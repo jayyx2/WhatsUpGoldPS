@@ -38,15 +38,17 @@ function Connect-WUGServer {
     $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
     try {
         $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody -SkipCertificateCheck
+        $token
+
     } catch {
         $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
         Write-Error -message $message
         throw
     }
     $global:WUGBearerHeaders = @{
-        "Content-Type" = "application/json"
-        "Authorization" = "Bearer $($token.Token)"
+        "Content-Type" = "application/json";"Authorization" = "Bearer $(${token}.access_token)"
     }
-    $expiry = (Get-Date).AddSeconds($token.expires_in).ToUniversalTime().ToString("s")
+    Write-Output $global:WUGBearerHeaders
+    $global:expiry = (Get-Date).AddSeconds($token.expires_in).ToUniversalTime().ToString("s")
     return "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at $expiry UTC."
 }

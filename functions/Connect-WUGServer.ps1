@@ -1,7 +1,3 @@
-#Example usage
-#Connect-WUGServer -Credential $Credential -serverUri "192.168.1.212"
-#Connect-WUGServer -Username "admin" -serverUri "192.168.1.212"
-#Connect-WUGServer -Username "admin" -Password "PasswordHere" -serverUri "192.168.1.212"
 function Connect-WUGServer {
     param (
         [Parameter(Mandatory)] [string] $serverUri,
@@ -33,22 +29,24 @@ function Connect-WUGServer {
         $Username = $Credential.GetNetworkCredential().UserName
         $Password = $Credential.GetNetworkCredential().Password
     }
+
     $tokenUri = "${protocol}://${serverUri}:9644/api/v1/token"
     $tokenHeaders = @{"Content-Type" = "application/json"}
     $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
     try {
         $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody -SkipCertificateCheck
         $token
-
     } catch {
         $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
         Write-Error -message $message
         throw
     }
+
     $global:WUGBearerHeaders = @{
-        "Content-Type" = "application/json";"Authorization" = "Bearer $(${token}.access_token)"
+        "Content-Type" = "application/json"
+        "Authorization" = "Bearer $($token.access_token)"
     }
-    Write-Output $global:WUGBearerHeaders
+
     $global:expiry = (Get-Date).AddSeconds($token.expires_in).ToUniversalTime().ToString("s")
-    return "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at $expiry UTC."
+    return "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at $global:expiry UTC."
 }

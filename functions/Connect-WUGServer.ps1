@@ -45,6 +45,7 @@ function Connect-WUGServer {
         [PSCredential]
         $Credential = $null
     )
+    $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:9644"
 
     if($Credential) {
         $Username = $Credential.GetNetworkCredential().UserName
@@ -67,7 +68,7 @@ function Connect-WUGServer {
         $Password = $Credential.GetNetworkCredential().Password
     }
 
-    $tokenUri = "${protocol}://${serverUri}:9644/api/v1/token"
+    $tokenUri = "${global:WhatsUpServerBaseURI}/api/v1/token"
     $tokenHeaders = @{"Content-Type" = "application/json"}
     $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
 

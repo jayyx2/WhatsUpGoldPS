@@ -20,10 +20,9 @@
 #>
 function Get-WUGAPIResponse {
     param(
-        [Parameter()] [string] $Uri,
+        [Parameter()] [string] $uri,
         [Parameter()] [ValidateSet('GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH')] [string] $Method
     )
-    $global:expiry
     if (-not $global:WUGBearerHeaders){
         Connect-WUGServer
     }

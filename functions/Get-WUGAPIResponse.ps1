@@ -24,6 +24,7 @@ function Get-WUGAPIResponse {
         [Parameter()] [ValidateSet('GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH')] [string] $Method
     )
     if (-not $global:WUGBearerHeaders){
+        Write-Error -Message "Authorization header not set, running Connect-WUGServer"
         Connect-WUGServer
     }
     if ((Get-Date) -ge $global:expiry){

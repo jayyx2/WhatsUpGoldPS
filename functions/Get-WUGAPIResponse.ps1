@@ -21,7 +21,8 @@
 function Get-WUGAPIResponse {
     param(
         [Parameter()] [string] $uri,
-        [Parameter()] [ValidateSet('GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH')] [string] $Method
+        [Parameter()] [ValidateSet('GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH')] [string] $Method,
+        [Parameter()] [string] $body
     )
     if (-not $global:WUGBearerHeaders){
         Write-Error -Message "Authorization header not set, running Connect-WUGServer"
@@ -38,7 +39,7 @@ function Get-WUGAPIResponse {
         $Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD)."
     }
     try {
-        $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders
+        $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $body
     } catch {
         $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
         Write-Error $message

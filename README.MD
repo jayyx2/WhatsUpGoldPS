@@ -1,8 +1,5 @@
 # WhatsUpGoldPS
 
-# Don't have one
-![Build Status](https://build.status.url.here)
-
 ## Description
 Interact with the WhatsUp Gold REST API using PowerShell
 

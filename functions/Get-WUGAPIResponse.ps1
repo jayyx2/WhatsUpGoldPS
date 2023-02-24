@@ -13,6 +13,9 @@
     Valid options are:
     GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH
 
+.PARAMETER body
+    The body of the request. This parameter is used when making POST, PUT, and PATCH requests.
+
 .EXAMPLE
     Get-WUGAPIResponse -uri "http://192.168.1.212:9644/api/v1/product/api" -Method GET
     $dataObject = (Get-WUGAPIResponse -uri "http://192.168.1.212:9644/api/v1/product/api" -Method GET).data
@@ -24,23 +27,28 @@ function Get-WUGAPIResponse {
         [Parameter()] [ValidateSet('GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH')] [string] $Method,
         [Parameter()] [string] $body
     )
-    if (-not $global:WUGBearerHeaders){
-        Write-Error -Message "Authorization header not set, running Connect-WUGServer"
-        Connect-WUGServer
-    }
-    if ((Get-Date) -ge $global:expiry){
-        Write-Error -Message "Token expired, running Connect-WUGServer"
-        Connect-WUGServer
-    }
-    if (-not $Uri){
+    Write-Debug "Function: Get-WUGAPIResponse"
+    Write-Debug "URI: $uri"
+    Write-Debug "Method: $Method"
+    Write-Debug "Body: $body"
+
+    #Global variables error checking
+    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
+    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;}
+    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
+    #End global variables error checking
+
+    if (-not $Uri) {
         $Uri = Read-Host "Enter the fully qualified REST API endpoint."
     }
-    If (-not $Method){
+    If (-not $Method) {
         $Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD)."
     }
     try {
         $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $body
-    } catch {
+        Write-Debug "Response: $($response | ConvertTo-Json -Depth 5)"
+    }
+    catch {
         $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
         Write-Error $message
         throw

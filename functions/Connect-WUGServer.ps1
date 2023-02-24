@@ -47,12 +47,12 @@ function Connect-WUGServer {
     )
     $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:9644"
 
-    if($Credential) {
+    if ($Credential) {
         $Username = $Credential.GetNetworkCredential().UserName
         $Password = $Credential.GetNetworkCredential().Password
     }
 
-    if($Password -and -not $Username) {
+    if ($Password -and -not $Username) {
         $Username = Read-Host "Username is required. Username?"
         $Password = $Password
     }
@@ -62,26 +62,27 @@ function Connect-WUGServer {
         $Password = $Credential.GetNetworkCredential().Password
     }
 
-    if(-not $Username -and -not $Credential) {
+    if (-not $Username -and -not $Credential) {
         $Credential = Get-Credential
         $Username = $Credential.GetNetworkCredential().UserName
         $Password = $Credential.GetNetworkCredential().Password
     }
 
     $tokenUri = "${global:WhatsUpServerBaseURI}/api/v1/token"
-    $tokenHeaders = @{"Content-Type" = "application/json"}
+    $tokenHeaders = @{"Content-Type" = "application/json" }
     $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
 
     try {
         $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody -SkipCertificateCheck
-    } catch {
+    }
+    catch {
         $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
         Write-Error -message $message
         throw
     }
 
     $global:WUGBearerHeaders = @{
-        "Content-Type" = "application/json"
+        "Content-Type"  = "application/json"
         "Authorization" = "$($token.token_type) $($token.access_token)"
     }
 

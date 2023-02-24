@@ -63,44 +63,52 @@ function Get-WUGDevice {
         [Parameter()] [string] $SearchValue
     )
 
+    #Global variables error checking
     if (-not $global:WUGBearerHeaders) {
-        Write-Output "Authorization token not found. Please run Connect-WUGServer to connect to the WhatsUp Gold server."
-        return
+        Write-Error -Message "Authorization header not set, running Connect-WUGServer"
+        Connect-WUGServer
     }
-
+    if ((Get-Date) -ge $global:expiry) {
+        Write-Error -Message "Token expired, running Connect-WUGServer"
+        Connect-WUGServer
+    }
     if (-not $global:WhatsUpServerBaseURI) {
-        Write-Output "Base URI not found. Please run Connect-WUGServer to connect to the WhatsUp Gold server."
-        return
+        Write-Error "Base URI not found. running Connect-WUGServer"
+        Connect-WUGServer
     }
+    #End global variables error checking
 
     $uri = $global:WhatsUpServerBaseURI
 
     if ($DeviceID) {
         $uri += "/api/v1/devices/${DeviceID}?view=overview"
-        try{
+        try {
             $result = Get-WUGAPIResponse -uri $uri -method "GET"
             return $result.data
-        } catch {
+        }
+        catch {
             Write-Error "No results returned for -DeviceID ${DeviceID}. Try using -Search instead."
         }
-    } else {
+    }
+    else {
         if (-not $SearchValue) {
             $SearchValue = Read-Host "Enter the IP address, hostname, or display name of the device you want to search for"
         }
         $uri += "/api/v1/device-groups/-1/devices/-?view=overview&search=$SearchValue"
         $result = Get-WUGAPIResponse -uri $uri -method "GET"
-        if($result.data.devices.Count -eq 0){
+        if ($result.data.devices.Count -eq 0) {
             throw  "No matching devices returned from the search. Try using the exact IP address, hostname, or display name to narrow your results."
         }
-        if($result.data.devices.Count -eq 1){
+        if ($result.data.devices.Count -eq 1) {
             return $result.data.devices
         }
-        if($result.data.devices.Count -gt 1){
+        if ($result.data.devices.Count -gt 1) {
             $devices = $result.data.devices
-            foreach($device in $devices){
-                if($count){
+            foreach ($device in $devices) {
+                if ($count) {
                     $count += 1
-                } else {
+                }
+                else {
                     $count = 1
                 }
                 $deviceName = $device.name

@@ -69,13 +69,8 @@ function Get-WUGDevices {
         $allDevices += $devices
         $pageInfo = ${result}.paging
 
-        if (${pageInfo}.nextPageId) {
-            if ($SearchValue) {
-                $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-1/devices/-?view=id&limit=200&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
-            }
-            else {
-                $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-1/devices/-?view=id&limit=200&pageId=$(${pageInfo}.nextPageId)"
-            }
+        if (${pageInfo}.nextPageId){
+            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-1/devices/-?view=id&limit=200&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
         }
     } while (${pageInfo}.nextPageId)
 

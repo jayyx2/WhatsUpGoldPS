@@ -45,6 +45,7 @@ function Connect-WUGServer {
         [PSCredential]
         $Credential = $null
     )
+
     $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:9644"
 
     if ($Credential) {
@@ -72,13 +73,36 @@ function Connect-WUGServer {
     $tokenHeaders = @{"Content-Type" = "application/json" }
     $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
 
-    try {
-        $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody -SkipCertificateCheck
-    }
-    catch {
-        $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
-        Write-Error -message $message
-        throw
+    if($Protcol -match "http"){
+        try {
+            $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody
+        }
+        catch {
+            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
+            Write-Error -message $message
+            throw
+        }
+    } else {
+        add-type @"
+        using System.Net;
+        using System.Security.Cryptography.X509Certificates;
+        public class TrustAllCertsPolicy : ICertificatePolicy {
+            public bool CheckValidationResult(
+                ServicePoint srvPoint, X509Certificate certificate,
+                WebRequest request, int certificateProblem) {
+                    return true;
+                }
+            }
+"@
+        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+        try {
+            $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody
+        }
+        catch {
+            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
+            Write-Error -message $message
+            throw
+        }
     }
 
     $global:WUGBearerHeaders = @{

@@ -44,14 +44,30 @@ function Get-WUGAPIResponse {
     If (-not $Method) {
         $Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD)."
     }
-    try {
-        $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $body
-        Write-Debug "Response: $($response | ConvertTo-Json -Depth 5)"
-    }
-    catch {
-        $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
-        Write-Error $message
-        throw
-    }
+    If(-not $body){
+        try {
+            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders
+            Write-Debug "Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders}"
+            Write-Debug "Response: ${response}"
+        }
+        catch {
+            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
+            Write-Error $message
+            throw
+        }
+     } else {
+            try {
+                $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $body
+                Write-Debug "Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders} -Body ${body}"
+                Write-Debug "Response: ${response}"
+            }
+            catch {
+                $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
+                Write-Error $message
+                throw
+            }
+        }
+
+
     return $response
 }

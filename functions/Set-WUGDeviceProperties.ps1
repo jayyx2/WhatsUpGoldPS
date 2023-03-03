@@ -84,8 +84,7 @@ function Set-WUGDeviceProperties {
         catch {
             Write-Error "Error setting device properties: $_"
         }
-    }
-    else {
+    } else {
         $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/-/properties"
         $method = "PATCH"
         $batchSize = 201

@@ -12,7 +12,7 @@
 .PARAMETER DeviceID
     If you already know the device id, get the other information
 
-.PARAMETER SearchValue
+.PARAMETER Search
     Search by IP address, hostname, or display name of the WhatsUp
     Gold device.
         If multiple results returned, you must select an index
@@ -59,8 +59,7 @@
 #>
 function Get-WUGDevice {
     param (
-        [Parameter()] [string] $DeviceID,
-        [Parameter()] [string] $SearchValue
+        [Parameter()] [string] $DeviceID
     )
 
     #Global variables error checking
@@ -79,37 +78,6 @@ function Get-WUGDevice {
         }
         catch {
             Write-Error "No results returned for -DeviceID ${DeviceID}. Try using -Search instead."
-        }
-    }
-    else {
-        if (-not $SearchValue) {
-            $SearchValue = Read-Host "Enter the IP address, hostname, or display name of the device you want to search for"
-        }
-        $uri += "/api/v1/device-groups/-1/devices/-?view=overview&search=$SearchValue"
-        $result = Get-WUGAPIResponse -uri $uri -method "GET"
-        if ($result.data.devices.Count -eq 0) {
-            throw  "No matching devices returned from the search. Try using the exact IP address, hostname, or display name to narrow your results."
-        }
-        if ($result.data.devices.Count -eq 1) {
-            return $result.data.devices
-        }
-        if ($result.data.devices.Count -gt 1) {
-            $devices = $result.data.devices
-            foreach ($device in $devices) {
-                if ($count) {
-                    $count += 1
-                }
-                else {
-                    $count = 1
-                }
-                $deviceName = $device.name
-                $devicehostName = $device.hostName
-                $deviceNetworkAddress = $device.NetworkAddress
-                $finalcount = $count - 1
-                Write-Output "Index ${finalcount} | DeviceName:${deviceName} | Hostname:${devicehostName} | IP:${deviceNetworkAddress}"
-            }
-            $Selected = Read-Host "Input the desired index ID"
-            return $devices[$selected]
         }
     }
 }

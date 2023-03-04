@@ -43,7 +43,11 @@ Retrieves a list of the first 50 devices whose name contains the string "switch"
 
 function Get-WUGDevices {
     param (
-        [Parameter()] [string] $SearchValue
+        [Parameter()] [string] $SearchValue,
+        [Parameter()] [string] $View = "id",
+        [Parameter()] [string] $Limit = "500",
+        [Parameter()] [string] $DeviceGroupID = "-1"
+
     )
 
     #Global variables error checking
@@ -53,7 +57,7 @@ function Get-WUGDevices {
     #End global variables error checking
 
     $uri = ${global:WhatsUpServerBaseURI}
-    $uri += "/api/v1/device-groups/-1/devices/-?view=id&limit=500"
+    $uri += "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}"
 
     if ($SearchValue) {
         $uri += "&search=${SearchValue}"
@@ -65,12 +69,12 @@ function Get-WUGDevices {
     $allDevices = @()
     do {
         $result = Get-WUGAPIResponse -uri $uri -method "GET"
-        $devices = ${result}.data.devices.id
+        $devices = ${result}.data.devices
         $allDevices += $devices
         $pageInfo = ${result}.paging
 
         if (${pageInfo}.nextPageId){
-            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-1/devices/-?view=id&limit=200&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
+            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
         }
     } while (${pageInfo}.nextPageId)
 

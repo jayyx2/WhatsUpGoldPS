@@ -33,9 +33,7 @@ function Get-WUGDeviceTemplate {
     if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
     #End global variables error checking
     #Input validation here
-    $DeviceID = Read-Host "Enter an array of numbers, separated by commas"
-    $DeviceID = $DeviceID.Split(",")
-    if(!$DeviceID){Write-Error "No DeviceID entered, so now I'm not doing it."; throw;}
+    if(!$DeviceID){$DeviceID = Read-Host "Enter an array of numbers, separated by commas";$DeviceID = $DeviceID.Split(",");}
     #End input validation
     $finaloutput = @()
     if ($DeviceID) {
@@ -52,5 +50,8 @@ function Get-WUGDeviceTemplate {
             }
         }
         return $finaloutput
+    } else {
+        Write-Error "There's no device id, see, here's the variable: ${DeviceID} <--- it's blank. Try again."
+        throw;
     }
 }

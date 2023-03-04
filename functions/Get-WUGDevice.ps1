@@ -5,62 +5,30 @@
     other rest API calls.
 
 .DESCRIPTION
-    Get data from the WhatsUp Gold /device/{$DeviceID} endpont or
+    Get data from the WhatsUp Gold /device/{$DeviceID} endpoint or
     search all devices using /device-groups/-1/devices/-?view=overview
     &search=$SearchValue" to find the device id you need
 
 .PARAMETER DeviceID
     If you already know the device id, get the other information
 
-.PARAMETER Search
-    Search by IP address, hostname, or display name of the WhatsUp
-    Gold device.
-        If multiple results returned, you must select an index
+.PARAMETER View
+    If you want to change between the views, acceptable values are:
+    "id", "basic", "card", "overview". Defaults to card.
 
 .NOTES
     WhatsUp Gold REST API is cool.
 
 .EXAMPLE
     Get-WUGDevice -DeviceID 33
-    or
-    Get-WUGDevice -Search 192.168.1.238
-        totalActiveMonitors     : 1
-        totalActiveMonitorsDown : 0
-        notes                   : This device was scanned by discovery
-        on 2/18/2023 3:13:17 PM.
-        hostName                : UnifiAP1.local
-        networkAddress          : 192.168.1.238
-        role                    : Managed Device
-        brand                   : Ubiquiti Networks
-        os                      : Linux
-        bestState               : Up
-        worstState              : Up
-        name                    : UnifiAP1
-        description             : Profile for devices with SNMP that did not match any other role
-        id                      : 33
-    Get-WUGDevice -Search 192.186.1.24
-        Index 0 | DeviceName:CB-PF2JWEGA.localdomain | Hostname:CB-PF2JWEGA.localdomain | IP:192.168.1.242
-        Index 1 | DeviceName:ESP_35DD0E.localdomain | Hostname:ESP_35DD0E.localdomain | IP:192.168.1.244
-        Index 2 | DeviceName:pi.hole | Hostname:pi.hole | IP:192.168.1.248
-    Input the desired index ID: 2
-        totalActiveMonitors     : 1
-        totalActiveMonitorsDown : 0
-        notes                   : This device was scanned by discovery on 2/18/2023 3:13:17 PM.
-        hostName                : pi.hole
-        networkAddress          : 192.168.1.248
-        role                    : Device
-        brand                   : VMware, Inc.
-        os                      : Not set
-        bestState               : Up
-        worstState              : Up
-        name                    : pi.hole
-        description             : By default, this role is assigned to devices that do not match any other device role
-        id                      : 11
+    Get-WUGDevice -DeviceID $ArrayOfDeviceIDs
+    Get-WUGDevice -DeviceID 2,3,4,20
 #>
 function Get-WUGDevice {
     param (
-        [Parameter()] [string] $DeviceID
-    )
+        [Parameter(Mandatory = $true)] [array] $DeviceID,
+        [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "card"
+     )
 
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
@@ -69,15 +37,21 @@ function Get-WUGDevice {
     #End global variables error checking
 
     $uri = $global:WhatsUpServerBaseURI
+    $finaloutput = @()
 
     if ($DeviceID) {
-        $uri += "/api/v1/devices/${DeviceID}?view=overview"
-        try {
-            $result = Get-WUGAPIResponse -uri $uri -method "GET"
-            return $result.data
-        }
-        catch {
-            Write-Error "No results returned for -DeviceID ${DeviceID}. Try using -Search instead."
+        foreach ($id in $DeviceID) {
+            $deviceUri = "${uri}/api/v1/devices/${id}?view=overview"
+            try {
+                $result = Get-WUGAPIResponse -uri $deviceUri -method "GET"
+                Write-Debug "Result from Get-WUGAPIResponse -uri ${deviceUri} -method `"GET`"`r`n:${result}"
+                $finaloutput += $result.data
+            }
+            catch {
+                Write-Error "No results returned for -DeviceID ${id}. Try using -Search instead."
+            }
         }
     }
+
+    return $finaloutput
 }

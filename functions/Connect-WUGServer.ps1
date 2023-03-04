@@ -24,6 +24,15 @@
     Accepts a PowerShell credential object. Set your credential first.
     For example: $Credential = Get-Credential
 
+.PARAMETER TokenEndpoint
+    Specifies the endpoint for the token request. The default value is "/api/v1/token".
+
+.PARAMETER Port
+    Specifies the port number used to connect to the WhatsUp Gold server. The default value is "9644".
+
+.PARAMETER IgnoreSSLErrors
+    If this switch is present, SSL certificate validation errors will be ignored when making requests to the WhatsUp Gold server. This is useful when connecting to servers with self-signed certificates or other certificate issues.
+
 .NOTES
     WhatsUp Gold REST API Handling Session Tokens
     https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Handling-Session-Tokens
@@ -33,7 +42,7 @@
     Connect-WUGServer -serverUri 192.168.1.212 -Credential $Credential -Protocol https
     Connect-WUGServer -serverUri 192.168.1.212 -Username "admin"
     Connect-WUGServer -serverUri 192.168.1.212 -Username "admin" -Password "Password"
-    Connect-WUGServer -server 192.168.1.212 -Username user -Password pass -Protocol https
+    Connect-WUGServer -serverUri 192.168.1.212 -Username user -Password pass -Protocol https
 #>
 function Connect-WUGServer {
     param (
@@ -43,47 +52,31 @@ function Connect-WUGServer {
         [Parameter()] [string] $Password,
         [System.Management.Automation.Credential()]
         [PSCredential]
-        $Credential = $null
+        $Credential = $null,
+        [switch] $IgnoreSSLErrors,
+        [string] $TokenEndpoint = "/api/v1/token",
+        [int32] $Port = "9644"
     )
 
-    $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:9644"
+    $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
 
+    #Input validation
     if ($Credential) {
-        $Username = $Credential.GetNetworkCredential().UserName
-        $Password = $Credential.GetNetworkCredential().Password
+        $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;
     }
-
-    if ($Password -and -not $Username) {
-        $Username = Read-Host "Username is required. Username?"
-        $Password = $Password
+    elseif ($Username -and -not $Password) {
+        $Username = $Username; $Password = (Get-Credential -UserName $Username -Message "Enter password for ${Username}").GetNetworkCredential().Password;
     }
-
-    if ($Username -and -not $Password) {
-        $Credential = Get-Credential -UserName $Username
-        $Password = $Credential.GetNetworkCredential().Password
+    elseif ($Password -and -not $Username) {
+        $Username = Read-Host "Enter the username associated with the password."; $Password = $Password;
     }
-
-    if (-not $Username -and -not $Credential) {
-        $Credential = Get-Credential
-        $Username = $Credential.GetNetworkCredential().UserName
-        $Password = $Credential.GetNetworkCredential().Password
+    elseif (!$Credential) {
+        $Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;
     }
-
-    $tokenUri = "${global:WhatsUpServerBaseURI}/api/v1/token"
-    $tokenHeaders = @{"Content-Type" = "application/json" }
-    $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
-
-    if($Protcol -match "http"){
-        try {
-            $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody
-        }
-        catch {
-            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
-            Write-Error -message $message
-            throw
-        }
-    } else {
-        add-type @"
+    if ($Protocol -match "https") {
+        # Set SSL validation callback if the IgnoreSSLErrors switch is present
+        if ($IgnoreSSLErrors) {
+            add-type @"
         using System.Net;
         using System.Security.Cryptography.X509Certificates;
         public class TrustAllCertsPolicy : ICertificatePolicy {
@@ -94,15 +87,25 @@ function Connect-WUGServer {
                 }
             }
 "@
-        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
-        try {
-            $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody
+            [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
         }
-        catch {
-            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
-            Write-Error -message $message
-            throw
-        }
+    }
+    #input validation
+
+    #Set the token URI
+    $tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}"
+    #Set the required header(s)
+    $tokenHeaders = @{"Content-Type" = "application/json" }
+    #Set the required body for the token request
+    $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
+    #Attempt to connect
+    try {
+        $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody
+    }
+    catch {
+        $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
+        Write-Error -message $message
+        throw
     }
 
     $global:WUGBearerHeaders = @{
@@ -112,4 +115,5 @@ function Connect-WUGServer {
 
     $global:expiry = (Get-Date).AddSeconds($token.expires_in)
     return "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at $global:expiry UTC."
+
 }

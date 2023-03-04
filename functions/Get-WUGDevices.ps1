@@ -3,23 +3,29 @@
 Get WhatsUp Gold devices data using the WhatsUp Gold REST API.
 
 .DESCRIPTION
-Retrieves a list of all devices in WhatsUp Gold or a filtered list of devices by name or IP address.
+Retrieve an array of devices from WhatsUp Gold
 
 .PARAMETER SearchValue
-Filters the list of devices by a name or a partial name.
+Search using IP Address, Display Name, or Hostname.
 
 .PARAMETER DeviceGroupID
-Filters the list of devices by an IP address.
+Default is -1 (all devices). You can increase your search efficiency
+by specifying a device group id
 
 .PARAMETER View
-Filters the list of devices by a device group ID.
-
+Default is card.
+    id: id
+    basic: id, name, os, brand, role, networkAddress, hostname, notes
+    overview: id, description, name, worstState, bestState, os, brand, role, networkAddress,
+    hostName, notes, totalActiveMonitorsDown, totalActiveMonitors
+    card: id, description, name, worstState, bestState, os, brand, role, networkAddress,
+    hostName, notes, totalActiveMonitorsDown, totalActiveMonitors, downActiveMonitors
 .PARAMETER Limit
-The view to use for the devices data, such as overview or detail.
+Default and maximum is 500. Specify number of records to return in a single page
 
 .EXAMPLE
-Get-WUGDevices
-Retrieves a list of all devices in WhatsUp Gold.
+Get-WUGDevices -SearchValue "sub.domain.com" -DeviceGroupId 3 -View basic -Limit 200
+Get-WUGDevices -SearchValue 192.168.1. -View overview
 
 #>
 
@@ -27,7 +33,7 @@ function Get-WUGDevices {
     param (
         [Parameter()] [string] $SearchValue,
         [Parameter()] [string] $DeviceGroupID = "-1",
-        [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "id",
+        [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "card",
         [Parameter()] [string] $Limit = "500"
      )
 

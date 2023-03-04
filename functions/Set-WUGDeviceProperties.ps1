@@ -62,7 +62,17 @@ function Set-WUGDeviceProperties {
     if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;}
     if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
     #End global variables error checking
-
+    #Input validation here
+    #Array validations
+    #actionPolicy
+    #DeviceID
+    if(!$DeviceID){$DeviceID = Write-Error "You must specify the DeviceID.";$DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas";$DeviceID = $DeviceID.Split(",");}
+    #String Validation
+    #DisplayName
+    #note
+    #snmpOid
+    #Boolean validations
+    #End input validation
     $finalresult = @()
 
     if ($DeviceID.Count -eq 1) {

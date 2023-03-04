@@ -34,7 +34,7 @@ function Get-WUGDevices {
         [Parameter()] [string] $SearchValue,
         [Parameter()] [string] $DeviceGroupID = "-1",
         [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "card",
-        [Parameter()] [string] $Limit = "500"
+        [Parameter()] [string] $Limit = "200"
      )
 
     #Global variables error checking
@@ -59,7 +59,6 @@ function Get-WUGDevices {
         $devices = ${result}.data.devices
         $allDevices += $devices
         $pageInfo = ${result}.paging
-
         if (${pageInfo}.nextPageId){
             $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
         }

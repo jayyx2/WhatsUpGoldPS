@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    Get a WhatsUp Gold device data using the WhatsUp Gold REST API
-    Usually used to get the device id which can be used for various
-    other rest API calls.
+    When you have the DeviceID, use Get-WUGDevice for returning
+    information for the given DeviceID(s) using the WhatsUp Gold
+    REST API.
 
 .DESCRIPTION
     Get data from the WhatsUp Gold /device/{$DeviceID} endpoint or
@@ -10,11 +10,17 @@
     &search=$SearchValue" to find the device id you need
 
 .PARAMETER DeviceID
-    If you already know the device id, get the other information
+    The ID of the device in the WhatsUp Gold database. You can search
+    for DeviceID using the Get-WUGDevices function
 
 .PARAMETER View
-    If you want to change between the views, acceptable values are:
-    "id", "basic", "card", "overview". Defaults to card.
+    Default is card. Choose from id, basic, overview, and card.
+    id: id
+    basic: id, name, os, brand, role, networkAddress, hostname, notes
+    overview: id, description, name, worstState, bestState, os, brand, role, networkAddress,
+    hostName, notes, totalActiveMonitorsDown, totalActiveMonitors
+    card: id, description, name, worstState, bestState, os, brand, role, networkAddress,
+    hostName, notes, totalActiveMonitorsDown, totalActiveMonitors, downActiveMonitors
 
 .NOTES
     WhatsUp Gold REST API is cool.

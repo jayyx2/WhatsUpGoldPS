@@ -61,18 +61,10 @@ function Connect-WUGServer {
     $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
 
     #Input validation
-    if ($Credential) {
-        $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;
-    }
-    elseif ($Username -and -not $Password) {
-        $Username = $Username; $Password = (Get-Credential -UserName $Username -Message "Enter password for ${Username}").GetNetworkCredential().Password;
-    }
-    elseif ($Password -and -not $Username) {
-        $Username = Read-Host "Enter the username associated with the password."; $Password = $Password;
-    }
-    elseif (!$Credential) {
-        $Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;
-    }
+    if ($Credential) {$Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;}
+    elseif ($Username -and -not $Password) {$Username = $Username; $Password = (Get-Credential -UserName $Username -Message "Enter password for ${Username}").GetNetworkCredential().Password;}
+    elseif ($Password -and -not $Username) {$Username = Read-Host "Enter the username associated with the password."; $Password = $Password;}
+    elseif (!$Credential) {$Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;}
     if ($Protocol -match "https") {
         # Set SSL validation callback if the IgnoreSSLErrors switch is present
         if ($IgnoreSSLErrors) {

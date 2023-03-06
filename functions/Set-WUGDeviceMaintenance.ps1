@@ -4,7 +4,7 @@ function Set-WUGDeviceMaintenance {
         [Parameter(Mandatory)][bool]$Enabled,
         [Parameter()][string]$Reason,
         [Parameter()][string]$EndUTC,
-        [Parameter()][ValidatePattern("^[0-9]+ (minutes|hours|days)$")][string]$TimeInterval
+        [Parameter()][ValidatePattern("^(?<Value>\d+)\s*(?<Unit>m|minutes|h|hours|d|days|s|seconds)$")][string]$TimeInterval
     )
 
     #Global variables error checking
@@ -14,9 +14,16 @@ function Set-WUGDeviceMaintenance {
     #End global variables error checking
 
     #Input validation
-    if (!$DeviceID) {$DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas";$DeviceID = $DeviceID.Split(",");
-    if ([string]::IsNullOrWhiteSpace($DeviceID)){Write-Error "You must specify the DeviceID.";return;}
-    if (!$Enabled) {
+    if (!$DeviceID) {
+        $DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas"
+        if ([string]::IsNullOrWhiteSpace($DeviceID)) {
+            Write-Error "You must specify the DeviceID."
+            return
+        }
+        $DeviceID = $DeviceID.Split(",")
+    }
+
+    if ($Enabled) {
         if ($TimeInterval) {
             $regex = "^(?<Value>\d+)\s*(?<Unit>m|minutes|h|hours|d|days)$|^(?<Value>\d+)(?<Unit>m|minutes|h|hours|d|days)$"
             $match = [regex]::Match($TimeInterval, $regex)
@@ -41,41 +48,46 @@ function Set-WUGDeviceMaintenance {
             return
         }
     }
-
     #End input validation
-    $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/maintenance"
-
-    $devicesProcessed = 0
+        
     $totalDevices = $DeviceID.Count
+    $batchSize = 499
+    if ($totalDevices -le $batchSize) {
+        $batchSize = $totalDevices
+    }
+    
+    $devicesProcessed = 0
     $successes = 0
     $errors = 0
     $percentComplete = 0
+    
     while ($percentComplete -ne 100) {
-        $batch = $DeviceID[0..498]
-        $DeviceID = $DeviceID[499..($DeviceID.Count - 1)]
+        $batch = $DeviceID[$devicesProcessed..($devicesProcessed + $batchSize - 1)]
+    
         $Progress = Write-Progress -Activity "Updating device maintenance mode to ${Enabled} for ${totalDevices} devices." -Status "Progress: $percentComplete% ($devicesProcessed/$totalDevices)" -PercentComplete $percentComplete
-
+    
         $body = @{
             devices = $batch
             enabled = $Enabled
             endUtc  = $EndUTC
             reason  = $Reason
         } | ConvertTo-Json
-
+        Write-Debug -Message "${body}"
+    
         try {
-            $result = Get-WUGAPIResponse -uri $uri -method "PATCH" -body $body
+            $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/maintenance" -method "PATCH" -body $body
             $successes += $result.data.successfulOperations
             $errors += $result.data.resourcesWithErros.Count + $result.data.errors.Count
         }
         catch {
             $errors += $batch.Count
         }
-
-        $devicesProcessed += $batch.Count
+    
+        $devicesProcessed += $batchSize
         $percentComplete = [Math]::Round($devicesProcessed / $totalDevices * 100)
         If ($percentComplete -gt 100) { $percentComplete = 100 }
     }
-    
+        
     $resultData = @{
         successfulOperations = $successes
         resourcesNotAllowed  = @()
@@ -83,11 +95,11 @@ function Set-WUGDeviceMaintenance {
         errors               = @()
         success              = $true
     }
-
+    
     if ($errors -gt 0) {
         $resultData.success = $false
     }
-
+    
     return $resultData
-}
+    
 }

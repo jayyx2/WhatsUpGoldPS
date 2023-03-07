@@ -3,8 +3,8 @@ function New-WUGDevice {
         [Parameter(Mandatory = $true)] [string] $displayName,
         [Parameter(Mandatory = $true)] [string] $DeviceAddress,
         [Parameter()] [string] $deviceType,
-        [Parameter()] [string] $PollInterval,
-        [Parameter()] [string] $PrimaryRole,
+        [Parameter()] [string] $PollInterval = 60,
+        [Parameter()] [string] $PrimaryRole = "Device",
         [Parameter()] [string[]] $SubRoles,
         [Parameter()] [string] $snmpOid,
         [Parameter()] [string] $SNMPPort,
@@ -46,7 +46,7 @@ function New-WUGDevice {
         deviceType = "Workstation"
         snmpOid = ""
         snmpPort = ""
-        pollInterval = 60
+        pollInterval = "${PollInterval}"
         primaryRole = "Device"
         subRoles = @("Resource Attributes", "Resource Monitors")
         os = ""
@@ -76,15 +76,14 @@ function New-WUGDevice {
             name='My Network'
         })
     }
-    $template
 
     $jsonBody = $template | ConvertTo-Json -Compress
-    $jsonBody
+
     $body = "{
         `"options`":[`"all`"],
         `"templates`":[${jsonBody}]
     }"
-    $body
+
     try {
         $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
         return $result.data

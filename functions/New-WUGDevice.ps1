@@ -1,6 +1,6 @@
 function New-WUGDevice {
     param (
-        [Parameter()] [string] $displayName,
+        [Parameter(Mandatory = $true)] [string] $displayName,
         [Parameter(Mandatory = $true)] [string] $DeviceAddress,
         [Parameter()] [string] $deviceType,
         [Parameter()] [string] $PollInterval,
@@ -13,18 +13,18 @@ function New-WUGDevice {
         [Parameter()] [string] $ActionPolicy,
         [Parameter()] [string] $Note,
         [Parameter()] [string] $AutoRefresh,
-        [Parameter()] [hashtable[]] $Credentials,
-        [Parameter()] [hashtable[]] $Interfaces,
-        [Parameter()] [hashtable[]] $Attributes,
-        [Parameter()] [hashtable[]] $CustomLinks,
-        [Parameter()] [hashtable[]] $ActiveMonitors,
-        [Parameter()] [hashtable[]] $PerformanceMonitors,
-        [Parameter()] [hashtable[]] $PassiveMonitors,
-        [Parameter()] [hashtable[]] $Dependencies,
-        [Parameter()] [hashtable[]] $NCMTasks,
-        [Parameter()] [hashtable[]] $ApplicationProfiles,
-        [Parameter()] [string] $Layer2Data,
-        [Parameter()] [hashtable[]] $Groups
+        [Parameter()] [string[]] $Credentials,
+        [Parameter()] [string[]] $Interfaces,
+        [Parameter()] [string[]] $Attributes,
+        [Parameter()] [string[]] $CustomLinks,
+        [Parameter()] [string[]] $ActiveMonitors,
+        [Parameter()] [string[]] $PerformanceMonitors,
+        [Parameter()] [string[]] $PassiveMonitors,
+        [Parameter()] [string[]] $Dependencies,
+        [Parameter()] [string[]] $NCMTasks,
+        [Parameter()] [string[]] $ApplicationProfiles,
+        [Parameter()] [string[]] $Layer2Data,
+        [Parameter()] [array] $Groups
     )
 
     #Global variables error checking
@@ -41,61 +41,45 @@ function New-WUGDevice {
     if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
 
     $template = @{
-        templateId = 0
-        displayName = ""
-        deviceType = ""
+        templateId = "WhatsUpGoldPS"
+        displayName = "${displayName}"
+        deviceType = "Workstation"
         snmpOid = ""
         snmpPort = ""
         pollInterval = 60
-        primaryRole = ""
-        subRoles = @()
+        primaryRole = "Device"
+        subRoles = @("Resource Attributes", "Resource Monitors")
         os = ""
         brand = ""
         actionPolicy = ""
-        note = ""
-        autoRefresh = $true
+        note = "${note}"
+        autoRefresh = "True"
         credentials = @()
-        interfaces = @(@{})
-        attributes = @(@{})
-        customLinks = @(@{})
-        activeMonitors = @(@{})
-        performanceMonitors = @(@{})
-        passiveMonitors = @(@{})
-        dependencies = @(@{})
-        ncmTasks = @(@{})
-        applicationProfiles = @(@{})
+        interfaces = @(
+            @{
+              defaultInterface = "true"
+              pollUsingNetworkName = "false"
+              networkAddress = "0.0.0.0"
+              networkName = "0.0.0.0"
+            }
+        )
+        attributes = @()
+        customLinks = @()
+        activeMonitors = @()
+        performanceMonitors = @()
+        passiveMonitors = @()
+        dependencies = @()
+        ncmTasks = @()
+        applicationProfiles = @()
         layer2Data = ""
-        groups = @({@{parents='My Network'; name='Discovered Devices';}})
+        groups = @(@{
+            name='My Network'
+        })
     }
-    $body = $template | ConvertTo-Json -Depth 99
-    return $body
+    $template
 
-    if ($displayName) {$template.displayName = $displayName}
-    if ($Note) {$template.note = $Note}
-    if ($templateId) {$template.templateId = $templateId}
-    if ($snmpOid) {$template.snmpOid = $snmpOid}
-    if ($deviceType) {$template.deviceType = $deviceType}
-    if ($snmpPort) {$template.snmpPort = $snmpPort}
-    if ($pollInterval) {$template.pollInterval = $pollInterval}
-    if ($primaryRole) {$template.primaryRole = $primaryRole}
-    if ($subRoles) {$template.subRoles = $subRoles}
-    if ($os) {$template.os = $os}
-    if ($brand) {$template.brand = $brand}
-    if ($actionPolicy) {$template.actionPolicy = $actionPolicy}
-    if ($autoRefresh) {$template.autoRefresh = $autoRefresh}
-    if ($credentials) {$template.credentials = $credentials}
-    if ($interfaces) {$template.interfaces = $interfaces}
-    if ($attributes) {$template.attributes = $attributes}
-    if ($customLinks) {$template.customLinks = $customLinks}
-    if ($activeMonitors) {$template.activeMonitors = $activeMonitors}
-    if ($performanceMonitors) {$template.performanceMonitors = $performanceMonitors}
-    if ($passiveMonitors) {$template.passiveMonitors = $passiveMonitors}
-    if ($dependencies) {$template.dependencies = $dependencies}
-    if ($ncmTasks) {$template.ncmTasks = $ncmTasks}
-    if ($applicationProfiles) {$template.applicationProfiles = $applicationProfiles}
-    if ($layer2Data) {$template.layer2Data = $layer2Data}
-    if ($groups){$template.groups = $groups}
-    $jsonBody = $template | ConvertTo-Json -Depth 10
+    $jsonBody = $template | ConvertTo-Json -Compress
+    $jsonBody
     $body = "{
         `"options`":[`"all`"],
         `"templates`":[${jsonBody}]

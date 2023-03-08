@@ -1,3 +1,38 @@
+<#
+.SYNOPSIS
+Updates the maintenance mode settings for one or more devices in WhatsUp Gold.
+
+.DESCRIPTION
+The Set-WUGDeviceMaintenance function allows you to update the maintenance mode settings for one or more devices in WhatsUp Gold. You can enable or disable maintenance mode for the specified devices, and set a reason and/or an end time for the maintenance period. You can also specify a time interval for the maintenance period using the -TimeInterval parameter.
+
+.PARAMETER DeviceID
+Specifies the ID or IDs of the device or devices for which to update maintenance mode. Multiple DeviceIDs can be specified by separating them with commas.
+
+.PARAMETER Enabled
+Specifies whether to enable or disable maintenance mode for the specified devices.
+
+.PARAMETER Reason
+Specifies the reason for the maintenance period.
+
+.PARAMETER EndUTC
+Specifies the end time of the maintenance period in UTC format (e.g. "2022-02-28T18:30:00Z").
+
+.PARAMETER TimeInterval
+Specifies the duration of the maintenance period as a time interval. The time interval should be in the format "Xm|Xminutes|Xh|Xhours|Xd|Xdays" where X is an integer value representing the duration.
+
+.NOTES
+- The function requires a connection to a WhatsUp Gold server with valid authorization token. You can establish the connection using the Connect-WUGServer function.
+- The function processes the device updates in batches of 499 to avoid exceeding the maximum limit.
+- The function returns a hashtable containing the number of successful and failed updates.
+
+.EXAMPLE
+Set-WUGDeviceMaintenance -DeviceID "12345" -Enabled $true -TimeInterval "2h"
+Enables maintenance mode for the device with ID "12345" for a period of 2 hours.
+
+.EXAMPLE
+Set-WUGDeviceMaintenance -DeviceID "12345,54321" -Enabled $false -Reason "Upgrading firmware"
+Disables maintenance mode for the devices with IDs "12345" and "54321" and sets the reason for the maintenance period to "Upgrading firmware".
+#>
 function Set-WUGDeviceMaintenance {
     param(
         [Parameter(Mandatory)][array]$DeviceID,

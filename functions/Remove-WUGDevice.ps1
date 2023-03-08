@@ -1,3 +1,24 @@
+<#
+.SYNOPSIS
+Removes a device from the WhatsUp Gold monitoring system.
+
+.PARAMETER DeviceId
+The ID of the device to remove.
+
+.PARAMETER DeleteDiscoveredDevices
+If specified, all discovered devices associated with the device to be removed will also be deleted.
+
+.EXAMPLE
+Remove-WUGDevice -DeviceId "12345"
+Removes the device with ID "12345" from the WhatsUp Gold monitoring system.
+
+.EXAMPLE
+Remove-WUGDevice -DeviceId "12345" -DeleteDiscoveredDevices
+Removes the device with ID "12345" from the WhatsUp Gold monitoring system, along with all discovered devices associated with it.
+
+.NOTES
+This function requires the user to be authenticated using Connect-WUGServer before it can be run.
+#>
 function Remove-WUGDevice {
     [CmdletBinding()]
     param (

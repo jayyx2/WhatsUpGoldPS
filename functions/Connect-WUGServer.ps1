@@ -46,44 +46,38 @@
 #>
 function Connect-WUGServer {
     param (
-        [Parameter(Mandatory)] [string] $serverUri,
-        [Parameter(Mandatory = $false)] [ValidateSet("http", "https")] [string] $Protocol = "http",
-        [Parameter()] [string] $Username,
-        [Parameter()] [string] $Password,
-        [System.Management.Automation.Credential()]
-        [PSCredential]
-        $Credential = $null,
-        [switch] $IgnoreSSLErrors,
-        [string] $TokenEndpoint = "/api/v1/token",
-        [int32] $Port = "9644"
+        [Parameter(Mandatory = $true)] [string] $serverUri,
+        [Parameter(Mandatory = $false)] [ValidateSet("http", "https", ErrorMessage = "Protocol must be http or https")] [string] $Protocol = "http",
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $Username,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $Password,
+        [System.Management.Automation.Credential()][PSCredential]$Credential = $null,
+        [Parameter()] [ValidateNotNullOrEmpty()][ValidatePattern("^(/[a-zA-Z0-9]+)+/?$", ErrorMessage = "Please enter a valid token endpoint. Example: /api/v1/token")] [string] $TokenEndpoint = "/api/v1/token",
+        [Parameter()] [ValidateRange(1,65535)] [int32] $Port = 9644,
+        [switch] $IgnoreSSLErrors
     )
 
-    $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
-
     #Input validation
+    # Check if the hostname or IP address is resolvable
+    $ip = $null;try {$ip = [System.Net.Dns]::GetHostAddresses($serverUri)} catch {throw "Cannot resolve hostname or IP address. Please enter a valid IP address or hostname.";}
+    if ($null -eq $ip) {throw "Cannot resolve hostname or IP address, ${serverUri}. Please enter a resolvable IP address or hostname."}
+    # Check if the port is open
+    $tcpClient = New-Object System.Net.Sockets.TcpClient;$connectResult = $tcpClient.BeginConnect($ip, $Port, $null, $null);$waitResult = $connectResult.AsyncWaitHandle.WaitOne(500);if (!$waitResult -or !$tcpClient.Connected) {throw "The specified port, ${Port}, is not open or accepting connections."};
+    #$tcpClient.EndConnect($connectResult)
+    # Check if the credential was input
     if ($Credential) {$Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;}
     elseif ($Username -and -not $Password) {$Username = $Username; $Password = (Get-Credential -UserName $Username -Message "Enter password for ${Username}").GetNetworkCredential().Password;}
     elseif ($Password -and -not $Username) {$Username = Read-Host "Enter the username associated with the password."; $Password = $Password;}
     elseif (!$Credential) {$Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;}
-    if ($Protocol -match "https") {
-        # Set SSL validation callback if the IgnoreSSLErrors switch is present
+    # Set SSL validation callback if the IgnoreSSLErrors switch is present
+    if ($Protocol -match "https"){
         if ($IgnoreSSLErrors) {
-            add-type @"
-        using System.Net;
-        using System.Security.Cryptography.X509Certificates;
-        public class TrustAllCertsPolicy : ICertificatePolicy {
-            public bool CheckValidationResult(
-                ServicePoint srvPoint, X509Certificate certificate,
-                WebRequest request, int certificateProblem) {
-                    return true;
-                }
-            }
-"@
-            [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+            Write-Warning "You are ignoring SSL certificate validation errors, which can introduce security risks. Use this option with caution.";
         }
     }
     #input validation
 
+    #Set the base URI
+    $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
     #Set the token URI
     $tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}"
     #Set the required header(s)

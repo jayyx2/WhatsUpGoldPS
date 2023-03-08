@@ -1,6 +1,46 @@
+<#
+.SYNOPSIS
+Creates new devices in WhatsUp Gold using device templates.
+
+.PARAMETER -templates <array>
+    The device templates to use to create the new devices.
+
+.PARAMETER -ApplyL2 [<SwitchParameter>]
+    Specifies whether Layer 2 data should be applied.
+
+.PARAMETER -Update [<SwitchParameter>]
+    Specifies whether to update existing devices with new templates.
+
+.PARAMETER -UpdateInterfaceState [<SwitchParameter>]
+    Specifies whether interface state should be updated.
+
+.PARAMETER -UpdateInterfaceNames [<SwitchParameter>]
+    Specifies whether interface names should be updated.
+
+.PARAMETER -UpdateActiveMonitors [<SwitchParameter>]
+    Specifies whether active monitors should be updated.
+
+.DESCRIPTION
+The `New-WUGDevices` function creates new devices in WhatsUp Gold using the specified device templates. If the `-ApplyL2`
+switch is specified, Layer 2 data will be applied to the new devices. If the `-Update` switch is specified, existing devices
+will be updated with the new templates. If the `-UpdateInterfaceState` switch is specified, the interface state of existing
+devices will be updated. If the `-UpdateInterfaceNames` switch is specified, the interface names of existing devices will be
+updated. If the `-UpdateActiveMonitors` switch is specified, the active monitors of existing devices will be updated.
+
+EXAMPLES
+New-WUGDevices -templates "Switch 1", "Router 1"
+
+This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates.
+
+New-WUGDevices -templates "Switch 1", "Router 1" -ApplyL2 -Update -UpdateInterfaceState -UpdateInterfaceNames
+
+This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates, applies Layer 2 data, updates
+existing devices with the new templates, updates the interface state of existing devices, and updates the interface names of
+existing devices.
+#>
 function New-WUGDevices {
     param(
-        [Parameter(Mandatory)][System.Collections.ArrayList]$templates,
+        [Parameter(Mandatory)] [array] $deviceTemplates,
         [switch]$ApplyL2,
         [switch]$Update,
         [switch]$UpdateInterfaceState,
@@ -23,7 +63,7 @@ function New-WUGDevices {
 
     $body = @{
         options = @("all")
-        templates = $templates
+        templates = $deviceTemplates
     } | ConvertTo-Json -Depth 10
 
     try {

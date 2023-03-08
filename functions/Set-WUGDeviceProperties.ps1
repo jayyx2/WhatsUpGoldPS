@@ -1,48 +1,37 @@
 <#
 .SYNOPSIS
-Set one or more properties of one or multiple devices in WhatsUp Gold
-using the WhatsUp Gold REST API.
+Sets properties of one or more devices in WhatsUp Gold.
+
+.SYNTAX
+Set-WUGDeviceProperties [-DeviceID] <array> [[-DisplayName] <string>] [[-isWireless] <boolean>] [[-collectWireless] <boolean>] [[-keepDetailsCurrent] <boolean>] [[-note] <string>] [[-snmpOid] <string>] [[-actionPolicy] <array>]
 
 .DESCRIPTION
-This function sets one or more properties of one or multiple devices in
-WhatsUp Gold using the WhatsUp Gold REST API. You can set properties
-such as the display name, whether the device is a wireless device, whether
-wireless information is collected, whether device details should be kept
-current, a note, SNMP OID, and an action policy.
+The Set-WUGDeviceProperties function allows you to set properties for one or more devices in WhatsUp Gold. You can specify the device ID(s) using the -DeviceID parameter. If you do not specify this parameter, you will be prompted to enter the device ID(s). Other parameters allow you to specify various properties to set for the devices.
 
-.PARAMETER DeviceID
-The device ID of the device to set properties for.
+PARAMETERS
+.PARAMETER DeviceID <array>
+    Specifies the device ID(s) of the device(s) for which you want to set properties. This parameter is mandatory.
 
-.PARAMETER DisplayName
-The new display name to set for the device.
+.PARAMETER DisplayName <string>
+    Specifies the display name of the device. Default is null.
 
-.PARAMETER isWireless
-Whether the device is a wireless device.
+.PARAMETER  isWireless <boolean>
+    Specifies whether the device is a wireless device. Default is null.
 
-.PARAMETER collectWireless
-Whether wireless information is collected for the device.
+.PARAMETER collectWireless <boolean>
+    Specifies whether wireless information should be collected for the device. Default is null.
 
-.PARAMETER keepDetailsCurrent
-Whether device details should be kept current.
+.PARAMETER keepDetailsCurrent <boolean>
+    Specifies whether details should be kept current for the device. Default is null.
 
-.PARAMETER note
-A note to set for the device.
+.PARAMETER note <string>
+    Specifies notes for the device. Default is null.
 
-.PARAMETER snmpOid
-The SNMP OID to set for the device.
+.PARAMETER snmpOid <string>
+    Specifies the SNMP OID for the device. Default is null.
 
-.PARAMETER actionPolicy
-An array of action policies to set for the device.
-
-.NOTES
-WhatsUp Gold REST API is cool.
-
-.EXAMPLE
-Set-WUGDeviceProperties -DeviceID 33 -DisplayName "My device"
-or
-Set-WUGDeviceProperties -DeviceID 33, 34, 35 -isWireless $true
-or
-Set-WUGDeviceProperties -DeviceID 33, 34 -collectWireless $false -keepDetailsCurrent $true
+.PARAMETER actionPolicy <array>
+    Specifies the action policy for the device. Default is null.
 
 #>
 function Set-WUGDeviceProperties {
@@ -89,7 +78,7 @@ function Set-WUGDeviceProperties {
         $jsonBody = $body | ConvertTo-Json -Depth 5
         try {
             $result = Get-WUGAPIResponse -uri $uri -method $method -body $jsonBody
-            return $result
+            return $result.data
         }
         catch {
             Write-Error "Error setting device properties: $_"
@@ -114,7 +103,7 @@ function Set-WUGDeviceProperties {
             Write-Debug "Get-WUGAPIResponse -uri ${uri} -method ${method} -body ${jsonBody}"
             try {
                 $result = Get-WUGAPIResponse -uri $uri -method $method -body $jsonBody
-                $finalresult += $result
+                $finalresult += $result.data
             }
             catch {
                 Write-Error "Error setting device properties: $_"

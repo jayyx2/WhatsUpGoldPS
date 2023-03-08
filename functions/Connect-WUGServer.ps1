@@ -1,48 +1,81 @@
 <#
 .SYNOPSIS
-    Connect to a WhatsUp Gold server to obtain an authorization token to
-     use for REST API requests
+Connects to a WhatsUp Gold (WUG) server and obtains an OAuth 2.0 authorization token.
 
 .DESCRIPTION
-    Obtains a WhatsUp Gold REST API authorization token
+The Connect-WUGServer function establishes a connection to a WhatsUp Gold server using the specified parameters,
+and obtains an authorization token using the OAuth 2.0 password grant type flow. The function validates the
+input parameters and handles credential input, and also allows for ignoring SSL certificate validation errors.
+The authorization token is stored in a global variable for subsequent API requests.
 
-.PARAMETER serverUri
-    The IP address or fully-qualified domain name of the WhatsUp Gold server.
+.PARAMETER -serverUri
+The URI of the WhatsUp Gold server to connect to.
 
-.PARAMETER Protocol
-    Specify whether to use HTTP or HTTPS. HTTP is default.
+.PARAMETER -Protocol
+The protocol to use for the connection (http or https). Default is http.
 
-.PARAMETER Username
-    Plaintext username used to connect to the WhatsUp Gold Server
-    INSECURE, USE AT YOUR OWN RISK! Use -Credential instead!
+.PARAMETER -Username
+The username to use for authentication. If not provided, the function will prompt for it.
 
-.PARAMETER Password
-    Plaintext password used to connect to the WhatsUp Gold Server
-    INSECURE, USE AT YOUR OWN RISK! Use -Credential instead!
+.PARAMETER -Password
+The password to use for authentication. If not provided, the function will prompt for it.
 
-.PARAMETER Credential
-    Accepts a PowerShell credential object. Set your credential first.
-    For example: $Credential = Get-Credential
+.PARAMETER -Credential
+A PSCredential object containing the username and password for authentication.
 
-.PARAMETER TokenEndpoint
-    Specifies the endpoint for the token request. The default value is "/api/v1/token".
+.PARAMETER -TokenEndpoint
+The endpoint for obtaining the OAuth 2.0 authorization token. Default is "/api/v1/token".
 
-.PARAMETER Port
-    Specifies the port number used to connect to the WhatsUp Gold server. The default value is "9644".
+.PARAMETER -Port
+The TCPIP port to use for the connection. Default is 9644.
 
-.PARAMETER IgnoreSSLErrors
-    If this switch is present, SSL certificate validation errors will be ignored when making requests to the WhatsUp Gold server. This is useful when connecting to servers with self-signed certificates or other certificate issues.
-
-.NOTES
-    WhatsUp Gold REST API Handling Session Tokens
-    https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Handling-Session-Tokens
+.PARAMETER -IgnoreSSLErrors
+A switch that allows for ignoring SSL certificate validation errors.
+...which currently does not work.
 
 .EXAMPLE
-    Connect-WUGServer
-    Connect-WUGServer -serverUri 192.168.1.212 -Credential $Credential -Protocol https
-    Connect-WUGServer -serverUri 192.168.1.212 -Username "admin"
-    Connect-WUGServer -serverUri 192.168.1.212 -Username "admin" -Password "Password"
-    Connect-WUGServer -serverUri 192.168.1.212 -Username user -Password pass -Protocol https
+Connect-WUGServer -serverUri "whatsup.example.com" -Protocol "https" -Username "admin" -Password "mypassword"
+Connects to the WhatsUp Gold server at "https://whatsup.example.com:9644" with the provided credentials, and obtains an
+OAuth 2.0 authorization token.
+
+.NOTES
+Author: Jason Alberino
+Version: 1.0
+WhatsUp Gold REST API Handling Session Tokens: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Handling-Session-Tokens
+
+.EXAMPLE
+    ###Example 1: Basic usage with prompt for username and password
+    Connect-WUGServer -serverUri "wug.example.com"
+    Connects to the WUG server at "http://wug.example.com:9644" with prompts for username and password.
+    
+    ###Example 2: Connection using a PSCredential object
+    $Credential = Get-Credential
+    Connect-WUGServer -serverUri "wug.example.com" -Credential $Credential -Protocol "https"
+    Connects to the WUG server at "https://wug.example.com:9644" using the provided PSCredential object.
+    
+    ###Example 3: Connection with specified username
+    Connect-WUGServer -serverUri "wug.example.com" -Username "admin"
+    Connects to the WUG server at "http://wug.example.com:9644" using the specified username, with a prompt for password.
+    
+    ###Example 4: Connection with specified username and password
+    Connect-WUGServer -serverUri "wug.example.com" -Username "admin" -Password "mypassword"
+    Connects to the WUG server at "http://wug.example.com:9644" using the specified username and password.
+    
+    ###Example 5: Connection with custom token endpoint
+    Connect-WUGServer -serverUri "wug.example.com" -TokenEndpoint "/api/v2/token"
+    Connects to the WUG server at "http://wug.example.com:9644" using the default username and password, but obtains
+    the OAuth 2.0 authorization token from the custom endpoint "/api/v2/token".
+    
+    ###Example 6: Connection with custom port and SSL protocol
+    Connect-WUGServer -serverUri "wug.example.com" -Port 8443 -Protocol "https"
+    Connects to the WUG server at "https://wug.example.com:8443" using the default username and password,
+    with SSL certificate validation enabled.
+    
+    ###Example 7: Connection with SSL protocol and ignoring SSL errors
+    Connect-WUGServer -serverUri "wug.example.com" -Protocol "https" -IgnoreSSLErrors
+    Connects to the WUG server at "https://wug.example.com:9644" using the default username and password,
+    but ignores SSL certificate validation errors.
+
 #>
 function Connect-WUGServer {
     param (
@@ -75,7 +108,6 @@ function Connect-WUGServer {
         }
     }
     #input validation
-
     #Set the base URI
     $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
     #Set the token URI

@@ -1,3 +1,35 @@
+<#
+.SYNOPSIS
+Removes one or more devices from WhatsUp Gold. Supports removing up to 499 devices in a single batch.
+
+.DESCRIPTION
+This function removes one or more devices from WhatsUp Gold. It supports removing up to 499 devices in a single batch. If more than 499 devices need to be removed, the function automatically divides them into batches and processes each batch. The function takes two parameters: DeviceID (required) and DeleteDiscoveredDevices (optional). The DeviceID parameter specifies the ID or IDs of the device or devices to remove. The DeleteDiscoveredDevices parameter is a switch that, when used, removes all discovered resources associated with the device.
+
+.PARAMETER DeviceID
+Specifies the ID or IDs of the device or devices to remove. This parameter is mandatory.
+
+.PARAMETER DeleteDiscoveredDevices
+A switch that, when used, removes all discovered resources associated with the device. This parameter is optional.
+
+.EXAMPLE
+Remove-WUGDevices -DeviceID "123456" -DeleteDiscoveredDevices
+Removes the device with ID "123456" and all of its associated discovered resources.
+
+.EXAMPLE
+Remove-WUGDevices -DeviceID "123456","789012"
+Removes the devices with ID "123456" and "789012".
+
+.EXAMPLE
+$devices = Get-WUGDevice -Name "Printer"
+Remove-WUGDevices -DeviceID $devices.ID
+Removes all devices that have the word "Printer" in their name.
+
+.NOTES
+Author: WhatsUp Gold Dream Team
+Last Edit: September 10, 2021
+Version: 1.0
+#>
+
 function Remove-WUGDevices {
     param(
         [Parameter(Mandatory)][array]$DeviceID,

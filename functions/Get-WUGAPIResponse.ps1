@@ -1,24 +1,32 @@
 <#
 .SYNOPSIS
-    Connect to a REST API endpoint by specifying a full URI and a  HTTP Verb
+Connects to a REST API endpoint by specifying a full URI and an HTTP verb, and returns the response.
 
 .DESCRIPTION
-    Connect to a REST API endpoint by specifying a full URI and a  HTTP Verb
+The Get-WUGAPIResponse function sends an HTTP request to the specified REST API endpoint using the specified HTTP verb.
+The function returns the response from the REST API.
 
 .PARAMETER Uri
-    The entire API endpoint, for example, http://192.168.1.212:9644/api/v1/product/api
+The entire URI of the REST API endpoint to connect to.
 
 .PARAMETER Method
-    The HTTP verb to use when connecting to the REST API endpoint.
-    Valid options are:
-    GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH
+The HTTP verb to use when connecting to the REST API endpoint.
+Valid options are: GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH.
 
 .PARAMETER body
-    The body of the request. This parameter is used when making POST, PUT, and PATCH requests.
+The request body to include in the REST API request. This parameter is used for POST, PUT, and PATCH requests.
 
 .EXAMPLE
-    Get-WUGAPIResponse -uri "http://192.168.1.212:9644/api/v1/product/api" -Method GET
-    $dataObject = (Get-WUGAPIResponse -uri "http://192.168.1.212:9644/api/v1/product/api" -Method GET).data
+Get-WUGAPIResponse -Uri "http://192.168.1.212:9644/api/v1/product/api" -Method GET
+Sends a GET request to the specified REST API endpoint, and returns the response.
+
+.EXAMPLE
+$dataObject = (Get-WUGAPIResponse -Uri "http://192.168.1.212:9644/api/v1/product/api" -Method GET).data
+Sends a GET request to the specified REST API endpoint, and assigns the 'data' property of the response to a variable.
+
+.NOTES
+Author: Jason Alberino
+Version: 1.0
 
 #>
 function Get-WUGAPIResponse {
@@ -38,15 +46,14 @@ function Get-WUGAPIResponse {
     if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
     #End global variables error checking
 
-    if (-not $Uri) {
-        $Uri = Read-Host "Enter the fully qualified REST API endpoint."
-    }
-    If (-not $Method) {
-        $Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD)."
-    }
+    #input validation
+    if (-not $Uri) {$Uri = Read-Host "Enter the fully qualified REST API endpoint.";}
+    If (-not $Method) {$Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD).";}
+    #end input validation
+
     If(-not $body){
         try {
-            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders
+            $response = Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders}
             Write-Debug "Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders}"
             Write-Debug "Response: ${response}"
         }

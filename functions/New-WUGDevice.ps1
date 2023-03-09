@@ -119,6 +119,32 @@ function New-WUGDevice {
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Layer2Data,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $Groups
     )
+    Write-Debug "Function: New-WUGDevice"
+    Write-Debug "Displayname:       ${displayName}"
+    Write-Debug "Device Address:    ${DeviceAddress}"
+    Write-Debug "Device Type:       ${deviceType}"
+    Write-Debug "PollInterval:      ${PollInterval}"
+    Write-Debug "PrimaryRole:       ${PrimaryRole}"
+    Write-Debug "SubRoles:          ${SubRoles}"
+    Write-Debug "snmpOid:           ${snmpOid}"
+    Write-Debug "SNMPPort:          ${SNMPPort}"   
+    Write-Debug "OS:                ${OS}"
+    Write-Debug "Brand:             ${Brand}"
+    Write-Debug "ActionPolicy:      ${ActionPolicy}"
+    Write-Debug "Note:              ${Note}"
+    Write-Debug "AutoRefresh:       ${AutoRefresh}"
+    Write-Debug "Credentials:       ${Credentials}"
+    Write-Debug "Interfaces:        ${Interfaces}"
+    Write-Debug "Attributes:        ${Attributes}"
+    Write-Debug "CustomLinks:       ${CustomLinks}"
+    Write-Debug "ActiveMonitors:    ${ActiveMonitors}"
+    Write-Debug "PerforMonitors:    ${PerformanceMonitors}"
+    Write-Debug "PassiveMonitors:   ${PassiveMonitors}"
+    Write-Debug "Dependencies:      ${Dependencies}"
+    Write-Debug "NCMTasks:          ${NCMTasks}"
+    Write-Debug "AppProfiles:       ${ApplicationProfiles}"
+    Write-Debug "Layer2Data:        ${Layer2Data}"
+    Write-Debug "Layer2Data:        ${Groups}"
 
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }

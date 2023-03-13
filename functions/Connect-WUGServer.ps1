@@ -80,11 +80,11 @@ WhatsUp Gold REST API Handling Session Tokens: https://docs.ipswitch.com/NM/What
 function Connect-WUGServer {
     param (
         [Parameter(Mandatory = $true)] [string] $serverUri,
-        [Parameter(Mandatory = $false)] [ValidateSet("http", "https", ErrorMessage = "Protocol must be http or https")] [string] $Protocol = "http",
+        [Parameter(Mandatory = $false)] [ValidateSet("http", "https")] [string] $Protocol = "http",
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Username,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Password,
         [System.Management.Automation.Credential()][PSCredential]$Credential = $null,
-        [Parameter()] [ValidateNotNullOrEmpty()][ValidatePattern("^(/[a-zA-Z0-9]+)+/?$", ErrorMessage = "Please enter a valid token endpoint. Example: /api/v1/token")] [string] $TokenEndpoint = "/api/v1/token",
+        [Parameter()] [ValidateNotNullOrEmpty()][ValidatePattern("^(/[a-zA-Z0-9]+)+/?$")] [string] $TokenEndpoint = "/api/v1/token",
         [Parameter()] [ValidateRange(1,65535)] [int32] $Port = 9644,
         [switch] $IgnoreSSLErrors
     )

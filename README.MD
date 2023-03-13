@@ -34,4 +34,4 @@ This project maintains a [Code of Conduct](code-of-conduct.md) that establishes 
 A detailed release history is contained in the [Change Log](CHANGELOG.md).
 
 ## License
-WhatsUpGoldPS is provided under the [MIT license](LICENSE.md).
+WhatsUpGoldPS is provided under the [Apache 2.0](LICENSE.md).

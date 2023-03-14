@@ -1,7 +1,18 @@
 # WhatsUpGoldPS
 
 ## Description
-Interact with the WhatsUp Gold REST API using PowerShell
+You need to start using automation to save time. Time is the most precious thing every person has. Start using the WhatsUp Gold REST API to automate administrative tasks, gather data for display elsewhere, integrate WhatsUp Gold with business processes, and much more. We include access to the WhatsUp Gold REST API with every license, including Free Edition. The new PowerShell module, WhatsUpGoldPS, aims to simplify getting value from WhatsUp Gold's REST API. 
+
+Some everyday use cases include updating device maintenance mode settings, creating new devices for monitoring, enabling or disabling monitors, and gathering report data to display in external systems. The REST API is expansive, and this module aims to gain parity with those same operations. Contributions are encouraged and welcome.
+
+I look forward to continuing to add value to WhatsUp Gold together with our customers and partners.
+
+Examples
+--------
+#Clone a device
+#Create a new device
+#Call a script to add device to WhatsUp Gold
+#Call a script to set maintenance mode
 
 ## Installing
 The easiest way to get WhatsUpGoldPS is using the [PowerShell Gallery](https://powershellgallery.com/packages/WhatsUpGoldPS/)!
@@ -34,4 +45,4 @@ This project maintains a [Code of Conduct](code-of-conduct.md) that establishes 
 A detailed release history is contained in the [Change Log](CHANGELOG.md).
 
 ## License
-WhatsUpGoldPS is provided under the [MIT license](LICENSE.md).
+WhatsUpGoldPS is provided under the [Apache License 2.0](LICENSE.md).

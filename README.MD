@@ -37,8 +37,8 @@ To uninstall WhatsUpGoldPS:
 PS> Uninstall-Module -Name WhatsUpGoldPS
 ```
 ## Contributing to WhatsUpGoldPS
-Interested in contributing? Read how you can [Contribute](contributing.md) to WhatsUpGoldPS
-This project maintains a [Code of Conduct](code-of-conduct.md) that establishes how the project is governed and how everyone involved is expected to behave. You can report unacceptable behavior to [alberino@progress.com](mailto:alberino@progress.com).
+Interested in contributing? Read how you can [contribute](contributing.md) to WhatsUpGoldPS
+This project maintains a [code of conduct](code-of-conduct.md) that establishes how the project is governed and how everyone involved is expected to behave. You can report unacceptable behavior to [alberino@progress.com](mailto:alberino@progress.com).
 
 ## Release History
 A detailed release history is contained in the [Change Log](CHANGELOG.md).

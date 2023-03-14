@@ -7,12 +7,12 @@ Some everyday use cases include updating device maintenance mode settings, creat
 
 I look forward to continuing to add value to WhatsUp Gold together with our customers and partners.
 
-Examples
+## Examples
 --------
-#Clone a device
-#Create a new device
-#Call a script to add device to WhatsUp Gold
-#Call a script to set maintenance mode
+* Clone a device
+* Create a new device
+* Call a script to add device to WhatsUp Gold
+* Call a script to set maintenance mode
 
 ## Installing
 The easiest way to get WhatsUpGoldPS is using the [PowerShell Gallery](https://powershellgallery.com/packages/WhatsUpGoldPS/)!

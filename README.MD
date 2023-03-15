@@ -7,6 +7,9 @@ Some everyday use cases include updating device maintenance mode settings, creat
 
 I look forward to continuing to add value to WhatsUp Gold together with our customers and partners.
 
+## Support
+* Make a note here
+
 ## Examples
 * Clone a device
 * Create a new device

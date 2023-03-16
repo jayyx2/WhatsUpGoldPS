@@ -4,7 +4,7 @@
 Use automation to save time with the WhatsUp Gold REST API, included in every license—even Free Edition. The new PowerShell module, WhatsUpGoldPS, simplifies tasks like updating maintenance settings, creating devices, and gathering report data. Contributions are welcome to achieve full functionality parity. I look forward to continuing to add value to WhatsUp Gold together customers and partners.
 
 ## Support
-This module comes with no warranty or support, and is offered as-is.
+This module comes with no warranty or support from anyone, and is offered as-is.
 
 ## Examples
 * Clone a device

@@ -61,7 +61,7 @@ PrivateData = @{
         ProjectUri = 'https://github.com/jayyx2/WhatsUpGoldPS'
 
         # A URL to an icon representing this module.
-        IconUri = ''
+        IconUri = 'https://wug.ninja/wp-content/uploads/cropped-ninja_wallpaper_1920x1080-3.png'
 
         # ReleaseNotes of this module
         ReleaseNotes = 'https://github.com/jayyx2/WhatsUpGoldPS/blob/main/CHANGELOG.md'
@@ -80,7 +80,7 @@ PrivateData = @{
 } # End of PrivateData hashtable
 
 # HelpInfo URI of this module
-# HelpInfoURI = ''
+ HelpInfoURI = 'https://github.com/jayyx2/WhatsUpGoldPS/issues'
 
 # Default prefix for commands exported from this module. Override the default prefix using Import-Module -Prefix.
 # DefaultCommandPrefix = ''

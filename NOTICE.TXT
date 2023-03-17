@@ -3,4 +3,4 @@ Copyright 2023 Jason Alberino
 
 Third-party notices
 -------------------
-* Currently, WhatsUpGoldPS is purely PowerShell code that does not require any third-party libraries.
+* WhatsUpGoldPS is purely PowerShell code that does not require any third-party libraries.

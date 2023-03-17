@@ -55,16 +55,16 @@ PrivateData = @{
          Tags = @("WhatsUp Gold","REST API")
 
         # A URL to the license for this module.
-        # LicenseUri = ''
+        LicenseUri = 'https://github.com/jayyx2/WhatsUpGoldPS/blob/main/LICENSE.md'
 
         # A URL to the main website for this project.
-        # ProjectUri = ''
+        ProjectUri = 'https://github.com/jayyx2/WhatsUpGoldPS'
 
         # A URL to an icon representing this module.
-        # IconUri = ''
+        IconUri = ''
 
         # ReleaseNotes of this module
-        # ReleaseNotes = ''
+        ReleaseNotes = 'https://github.com/jayyx2/WhatsUpGoldPS/blob/main/CHANGELOG.md'
 
         # Prerelease string of this module
         # Prerelease = ''

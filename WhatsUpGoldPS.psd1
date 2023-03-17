@@ -6,7 +6,7 @@
 
 @{
 # Version number of this module.
-ModuleVersion = '0.0.1'
+ModuleVersion = '0.0.2'
 
 # ID used to uniquely identify this module
 GUID = '94d2aadd-f227-452e-b48a-c215d243418c'
@@ -28,11 +28,11 @@ PowerShellVersion = '5.1'
 
 # Name of the PowerShell host required by this module
 # *
-PowerShellHostName = 'WhatsUp Gold REST API'
+PowerShellHostName = ''
 
 # Minimum version of the PowerShell host required by this module
 # *
-PowerShellHostVersion = '22.1'
+PowerShellHostVersion = ''
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
 FunctionsToExport = '*'

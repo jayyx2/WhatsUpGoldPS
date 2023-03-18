@@ -54,7 +54,7 @@ function Get-WUGDevice {
                 $finaloutput += $result.data
             }
             catch {
-                Write-Error "No results returned for -DeviceID ${id}. Try using -Search instead."
+                Write-Error "No results returned for -DeviceID ${id}. Try using Get-WugDevices -SearchValue instead."
             }
         }
     }

@@ -25,8 +25,8 @@ Remove-WUGDevices -DeviceID $devices.ID
 Removes all devices that have the word "Printer" in their name.
 
 .NOTES
-Author: WhatsUp Gold Dream Team
-Last Edit: September 10, 2021
+Author: Jason Alberino
+Last Edit: 2023-03-18
 Version: 1.0
 #>
 

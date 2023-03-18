@@ -33,7 +33,7 @@ function Get-WUGDevices {
     param (
         [Parameter()] [string] $SearchValue,
         [Parameter()] [string] $DeviceGroupID = "-1",
-        [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "card",
+        [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "id",
         [Parameter()] [string] $Limit = "200"
      )
 
@@ -52,21 +52,21 @@ function Get-WUGDevices {
     else {
         $SearchValue = Read-Host "Enter the search value either IP, hostname, or display name."
     }
-    $currentPage = 0
+    $currentPage = 1
     $allDevices = @()
     do {
-        $currentPage++
         $result = Get-WUGAPIResponse -uri $uri -method "GET"
         $devices = ${result}.data.devices
         $allDevices += $devices
         $pageInfo = ${result}.paging
         if (${pageInfo}.nextPageId){
+            $currentPage++
             $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
             $percentComplete = ($currentPage / ${pageInfo}.nextPageId) * 100
+            Write-Progress -Activity "Retrieved $($allDevices.Count) devices already, wait for more." -PercentComplete $percentComplete -Status "Page $currentPage of ?? (${Limit} per page)"
         } else {
-            $percentComplete = 100     
+            #Do Nothing
         }
-        Write-Progress -Activity "Retrieving devices...please wait" -PercentComplete $percentComplete -Status "Currently working on page $currentPage (${Limit} per page)"
     } while (${pageInfo}.nextPageId)
     return $allDevices
 }

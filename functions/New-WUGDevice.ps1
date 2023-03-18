@@ -94,18 +94,19 @@ Date: 2023-03-07
 function New-WUGDevice {
     param (
         [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [string] $displayName,
-        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [ValidatePattern('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', ErrorMessage = 'You must input a valid IP address.')] [string] $DeviceAddress,
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [ValidatePattern('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')] [string] $DeviceAddress,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $Hostname,       
         [Parameter()] <#[ValidateSet("Workstation", "Server")]#> [string] $deviceType,
-        [Parameter()] [ValidateRange(10,3600, ErrorMessage = 'You must specify a poll interval greater than 10 and less than 3600.')] [int] $PollInterval = 60,
+        [Parameter()] [ValidateRange(10,3600)] [int] $PollInterval = 60,
         [Parameter()] <#[ValidateSet("Device", "Router", "Switch", "Firewall")]#> [string] $PrimaryRole = "Device",
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $SubRoles,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $snmpOid,
-        [Parameter()] [ValidateRange(1,65535, ErrorMessage = 'You must input a valid TCPIP port.')] [int] $SNMPPort,
+        [Parameter()] [ValidateRange(1,65535)] [int] $SNMPPort,
         [Parameter()] [ValidateNotNullOrEmpty()] <#[ValidateSet("Windows", "Linux", "Unix")]#> [string] $OS,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Brand,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $ActionPolicy,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Note,
-        [Parameter()] [ValidateNotNullOrEmpty()] [bool] $AutoRefresh,
+        [Parameter()] [ValidateNotNullOrEmpty()] [bool] $AutoRefresh = $true,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $Credentials,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $Interfaces,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $Attributes,
@@ -152,41 +153,89 @@ function New-WUGDevice {
     if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
 
+    #Input validation
+
+    ### Active Monitors
+    # Define an empty array to hold the ActiveMonitor objects
+    $ActiveMonitorObjects = @()
+    # Loop through each item in the ActiveMonitors array and create an ActiveMonitor object for it
+    if ($ActiveMonitors) {
+        foreach ($ActiveMonitor in $ActiveMonitors) {
+            $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
+                classId = ''
+                Name = $ActiveMonitor
+            }
+            # Add the new ActiveMonitor object to the array
+            $ActiveMonitorObjects += $ActiveMonitorObject
+        }
+    } else {
+        $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
+            classId = ''
+            Name = 'Ping'
+        }
+        $ActiveMonitorObjects += $ActiveMonitorObject
+    }
+
+    ### Performance Monitors
+    $PerformanceMonitorObjects = @()
+    if ($PerformanceMonitors) {
+        foreach ($PerformanceMonitor in $PerformanceMonitors) {
+            $PerformanceMonitorObject = New-Object -TypeName PSObject -Property @{
+                classId = ''
+                Name = $PerformanceMonitor
+            }
+            $PerformanceMonitorObjects += $PerformanceMonitorObject
+        }
+    }
+    ### Passive Monitors
+    $PassiveMonitorObjects = @()
+    if ($PassiveMonitors) {
+        foreach ($PassiveMonitor in $PassiveMonitors) {
+            $PassiveMonitorObject = New-Object -TypeName PSObject -Property @{
+                classId = ''
+                Name = $PassiveMonitor
+            }
+            $PassiveMonitorObjects += $PassiveMonitorObject
+        }
+    }
+    #End input validation
+
     $options = @("all")
     if ($ApplyL2) { $options += "l2" }
     if ($Update) { $options += "update" }
     if ($UpdateInterfaceState) { $options += "update-interface-state" }
     if ($UpdateInterfaceNames) { $options += "update-interface-names" }
     if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
+    if (!$hostname){$hostname = $DeviceAddress}
 
     $template = @{
         templateId = "WhatsUpGoldPS"
         displayName = "${displayName}"
-        deviceType = "Workstation"
+        deviceType = "${deviceType}"
         snmpOid = ""
         snmpPort = ""
         pollInterval = "${PollInterval}"
-        primaryRole = "Device"
+        primaryRole = "${PrimaryRole}"
         subRoles = @("Resource Attributes", "Resource Monitors")
         os = ""
         brand = ""
         actionPolicy = ""
         note = "${note}"
-        autoRefresh = "True"
+        autoRefresh = "$true"
         credentials = @()
         interfaces = @(
             @{
               defaultInterface = "true"
               pollUsingNetworkName = "false"
-              networkAddress = "0.0.0.0"
-              networkName = "0.0.0.0"
+              networkAddress = "${DeviceAddress}"
+              networkName = "${Hostname}"
             }
         )
         attributes = @()
         customLinks = @()
-        activeMonitors = @()
-        performanceMonitors = @()
-        passiveMonitors = @()
+        activeMonitors = @(${ActiveMonitorObjects})
+        performanceMonitors = @(${PerformanceMonitorObjects})
+        passiveMonitors = @(${PassiveMonitorObjects})
         dependencies = @()
         ncmTasks = @()
         applicationProfiles = @()
@@ -196,8 +245,8 @@ function New-WUGDevice {
         })
     }
 
-    $jsonBody = $template | ConvertTo-Json -Compress
-
+    $jsonBody = $template | ConvertTo-Json -Depth 5 -Compress
+    $jsonBody
     $body = "{
         `"options`":[`"all`"],
         `"templates`":[${jsonBody}]
@@ -205,9 +254,13 @@ function New-WUGDevice {
 
     try {
         $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
+        if($result.data.errors){
+            return $result.data.errors
+        } else {
         return $result.data
+        }
     }
     catch {
-        Write-Error $_
+        Write-Error $_.
     }
 }

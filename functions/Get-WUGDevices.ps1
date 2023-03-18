@@ -52,17 +52,21 @@ function Get-WUGDevices {
     else {
         $SearchValue = Read-Host "Enter the search value either IP, hostname, or display name."
     }
-
+    $currentPage = 0
     $allDevices = @()
     do {
+        $currentPage++
         $result = Get-WUGAPIResponse -uri $uri -method "GET"
         $devices = ${result}.data.devices
         $allDevices += $devices
         $pageInfo = ${result}.paging
         if (${pageInfo}.nextPageId){
             $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
+            $percentComplete = ($currentPage / ${pageInfo}.nextPageId) * 100
+        } else {
+            $percentComplete = 100     
         }
+        Write-Progress -Activity "Retrieving devices...please wait" -PercentComplete $percentComplete -Status "Currently working on page $currentPage (${Limit} per page)"
     } while (${pageInfo}.nextPageId)
-
     return $allDevices
 }

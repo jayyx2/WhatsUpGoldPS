@@ -25,6 +25,6 @@ function Update-WUGAuthToken {
         $global:expiry = (Get-Date).AddSeconds($newToken.expires_in)
         return "Refreshed authorization token which now expires at $global:expiry UTC."
     } else {
-        #Write-Host "We don't need to refresh yet, token expires ${global:expiry}"
+        Write-Debug "We don't need to refresh yet, token expires ${global:expiry}"
     }
 }

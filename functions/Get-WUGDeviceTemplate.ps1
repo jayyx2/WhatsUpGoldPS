@@ -27,11 +27,13 @@ function Get-WUGDeviceTemplate {
         [Parameter()] [array] $DeviceID,
         [Parameter()] [ValidateSet('all', 'l2', 'tempip', 'simple')] [string] $Options = 'all'
     )
+
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;}
+    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Get-WUGAuthToken}
     if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
     #End global variables error checking
+    
     #Input validation here
     if(!$DeviceID){$DeviceID = Write-Error "You must specify the DeviceID.";$DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas";$DeviceID = $DeviceID.Split(",");}
     #End input validation

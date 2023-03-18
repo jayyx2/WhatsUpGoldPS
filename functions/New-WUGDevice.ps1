@@ -148,24 +148,27 @@ function New-WUGDevice {
     Write-Debug "Layer2Data:        ${Groups}"
 
     #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
+    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
+    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Get-WUGAuthToken}
+    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
     #End global variables error checking
 
-    #Input validation
+    #Begin Input validation
+    if ($SubRoles) {if ($SubRoles -isnot [string[]]) {throw "SubRoles parameter must be an array of strings."}}
+    if ($ActiveMonitors) {if ($ActiveMonitors -isnot [string[]]) {throw "ActiveMonitors parameter must be an array of strings."}}
+    if ($PerformanceMonitors) {if ($PerformanceMonitors -isnot [string[]]) {throw "PerformanceMonitors parameter must be an array of strings."}}
+    if ($PassiveMonitors) {if ($PassiveMonitors -isnot [string[]]) {throw "PassiveMonitors parameter must be an array of strings."}}
+    #End input validation
 
+    #Begin data formatting
     ### Active Monitors
-    # Define an empty array to hold the ActiveMonitor objects
     $ActiveMonitorObjects = @()
-    # Loop through each item in the ActiveMonitors array and create an ActiveMonitor object for it
     if ($ActiveMonitors) {
         foreach ($ActiveMonitor in $ActiveMonitors) {
             $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
                 classId = ''
                 Name = $ActiveMonitor
             }
-            # Add the new ActiveMonitor object to the array
             $ActiveMonitorObjects += $ActiveMonitorObject
         }
     } else {
@@ -198,7 +201,7 @@ function New-WUGDevice {
             $PassiveMonitorObjects += $PassiveMonitorObject
         }
     }
-    #End input validation
+    #End data formatting
 
     $options = @("all")
     if ($ApplyL2) { $options += "l2" }

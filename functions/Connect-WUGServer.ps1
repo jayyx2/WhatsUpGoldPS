@@ -111,7 +111,7 @@ function Connect-WUGServer {
     #Set the base URI
     $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
     #Set the token URI
-    $tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}"
+    $global:tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}"
     #Set the required header(s)
     $tokenHeaders = @{"Content-Type" = "application/json" }
     #Set the required body for the token request
@@ -126,12 +126,17 @@ function Connect-WUGServer {
         throw
     }
 
+    #Store the headers for usage in calls
     $global:WUGBearerHeaders = @{
         "Content-Type"  = "application/json"
         "Authorization" = "$($token.token_type) $($token.access_token)"
     }
 
+    #Store the token expiration
     $global:expiry = (Get-Date).AddSeconds($token.expires_in)
+    # Store the refresh_token
+    $global:WUGRefreshToken = $token.refresh_token
+
     return "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at $global:expiry UTC."
 
 }

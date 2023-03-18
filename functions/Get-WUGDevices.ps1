@@ -9,8 +9,8 @@ Retrieve an array of devices from WhatsUp Gold
 Search using IP Address, Display Name, or Hostname.
 
 .PARAMETER DeviceGroupID
-Default is -1 (all devices). You can increase your search efficiency
-by specifying a device group id
+Default is -1 (all devices). You will vastly increase your search 
+efficiency by specifying a device group id
 
 .PARAMETER View
 Default is card.

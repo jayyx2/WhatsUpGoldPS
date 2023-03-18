@@ -1,5 +1,5 @@
 function Get-WUGAuthToken {
-    # Check if the token is within 2 minutes of expiry
+    # Check if the token is within 5 minutes of expiry
     if ((Get-Date).AddMinutes(5) -ge $global:expiry) {
         $refreshTokenUri = "${global:tokenUri}"
         $refreshTokenHeaders = @{"Content-Type" = "application/json" }
@@ -25,6 +25,6 @@ function Get-WUGAuthToken {
         $global:expiry = (Get-Date).AddSeconds($newToken.expires_in)
         return "Refreshed authorization token which now expires at $global:expiry UTC."
     } else {
-        Write-Host "We don't need to refresh yet, token expires ${global:expiry}"
+        #Write-Host "We don't need to refresh yet, token expires ${global:expiry}"
     }
 }

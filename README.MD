@@ -7,7 +7,7 @@ Use automation to save time with the WhatsUp Gold REST API, included in every li
 This module comes with no warranty or support from anyone, and is offered as-is.
 
 ## Examples
-* Clone a device
+* [Clone a device](https://github.com/jayyx2/WhatsUpGoldPS/blob/main/examples/Clone_device.ps1) - Use another device as a template to create a new device
 * Create a new device
 * Call a script to add device to WhatsUp Gold
 * Call a script to set maintenance mode

@@ -34,12 +34,12 @@ function Get-WUGDevices {
         [Parameter()] [string] $SearchValue,
         [Parameter()] [string] $DeviceGroupID = "-1",
         [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "id",
-        [Parameter()] [string] $Limit = "200"
+        [Parameter()] [string] $Limit = "25"
      )
 
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Update-WUGAuthToken}
+    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Request-WUGAuthToken}
     if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
     #End global variables error checking
 

@@ -1,4 +1,4 @@
-function Update-WUGAuthToken {
+function Request-WUGAuthToken {
     # Check if the token is within 5 minutes of expiry
     if ((Get-Date).AddMinutes(5) -ge $global:expiry) {
         $refreshTokenUri = "${global:tokenUri}"

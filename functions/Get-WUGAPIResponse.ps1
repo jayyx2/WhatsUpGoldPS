@@ -71,6 +71,9 @@ function Get-WUGAPIResponse {
             catch {
                 $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
                 Write-Error $message
+                Write-Error "URI: $uri"
+                Write-Error "Method: $Method"
+                Write-Error "Body: $body"
                 throw
             }
         }

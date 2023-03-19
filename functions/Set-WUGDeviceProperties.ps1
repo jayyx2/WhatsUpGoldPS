@@ -43,8 +43,12 @@ function Set-WUGDeviceProperties {
         [Parameter()] [boolean] $keepDetailsCurrent,
         [Parameter()] [string] $note,
         [Parameter()] [string] $snmpOid,
-        [Parameter()] [array] $actionPolicy
+        [Parameter()] [string] $actionPolicy,
+        [Parameter()][string]$JsonData
     )
+
+    # Your existing code to make the API call using $JsonData
+    
 
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
@@ -75,7 +79,13 @@ function Set-WUGDeviceProperties {
         if ($keepDetailsCurrent) {$body.keepdetailscurrent = $keepDetailsCurrent}
         if ($note) {$body.note = $note}
         if ($snmpOid) {$body.snmpoid = $snmpOid}
-        if ($actionPolicy) {$body.actionpolicy = $actionPolicy}
+        if ($actionPolicy) {
+            $body.actionpolicy = @{
+                name = "${actionPolicy}"
+                #description = ""
+                #id = ""
+            }
+        }
         $jsonBody = $body | ConvertTo-Json -Depth 5
         try {
             $result = Get-WUGAPIResponse -uri $uri -method $method -body $jsonBody
@@ -98,7 +108,13 @@ function Set-WUGDeviceProperties {
             if ($keepDetailsCurrent) {$body.keepdetailscurrent = $keepDetailsCurrent}
             if ($note) {$body.note = $note}
             if ($snmpOid) {$body.snmpoid = $snmpOid}
-            if ($actionPolicy) {$body.actionpolicy = $actionPolicy}
+            if ($actionPolicy) {
+                $body.actionpolicy = @{
+                    name = "${actionPolicy}"
+                    #description = ""
+                    #id = ""
+                }
+            }
             $jsonBody = $body | ConvertTo-Json -Depth 5
             Write-Information "Current batch of ${batchSize} is being processed."
             Write-Debug "Get-WUGAPIResponse -uri ${uri} -method ${method} -body ${jsonBody}"
@@ -107,6 +123,7 @@ function Set-WUGDeviceProperties {
                 $finalresult += $result.data
             }
             catch {
+                Write-Error $jsonBody
                 Write-Error "Error setting device properties: $_"
                 $errorMessage = "Error setting device properties: $($_.Exception.Message)`nStackTrace: $($_.ScriptStackTrace)"
                 Write-Error $errorMessage

@@ -19,18 +19,31 @@ It sets the displayName to "Cloned Device Example" and DeviceAddress to "127.0.0
 
 ###Clone device example
 
-#Obtain the Device ID of the device we want to be our template
+<#
+This script clones an existing device in WhatsUp Gold using a template, and 
+updates the display name and address of the new device. If any errors occur during the process, 
+it handles them and outputs the error message to the console.
+#>
+
+### Clone device example
+
+# Check if the WhatsUpGoldPS module is loaded, and if not, import it
+if (-not (Get-Module -Name WhatsUpGoldPS)) {
+    Import-Module WhatsUpGoldPS
+}
+
+# Obtain the Device ID of the device we want to be our template
 $TemplateId = Get-WUGDevices -SearchValue "WhatsUpGoldPS_Template" -view id
 
-#Obtain the device template using the Device ID
+# Obtain the device template using the Device ID
 $DeviceTemplate = Get-WUGDeviceTemplate -DeviceID $TemplateId.id
 
-#Try to create the new device using the template
-try{
+# Try to create the new device using the template
+try {
     $NewId = Add-WugDevice -Template $DeviceTemplate -displayName "Cloned Device Example" -DeviceAddress "127.0.0.1"
-    Write-Host "We created deviceID $($NewId.idmap.resultId) using templateId $($NewId.idMap.templateId)"
+    Write-Host "Created deviceID $($NewId.idmap.resultId) using templateId $($NewId.idMap.templateId) on ${global:WhatsUpServerBaseURI}"
 } 
-#If it fails, write the error message
+# If it fails, write the error message
 catch {
     Write-Error "Error: $_"
     $errorMessage = "Error setting device properties: $($_.Exception.Message)`nStackTrace: $($_.ScriptStackTrace)"

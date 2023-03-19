@@ -81,17 +81,37 @@ An array of groups to which the device should belong.
 $params = @{
     DeviceAddress = "192.168.1.1"
     displayName = "My Device"
+    Hostname = "my-device.example.com"
+    deviceType = "Server"
+    PollInterval = 120
+    PrimaryRole = "Switch"
+    SubRoles = @("Role1", "Role2")
+    snmpOid = "1.3.6.1.4.1.9.1.2417"
+    SNMPPort = 161
+    OS = "Linux"
+    Brand = "Cisco"
+    ActionPolicy = "MyActionPolicy"
+    Note = "This is a test device"
+    AutoRefresh = $true
+    Credentials = @("Credential1", "Credential2")
+    Interfaces = @("Interface1", "Interface2")
+    Attributes = @("Attribute1", "Attribute2")
+    CustomLinks = @("Link1", "Link2")
+    ActiveMonitors = @("Ping", "SNMP")
+    PerformanceMonitors = @("PerfMonitor1", "PerfMonitor2")
+    PassiveMonitors = @("PassiveMonitor1", "PassiveMonitor2")
+    Groups = @("Group1", "Group2")
 }
-New-WUGDevice @params
+Add-WUGDevice @params
 
-This example creates a new device with the specified IP address and display name.
+This example creates a new device with all the specified parameters, including the IP address, display name, active monitors, and more.
 
 .NOTES
 Author: Jason Alberino
 Date: 2023-03-07
 #>
 
-function New-WUGDevice {
+function Add-WUGDevice {
     param (
         [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [string] $displayName,
         [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [ValidatePattern('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')] [string] $DeviceAddress,

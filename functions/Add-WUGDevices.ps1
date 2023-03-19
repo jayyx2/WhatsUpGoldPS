@@ -21,24 +21,25 @@ Creates new devices in WhatsUp Gold using device templates.
     Specifies whether active monitors should be updated.
 
 .DESCRIPTION
-The `New-WUGDevices` function creates new devices in WhatsUp Gold using the specified device templates. If the `-ApplyL2`
+The `Add-WUGDevices` function creates new devices in WhatsUp Gold using the specified device templates. If the `-ApplyL2`
 switch is specified, Layer 2 data will be applied to the new devices. If the `-Update` switch is specified, existing devices
 will be updated with the new templates. If the `-UpdateInterfaceState` switch is specified, the interface state of existing
 devices will be updated. If the `-UpdateInterfaceNames` switch is specified, the interface names of existing devices will be
 updated. If the `-UpdateActiveMonitors` switch is specified, the active monitors of existing devices will be updated.
 
 EXAMPLES
-New-WUGDevices -templates "Switch 1", "Router 1"
+Add-WUGDevices -templates "Switch 1", "Router 1"
 
 This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates.
 
-New-WUGDevices -templates "Switch 1", "Router 1" -ApplyL2 -Update -UpdateInterfaceState -UpdateInterfaceNames
+Add-WUGDevices -templates "Switch 1", "Router 1" -ApplyL2 -Update -UpdateInterfaceState -UpdateInterfaceNames
 
 This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates, applies Layer 2 data, updates
 existing devices with the new templates, updates the interface state of existing devices, and updates the interface names of
 existing devices.
 #>
-function New-WUGDevices {
+
+function Add-WUGDevices {
     param(
         [Parameter(Mandatory)] [array] $deviceTemplates,
         [switch]$ApplyL2,

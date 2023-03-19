@@ -291,9 +291,8 @@ function Add-WUGDevice {
                 }
             )
         }
-        $TempId = ""
         $TempId = $Template.templateId
-        $Template.templateId = "WhatsUpGoldPS $($TempId)"
+        $Template.templateId = "WhatsUpGoldPS(${TempId})"
         if ($displayName) { $Template.displayName = "${displayName}" }
         if ($deviceType) { $Template.deviceType = "${deviceType}" }
         if ($PollInterval) { $Template.pollInterval = "${PollInterval}" }

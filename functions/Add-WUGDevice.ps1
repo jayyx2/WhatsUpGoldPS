@@ -115,6 +115,7 @@ function Add-WUGDevice {
     param (
         [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [string] $displayName,
         [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [ValidatePattern('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')] [string] $DeviceAddress,
+        [Parameter()] $Template,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Hostname,       
         [Parameter()] <#[ValidateSet("Workstation", "Server")]#> [string] $deviceType,
         [Parameter()] [ValidateRange(10,3600)] [int] $PollInterval = 60,
@@ -175,9 +176,9 @@ function Add-WUGDevice {
 
     #Begin Input validation
     if ($SubRoles) {if ($SubRoles -isnot [string[]]) {throw "SubRoles parameter must be an array of strings."}}
-    if ($ActiveMonitors) {if ($ActiveMonitors -isnot [string[]]) {throw "ActiveMonitors parameter must be an array of strings."}}
-    if ($PerformanceMonitors) {if ($PerformanceMonitors -isnot [string[]]) {throw "PerformanceMonitors parameter must be an array of strings."}}
-    if ($PassiveMonitors) {if ($PassiveMonitors -isnot [string[]]) {throw "PassiveMonitors parameter must be an array of strings."}}
+    if ($ActiveMonitors) {if ($ActiveMonitors -is [array]) {foreach ($item in $ActiveMonitors) {if ($item -isnot [string]) {throw "ActiveMonitors parameter must be a one-dimensional array of strings."}}} else {throw "ActiveMonitors parameter must be a one-dimensional array of strings."}}
+    if ($PerformanceMonitors) {if ($PerformanceMonitors -is [array]) {foreach ($item in $PerformanceMonitors) {if ($item -isnot [string]) {throw "PerformanceMonitors parameter must be a one-dimensional array of strings."}}} else {throw "PerformanceMonitors parameter must be a one-dimensional array of strings."}}
+    if ($PassiveMonitors) {if ($PassiveMonitors -is [array]) {foreach ($item in $PassiveMonitors) {if ($item -isnot [string]) {throw "PassiveMonitors parameter must be a one-dimensional array of strings."}}} else {throw "PassiveMonitors parameter must be a one-dimensional array of strings."}}   
     #End input validation
 
     #Begin data formatting
@@ -187,16 +188,20 @@ function Add-WUGDevice {
         foreach ($ActiveMonitor in $ActiveMonitors) {
             $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
                 classId = ''
-                Name = $ActiveMonitor
+                Name    = $ActiveMonitor
             }
             $ActiveMonitorObjects += $ActiveMonitorObject
         }
-    } else {
-        $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
-            classId = ''
-            Name = 'Ping'
+    }
+    else {
+        if(!$Template){
+            $ActiveMonitorObjects = @()
+            $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
+                classId = ''
+                Name    = 'Ping'
+            }
+            $ActiveMonitorObjects += $ActiveMonitorObject   
         }
-        $ActiveMonitorObjects += $ActiveMonitorObject
     }
 
     ### Performance Monitors
@@ -205,7 +210,7 @@ function Add-WUGDevice {
         foreach ($PerformanceMonitor in $PerformanceMonitors) {
             $PerformanceMonitorObject = New-Object -TypeName PSObject -Property @{
                 classId = ''
-                Name = $PerformanceMonitor
+                Name    = $PerformanceMonitor
             }
             $PerformanceMonitorObjects += $PerformanceMonitorObject
         }
@@ -216,7 +221,8 @@ function Add-WUGDevice {
         foreach ($PassiveMonitor in $PassiveMonitors) {
             $PassiveMonitorObject = New-Object -TypeName PSObject -Property @{
                 classId = ''
-                Name = $PassiveMonitor
+                Name    = $PassiveMonitor
+                #actions = ''
             }
             $PassiveMonitorObjects += $PassiveMonitorObject
         }
@@ -229,47 +235,104 @@ function Add-WUGDevice {
     if ($UpdateInterfaceState) { $options += "update-interface-state" }
     if ($UpdateInterfaceNames) { $options += "update-interface-names" }
     if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
-    if (!$hostname){$hostname = $DeviceAddress}
+    if (!$hostname) { $hostname = $DeviceAddress }
 
-    $template = @{
-        templateId = "WhatsUpGoldPS"
-        displayName = "${displayName}"
-        deviceType = "${deviceType}"
-        snmpOid = ""
-        snmpPort = ""
-        pollInterval = "${PollInterval}"
-        primaryRole = "${PrimaryRole}"
-        subRoles = @("Resource Attributes", "Resource Monitors")
-        os = ""
-        brand = ""
-        actionPolicy = ""
-        note = "${note}"
-        autoRefresh = "$true"
-        credentials = @()
-        interfaces = @(
-            @{
-              defaultInterface = "true"
-              pollUsingNetworkName = "false"
-              networkAddress = "${DeviceAddress}"
-              networkName = "${Hostname}"
-            }
-        )
-        attributes = @()
-        customLinks = @()
-        activeMonitors = @(${ActiveMonitorObjects})
-        performanceMonitors = @(${PerformanceMonitorObjects})
-        passiveMonitors = @(${PassiveMonitorObjects})
-        dependencies = @()
-        ncmTasks = @()
-        applicationProfiles = @()
-        layer2Data = ""
-        groups = @(@{
-            name='My Network'
-        })
+    #Handle null objects
+
+    #Begin template handling
+    if (!$Template) {
+        $Template = @{
+            templateId          = "WhatsUpGoldPS"
+            displayName         = "${displayName}"
+            deviceType          = "${deviceType}"
+            snmpOid             = ""
+            snmpPort            = ""
+            pollInterval        = "${PollInterval}"
+            primaryRole         = "${PrimaryRole}"
+            subRoles            = @("Resource Attributes", "Resource Monitors")
+            os                  = ""
+            brand               = ""
+            actionPolicy        = ""
+            note                = "${note}"
+            autoRefresh         = "$true"
+            credentials         = @()
+            interfaces          = @(
+                @{
+                    defaultInterface     = "true"
+                    pollUsingNetworkName = "false"
+                    networkAddress       = "${DeviceAddress}"
+                    networkName          = "${Hostname}"
+                }
+            )
+            attributes          = @()
+            customLinks         = @()
+            activeMonitors      = @(${ActiveMonitorObjects})
+            performanceMonitors = @(${PerformanceMonitorObjects})
+            passiveMonitors     = @(${PassiveMonitorObjects})
+            dependencies        = @()
+            ncmTasks            = @()
+            applicationProfiles = @()
+            layer2Data          = ""
+            groups              = @(
+                @{
+                    name = 'My Network'
+                }
+            )
+        }
     }
+    else {
+        if ($DeviceAddress -and $Hostname) {
+            $Template.interfaces = @(
+                @{
+                    defaultInterface     = "true"
+                    pollUsingNetworkName = "false"
+                    networkAddress       = "${DeviceAddress}"
+                    networkName          = "${Hostname}"
+                }
+            )
+        }
+        $TempId = ""
+        $TempId = $Template.templateId
+        $Template.templateId = "WhatsUpGoldPS $($TempId)"
+        if ($displayName) { $Template.displayName = "${displayName}" }
+        if ($deviceType) { $Template.deviceType = "${deviceType}" }
+        if ($PollInterval) { $Template.pollInterval = "${PollInterval}" }
+        if ($PrimaryRole) {
+            if ($Template.PSObject.Properties['primaryRole']) {
+                $Template.primaryRole = "${PrimaryRole}"
+            } else {
+                $Template | Add-Member -MemberType NoteProperty -Name 'primaryRole' -Value "${PrimaryRole}"
+            }
+        }
+        if ($note) { $Template.note = "${note}" } else { $Template.note = "Added by WhatsUpGoldPS PowerShell module on $((Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz UTC"))"}
+        if ($ActiveMonitorObjects) {
+            if ($Template.activeMonitors) {
+                $Template.activeMonitors += @(${ActiveMonitorObjects})
+            } else {
+                $Template.activeMonitors = @(${ActiveMonitorObjects})
+            }
+        }
+        if ($PerformanceMonitorObjects) {
+            if ($Template.performanceMonitors) {
+                $Template.performanceMonitors += @(${PerformanceMonitorObjects})
+            } else {
+                $Template.performanceMonitors = @(${PerformanceMonitorObjects})
+            }
+        }
+        if ($PassiveMonitorObjects) {
+            if ($Template.passiveMonitors) {
+                $Template.passiveMonitors += @(${PassiveMonitorObjects})
+            } else {
+                $Template.passiveMonitors = @(${PassiveMonitorObjects})
+            }
+        }
+    }    
+    #End template handling
 
-    $jsonBody = $template | ConvertTo-Json -Depth 5 -Compress
+    $jsonBody = $Template | ConvertTo-Json -Depth 5 -Compress
+
     $jsonBody
+
     $body = "{
         `"options`":[`"all`"],
         `"templates`":[${jsonBody}]

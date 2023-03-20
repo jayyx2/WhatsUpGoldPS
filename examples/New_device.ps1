@@ -9,6 +9,7 @@ if (-not (Get-Module -Name WhatsUpGoldPS)) {
     Import-Module WhatsUpGoldPS
 }
 
+
 ### New device example
 Write-Host "Begin creating new device..."
 Write-Host "Settings parameters."

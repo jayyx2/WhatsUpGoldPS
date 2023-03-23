@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyCustomReportTitle</title>
+    <style>
+        .container {
+            min-height: 100vh;
+            width: 100%;
+        }
+
+        .flex-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: nowrap;
+        }
+
+        .flex-container>* {
+            margin-right: 10px;
+        }
+
+        .flex-container> :last-child {
+            margin-right: 0;
+        }
+
+        #searchInput {
+            flex: 7;
+        }
+
+        #exportBtn,
+        #exportFormat {
+            flex: 1.5;
+        }
+    </style>
+
+    <!-- Add the necessary Bootstrap and jQuery JavaScript files -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery/dist/jquery.min.js"
+        integrity="sha256-oP6HI9z1XaZNBrJURtCoUT5SUnxFr8s3BzRl+cbzUq8=" crossorigin="anonymous"></script>
+    <!-- Add Popper.js before Bootstrap -->
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core/dist/umd/popper.min.js"
+        integrity="sha256-BRqBN7dYgABqtY9Hd4ynE+1slnEw+roEPFzQ7TRRfcg=" crossorigin="anonymous"></script>
+    <!-- Add Bootstrap and Bootstrap table-->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap/dist/js/bootstrap.min.js"
+        integrity="sha256-m81NDyncZVbr7v9E6qCWXwx/cwjuWDlHCMzi9pjMobA=" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.js"
+        integrity="sha256-cQeYqn1lR/lCDXlqOTekwEo8GcDbjCS6XZNWSNLo3QI=" crossorigin="anonymous"></script>
+    <!-- Add the necessary dependencies for the TableExport plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js"
+        integrity="sha256-xoh0y6ov0WULfXcLMoaA6nZfszdgI8w2CEJ/3k8NBIE=" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"
+        integrity="sha256-yVBhl8r4CaB1tt7h2g02+xnacVj/6KiOewyWxdhiPJk=" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js"
+        integrity="sha256-6H5VB5QyLldKH9oMFUmjxw2uWpPZETQXpCkBaDjquMs=" crossorigin="anonymous"></script>
+    <!-- Add tableExport -->
+    <script src="https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin/tableExport.min.js"
+        integrity="sha256-XAu9RE1HxiLuc5paTy88tj0d+NYuSur4Jz/qNuXE0oY=" crossorigin="anonymous"></script>
+    <!-- Add the necessary Bootstrap CSS file -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap/dist/css/bootstrap.min.css"
+        integrity="sha256-wLz3iY/cO4e6vKZ4zRmo4+9XDpMcgKOvv/zEU3OMlRo=" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.css"
+        integrity="sha256-WCS94rIWyur3syoiK0RVRXk+eW81xn4y5BEUrjmu0I0=" crossorigin="anonymous">
+    <!-- You could provide local copies of these instead for offline scenarios -->
+</head>
+
+<body>
+
+    <div class="container">
+        <h2>MyCustomReportTitle</h2>
+        <!-- Add a flex container -->
+        <div class="flex-container">
+            <!-- Add a search input field -->
+            <input class="form-control" id="searchInput" type="text" placeholder="Search">
+            <!-- Add export button and dropdown menu -->
+            <div class="dropdown">
+                <button class="btn btn-primary dropdown-toggle" type="button" id="exportBtn" data-bs-toggle="dropdown"
+                    aria-expanded="false">
+                    Export
+                </button>
+                <ul class="dropdown-menu" aria-labelledby="exportBtn">
+                    <li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>
+                    <li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>
+                    <li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>
+                    <li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>
+                    <li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>
+                    <li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>
+                    <li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>
+                    <li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>
+                </ul>
+            </div>
+
+        </div>
+        <!-- Add the table classes to style your table -->
+        <table class="table table-bordered table-striped table-hover">
+            <thead>
+                <!-- Begin table headers here -->
+                    <tr><th>id</th><th>name</th><th>totalActiveMonitors</th><th>totalActiveMonitorsDown</th><th>notes</th><th>hostName</th><th>networkAddress</th><th>bestState</th><th>worstState</th><th>downActiveMonitorsDetails</th></tr>
+                <!-- End table headers -->
+            </thead>
+            <tbody id="tableBody">
+                <!-- Just put your table rows here-->
+                    <tr><td>4300</td><td>192.168.1.152</td><td>1</td><td>1</td><td>This device was scanned by discovery on 3/12/2023 6:19:26 PM.</td><td>192.168.1.152</td><td>192.168.1.152</td><td>Down</td><td>Down</td><td>Down (Ping 192.168.1.152 failed. Error=Destination host unreachable.; 03/20/2023 14:04:04; Ping; ; True)</td></tr>
+                    <tr><td>2179</td><td>game-server</td><td>3</td><td>3</td><td>This device was scanned by discovery on 2/18/2023 2:20:00 PM.</td><td>game-server.localdomain</td><td>192.168.1.232</td><td>Down</td><td>Down</td><td>Down (Ping 192.168.1.232 failed. Error=Destination host unreachable.; 03/18/2023 04:59:27; Ping; ; True), Down (Timeout. (2000 ms; 1 retries); 03/18/2023 04:58:47; Interface; lo; True), Down (Timeout. (2000 ms; 1 retries); 03/18/2023 04:58:47; Interface; ens192; True)</td></tr>
+                    <tr><td>2149</td><td>OBi200.localdomain</td><td>1</td><td>1</td><td>This device was scanned by discovery on 2/18/2023 2:20:00 PM.</td><td>OBi200.localdomain</td><td>192.168.1.163</td><td>Down</td><td>Down</td><td>Down (Ping 192.168.1.163 failed. Error=Destination host unreachable.; 03/22/2023 02:14:35; Ping; ; True)</td></tr>
+                    <tr><td>2165</td><td>UnifiCoreSw1</td><td>11</td><td>1</td><td>This device was scanned by discovery on 2/18/2023 2:20:00 PM.</td><td>192.168.1.2</td><td>192.168.1.2</td><td>Up</td><td>Down</td><td>Down (Interface ''9''-''Port 9'' is Down; 03/18/2023 04:59:34; Interface; Port 9; True)</td></tr>
+                    <tr><td>2190</td><td>UnifiSW2</td><td>5</td><td>2</td><td>This device was scanned by discovery on 2/18/2023 2:20:00 PM.</td><td>192.168.1.4</td><td>192.168.1.4</td><td>Up</td><td>Down</td><td>Down (Interface ''2''-''Port 2'' is Down; 03/18/2023 04:59:33; Interface; Port 2; True), Down (Interface ''3''-''Port 3'' is Down; 03/18/2023 04:59:33; Interface; Port 3; True)</td></tr>
+                    <tr><td>2135</td><td>USG-4P</td><td>6</td><td>5</td><td>This device was scanned by discovery on 2/18/2023 2:20:00 PM.</td><td>setup.ui.com</td><td>192.168.1.1</td><td>Up</td><td>Down</td><td>Down (Timeout. (2000 ms; 1 retries); 03/18/2023 04:58:47; Interface; lo; True), Down (Timeout. (2000 ms; 1 retries); 03/18/2023 04:58:47; Interface; LAN; True), Down (Timeout. (2000 ms; 1 retries); 03/18/2023 04:58:47; Interface; WAN; True), Down (Timeout. (2000 ms; 1 retries); 03/18/2023 04:58:47; Interface; imq0; True), Down (Timeout. (2000 ms; 1 retries); 03/18/2023 04:58:47; Interface; eth0.16@eth0; True)</td></tr>
+                    <tr><td>2201</td><td>wugninja-lb1</td><td>3</td><td>2</td><td>This device was scanned by discovery on 2/18/2023 2:20:00 PM.</td><td>OnePlus-9-5G.localdomain</td><td>192.168.1.75</td><td>Up</td><td>Down</td><td>Down (Timeout. (2000 ms; 1 retries); 03/18/2023 04:58:47; Interface; lo; True), Down (Timeout. (2000 ms; 1 retries); 03/18/2023 04:58:47; Interface; eth0; True)</td></tr>
+                <!-- End table rows -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Add the JavaScript code for search functionality -->
+    <script>
+        $(document).ready(function () {
+            <!-- Add the JavaScript code for search functionality -->
+            $("#searchInput").on("keyup", function () {
+                const value = $(this).val().toLowerCase();
+                $("#tableBody tr").filter(function () {
+                    $(this).toggle($(this).text().toLowerCase().indexOf(value) > -1);
+                });
+            });
+        });
+
+        $(".dropdown-menu a").click(function () {
+            const exportFormat = $(this).data("type");
+            const $table = $(".table");
+            $table.tableExport({
+                type: exportFormat,
+                fileName: "custom_report_export",
+                escape: false,
+                headings: true,
+                footers: true,
+                ignoreRows: null,
+                ignoreCols: null,
+                trimWhitespace: true,
+                RTL: false,
+                sheetname: "custom_report_export"
+            });
+        });
+    </script>
+</body>
+
+</html>

@@ -25,8 +25,8 @@ $dataObject = (Get-WUGAPIResponse -Uri "http://192.168.1.212:9644/api/v1/product
 Sends a GET request to the specified REST API endpoint, and assigns the 'data' property of the response to a variable.
 
 .NOTES
-Author: Jason Alberino
-Version: 1.0
+Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+Last modified: Let's see your name here YYYY-MM-DD
 
 #>
 function Get-WUGAPIResponse {
@@ -41,17 +41,17 @@ function Get-WUGAPIResponse {
     Write-Debug "Body: $body"
 
     #Global variables error checking
-    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Request-WUGAuthToken}
-    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
+    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
+    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
 
     #input validation
-    if (-not $Uri) {$Uri = Read-Host "Enter the fully qualified REST API endpoint.";}
-    If (-not $Method) {$Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD).";}
+    if (-not $Uri) { $Uri = Read-Host "Enter the fully qualified REST API endpoint."; }
+    If (-not $Method) { $Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD)."; }
     #end input validation
 
-    If(-not $body){
+    If (-not $body) {
         try {
             $response = Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders}
             Write-Debug "Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders}"
@@ -62,21 +62,22 @@ function Get-WUGAPIResponse {
             Write-Error $message
             throw
         }
-     } else {
-            try {
-                $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $body
-                Write-Debug "Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders} -Body ${body}"
-                Write-Debug "Response: ${response}"
-            }
-            catch {
-                $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
-                Write-Error $message
-                Write-Error "URI: $uri"
-                Write-Error "Method: $Method"
-                Write-Error "Body: $body"
-                throw
-            }
+    }
+    else {
+        try {
+            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $body
+            Write-Debug "Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders} -Body ${body}"
+            Write-Debug "Response: ${response}"
         }
+        catch {
+            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
+            Write-Error $message
+            Write-Error "URI: $uri"
+            Write-Error "Method: $Method"
+            Write-Error "Body: $body"
+            throw
+        }
+    }
 
 
     return $response

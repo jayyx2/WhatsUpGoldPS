@@ -33,6 +33,9 @@ PARAMETERS
 .PARAMETER actionPolicy <array>
     Specifies the action policy for the device. Default is null.
 
+.NOTES
+    Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+    Last modified: Let's see your name here YYYY-MM-DD
 #>
 function Set-WUGDeviceProperties {
     param (
@@ -51,16 +54,16 @@ function Set-WUGDeviceProperties {
     
 
     #Global variables error checking
-    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Request-WUGAuthToken}
-    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
+    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
+    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
 
     #Input validation here
     #Array validations
     #actionPolicy
     #DeviceID
-    if(!$DeviceID){$DeviceID = Write-Error "You must specify the DeviceID.";$DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas";$DeviceID = $DeviceID.Split(",");}
+    if (!$DeviceID) { $DeviceID = Write-Error "You must specify the DeviceID."; $DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas"; $DeviceID = $DeviceID.Split(","); }
     #String Validation
     #DisplayName
     #note
@@ -73,12 +76,12 @@ function Set-WUGDeviceProperties {
         $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/$($DeviceID[0])/properties"
         $method = "PUT"
         $body = @{}
-        if ($DisplayName) {$body.displayname = $DisplayName}
-        if ($isWireless) {$body.iswireless = $isWireless}
-        if ($collectWireless) {$body.collectwireless = $collectWireless}
-        if ($keepDetailsCurrent) {$body.keepdetailscurrent = $keepDetailsCurrent}
-        if ($note) {$body.note = $note}
-        if ($snmpOid) {$body.snmpoid = $snmpOid}
+        if ($DisplayName) { $body.displayname = $DisplayName }
+        if ($isWireless) { $body.iswireless = $isWireless }
+        if ($collectWireless) { $body.collectwireless = $collectWireless }
+        if ($keepDetailsCurrent) { $body.keepdetailscurrent = $keepDetailsCurrent }
+        if ($note) { $body.note = $note }
+        if ($snmpOid) { $body.snmpoid = $snmpOid }
         if ($actionPolicy) {
             $body.actionpolicy = @{
                 name = "${actionPolicy}"
@@ -94,7 +97,8 @@ function Set-WUGDeviceProperties {
         catch {
             Write-Error "Error setting device properties: $_"
         }
-    } else {
+    }
+    else {
         $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/-/properties"
         $method = "PATCH"
         $batchSize = 201
@@ -103,11 +107,11 @@ function Set-WUGDeviceProperties {
             $body = @{
                 devices = $currentBatch
             }
-            if ($isWireless) {$body.iswireless = $isWireless}
-            if ($collectWireless) {$body.collectwireless = $collectWireless}
-            if ($keepDetailsCurrent) {$body.keepdetailscurrent = $keepDetailsCurrent}
-            if ($note) {$body.note = $note}
-            if ($snmpOid) {$body.snmpoid = $snmpOid}
+            if ($isWireless) { $body.iswireless = $isWireless }
+            if ($collectWireless) { $body.collectwireless = $collectWireless }
+            if ($keepDetailsCurrent) { $body.keepdetailscurrent = $keepDetailsCurrent }
+            if ($note) { $body.note = $note }
+            if ($snmpOid) { $body.snmpoid = $snmpOid }
             if ($actionPolicy) {
                 $body.actionpolicy = @{
                     name = "${actionPolicy}"

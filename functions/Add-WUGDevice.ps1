@@ -118,11 +118,11 @@ function Add-WUGDevice {
         [Parameter()] $Template,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Hostname,       
         [Parameter()] <#[ValidateSet("Workstation", "Server")]#> [string] $deviceType,
-        [Parameter()] [ValidateRange(10,3600)] [int] $PollInterval = 60,
+        [Parameter()] [ValidateRange(10, 3600)] [int] $PollInterval = 60,
         [Parameter()] <#[ValidateSet("Device", "Router", "Switch", "Firewall")]#> [string] $PrimaryRole = "Device",
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $SubRoles,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $snmpOid,
-        [Parameter()] [ValidateRange(1,65535)] [int] $SNMPPort,
+        [Parameter()] [ValidateRange(1, 65535)] [int] $SNMPPort,
         [Parameter()] [ValidateNotNullOrEmpty()] <#[ValidateSet("Windows", "Linux", "Unix")]#> [string] $OS,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Brand,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $ActionPolicy,
@@ -169,16 +169,16 @@ function Add-WUGDevice {
     Write-Debug "Layer2Data:        ${Groups}"
 
     #Global variables error checking
-    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Request-WUGAuthToken}
-    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
+    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
+    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
 
     #Begin Input validation
-    if ($SubRoles) {if ($SubRoles -isnot [string[]]) {throw "SubRoles parameter must be an array of strings."}}
-    if ($ActiveMonitors) {if ($ActiveMonitors -is [array]) {foreach ($item in $ActiveMonitors) {if ($item -isnot [string]) {throw "ActiveMonitors parameter must be a one-dimensional array of strings."}}} else {throw "ActiveMonitors parameter must be a one-dimensional array of strings."}}
-    if ($PerformanceMonitors) {if ($PerformanceMonitors -is [array]) {foreach ($item in $PerformanceMonitors) {if ($item -isnot [string]) {throw "PerformanceMonitors parameter must be a one-dimensional array of strings."}}} else {throw "PerformanceMonitors parameter must be a one-dimensional array of strings."}}
-    if ($PassiveMonitors) {if ($PassiveMonitors -is [array]) {foreach ($item in $PassiveMonitors) {if ($item -isnot [string]) {throw "PassiveMonitors parameter must be a one-dimensional array of strings."}}} else {throw "PassiveMonitors parameter must be a one-dimensional array of strings."}}   
+    if ($SubRoles) { if ($SubRoles -isnot [string[]]) { throw "SubRoles parameter must be an array of strings." } }
+    if ($ActiveMonitors) { if ($ActiveMonitors -is [array]) { foreach ($item in $ActiveMonitors) { if ($item -isnot [string]) { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } }
+    if ($PerformanceMonitors) { if ($PerformanceMonitors -is [array]) { foreach ($item in $PerformanceMonitors) { if ($item -isnot [string]) { throw "PerformanceMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PerformanceMonitors parameter must be a one-dimensional array of strings." } }
+    if ($PassiveMonitors) { if ($PassiveMonitors -is [array]) { foreach ($item in $PassiveMonitors) { if ($item -isnot [string]) { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } }   
     #End input validation
 
     #Begin data formatting
@@ -194,7 +194,7 @@ function Add-WUGDevice {
         }
     }
     else {
-        if(!$Template){
+        if (!$Template) {
             $ActiveMonitorObjects = @()
             $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
                 classId = ''
@@ -299,29 +299,33 @@ function Add-WUGDevice {
         if ($PrimaryRole) {
             if ($Template.PSObject.Properties['primaryRole']) {
                 $Template.primaryRole = "${PrimaryRole}"
-            } else {
+            }
+            else {
                 $Template | Add-Member -MemberType NoteProperty -Name 'primaryRole' -Value "${PrimaryRole}"
             }
         }
-        if ($note) { $Template.note = "${note}" } else { $Template.note = "Added by WhatsUpGoldPS PowerShell module on $((Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz UTC"))"}
+        if ($note) { $Template.note = "${note}" } else { $Template.note = "Added by WhatsUpGoldPS PowerShell module on $((Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz UTC"))" }
         if ($ActiveMonitorObjects) {
             if ($Template.activeMonitors) {
                 $Template.activeMonitors += @(${ActiveMonitorObjects})
-            } else {
+            }
+            else {
                 $Template.activeMonitors = @(${ActiveMonitorObjects})
             }
         }
         if ($PerformanceMonitorObjects) {
             if ($Template.performanceMonitors) {
                 $Template.performanceMonitors += @(${PerformanceMonitorObjects})
-            } else {
+            }
+            else {
                 $Template.performanceMonitors = @(${PerformanceMonitorObjects})
             }
         }
         if ($PassiveMonitorObjects) {
             if ($Template.passiveMonitors) {
                 $Template.passiveMonitors += @(${PassiveMonitorObjects})
-            } else {
+            }
+            else {
                 $Template.passiveMonitors = @(${PassiveMonitorObjects})
             }
         }
@@ -339,10 +343,11 @@ function Add-WUGDevice {
 
     try {
         $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
-        if($result.data.errors){
+        if ($result.data.errors) {
             return $result.data.errors
-        } else {
-        return $result.data
+        }
+        else {
+            return $result.data
         }
     }
     catch {

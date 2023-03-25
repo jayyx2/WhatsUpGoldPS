@@ -13,7 +13,7 @@ Disconnect-WUGServer
 Disconnects from the connected WhatsUp Gold server and clears the global variables.
 
 .NOTES
-Author: Your Name
+Author: Jason Alberino
 Version: 1.0
 
 #>
@@ -21,7 +21,8 @@ Version: 1.0
 function Disconnect-WUGServer {
     if ($global:WhatsUpServerBaseURI) {
         Write-Host "You've disconnected from $global:WhatsUpServerBaseURI"
-    } else {
+    }
+    else {
         Write-Host "No active connection found."
     }
 

@@ -18,6 +18,10 @@ Removes the device with ID "12345" from the WhatsUp Gold monitoring system, alon
 
 .NOTES
 This function requires the user to be authenticated using Connect-WUGServer before it can be run.
+
+Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+Last modified: Let's see your name here YYYY-MM-DD
+
 #>
 function Remove-WUGDevice {
     [CmdletBinding()]
@@ -28,9 +32,9 @@ function Remove-WUGDevice {
     )
     
     #Global variables error checking
-    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Request-WUGAuthToken}
-    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
+    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
+    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
     
     # Invoke the API
@@ -42,10 +46,12 @@ function Remove-WUGDevice {
         $result = Get-WUGAPIResponse -Uri $uri -Method DELETE
         if ($result.data.success) {
             Write-Output "Device $($DeviceId) removed successfully."
-        } else {
+        }
+        else {
             Write-Error "Failed to remove device $($DeviceId)."
         }
-    } catch {
+    }
+    catch {
         Write-Error "Failed to remove device $($DeviceId). $($Error[0].Exception.Message)"
     }
 }

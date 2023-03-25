@@ -27,6 +27,10 @@ Default and maximum is 500. Specify number of records to return in a single page
 Get-WUGDevices -SearchValue "sub.domain.com" -DeviceGroupId 3 -View basic -Limit 200
 Get-WUGDevices -SearchValue 192.168.1. -View overview
 
+.NOTES
+Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+Last modified: Let's see your name here YYYY-MM-DD
+
 #>
 
 function Get-WUGDevices {
@@ -35,12 +39,12 @@ function Get-WUGDevices {
         [Parameter()] [string] $DeviceGroupID = "-1",
         [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "id",
         [Parameter()] [string] $Limit = "25"
-     )
+    )
 
     #Global variables error checking
-    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Request-WUGAuthToken}
-    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
+    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
+    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
 
     $uri = ${global:WhatsUpServerBaseURI}
@@ -59,7 +63,7 @@ function Get-WUGDevices {
         $devices = ${result}.data.devices
         $allDevices += $devices
         $pageInfo = ${result}.paging
-        if (${pageInfo}.nextPageId){
+        if (${pageInfo}.nextPageId) {
             $currentPage++
             $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
             $percentComplete = ($currentPage / ${pageInfo}.nextPageId) * 100

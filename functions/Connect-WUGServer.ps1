@@ -39,7 +39,7 @@ Connects to the WhatsUp Gold server at "https://whatsup.example.com:9644" with t
 OAuth 2.0 authorization token.
 
 .NOTES
-Author: Jason Alberino
+Author: Jason Alberino (jason@wug.ninja)
 Version: 1.0
 WhatsUp Gold REST API Handling Session Tokens: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Handling-Session-Tokens
 
@@ -85,37 +85,45 @@ function Connect-WUGServer {
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Password,
         [System.Management.Automation.Credential()][PSCredential]$Credential = $null,
         [Parameter()] [ValidateNotNullOrEmpty()][ValidatePattern("^(/[a-zA-Z0-9]+)+/?$")] [string] $TokenEndpoint = "/api/v1/token",
-        [Parameter()] [ValidateRange(1,65535)] [int32] $Port = 9644,
+        [Parameter()] [ValidateRange(1, 65535)] [int32] $Port = 9644,
         [switch] $IgnoreSSLErrors
     )
 
     #Input validation
     # Check if the hostname or IP address is resolvable
-    $ip = $null;try {$ip = [System.Net.Dns]::GetHostAddresses($serverUri)} catch {throw "Cannot resolve hostname or IP address. Please enter a valid IP address or hostname.";}
-    if ($null -eq $ip) {throw "Cannot resolve hostname or IP address, ${serverUri}. Please enter a resolvable IP address or hostname."}
+    $ip = $null; try { $ip = [System.Net.Dns]::GetHostAddresses($serverUri) } catch { throw "Cannot resolve hostname or IP address. Please enter a valid IP address or hostname."; }
+    if ($null -eq $ip) { throw "Cannot resolve hostname or IP address, ${serverUri}. Please enter a resolvable IP address or hostname." }
+    
     # Check if the port is open
-    $tcpClient = New-Object System.Net.Sockets.TcpClient;$connectResult = $tcpClient.BeginConnect($ip, $Port, $null, $null);$waitResult = $connectResult.AsyncWaitHandle.WaitOne(500);if (!$waitResult -or !$tcpClient.Connected) {throw "The specified port, ${Port}, is not open or accepting connections."};
+    $tcpClient = New-Object System.Net.Sockets.TcpClient; $connectResult = $tcpClient.BeginConnect($ip, $Port, $null, $null); $waitResult = $connectResult.AsyncWaitHandle.WaitOne(500); if (!$waitResult -or !$tcpClient.Connected) { throw "The specified port, ${Port}, is not open or accepting connections." };
     #$tcpClient.EndConnect($connectResult)
+    
     # Check if the credential was input
-    if ($Credential) {$Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;}
-    elseif ($Username -and -not $Password) {$Username = $Username; $Password = (Get-Credential -UserName $Username -Message "Enter password for ${Username}").GetNetworkCredential().Password;}
-    elseif ($Password -and -not $Username) {$Username = Read-Host "Enter the username associated with the password."; $Password = $Password;}
-    elseif (!$Credential) {$Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password;}
+    if ($Credential) { $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
+    elseif ($Username -and -not $Password) { $Username = $Username; $Password = (Get-Credential -UserName $Username -Message "Enter password for ${Username}").GetNetworkCredential().Password; }
+    elseif ($Password -and -not $Username) { $Username = Read-Host "Enter the username associated with the password."; $Password = $Password; }
+    elseif (!$Credential) { $Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
+    
     # Set SSL validation callback if the IgnoreSSLErrors switch is present
-    if ($Protocol -match "https"){
+    if ($Protocol -match "https") {
         if ($IgnoreSSLErrors) {
             Write-Warning "You are ignoring SSL certificate validation errors, which can introduce security risks. Use this option with caution.";
         }
     }
     #input validation
+    
     #Set the base URI
     $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
+    
     #Set the token URI
     $global:tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}"
+    
     #Set the required header(s)
     $tokenHeaders = @{"Content-Type" = "application/json" }
+    
     #Set the required body for the token request
     $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
+    
     #Attempt to connect
     try {
         $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody

@@ -25,9 +25,9 @@ Remove-WUGDevices -DeviceID $devices.ID
 Removes all devices that have the word "Printer" in their name.
 
 .NOTES
-Author: Jason Alberino
-Last Edit: 2023-03-18
-Version: 1.0
+Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+Last modified: Let's see your name here YYYY-MM-DD
+
 #>
 
 function Remove-WUGDevices {

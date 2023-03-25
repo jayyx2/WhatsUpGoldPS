@@ -37,6 +37,8 @@ Add-WUGDevices -templates "Switch 1", "Router 1" -ApplyL2 -Update -UpdateInterfa
 This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates, applies Layer 2 data, updates
 existing devices with the new templates, updates the interface state of existing devices, and updates the interface names of
 existing devices.
+Author: Jason Alberino
+Date: 2023-03-07
 #>
 
 function Add-WUGDevices {
@@ -50,11 +52,12 @@ function Add-WUGDevices {
     )
 
     #Global variables error checking
-    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Request-WUGAuthToken}
-    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
+    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
+    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
 
+    #Unsure if these are needed or how to test them properly
     $options = @("all")
     if ($ApplyL2) { $options += "l2" }
     if ($Update) { $options += "update" }
@@ -62,11 +65,13 @@ function Add-WUGDevices {
     if ($UpdateInterfaceNames) { $options += "update-interface-names" }
     if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
 
+    #Convert the PowerShell object to a JSON object, up to the specified depth
     $body = @{
-        options = @("all")
+        options   = @("all")
         templates = $deviceTemplates
     } | ConvertTo-Json -Depth 10
 
+    #Try the request and return the response or write an error if it fails
     try {
         $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
         return $result.data

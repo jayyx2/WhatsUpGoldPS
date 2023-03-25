@@ -21,6 +21,11 @@
 .EXAMPLE
     Get-WUGDeviceTemplate -DeviceID 20 -options tempip
     Get-WUGDeviceTemplate -DeviceID $arrayOfIds
+
+.NOTES
+    Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+    Last modified: Let's see your name here YYYY-MM-DD
+
 #>
 function Get-WUGDeviceTemplate {
     param(
@@ -29,13 +34,13 @@ function Get-WUGDeviceTemplate {
     )
 
     #Global variables error checking
-    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Request-WUGAuthToken}
-    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
+    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
+    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
     
     #Input validation here
-    if(!$DeviceID){$DeviceID = Write-Error "You must specify the DeviceID.";$DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas";$DeviceID = $DeviceID.Split(",");}
+    if (!$DeviceID) { $DeviceID = Write-Error "You must specify the DeviceID."; $DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas"; $DeviceID = $DeviceID.Split(","); }
     #End input validation
     $finaloutput = @()
     if ($DeviceID) {
@@ -52,7 +57,8 @@ function Get-WUGDeviceTemplate {
             }
         }
         return $finaloutput
-    } else {
+    }
+    else {
         Write-Error "There's no device id, see, here's the variable: ${DeviceID} <--- it's blank. Try again."
         throw;
     }

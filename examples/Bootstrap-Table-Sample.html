@@ -36,64 +36,42 @@
 
 <body>
     <div class="container">
-        <div id="toolbar-container">
-            <div class="float-start">
-                <div id="toolbar" class="toolbar-buttons d-flex flex-row">
-                </div> 
-            </div>
-            <div class="float-end">
-                <button id="exportBtn" type="button" class="btn btn-secondary dropdown-toggle rounded-end" style="" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+            <div class="float-end btn-group" role="group">
+
+                <button id="exportBtn" type="button" class="btn btn-secondary dropdown-toggle rounded-end" style=""
+                    data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                     <i class="bi bi-download" style=""></i>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end export-menu">
-                    <li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>
-                    <li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>
-                    <li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>
-                    <li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>
-                    <li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>
-                    <li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>
-                    <li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>
-                    <li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>
+                    <li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li><li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li><li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li><li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li><li><a class="dropdown-item" href="#" data-type="json">JSON</a></li><li><a class="dropdown-item" href="#" data-type="png">PNG</a></li><li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li><li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>
                 </ul>
             </div>
-        </div>
 
-        <table id="table" data-toolbar="#toolbar" data-classes="table table-light table-striped table-responsive table-sm caption-top"
-            data-show-export="true" data-show-toggle="true" data-show-columns="true" data-search="true">
+        <table id="table" data-toolbar="#toolbar"
+            data-classes="table table-light table-striped table-responsive table-sm caption-top" data-show-export="true"
+            data-show-toggle="true" data-show-columns="true" data-search="true">
             <caption class="p-1 bg-secondary text-white">
                 <div id="caption" class="d-flex justify-content-center">
-                    <div class="mx-auto" style="">
+                    <div class="mx-auto flex-grow-1" style="">
                         <h5 class="bg-secondary text-white">Test Report Name</h6>
-                      </div>
-                      <div class="vr"></div>
-                      <div class="mx-auto" style="">
-                        <h5 class="bg-secondary text-white">Updated: 2023-03-26 04:30:22.111</h6>
-                      </div>
+                    </div>
+                    <div class="mx-auto" style="">
+                        <h5 class="bg-secondary text-white">Last Update: 2023-03-26 04:30:22.111</h6>
+                    </div>
                 </div>
-		</caption>
+            </caption>
         </table>
     </div>
 
     <script type="text/javascript">
-
         var $table = $('#table');
+
         var mydata = [
-            {
-                id: 1,
-                name: 'Item 1',
-                price: 10
-            },
-            {
-                id: 2,
-                name: 'Item 2',
-                price: 20
-            },
-            {
-                id: 3,
-                name: 'Item 3',
-                price: 30
-            }
+            { id: 1, name: 'Item 1', price: 10 },
+            { id: 2, name: 'Item 2', price: 20 },
+            { id: 3, name: 'Item 3', price: 30 }
         ];
+        
         var mycolumns = [
             { title: 'ID', field: 'id' },
             { title: 'Item Name', field: 'name' },
@@ -104,19 +82,7 @@
             $table.bootstrapTable({
                 columns: mycolumns,
                 data: mydata,
-                exportDataType: 'all',
-                exportOptions: {
-                    fileName: 'custom_report_export',
-                    ignoreColumn: [],
-                    exportHiddenCells: true,
-                    onMsoNumberFormat: 'Table'
-                },
-                exportTypes: ['csv', 'txt', 'xlsx', 'xls', 'json', 'png', 'sql', 'tsv'],
-                toolbar: '#toolbar',
-                onPostHeader: function () {
-                    var $toolbar = $('#toolbar');
-                    $toolbar.find('#exportBtn').dropdown();
-                }
+                toolbar: '#toolbar'
             });
 
             $('#exportBtn').on('click', function () {
@@ -143,5 +109,6 @@
         });
 
     </script>
-    </body>
-    </html>
+</body>
+
+</html>

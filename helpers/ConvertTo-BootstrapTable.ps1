@@ -13,6 +13,11 @@ function ConvertTo-BootstrapTable {
             field = $_.Name
             title = $_.Name
         }
+
+        if ($_.Name -eq 'downActiveMonitors') {
+            $column.formatter = 'formatDownActiveMonitors'
+        }
+
         $columns += $column
     }
 

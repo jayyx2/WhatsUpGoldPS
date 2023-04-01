@@ -8,4 +8,4 @@ $templateFilePath = ".\examples\Bootstrap-Table-Sample.html"
 $jsonFilePath = "C:\temp\json.json"
 $outputFilePath = "C:\temp\Example-Custom-Report.html"
 $customPlaceholder = 'replaceThisHere'
-Convert-HTMLTemplate -TemplateFilePath $templateFilePath -JsonFilePath $jsonFilePath -OutputFilePath $outputFilePath -Placeholder $customPlaceholder -ReportName "TestReport1"
+Convert-HTMLTemplate -TemplateFilePath $templateFilePath -JsonFilePath $jsonFilePath -OutputFilePath $outputFilePath -Placeholder $customPlaceholder -ReportName "Down Active Monitor Details"

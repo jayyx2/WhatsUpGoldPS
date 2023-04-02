@@ -1,4 +1,4 @@
-$functionFolders = @('functions')
+$functionFolders = @('functions', 'helpers')
 ForEach ($folder in $functionFolders)
 {
     $folderPath = Join-Path -Path $PSScriptRoot -ChildPath $folder
@@ -13,4 +13,4 @@ ForEach ($folder in $functionFolders)
         }
     }
 }
-Export-ModuleMember -Function *
+Export-ModuleMember -Function * -Exclude Request-WUGAuthToken, Get-WUGAPIResponse

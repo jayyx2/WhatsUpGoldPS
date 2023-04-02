@@ -65,20 +65,21 @@
             data-classes="table table-light table-striped table-responsive table-sm caption-top" data-show-export="true"
             data-show-toggle="true" data-show-columns="true" data-search="true">
             <caption class="p-1 bg-secondary text-white">
-                <div id="caption" class="d-flex justify-content-center">
-                    <div class="mx-auto flex-grow-1" style="">
-                        <h5 class="bg-secondary text-white"> ReplaceYourReportNameHere </h6>
-                    </div>
-                    <div class="mx-auto" style="">
-                        <h5 class="bg-secondary text-white">Updated: ReplaceUpdateTimeHere </h6>
-                    </div>
+                <div id="caption" class="d-flex justify-content-evenly">
+                    <div class="vr"></div>
+                    <div class="" style=""><h5 class="bg-secondary text-white"> ReplaceYourReportNameHere </h6></div>
+                    <div class="vr"></div>
+                    <div class="" style=""><h5 class="bg-secondary text-white justify-content-center">Updated: ReplaceUpdateTimeHere </h6></div>
+                    <div class="vr"></div>
                 </div>
             </caption>
         </table>
     </div>
 
     <script type="text/javascript">
+
         var $table = $('#table');
+
         function formatDownActiveMonitors(value, row, index) {
             if (value) {
                 // Replace '@{' with an empty string and '}' with '}<br>' to add a line break after each '}' character.
@@ -87,6 +88,19 @@
             return '-';
         }
 
+        function formatId(value, row, index) {
+            if (value) {
+                return `<button class="btn btn-secondary dropdown-toggle p-0" type="button" id="idDropdown${index}" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <i class="bi bi-ellipsis-vertical">${value}</i>
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="idDropdown${index}">
+                <li><a class="dropdown-item" target="_blank" href="/NmConsole/#v=Wug_view_device_deviceproperties_DeviceProperties/p=%7B%22deviceId%22%3A${value}%7D">Devices Properties</a></li>
+                <li><a class="dropdown-item" target="_blank" href="/NmConsole/#v=Reporting_fullpagepanel_FullPagePanel/p=%7B%22reportClass%22%3A%22Wug_report_statechangetimeline_StateChangeTimelineReport%22%2C%22filters%22%3A%5B%7B%22filterClass%22%3A%22Wug_filter_DeviceGroup%22%2C%22value%22%3A%7B%22id%22%3A${value}%2C%22isDevice%22%3Atrue%2C%22recurse%22%3Afalse%7D%7D%5D%7D">State Change Timeline</a></li>
+                <li><a class="dropdown-item" target="_blank" href="#">Device Status</a></li>
+            </ul>`;
+            }
+            return '-';
+        }
 
         $(document).ready(function () {
             $table.bootstrapTable({

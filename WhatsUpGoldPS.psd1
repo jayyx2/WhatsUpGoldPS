@@ -40,6 +40,10 @@ FunctionsToExport = '*'
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
 CmdletsToExport = '*'
 
+# List of all the files in the helpers directory to be imported.
+# Change the file names as per your requirement.
+NestedModules = @('helpers\ConvertTo-BootstrapTable.ps1', 'helpers\Convert-HTMLTemplate.ps1')
+
 # Variables to export from this module
 VariablesToExport = '*'
 
@@ -61,7 +65,7 @@ PrivateData = @{
         ProjectUri = 'https://github.com/jayyx2/WhatsUpGoldPS'
 
         # A URL to an icon representing this module.
-        IconUri = 'https://wug.ninja/wp-content/uploads/cropped-ninja_wallpaper_1920x1080-3.png'
+        IconUri = 'https://wug.ninja/favicon.ico'
 
         # ReleaseNotes of this module
         ReleaseNotes = 'https://github.com/jayyx2/WhatsUpGoldPS/blob/main/CHANGELOG.md'

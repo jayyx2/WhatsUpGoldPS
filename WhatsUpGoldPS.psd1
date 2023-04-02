@@ -6,7 +6,7 @@
 
 @{
 # Version number of this module.
-ModuleVersion = '0.0.2'
+ModuleVersion = '0.0.3'
 
 # ID used to uniquely identify this module
 GUID = '94d2aadd-f227-452e-b48a-c215d243418c'
@@ -71,7 +71,7 @@ PrivateData = @{
         ReleaseNotes = 'https://github.com/jayyx2/WhatsUpGoldPS/blob/main/CHANGELOG.md'
 
         # Prerelease string of this module
-        # Prerelease = ''
+        Prerelease = 'test'
 
         # Flag to indicate whether the module requires explicit user acceptance for install/update/save
         # RequireLicenseAcceptance = $false

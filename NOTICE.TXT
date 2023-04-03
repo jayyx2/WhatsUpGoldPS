@@ -1,10 +1,12 @@
 WhatsUpGoldPS
-* WhatsUpGoldPS is purely PowerShell code that does not require any third-party libraries.
-Copyright 2023 Jason Alberino
+Copyright (c) 2023 Jason Alberino
 
 Third-party notices
 -------------------
-* Custom Report sample template found here https://github.com/jayyx2/WhatsUpGoldPS/blob/main/examples/Bootstrap-Table-Sample.html uses third-party libraries. Here are those licenses.
+* The WhatsUpGoldPS module is purely PowerShell code that does not require any third-party libraries.
+
+
+* Custom Report sample template, found here https://github.com/jayyx2/WhatsUpGoldPS/blob/main/examples/Bootstrap-Table-Sample.html, does use third-party libraries. Here are those licenses.
 
 * https://cdn.jsdelivr.net/npm/bootstrap/dist/js/bootstrap.min.js
 * https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/LICENSE

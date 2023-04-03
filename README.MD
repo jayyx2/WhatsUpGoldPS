@@ -10,7 +10,11 @@ This module comes with no warranty or support from anyone, and is offered as-is.
 * [Clone a device](https://github.com/jayyx2/WhatsUpGoldPS/blob/main/examples/Clone_device.ps1) - Use another device as a template to create a new device
 * [Create a new device](https://github.com/jayyx2/WhatsUpGoldPS/blob/main/examples/New_device.ps1)
 * Enable or disable maintenance mode
-* Change device attributes
+* [Make a custom report to display your data anywhere](https://github.com/jayyx2/WhatsUpGoldPS/blob/main/examples/Custom_report.ps1)
+* Set device properties
+* Set device attributes
+* Set group membership
+* Trigger events
 
 ## Installing
 The easiest way to get WhatsUpGoldPS is using the [PowerShell Gallery](https://powershellgallery.com/packages/WhatsUpGoldPS/)!

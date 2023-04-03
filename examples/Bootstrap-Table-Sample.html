@@ -42,7 +42,7 @@
 </head>
 
 <body>
-    <div class="container">
+    <div class="container-fluid">
         <div class="float-end btn-group" role="group">
 
             <button id="exportBtn" type="button" class="btn btn-secondary dropdown-toggle rounded-end" style=""
@@ -62,15 +62,19 @@
         </div>
 
         <table id="table" data-toolbar="#toolbar"
-            data-classes="table table-light table-striped table-responsive table-sm caption-top" data-show-export="true"
-            data-show-toggle="true" data-show-columns="true" data-search="true">
-            <caption class="p-1 bg-secondary text-white">
-                <div id="caption" class="d-flex justify-content-evenly">
-                    <div class="vr"></div>
-                    <div class="" style=""><h5 class="bg-secondary text-white"> ReplaceYourReportNameHere </h6></div>
-                    <div class="vr"></div>
-                    <div class="" style=""><h5 class="bg-secondary text-white justify-content-center">Updated: ReplaceUpdateTimeHere </h6></div>
-                    <div class="vr"></div>
+            data-classes="table table-light table-striped table-responsive table-sm caption-top"
+            data-show-export="true"
+            data-show-toggle="true"
+            data-show-columns="true"
+            data-search="true"
+            >
+            <caption class="p-0 bg-secondary text-white">
+                <div id="caption" class="d-flex justify-content-between">
+                    <div class="" style=""><h5 class="m-1 bg-secondary text-white">WhatsUpGoldPS Custom Report</h6></div>
+                    <div class=""></div>
+                    <div class="" style=""><h5 class="bg-secondary text-white">ReplaceYourReportNameHere</h6></div>
+                    <div class=""></div>
+                    <div class="" style=""><h5 class="m-1 bg-secondary text-white justify-content-center">Updated: ReplaceUpdateTimeHere</h6></div>
                 </div>
             </caption>
         </table>
@@ -90,8 +94,8 @@
 
         function formatId(value, row, index) {
             if (value) {
-                return `<button class="btn btn-secondary dropdown-toggle p-0" type="button" id="idDropdown${index}" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                <i class="bi bi-ellipsis-vertical">${value}</i>
+                return `<button class="btn btn-outline-secondary" type="button" id="idDropdown${index}" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    <i class="bi bi-three-dots"></i>
             </button>
             <ul class="dropdown-menu" aria-labelledby="idDropdown${index}">
                 <li><a class="dropdown-item" target="_blank" href="/NmConsole/#v=Wug_view_device_deviceproperties_DeviceProperties/p=%7B%22deviceId%22%3A${value}%7D">Devices Properties</a></li>
@@ -123,7 +127,7 @@
                     footers: true,
                     ignoreRows: null,
                     ignoreCols: null,
-                    trimWhitespace: true,
+                    trimWhitespace: true,   
                     RTL: false,
                     sheetname: "custom_report_export"
                 });

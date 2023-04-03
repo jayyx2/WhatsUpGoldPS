@@ -47,19 +47,16 @@ function Set-WUGDeviceProperties {
         [Parameter()] [string] $note,
         [Parameter()] [string] $snmpOid,
         [Parameter()] [string] $actionPolicyName,
-        [Parameter()] [string] $actionPolicyId,     
-        [Parameter()][string]$JsonData
+        [Parameter()] [string] $actionPolicyId
+        #[Parameter()][string]$JsonData
     )
-
     # Your existing code to make the API call using $JsonData
     # TBD using call from Get-WUGDeviceTemplate or Get-WUGDeviceProperties
-
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
     if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
     if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
-
     #Input validation here
     #Array validations
     #actionPolicy
@@ -72,7 +69,6 @@ function Set-WUGDeviceProperties {
     #Boolean validations
     #End input validation
     $finalresult = @()
-
     if ($DeviceID.Count -eq 1) {
         $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/$($DeviceID[0])/properties"
         $method = "PUT"
@@ -100,7 +96,6 @@ function Set-WUGDeviceProperties {
             }
             $body.actionpolicy = $actionPolicy
         }
-        
         $jsonBody = $body | ConvertTo-Json -Depth 5
         try {
             $result = Get-WUGAPIResponse -uri $uri -method $method -body $jsonBody
@@ -141,7 +136,6 @@ function Set-WUGDeviceProperties {
                 }
                 $body.actionpolicy = $actionPolicy
             }
-            
             $jsonBody = $body | ConvertTo-Json -Depth 5
             Write-Information "Current batch of ${batchSize} is being processed."
             Write-Debug "Get-WUGAPIResponse -uri ${uri} -method ${method} -body ${jsonBody}"

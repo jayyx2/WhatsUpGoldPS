@@ -10,7 +10,7 @@ $jsonFilePath = "C:\temp\json.json"
 Connect-WUGServer -serverUri $ServerIpOrHostName -Credential $Credential
 #This uses WhatsUpGoldPS Get-WUGDevices function to search for monitored devices with "192.168.1." and requests the card view
 #It then uses PowerShell's Select-Object to isolate data, converts it to JSON, and outputs to a file
-$Dashboard = Get-WUGDevices -SearchValue "192.168.1." -View card | Where-Object{$_.downActiveMonitors -ne $null} | Select-Object id, name, networkAddress, hostName, downActiveMonitors | ConvertTo-Json | Out-File $jsonFilePath -Force
+$Dashboard = Get-WUGDevices -SearchValue "192.168.1." -View card | Where-Object{$_.downActiveMonitors -ne $null} | Select-Object @{Name='...'; Expression={$_.id}}, id, name, networkAddress, hostName, downActiveMonitors | ConvertTo-Json | Out-File $jsonFilePath -Force
 #Where is your HTML template file?
 $templateFilePath = ".\examples\Bootstrap-Table-Sample.html"
 #What is the file path and name to output?

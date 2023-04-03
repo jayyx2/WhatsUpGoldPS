@@ -12,12 +12,16 @@ function ConvertTo-BootstrapTable {
         $column = @{
             field = $_.Name
             title = $_.Name
+            sortable = $true
+            searchable = $true
         }
         if ($_.Name -eq 'downActiveMonitors') {
             $column.formatter = 'formatDownActiveMonitors'
         }
-        if ($_.Name -eq 'id') {
+        if ($_.Name -eq '...') {
             $column.formatter = 'formatId'
+            $column.sortable = $false
+            $column.searchable = $false
         }
         $columns += $column
     }

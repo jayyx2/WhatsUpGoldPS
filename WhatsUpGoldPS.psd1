@@ -6,7 +6,7 @@
 
 @{
 # Version number of this module.
-ModuleVersion = '0.0.3'
+ModuleVersion = '0.0.2'
 
 # ID used to uniquely identify this module
 GUID = '94d2aadd-f227-452e-b48a-c215d243418c'
@@ -35,7 +35,7 @@ PowerShellHostName = ''
 PowerShellHostVersion = ''
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
-FunctionsToExport = '*'
+FunctionsToExport = 'Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate'
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
 CmdletsToExport = '*'
@@ -65,13 +65,13 @@ PrivateData = @{
         ProjectUri = 'https://github.com/jayyx2/WhatsUpGoldPS'
 
         # A URL to an icon representing this module.
-        IconUri = 'https://wug.ninja/favicon.ico'
+        IconUri = 'https://wug.ninja/wp-content/uploads/cropped-ninja_wallpaper_1920x1080-3.png'
 
         # ReleaseNotes of this module
         ReleaseNotes = 'https://github.com/jayyx2/WhatsUpGoldPS/blob/main/CHANGELOG.md'
 
         # Prerelease string of this module
-        Prerelease = 'test'
+        # Prerelease = ''
 
         # Flag to indicate whether the module requires explicit user acceptance for install/update/save
         # RequireLicenseAcceptance = $false

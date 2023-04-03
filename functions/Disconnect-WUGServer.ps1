@@ -20,10 +20,10 @@ Version: 1.0
 
 function Disconnect-WUGServer {
     if ($global:WhatsUpServerBaseURI) {
-        Write-Host "You've disconnected from $global:WhatsUpServerBaseURI"
+        Write-Information "You've disconnected from $global:WhatsUpServerBaseURI"
     }
     else {
-        Write-Host "No active connection found."
+        Write-Information "No active connection found."
     }
 
     # Clear global variables

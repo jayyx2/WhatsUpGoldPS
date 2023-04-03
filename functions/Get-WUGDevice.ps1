@@ -49,7 +49,7 @@ function Get-WUGDevice {
 
     if ($DeviceID) {
         foreach ($id in $DeviceID) {
-            $deviceUri = "${uri}/api/v1/devices/${id}?view=overview"
+            $deviceUri = "${uri}/api/v1/devices/${id}?view=${View}"
             try {
                 $result = Get-WUGAPIResponse -uri $deviceUri -method "GET"
                 Write-Debug "Result from Get-WUGAPIResponse -uri ${deviceUri} -method `"GET`"`r`n:${result}"

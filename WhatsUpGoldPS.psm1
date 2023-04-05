@@ -13,4 +13,5 @@ ForEach ($folder in $functionFolders)
         }
     }
 }
-Export-ModuleMember -Function Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate
+#Export-ModuleMember -Function Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate
+Export-ModuleMember -Function *

@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!--Author: jason@wug.ninja-->
 <html lang="en">
 
 <head>
@@ -27,8 +28,7 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js" crossorigin="anonymous"></script>
     <!-- Add tableExport -->
-    <script src="https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin/tableExport.min.js"
-        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin/tableExport.min.js" crossorigin="anonymous"></script>
     <style>
         .export-menu {
             margin-top: 3rem;
@@ -100,7 +100,7 @@
             <ul class="dropdown-menu" aria-labelledby="idDropdown${index}">
                 <li><a class="dropdown-item" target="_blank" href="/NmConsole/#v=Wug_view_device_deviceproperties_DeviceProperties/p=%7B%22deviceId%22%3A${value}%7D">Devices Properties</a></li>
                 <li><a class="dropdown-item" target="_blank" href="/NmConsole/#v=Reporting_fullpagepanel_FullPagePanel/p=%7B%22reportClass%22%3A%22Wug_report_statechangetimeline_StateChangeTimelineReport%22%2C%22filters%22%3A%5B%7B%22filterClass%22%3A%22Wug_filter_DeviceGroup%22%2C%22value%22%3A%7B%22id%22%3A${value}%2C%22isDevice%22%3Atrue%2C%22recurse%22%3Afalse%7D%7D%5D%7D">State Change Timeline</a></li>
-                <li><a class="dropdown-item" target="_blank" href="#">Device Status</a></li>
+                <li><a class="dropdown-item" target="_blank" href="/NmConsole/#v=Wug_view_dashboard_DeviceStatus/p=%7B"deviceId"%3A${value}%7D">Device Status</a></li>
             </ul>`;
             }
             return '-';

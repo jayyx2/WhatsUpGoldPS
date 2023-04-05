@@ -95,10 +95,14 @@ function Set-WUGDeviceProperties {
                 }
             }
             $body.actionpolicy = $actionPolicy
+        } else {
+            $actionPolicy = @{}
+            $body.actionpolicy = $actionPolicy
         }
         $jsonBody = $body | ConvertTo-Json -Depth 5
         try {
             $result = Get-WUGAPIResponse -uri $uri -method $method -body $jsonBody
+            Write-Information $jsonBody
             return $result.data
         }
         catch {
@@ -134,6 +138,9 @@ function Set-WUGDeviceProperties {
                         name = "${actionPolicyName}"
                     }
                 }
+                $body.actionpolicy = $actionPolicy
+            } else {
+                $actionPolicy = @{}
                 $body.actionpolicy = $actionPolicy
             }
             $jsonBody = $body | ConvertTo-Json -Depth 5

@@ -35,14 +35,15 @@ PowerShellHostName = ''
 PowerShellHostVersion = ''
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
-FunctionsToExport = 'Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate'
+#FunctionsToExport = 'Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate'
+FunctionsToExport = '*'
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
 CmdletsToExport = '*'
 
 # List of all the files in the helpers directory to be imported.
 # Change the file names as per your requirement.
-NestedModules = @('helpers\ConvertTo-BootstrapTable.ps1', 'helpers\Convert-HTMLTemplate.ps1')
+# NestedModules = @('helpers\ConvertTo-BootstrapTable.ps1', 'helpers\Convert-HTMLTemplate.ps1')
 
 # Variables to export from this module
 VariablesToExport = '*'
@@ -71,7 +72,7 @@ PrivateData = @{
         ReleaseNotes = 'https://github.com/jayyx2/WhatsUpGoldPS/blob/main/CHANGELOG.md'
 
         # Prerelease string of this module
-        # Prerelease = ''
+        Prerelease = 'test3'
 
         # Flag to indicate whether the module requires explicit user acceptance for install/update/save
         # RequireLicenseAcceptance = $false

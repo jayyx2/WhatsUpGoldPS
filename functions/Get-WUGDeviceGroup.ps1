@@ -1,41 +1,29 @@
 <#
 .SYNOPSIS
-    When you have the DeviceID, use Get-WUGDevice for returning
-    information for the given DeviceID(s) using the WhatsUp Gold
-    REST API.
+    Gets information about a device group in WhatsUp Gold.
 
-.DESCRIPTION
-    Get data from the WhatsUp Gold /device/{$DeviceID} endpoint or
-    search all devices using /device-groups/-1/devices/-?view=overview
-    &search=$SearchValue" to find the device id you need
-
-.PARAMETER DeviceID
-    The ID of the device in the WhatsUp Gold database. You can search
-    for DeviceID using the Get-WUGDevices function
-
-.PARAMETER View
-    Default is card. Choose from id, basic, overview, and card.
-    id: id
-    basic: id, name, os, brand, role, networkAddress, hostname, notes
-    overview: id, description, name, worstState, bestState, os, brand, role, networkAddress,
-    hostName, notes, totalActiveMonitorsDown, totalActiveMonitors
-    card: id, description, name, worstState, bestState, os, brand, role, networkAddress,
-    hostName, notes, totalActiveMonitorsDown, totalActiveMonitors, downActiveMonitors
+.PARAMETER GroupId
+    The ID of the device group to retrieve information for. This parameter is required.
 
 .EXAMPLE
-    Get-WUGDevice -DeviceID 33
-    Get-WUGDevice -DeviceID $ArrayOfDeviceIDs
-    Get-WUGDevice -DeviceID 2,3,4,20
+    Get-WUGDeviceGroup -GroupId "12345"
+    Gets information about the device group with ID "12345".
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-    Last modified: Let's see your name here YYYY-MM-DD
-
+    Author: Jason Alberino (jason@wug.ninja)
+    Date: 2023-04-15
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceGroup_Get
 #>
-function Get-WUGDevice {
+function Get-WUGDeviceGroup {
     param (
-        [Parameter(Mandatory = $true)] [array] $DeviceID,
-        [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "card"
+        [Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0)]
+        [string]$SearchValue,
+        [Parameter(Mandatory=$false,Position=1)]
+        [string]$ParentGroupName,
+        [Parameter(Mandatory=$false)]
+        [string]$View = 'basic',
+        [Parameter(Mandatory=$false)]
+        [string]$Limit = '25'
     )
 
     #Global variables error checking
@@ -44,30 +32,48 @@ function Get-WUGDevice {
     if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
 
-    $uri = $global:WhatsUpServerBaseURI
-    $finaloutput = @()
+    $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-/-?view=$View&limit=$Limit"
 
-    if ($DeviceID) {
-        foreach ($id in $DeviceID) {
-            $deviceUri = "${uri}/api/v1/devices/${id}?view=${View}"
-            try {
-                $result = Get-WUGAPIResponse -uri $deviceUri -method "GET"
-                Write-Debug "Result from Get-WUGAPIResponse -uri ${deviceUri} -method `"GET`"`r`n:${result}"
-                $finaloutput += $result.data
-            } 
-            catch {
-                Write-Error "No results returned for -DeviceID ${id}. Try using Get-WugDevices -SearchValue instead."
-            }
+    if (-not [string]::IsNullOrEmpty($ParentGroupName)) {
+        $ParentGroupId = (Get-WUGDeviceGroup -SearchValue $ParentGroupName -View id -Limit 1).id
+        if ($ParentGroupId -eq $null) {
+            Write-Error -Message "Parent device group with name '$ParentGroupName' not found"
+            return
         }
+        $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/$ParentGroupId/child-groups/-?view=$View&limit=$Limit"
     }
 
-    return $finaloutput
+    if (-not [string]::IsNullOrEmpty($SearchValue)) {
+        $uri += "&search=$SearchValue"
+    }
+
+    $currentPage = 1
+    $allGroups = @()
+    do {
+        $result = Get-WUGAPIResponse -uri $uri -method 'GET'
+        $groups = $result.data.groups
+        $allGroups += $groups
+        $pageInfo = $result.paging
+
+        if ($pageInfo.nextPageId) {
+            $currentPage++
+            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/$ParentGroupId/child-groups/-?view=$View&limit=$Limit&pageId=$($pageInfo.nextPageId)"
+            if (-not [string]::IsNullOrEmpty($SearchValue)) {
+                $uri += "&search=$SearchValue"
+            }
+            $percentComplete = ($currentPage / $pageInfo.nextPageId) * 100
+            Write-Progress -Activity "Retrieved $($allGroups.Count) device groups already, wait for more." -PercentComplete $percentComplete -Status "Page $currentPage of ?? ($Limit per page)"
+        }
+    } while ($pageInfo.nextPageId)
+
+    return $allGroups
 }
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDXSMZ/cqdwLk7m
-# Qhddz+pAjBe3vu76UbvZHOGbC8VMQ6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbUlNw+yeOOjnv
+# /w5XjFjMuqttbL0sPQ//CLXF9k8DJ6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -168,17 +174,17 @@ function Get-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgEnTgvoIoO4rfSrFmjCXXrz6tdyuRyRO3BCyyW16k6Zcw
-# DQYJKoZIhvcNAQEBBQAEggIAg14onvG1bhNf0P/a0QinIXaE+SWXNCulfjo47h85
-# o6wCBrs5x7p0CIqOJ/TrnWUv5QtrJHIcZ9/cd9KRD9UHJ16y2MCgS3jzX7V1slNd
-# fCsNHfPc1u03NpLToT2ecqh/YqgcUcIZNpd4z/3HP9w1J6FGtLgm9TiKgvhYLBxY
-# VRuzKTNmcyDd4IPRCMkpAmmd0qgC4o1zxaiYBZbzunE0CN2ONN8GyFrLcUvpE141
-# jLoN0fdOsuv0b++1tEjtilpgOQwMmdFx1/x9M+qvmjlyXsGqGZUqz/7frfFNL9QJ
-# kro7I+9F8XaTC2mxeWt0CEpolhgVrnedLRZWBRRw387bdbg9emAKbAvJbOCzLDXq
-# r8MPFSi7eB0LwtAebFBGKDibdkkaShswl8/I9KLkx7mo974uWqg54IRV9BokOtMV
-# OtgP/0VdhWq+BJNKuJqGKagMa1Mn1o1tSYs6PMwPpD6SsJM7PennNoGsFnZrtoI3
-# Ifs+msNFIbyosoJ5a2PfoplsRhzaIdJkSeQWWLHhx4CjMAgJikGvoDDI23GPRaRV
-# IVI1xlGLyTSMaorVMUbYiZ2s3GT4x10JR3C36Hjg6RrKfD25Fit0HLFavCeATGCV
-# ZmgPt4NQHxdyzkbVCmmTZ3j36DZ2oXT5yaawgQDf+Xahc1GT8ALs+SCf3ZAKeAkN
-# k3w=
+# BgkqhkiG9w0BCQQxIgQgyZ5UEZsx9fJ1Ed/J5YuFzL6CEihPIMwRhqG+Q9C8QwYw
+# DQYJKoZIhvcNAQEBBQAEggIAnSd+w3kH+a5pCoGRw1VrJNN2zUhi/DsoWi8fppNf
+# 5Iyuw01DI+UWMSpse8rL9KvmQv+Qs32LkHw1/mBYnAcf0mp1Fyu41lipYZ/auoeb
+# 1Wm+MM1Km3kak3d+oKuzg73uXRSduqXL5u+8W1LBQuFhtBs/Lx9Eo/+FR/9SXnOe
+# thJzLerY/Q77GVE4MseF+vko8GboGvhowYy3hkWLsJdUa2+QwM/fYALH3+rz3i5W
+# 9BidHj28Wn3nhC/Owv/1CehRtL6oxSyzCYr7fm6RuQUNElyvmN+Gz1Tghg3/r4Qk
+# y5zsL6aGXa0Q3U5+3SR/mrfjET/yiMFkY3VXeG/4xoOhzgSjoGL1LftFdeLgpoYH
+# Fpv/vQ03/j9rAomQG3xf/z/lGwPZv98Wh8a0CfxHjmYFs9c+wrPt8nub4VabmUWq
+# tI2O08u9wGWa4M5IQ+XmbCGqTsfHUJVvdeAtvWbBjt1P2+P6hEetfS7ugSXiGSPL
+# BSO8ngaJ3m26oYrsyhrwJ2ihJ9grFQ78bTqDOh2CdFAO/TVTb0J8Lb31V1YgFIMw
+# 4ib1bTZq8Q6uRNZG4couQkOLTJ5KQ5wsWg3XGptZRXij7NFjL6fDjtFsAPnCFLKu
+# kc+Hdi3i8Esx6Ed3+hlvF7g6J82/GfFLej++HSWQG1CSL/eigvRb2nxNI04akuMF
+# LHs=
 # SIG # End signature block

@@ -39,7 +39,7 @@ PowerShellHostVersion = ''
 FunctionsToExport = '*'
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
-CmdletsToExport = '*'
+CmdletsToExport = 'Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceAttribute, Get-WUGDeviceAttributes, Get-WUGDeviceGroup, Get-WUGDeviceProperties, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate'
 
 # List of all the files in the helpers directory to be imported.
 # Change the file names as per your requirement.
@@ -94,8 +94,8 @@ PrivateData = @{
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgJdI5cYMrbzMp
-# h+f+VWPIVQOpRwyYinFxfew5u6VOx6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXsix5EmRkrxRC
+# kAqIYcfkxP70MH7tKyd179wakmWZu6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -196,17 +196,17 @@ PrivateData = @{
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgHWOY0PDOU9iAXL/Enlh8FaKxcTZ50kB+6IBzgV34Pacw
-# DQYJKoZIhvcNAQEBBQAEggIAp1kZA17AEvaSwPsZMmFnnGdLIn5hvFR/a6qy8A56
-# QheoDkSRfiNl/yDUPBYKxaTvAGU4uHu3J1kcpLz9U3p0ZNb1GYdaIHmDpjRtrFyZ
-# 7wx0WqFoDaQSs8gN6bcPzT+sm3FT9VTMRdRiK8P6TCQueQrsY6p8B1gUKuCtwx9d
-# WsewRFcgaXrufA8LLz/DSd9xkIfY+kCpwSKEmw0Gq8L/2OZXuDBCWmMWbpQtkhI/
-# ehVUml6Ac3jWXZ2Pocw0Wbh8SahtmMXofxun9GkMRdbfG30nvtd34S6SHaPycaTU
-# Z3UMFwlsphrc+ft+BsSJYzWwN2ZOT3g8ErIAxHOPBwG/DxQXXaiUhr7EaAcEnEYc
-# hhyK5WgLuVsnSysd5XNYDtBDrN/bxbwifAcLRD11jTLVrgCl4DGgyLnSuWW6K4ER
-# Tfp+L/Iw7B6cuOnsT7eczYaId9xmg8x6qbo4Qtx6fu8yTMLh9TeLgva/76m+MyVi
-# +p2wQd8PpK3bK23nGDx65xL5u6MCkSikGbZeM050rEzJRuX4HQBh+85ox2fMx4oy
-# vkL+GaZ7GW1pgbjH//PWMKzZBVlybz4dSbu++hXXJmQ9wleHKdExuR0moveEPTij
-# Rm/Hmlx8FqAJ2MhS81a/yWzmphPpZxxoiLV/nlGWfFuJAOM+Tw0X4ds25sNJSGN/
-# bYU=
+# BgkqhkiG9w0BCQQxIgQgayYrg23RfrMwNRv6GFOvR/2YrTunK7dFiM87h8wGWoAw
+# DQYJKoZIhvcNAQEBBQAEggIAPzbWxVe/rwq1rCvJWOcT8sS+cswErPqUfa7pzPWz
+# oBZQMPrIBHXuXNzw5Ov4rcyUnijTWQhLTxuH0NrdGh9HPdo6q47INpdkkzzeP9qN
+# rHVOzVjMGjp975F62hHBJWP867hTUIZfXU0CA1FonmQyKLa88mFLbHWQLF/TvAaa
+# Bs1CuhRys7uzxonQ80OHi0GDS00WKE/5MnpbNrcR638oXqxTHvWe23X6KHH8QVGj
+# itMAIYNO24gE7sRXL2Z+Y01IaoNJN/iwKUprxsj+lbTYiypS3opwRvL714F4jGLC
+# xqi2cLnu89dxSkMGGhQC5Ju11sX7d5UlvbnWRnUwsF0bWeD2BC2t0pYI3pAWSXBP
+# An9dvTIqOWLNI4Na4sbORwAav3ICKRqvj6m0YjnTx8LOOJvYUPnk0Q6cL/svcQ8x
+# yJN53W4t5arKO5ADjMKwZEIsdHdZcZ71awi/QXKvpwoImQLwMOKdRIMEFK13H0QD
+# OSAkVNrPdENCul1mXxTs+pD9lDWAbs6lZfYak5iwoNp29KzGFLUVV3Ru7AzpflyT
+# SxsHrPcEw+RB7qYDUjLkBRYJPhsmXa7zU2c9eG05cediFDGbSm3GzhCqI+lDQQGu
+# VMuh1VbmpYzo5FHTSnU1fjpqapoCjF7Gio+5KCYRDL0idFO+aG0AYWeXWUbFNXEP
+# nSY=
 # SIG # End signature block

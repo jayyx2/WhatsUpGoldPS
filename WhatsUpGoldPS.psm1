@@ -13,13 +13,13 @@ ForEach ($folder in $functionFolders)
         }
     }
 }
-#Export-ModuleMember -Function Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate
-Export-ModuleMember -Function *
+Export-ModuleMember -Function Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceAttribute, Get-WUGDeviceAttributes, Get-WUGDeviceGroup, Get-WUGDeviceProperties, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate
+#Export-ModuleMember -Function *
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3SUG8p+HihrMW
-# fW35zFa1jtkyygXl4tVyo9XVGmFY5qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgSM/FK00U2HGo
+# jAJGxvzxRwHze6MvBKzIUvH//9crPqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -120,17 +120,17 @@ Export-ModuleMember -Function *
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgt06UbltkzGNrZPLKJULfQta7uvJ7zqJ81/LxnF3m82Qw
-# DQYJKoZIhvcNAQEBBQAEggIAPcuTk4YEjiHzgzS1jk0E3aGuU4E28AEG3utgrsLT
-# ncLflDX67ogOruvjbMZm/HoHLH8UjAT14tjn67cn0qfrUsmVrvOLjDhNM+WHL78P
-# nEv0K/yJFV+tm8bUze34A8fnC+SkZKTHaA9kRirF1BSPMwpKo+q47rfUZM/wybFu
-# CT17AimrX06RcoWYA1Rc3X3I6/2gPxWgIJ50UQYRfmh5FKUBWt8+WgpAuxkBmhZX
-# z7rIulmrdbX/udHp/RIx9BiPoLQWqMwy6/sGAeSCt/iA0bQ19g/WMIKb8wbeLUZJ
-# vaniynXYdSYxlYsOhyhvwzJOZm0NZft5rLmCNz2N/iIOTpFdJL9UlPTBmmvd9uzC
-# ED+7K16fpgUopsCb4Lzq6d1ye23bMvSA59fBDKCiCJ6jBOmdEMfYF2z1Lj7ZxoS6
-# IFgGZeCSIDjPStrywaW/du6zgmkrhlisaosSOp/4zOV45vPWNcXvsYeIuMCrj0un
-# +1DZkPXQhkZfmNylZtJdignTkfwKdCLz40hl1o2PrJoxO1dsEIbA4vj4X6gdk1IF
-# mLOWLh9aTM7W+PO2IOin+VawGsvOPTumrIcRvbPn+m4jf+DTckrctoKQg3P4xu+2
-# mc2utLMQXHZEosphT5DiWfTFCGg9ktRbF7qWp47WrsDgOpodXGIXDTKst+21coZ4
-# jUE=
+# BgkqhkiG9w0BCQQxIgQgfzytpdAErUoHxKDanD+NJ4NI1aaBtuTn8YHRr+r2mEIw
+# DQYJKoZIhvcNAQEBBQAEggIAsg8H3NrVT1JEXB7XCTSvd9tzDhejFe8bedsP7nCP
+# iKF7QQAihq8Tziz3qCvhOllSSknql4pxX6Cs+aw2HRN0fXUrGekwPW5PGsXKBNqM
+# AvB7SLNiAueJgVOzGm76KEl451YsKOcJLvwhm0LurNBgi1hYQb7b4Vx0RpNeYl2H
+# qVQLTdOwYfWiu6XGtLebZxtX10tYFbL9/SK1jPb8k8tQHzJGvX8XqPCoSXBUH0LP
+# +XTVAQyBd0LJzgD6no43swPITUEGJGQkFRWxgSnEbiYGjmm2tuxzwrSJ9Fe0INOp
+# xWPASrvRb0Cn7fJV+xXEb2HwzSKoh+72GGP+ILBqPT/kJ8/SMHeUU0Z4JXV9VTRB
+# iJiFlxprGKKsIknWKPdsYjK/7F6UmDzuXcFIjrs/isAVn8gQHHWEDh/Vmh9f9kMd
+# k7t0vCmMr6I/kGtu6eodoZn7aRefMbv1RNUYPgQAkk2wJ+57LlucUFg311JKS4DL
+# VsfNNGjz158tg0JOdVt27ggzWcatkCBN1kCvXX7XmiOeKR7YzW5s/KsTHhB3uJJY
+# vJvS1V4i17s8yatBqkh+NoIkbx6khHz7EwG62tsq+3VxsDFviHh2Iwu7LDnGRiYd
+# hKlmxq+eHmCbzhHOj8Q57PCwaSZFC8rGcGKJVktczSMR6jN9tlVToCvmKjJLpGqO
+# 8/A=
 # SIG # End signature block

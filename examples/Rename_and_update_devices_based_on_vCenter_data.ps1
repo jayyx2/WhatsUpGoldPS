@@ -1,3 +1,5 @@
+#####!!!! THIS EXAMPLE IS INCOMPLETE !!!!! ########
+
 #Specify the hostname or IP to your vCenter sevver(s)
 $vCenterServer = "192.168.23.60"
 #Specify the WhatsUp Gold IP Address or Hostname

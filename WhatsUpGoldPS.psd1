@@ -6,7 +6,7 @@
 
 @{
 # Version number of this module.
-ModuleVersion = '0.0.3'
+ModuleVersion = '0.1.0'
 
 # ID used to uniquely identify this module
 GUID = '94d2aadd-f227-452e-b48a-c215d243418c'
@@ -72,7 +72,7 @@ PrivateData = @{
         ReleaseNotes = 'https://github.com/jayyx2/WhatsUpGoldPS/blob/main/CHANGELOG.md'
 
         # Prerelease string of this module
-        Prerelease = 'beta3'
+        Prerelease = ''
 
         # Flag to indicate whether the module requires explicit user acceptance for install/update/save
         # RequireLicenseAcceptance = $false
@@ -94,8 +94,8 @@ PrivateData = @{
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpF+N+CyBJztyo
-# fdCBY9ei4Jr8z33NIPTA+3MmXmm2k6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgJdI5cYMrbzMp
+# h+f+VWPIVQOpRwyYinFxfew5u6VOx6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -196,17 +196,17 @@ PrivateData = @{
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg1WnC7RobQ4aG8tyqW8EJgWWSXkbDRLAhKby/svbG6w4w
-# DQYJKoZIhvcNAQEBBQAEggIAPBdqocJ/WOb2YPixbuz+j6PxbbNaNkcaG9hAEYvx
-# 6YHmqf7qhlF2UdOdIwQumh2vYZLpFHMelUb3Jw3wdkqi4CysOs2e5bcRh/J6AfBG
-# PMBho5iotMAFaxpCy5QP8hFSheMSnR1Z8cw3OWZgQwmH0uoeDlcESoWNl1VkEazd
-# gZpTkAFgZgpx1JX0KvNYO1XmgdYQYHZQQejLvdfV1xty0cpEgFExSMxd1AiuiInI
-# 3R7sw8o/VEJT1bBrpdwF/OtVZaxpKsAKx44yDt/GF/9gBBG2jj4AlFgNEPq01vPa
-# NC5W6p21QMMTC3zV7Tx0cfCMLxTGENbZxdwpoCzRSek/IHFI5DpPAyg/89b4eO2z
-# 6VAk75EdHyk5epes0zuN3KqtMU36jKl+8Z/aaeHOloVKJLTm9Wm9gkpOIobePMWx
-# bt+kTGtSxxLr5zhF5nnyJB5XhHbsiHGOBcHyYmcd4kVu1XtD67jfuR6Tq+0I/CQw
-# l/AgHobq3MLZtZVmpjYnM4M4Fqx3NIkKEKjMHFzCFrlLP79qvSEghMy33WW464HY
-# GQFU8EJ3Fbn5boq0Twkf5levaarOhFhmOj8WZ7YwUZKlK53bJYEnZT1Je9xaNbDv
-# 5b6xum85doznuEiQsyW58dSZ/ArQ6kVdwjGUuztXYpIqak4jksMcUn3tYisF0vjw
-# 3sw=
+# BgkqhkiG9w0BCQQxIgQgHWOY0PDOU9iAXL/Enlh8FaKxcTZ50kB+6IBzgV34Pacw
+# DQYJKoZIhvcNAQEBBQAEggIAp1kZA17AEvaSwPsZMmFnnGdLIn5hvFR/a6qy8A56
+# QheoDkSRfiNl/yDUPBYKxaTvAGU4uHu3J1kcpLz9U3p0ZNb1GYdaIHmDpjRtrFyZ
+# 7wx0WqFoDaQSs8gN6bcPzT+sm3FT9VTMRdRiK8P6TCQueQrsY6p8B1gUKuCtwx9d
+# WsewRFcgaXrufA8LLz/DSd9xkIfY+kCpwSKEmw0Gq8L/2OZXuDBCWmMWbpQtkhI/
+# ehVUml6Ac3jWXZ2Pocw0Wbh8SahtmMXofxun9GkMRdbfG30nvtd34S6SHaPycaTU
+# Z3UMFwlsphrc+ft+BsSJYzWwN2ZOT3g8ErIAxHOPBwG/DxQXXaiUhr7EaAcEnEYc
+# hhyK5WgLuVsnSysd5XNYDtBDrN/bxbwifAcLRD11jTLVrgCl4DGgyLnSuWW6K4ER
+# Tfp+L/Iw7B6cuOnsT7eczYaId9xmg8x6qbo4Qtx6fu8yTMLh9TeLgva/76m+MyVi
+# +p2wQd8PpK3bK23nGDx65xL5u6MCkSikGbZeM050rEzJRuX4HQBh+85ox2fMx4oy
+# vkL+GaZ7GW1pgbjH//PWMKzZBVlybz4dSbu++hXXJmQ9wleHKdExuR0moveEPTij
+# Rm/Hmlx8FqAJ2MhS81a/yWzmphPpZxxoiLV/nlGWfFuJAOM+Tw0X4ds25sNJSGN/
+# bYU=
 # SIG # End signature block

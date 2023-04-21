@@ -13,13 +13,31 @@ ForEach ($folder in $functionFolders)
         }
     }
 }
-Export-ModuleMember -Function @('Add-WUGDevice', 'Add-WUGDevices', 'Connect-WUGServer', 'Disconnect-WUGServer', 'Get-WUGDevice', 'Get-WUGDevices', 'Get-WUGDeviceAttribute', 'Get-WUGDeviceAttributes', 'Get-WUGDeviceGroup', 'Get-WUGDeviceProperties', 'Get-WUGDeviceTemplate', 'Remove-WUGDevice', 'Remove-WUGDevices', 'Set-WUGDeviceMaintenance', 'Get-WUGDeviceProperties', 'Set-WUGDeviceProperties', 'ConvertTo-BootstrapTable', 'Convert-HTMLTemplate')
+Export-ModuleMember -Function Add-WUGDevice
+Export-ModuleMember -Function Add-WUGDevices
+Export-ModuleMember -Function Connect-WUGServer
+Export-ModuleMember -Function Disconnect-WUGServer
+Export-ModuleMember -Function Get-WUGDevice
+Export-ModuleMember -Function Get-WUGDevices
+Export-ModuleMember -Function Get-WUGDeviceAttribute
+Export-ModuleMember -Function Get-WUGDeviceAttributes
+Export-ModuleMember -Function Get-WUGDeviceGroup
+Export-ModuleMember -Function Get-WUGDeviceProperties
+Export-ModuleMember -Function Get-WUGDeviceTemplate
+Export-ModuleMember -Function Remove-WUGDevice
+Export-ModuleMember -Function Remove-WUGDevices
+Export-ModuleMember -Function Set-WUGDeviceMaintenance
+Export-ModuleMember -Function Get-WUGDeviceProperties
+Export-ModuleMember -Function Set-WUGDeviceProperties
+Export-ModuleMember -Function ConvertTo-BootstrapTable
+Export-ModuleMember -Function Convert-HTMLTemplate
+
 #Export-ModuleMember -Function *
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgSM/FK00U2HGo
-# jAJGxvzxRwHze6MvBKzIUvH//9crPqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCY4E07bafgnE2k
+# M70mw6V44Uf5ziPJvGufEhFSJPhbY6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -120,17 +138,17 @@ Export-ModuleMember -Function @('Add-WUGDevice', 'Add-WUGDevices', 'Connect-WUGS
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgfzytpdAErUoHxKDanD+NJ4NI1aaBtuTn8YHRr+r2mEIw
-# DQYJKoZIhvcNAQEBBQAEggIAsg8H3NrVT1JEXB7XCTSvd9tzDhejFe8bedsP7nCP
-# iKF7QQAihq8Tziz3qCvhOllSSknql4pxX6Cs+aw2HRN0fXUrGekwPW5PGsXKBNqM
-# AvB7SLNiAueJgVOzGm76KEl451YsKOcJLvwhm0LurNBgi1hYQb7b4Vx0RpNeYl2H
-# qVQLTdOwYfWiu6XGtLebZxtX10tYFbL9/SK1jPb8k8tQHzJGvX8XqPCoSXBUH0LP
-# +XTVAQyBd0LJzgD6no43swPITUEGJGQkFRWxgSnEbiYGjmm2tuxzwrSJ9Fe0INOp
-# xWPASrvRb0Cn7fJV+xXEb2HwzSKoh+72GGP+ILBqPT/kJ8/SMHeUU0Z4JXV9VTRB
-# iJiFlxprGKKsIknWKPdsYjK/7F6UmDzuXcFIjrs/isAVn8gQHHWEDh/Vmh9f9kMd
-# k7t0vCmMr6I/kGtu6eodoZn7aRefMbv1RNUYPgQAkk2wJ+57LlucUFg311JKS4DL
-# VsfNNGjz158tg0JOdVt27ggzWcatkCBN1kCvXX7XmiOeKR7YzW5s/KsTHhB3uJJY
-# vJvS1V4i17s8yatBqkh+NoIkbx6khHz7EwG62tsq+3VxsDFviHh2Iwu7LDnGRiYd
-# hKlmxq+eHmCbzhHOj8Q57PCwaSZFC8rGcGKJVktczSMR6jN9tlVToCvmKjJLpGqO
-# 8/A=
+# BgkqhkiG9w0BCQQxIgQgTrTwqAd0p6SPl0O4/1AQNyyW6sl3EcxgeW7FmKbH5sYw
+# DQYJKoZIhvcNAQEBBQAEggIAPH4buiyqn24dOS9Wlqm55aXlbTbXTQMe/Ux1kBhD
+# fAYqa9yZqj827WcRrFIDOn5a2tDLXgUowyYjJqh8gXZbREQYa8Uk+hCkCUKJmPJi
+# Vz/emhkR8sB0pjsQ6ANPs7lY1OnyeyPXupACD+U2fz+It2oGoEQjUQPjHpc/jWwa
+# YQFBWg4Iz/S5wWW17ZiuUDsHzcV7YFBUqQjNnAJFrYmCHkK8pYqYo1h+ymFc86MJ
+# eoD+o3OTuTpXsDP+XOH20w9cfnihEl5AxdAp7z6IpIKUbETrRKe02y7/lRR6/vvi
+# pYJfNQyy7Fn1exOJq2xUQHpnZp/px7RyCiUP/iEKKcIeQxFAFKyFUysezWfVkrlf
+# e0yhbJqj6RGqBLHVw1ibjILGsEmf/Vv6Mg727a42aU3rpKL1P5hApU3riyjf14zl
+# Id9dEI480WImVv+m8+sOR+7jzufzimAs3NtYUzdVNneNFt6n/0wbsUK64/sHEK5j
+# DmkNxRoXvCgE7ksSwUkS0gfn8B4KBN7oyVbpI5TskzzZ7EAZUULwvpOVT+VJ9wVW
+# Zjknf4tMI9ttp1AXZgfVN1DOnWq28iqXePNPSH668Ya1dX7zdtRNi9SNW6d0FKLv
+# THJ5PNPXryUexCi0FXtlgWLmGiYY3CWmcRBKS84VW7Ah137Htb45A9uo5/Wrm2ss
+# vDg=
 # SIG # End signature block

@@ -13,7 +13,7 @@ ForEach ($folder in $functionFolders)
         }
     }
 }
-Export-ModuleMember -Function Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceAttribute, Get-WUGDeviceAttributes, Get-WUGDeviceGroup, Get-WUGDeviceProperties, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate
+Export-ModuleMember -Function @('Add-WUGDevice', 'Add-WUGDevices', 'Connect-WUGServer', 'Disconnect-WUGServer', 'Get-WUGDevice', 'Get-WUGDevices', 'Get-WUGDeviceAttribute', 'Get-WUGDeviceAttributes', 'Get-WUGDeviceGroup', 'Get-WUGDeviceProperties', 'Get-WUGDeviceTemplate', 'Remove-WUGDevice', 'Remove-WUGDevices', 'Set-WUGDeviceMaintenance', 'Get-WUGDeviceProperties', 'Set-WUGDeviceProperties', 'ConvertTo-BootstrapTable', 'Convert-HTMLTemplate')
 #Export-ModuleMember -Function *
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor

@@ -6,7 +6,7 @@
 
 @{
 # Version number of this module.
-ModuleVersion = '0.1.1'
+ModuleVersion = '0.1.2'
 
 # ID used to uniquely identify this module
 GUID = '94d2aadd-f227-452e-b48a-c215d243418c'
@@ -35,21 +35,20 @@ PowerShellHostName = ''
 PowerShellHostVersion = ''
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
-#FunctionsToExport = 'Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate'
-FunctionsToExport = '*'
+FunctionsToExport = 'Add-WUGDevice', 'Add-WUGDevices', 'Connect-WUGServer', 'Disconnect-WUGServer', 'Get-WUGDevice', 'Get-WUGDevices', 'Get-WUGDeviceAttribute', 'Get-WUGDeviceAttributes', 'Get-WUGDeviceGroup', 'Get-WUGDeviceProperties', 'Get-WUGDeviceTemplate', 'Remove-WUGDevice', 'Remove-WUGDevices', 'Set-WUGDeviceMaintenance', 'Get-WUGDeviceProperties', 'Set-WUGDeviceProperties', 'ConvertTo-BootstrapTable', 'Convert-HTMLTemplate'
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
-CmdletsToExport = 'Add-WUGDevice, Add-WUGDevices, Connect-WUGServer, Disconnect-WUGServer, Get-WUGDevice, Get-WUGDevices, Get-WUGDeviceAttribute, Get-WUGDeviceAttributes, Get-WUGDeviceGroup, Get-WUGDeviceProperties, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceMaintenance, Get-WUGDeviceProperties, Set-WUGDeviceProperties, ConvertTo-BootstrapTable, Convert-HTMLTemplate'
+CmdletsToExport = @()
 
 # List of all the files in the helpers directory to be imported.
 # Change the file names as per your requirement.
-# NestedModules = @('helpers\ConvertTo-BootstrapTable.ps1', 'helpers\Convert-HTMLTemplate.ps1')
+NestedModules = @()
 
 # Variables to export from this module
 VariablesToExport = '*'
 
 # Aliases to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no aliases to export.
-AliasesToExport = '*'
+AliasesToExport = @()  
 
 # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
 PrivateData = @{
@@ -94,8 +93,8 @@ PrivateData = @{
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeM7SUUWcUDB0i
-# MNgsX8DB055UP6aIWlawyVxehq6oaaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHkXwAin7hkeA1
+# WV7RDTlJI17qjRsFtPgAj5NKyiIQhaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -196,17 +195,17 @@ PrivateData = @{
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg0PzPaUD1LYo/gca0faNPEKGM4/WywjjgdqSTnBo/Fm4w
-# DQYJKoZIhvcNAQEBBQAEggIAUBjyqrsRDc4IgPRAayF7ekRgpVGJOOcGDmzfZPx+
-# Pw9TaB4SyFU8VzhsJRlWd+XVEpD+tMorpcb5TeT5qnq8ehvJemQEIDE9Kt7SsjB5
-# pBrgVK9kJpx5CIU4yAFOT8MQTu5zg39K6EEm5Ft3dnY/SBI2VmYU1KnFFsiZ3MeE
-# RuSv1cOQg36OIG8y2kI2erep0jhG8WKBNQyXP2IVlmyNbcmcBGoZtYTYp170D3gv
-# QHaToUIRSdJAuquY4ajLL4UInpVYuNjreDARCzOvB12Pm1YYXOlJdDHjqIv+zHaF
-# zQVK/vI5bO+pxZKdd9T2IRo/AwRdDmQDpWcyiEJn94BMr/OdTGfS9unWwdEVwGGU
-# LMoTsLUxgv8qwieXk79gJNSGKJ+vU18oR5j8WaX//jXCLJcc/UcLLF8/02VkeaVO
-# BOJbI0XEZUYEmS7f5VPsykGbaTckeHh8q2vCmj8yO0YMOQeB0mxzXXVJ9RJjpwWJ
-# b96sYiz0KUXgtqOFopWWaN4pgT/l5R/66HpKvNiQ5xByWXavBYLM76HSn8dLZxGg
-# erEHNrpeuZsCpZyqjbQt7V2sqXRRXXYJnGUFIDtQsgO6ZqQCHSaAo1rIq1FqXuzU
-# Vj5AYsBlJoeBYiAjO+0H3rzBVrotZ8UEchcqxRnaxZO+0EcM5hu+8F5rHPShLRVE
-# J3o=
+# BgkqhkiG9w0BCQQxIgQgzFVuBR+cP/ynsymATfc04BU8OD+Wb/ibrBANkTgqPRcw
+# DQYJKoZIhvcNAQEBBQAEggIANN06fq4KY+XmFDZOgooGVRnyXDL2OboyEmGZO7v3
+# qoWwMiWcydvsA05RJGBXbs8AEIiRZ4NnOPwrBgZDFrzTDXGqT7QWoyLnoZiBeRZQ
+# fVvH3f4pfYOVg2vd3wnGW3z8Havbntaxa4P0EVLg6yMI8JDfCnwJRZACwk/5HzRW
+# 9L9TzVvbZMpNDB4PI5wigndUF0v9gouhkeFLX1CwfsYkqUS6mHq2yb3plNuaHIQi
+# 534AL6NIlV3MvlQYc5XSaszXT+d6oyYTgWT43j+GQpj3TzQvKGw1Vat5IbymYVfa
+# CwnYJr5FHenZkWtmkcFQwrdV8WiH8UfrEMxTugkos11dVkH++EvzH1Q83ErOc7VT
+# VqfkT9iVVcCX7zZHoCMlS9v9Brg3cEfgfwE6whj+RZ9IyOF1OiVVkJKl5AknjSq+
+# HcOaKEdsGrE7jtvfIMyoyItHWwjvG79sTNaHkP0QS3cQDRBVRJpE6MbfHpsFCGrO
+# NZG33/iX/tm5yzTJ2nyC3NmM7bMBABdG67c3YcfQiqRvhyJIujsBBMUyXlI6wVrg
+# xwj13rt26RWrgQk7RVOpclij9bjAEyqOh54bG4aMBvDcxFlMB1ADhwx1q6IBm0VS
+# ONbvQPvvtbzTT6xpgakqiJf78mjxBMOJZHSs3temrHOiHnCrnpvYOS8cMTRN3ZBm
+# fXg=
 # SIG # End signature block

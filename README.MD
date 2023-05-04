@@ -6,8 +6,6 @@ Use automation to save time with the WhatsUp Gold REST API, included in every li
 ## Support
 This module comes with no warranty or support from anyone, and is offered as-is.
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z4KO41H)
-
 ## Examples
 * [Clone a device](https://github.com/jayyx2/WhatsUpGoldPS/blob/main/examples/Clone_device.ps1) - Use another device as a template to create a new device
 * [Create a new device](https://github.com/jayyx2/WhatsUpGoldPS/blob/main/examples/New_device.ps1)

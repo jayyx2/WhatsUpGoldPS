@@ -60,7 +60,7 @@ function Get-WUGDevices {
         $pageInfo = ${result}.paging
         if (${pageInfo}.nextPageId) {
             $currentPage++
-            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
+            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}&pageId=$(${pageInfo}.nextPageId)"
             if ($SearchValue) {$uri += "&search=${SearchValue}"}
             $percentComplete = ($currentPage / ${pageInfo}.nextPageId) * 100
             Write-Progress -Activity "Retrieved $($allDevices.Count) devices already, wait for more." -PercentComplete $percentComplete -Status "Page $currentPage of ?? (${Limit} per page)"
@@ -73,8 +73,8 @@ function Get-WUGDevices {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDnwyXKwuBvUlM4
-# fnROp1hSfdziyXobxsxyg324C8einaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD684pXbr0+mYCc
+# UiJFwgsieGyi+qGcxO/j1OykjD4OhKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -175,17 +175,17 @@ function Get-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg6aQw9hKQDyxmLtzyqWX+rxcYXvvTyVg2dIWL+KvtDwow
-# DQYJKoZIhvcNAQEBBQAEggIAAZh3Jm/aS4Inn4Iqqttr7HcLG9iCZMpzYqGhytur
-# SMNNgQVzRe2sIUeUYlKP31StX88DDvmAf7iwH3GsgPwfAXPVL0071oEm/4AyN1Uw
-# SDnn7F6xsUqAzrUcMwengquoNbKO8AeKfYQHrvVOZpuX3tmeWs5ooLm2t7RbZcRX
-# d4P1jRKyoeRFUtupwWHUdo1l0JyRjMm4ZU8czrf+nhMnD7XLtAFu8K15ZY9DdI/r
-# TCcOTRuKPYXmoRCpS2E3MN8p2TK0tII6LctiHDXQETfACUdhdRrjZgevMVA/6ts7
-# Q/FwJ8F7/Kkq0gPhgKtC4Wn7FlW6c/+3kx7J+IiOAEN3M1pAjs9k+MdevyYguU8+
-# nvCIZxL0NjUutSVCj3itwE2aSEk9agTGZld8MA6t4P8CTYZWBCshnLhMik9BXHqD
-# QiFV/FRL91O1AeF44+OwHcyq5ZQ7WCNtD/mhmPqbd5QnOFPqtxP5+cuiXuWbR17i
-# +rL96T3Gu5MljF93Fi3FeEB7oWBo0mGMS9c9cYq4fbxF8UvDeuHdg46Mxz96VOhI
-# VySgITczvzKUfenBoaH+0RI18bqS1EPusQqpSj9Tlm+arMQsDD1gSTHUttv6RGIv
-# 89JIp3T2tncmlXI6uPxYaYEmvgM0VZx1kToWAFNqLwoBxovBb39vnIsGWvSRX1cq
-# XdI=
+# BgkqhkiG9w0BCQQxIgQgBjZTU8xtkoWkLf60qIz/lLorXf19lNTGL0swu2Q3tGIw
+# DQYJKoZIhvcNAQEBBQAEggIAE5GeXFO+vsP+YA1Rfhn9FSbKFEZb8C+TJEIV84xf
+# O+QRzqXbnVkns1DspWZlZv0zXz5ja9xiT0BA6gCPV3mKdWN6kQFpamMMWdhgNufk
+# SKakSekNRkAXzavoCaRHtKgjVOgMW4CtU3v22zLlJfIxEhx3D0tBeFQ+FX5pTqOM
+# WazL9F/9M6BCSZKwyP+hMtE3/dnJPH5uAvt4yac0C/TtibA9KCOvV2E3G3IKxhzS
+# NYUUSp640Ntrn95BbRBicjHX0dLFdSC//418o5tyPq3TJAJTLyKdKSZlg76V4XlP
+# Wtt7FM3ov73D1GwD5e0UvcTDTN1IAJj0SacoPLdKy1mxRvyuQmfFrxFmzhWBsBl0
+# kPL1+p+Rgg0zRSKsV7hz7qRl+QAFg9CbfmICX0h9pbnpQXQDQdTG0jCD8/hjXbjZ
+# Zgsl8EiQ8svXSdzfdAzUwThiF9+gmIR++vXJ+ndYLiETZkmJo4hEGV/m6+4BeuQU
+# z3vvjKl/j6a8TW3dAFGtXHpabqTxeNbQv/1OlX6NUYbh7tfvCIbaemt7qGNe1tBl
+# aq0vMWPphiyBV/2YzRMsCT/2B2qf3lq/blojxy1aQoNJZBr0yTzUPQD877p5zOYy
+# gYahusXI1AGnDJDHOJpO5PsPWu/g1gvgn/UcdJxfUQqG5jriKBwFCaAn4MbuFaTC
+# y3A=
 # SIG # End signature block

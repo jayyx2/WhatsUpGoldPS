@@ -53,9 +53,7 @@ function Get-WUGDevices {
     if ($SearchValue) {
         $uri += "&search=${SearchValue}"
     }
-    else {
-        $SearchValue = Read-Host "Enter the search value either IP, hostname, or display name."
-    }
+    
     $currentPage = 1
     $allDevices = @()
     do {

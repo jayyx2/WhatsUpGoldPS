@@ -29,7 +29,7 @@ Get-WUGDevices -SearchValue 192.168.1. -View overview
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: Let's see your name here YYYY-MM-DD
+Last modified: YouHaveToBeKiddingMe 2023-11-01
 
 #>
 
@@ -49,10 +49,7 @@ function Get-WUGDevices {
 
     $uri = ${global:WhatsUpServerBaseURI}
     $uri += "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}"
-
-    if ($SearchValue) {
-        $uri += "&search=${SearchValue}"
-    }
+    if ($SearchValue) {$uri += "&search=${SearchValue}"}
     
     $currentPage = 1
     $allDevices = @()
@@ -64,6 +61,7 @@ function Get-WUGDevices {
         if (${pageInfo}.nextPageId) {
             $currentPage++
             $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}&pageId=$(${pageInfo}.nextPageId)&search=${SearchValue}"
+            if ($SearchValue) {$uri += "&search=${SearchValue}"}
             $percentComplete = ($currentPage / ${pageInfo}.nextPageId) * 100
             Write-Progress -Activity "Retrieved $($allDevices.Count) devices already, wait for more." -PercentComplete $percentComplete -Status "Page $currentPage of ?? (${Limit} per page)"
         } else {

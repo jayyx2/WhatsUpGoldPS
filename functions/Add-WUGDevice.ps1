@@ -178,7 +178,8 @@ function Add-WUGDevice {
     if ($SubRoles) { if ($SubRoles -isnot [string[]]) { throw "SubRoles parameter must be an array of strings." } }
     if ($ActiveMonitors) { if ($ActiveMonitors -is [array]) { foreach ($item in $ActiveMonitors) { if ($item -isnot [string]) { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } }
     if ($PerformanceMonitors) { if ($PerformanceMonitors -is [array]) { foreach ($item in $PerformanceMonitors) { if ($item -isnot [string]) { throw "PerformanceMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PerformanceMonitors parameter must be a one-dimensional array of strings." } }
-    if ($PassiveMonitors) { if ($PassiveMonitors -is [array]) { foreach ($item in $PassiveMonitors) { if ($item -isnot [string]) { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } }   
+    if ($PassiveMonitors) { if ($PassiveMonitors -is [array]) { foreach ($item in $PassiveMonitors) { if ($item -isnot [string]) { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } }
+    if ($Credentials) { if ($Credentials -is [array]) { foreach ($item in $Credentials) { if ($item -isnot [string]) { throw "Credentials parameter must be a one-dimensional array of strings." } } } else { throw "Credentials parameter must be a one-dimensional array of strings." } }
     #End input validation
 
     #Begin data formatting
@@ -227,6 +228,17 @@ function Add-WUGDevice {
             $PassiveMonitorObjects += $PassiveMonitorObject
         }
     }
+    ### Credentials
+    $CredentialObjects = @()
+    if ($Credentials) {
+        foreach ($Credential in $Credentials) {
+            $CredentialObject = New-Object -TypeName PSObject -Property @{
+                credentialType = ''
+                credential     = $Credential
+            }
+            $CredentialObjects += $CredentialObject
+        }
+    }
     #End data formatting
 
     $options = @("all")
@@ -236,6 +248,9 @@ function Add-WUGDevice {
     if ($UpdateInterfaceNames) { $options += "update-interface-names" }
     if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
     if (!$hostname) { $hostname = $DeviceAddress }
+    if (!$Brand) { $Brand = "Not Set" }
+    if (!$OS) { $OS = "Not Set" }
+    if (!$SNMPPort) { $SNMPPort = 161 }
 
     #Handle null objects
 
@@ -245,17 +260,17 @@ function Add-WUGDevice {
             templateId          = "WhatsUpGoldPS"
             displayName         = "${displayName}"
             deviceType          = "${deviceType}"
-            snmpOid             = ""
-            snmpPort            = ""
+            snmpOid             = "${snmpOid}"
+            snmpPort            = "${SNMPPort}"
             pollInterval        = "${PollInterval}"
             primaryRole         = "${PrimaryRole}"
-            subRoles            = @("Resource Attributes", "Resource Monitors")
-            os                  = ""
-            brand               = ""
-            actionPolicy        = ""
+            subRoles            = @($SubRoles)
+            os                  = "${OS}"
+            brand               = "${Brand}"
+            actionPolicy        = "${ActionPolicy}"
             note                = "${note}"
             autoRefresh         = "$true"
-            credentials         = @()
+            credentials         = @(${CredentialObjects})
             interfaces          = @(
                 @{
                     defaultInterface     = "true"

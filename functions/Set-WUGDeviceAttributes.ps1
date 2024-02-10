@@ -80,9 +80,9 @@ function Set-WUGDeviceAttributes {
         Write-Error "Combining 'DeleteAllAttributes' with other delete statements is not allowed."
         return
     }
-
+    
     try {
-        $result = Invoke-RestMethod -Uri $uri -Method PUT -Headers $global:WUGBearerHeaders -ContentType 'application/json' -Body ($BatchData | ConvertTo-Json -Depth 10)
+        $result = Get-WUGAPIResponse -Uri $uri -Method PUT -Body ($BatchData | ConvertTo-Json -Depth 10)
         return $result
     }
     catch {

@@ -128,7 +128,21 @@ function Add-WUGDevice {
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $ActionPolicy,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Note,
         [Parameter()] [ValidateNotNullOrEmpty()] [bool] $AutoRefresh = $true,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $Credentials,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialWindows,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSnmpV3, 
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSnmpV2,  
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSnmpV1,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialAdo,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialTelnet,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSsh,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialVMware,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialAWS,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialAzure,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialMeraki,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialRestApi,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialRedfish,
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialJmx, 
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSmis,                               
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $Interfaces,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $Attributes,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $CustomLinks,
@@ -141,21 +155,37 @@ function Add-WUGDevice {
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Layer2Data,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $Groups
     )
-    Write-Debug "Function: New-WUGDevice"
+
+    Write-Debug "Function: Add-WUGDevice"
     Write-Debug "Displayname:       ${displayName}"
     Write-Debug "Device Address:    ${DeviceAddress}"
+    Write-Debug "Hostname:          ${Hostname}"
     Write-Debug "Device Type:       ${deviceType}"
     Write-Debug "PollInterval:      ${PollInterval}"
     Write-Debug "PrimaryRole:       ${PrimaryRole}"
     Write-Debug "SubRoles:          ${SubRoles}"
     Write-Debug "snmpOid:           ${snmpOid}"
-    Write-Debug "SNMPPort:          ${SNMPPort}"   
+    Write-Debug "SNMPPort:          ${SNMPPort}"
     Write-Debug "OS:                ${OS}"
     Write-Debug "Brand:             ${Brand}"
     Write-Debug "ActionPolicy:      ${ActionPolicy}"
     Write-Debug "Note:              ${Note}"
     Write-Debug "AutoRefresh:       ${AutoRefresh}"
-    Write-Debug "Credentials:       ${Credentials}"
+    Write-Debug "WindowsCredential:${WindowsCredential}"
+    Write-Debug "SnmpV3Credential:  ${SnmpV3Credential}"
+    Write-Debug "SnmpV2Credential:  ${SnmpV2Credential}"
+    Write-Debug "SnmpV1Credential:  ${SnmpV1Credential}"
+    Write-Debug "AdoCredential:     ${AdoCredential}"
+    Write-Debug "TelnetCredential:  ${TelnetCredential}"
+    Write-Debug "SshCredential:     ${SshCredential}"
+    Write-Debug "VMwareCredential:  ${VMwareCredential}"
+    Write-Debug "JmxCredential:     ${JmxCredential}"
+    Write-Debug "SmisCredential:    ${SmisCredential}"
+    Write-Debug "AWSCredential:     ${AWSCredential}"
+    Write-Debug "AzureCredential:   ${AzureCredential}"
+    Write-Debug "MerakiCredential:  ${MerakiCredential}"
+    Write-Debug "RestApiCredential: ${RestApiCredential}"
+    Write-Debug "RedfishCredential: ${RedfishCredential}"
     Write-Debug "Interfaces:        ${Interfaces}"
     Write-Debug "Attributes:        ${Attributes}"
     Write-Debug "CustomLinks:       ${CustomLinks}"
@@ -166,7 +196,8 @@ function Add-WUGDevice {
     Write-Debug "NCMTasks:          ${NCMTasks}"
     Write-Debug "AppProfiles:       ${ApplicationProfiles}"
     Write-Debug "Layer2Data:        ${Layer2Data}"
-    Write-Debug "Layer2Data:        ${Groups}"
+    Write-Debug "Groups:            ${Groups}"
+
 
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
@@ -175,10 +206,10 @@ function Add-WUGDevice {
     #End global variables error checking
 
     #Begin Input validation
-    if ($SubRoles) { if ($SubRoles -isnot [string[]]) { throw "SubRoles parameter must be an array of strings." } }
+    if ($SubRoles) { if ($SubRoles -is [array]) { foreach ($item in $SubRoles) { if ($item -isnot [string]) { throw "SubRoles parameter must be a one-dimensional array of strings." } } } else { throw "SubRoles parameter must be a one-dimensional array of strings." } }
     if ($ActiveMonitors) { if ($ActiveMonitors -is [array]) { foreach ($item in $ActiveMonitors) { if ($item -isnot [string]) { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } }
     if ($PerformanceMonitors) { if ($PerformanceMonitors -is [array]) { foreach ($item in $PerformanceMonitors) { if ($item -isnot [string]) { throw "PerformanceMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PerformanceMonitors parameter must be a one-dimensional array of strings." } }
-    if ($PassiveMonitors) { if ($PassiveMonitors -is [array]) { foreach ($item in $PassiveMonitors) { if ($item -isnot [string]) { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } }   
+    if ($PassiveMonitors) { if ($PassiveMonitors -is [array]) { foreach ($item in $PassiveMonitors) { if ($item -isnot [string]) { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } }
     #End input validation
 
     #Begin data formatting
@@ -227,6 +258,100 @@ function Add-WUGDevice {
             $PassiveMonitorObjects += $PassiveMonitorObject
         }
     }
+
+    ### Credentials
+    $CredentialObjects = @()
+    if ($CredentialSnmpV1){
+            $CredentialObject = New-Object -TypeName PSObject -Property @{
+            credentialType = 'SNMP v1'
+            credential     = $CredentialSnmpV1
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialSnmpV2){
+            $CredentialObject = New-Object -TypeName PSObject -Property @{
+            credentialType = 'SNMP v2'
+            credential     = $CredentialSnmpV2
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialSnmpV3){
+            $CredentialObject = New-Object -TypeName PSObject -Property @{
+            credentialType = 'SNMP v3'
+            credential     = $CredentialSnmpV3
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialWindows){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'Windows'
+        credential     = $CredentialWindows
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialAdo){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'ADO'
+        credential     = $CredentialAdo
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialAws){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'AWS'
+        credential     = $CredentialAws
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialRedfish){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'Redfish'
+        credential     = $CredentialRedfish
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialRestApi){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'REST API'
+        credential     = $CredentialRestApi
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialSsh){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'SSH'
+        credential     = $CredentialSsh
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialTelnet){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'Telnet'
+        credential     = $CredentialTelnet
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialVmware){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'VMware'
+        credential     = $CredentialVmware
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialJmx){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'jmx'
+        credential     = $CredentialJmx
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialSmis){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'smis'
+        credential     = $CredentialSmis
+        }
+        $CredentialObjects += $CredentialObject
+    }
     #End data formatting
 
     $options = @("all")
@@ -236,6 +361,10 @@ function Add-WUGDevice {
     if ($UpdateInterfaceNames) { $options += "update-interface-names" }
     if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
     if (!$hostname) { $hostname = $DeviceAddress }
+    if (!$Brand) { $Brand = "Not Set" }
+    if (!$OS) { $OS = "Not Set" }
+    if (!$SNMPPort) { $SNMPPort = 161 }
+    if(!$SubRoles){ $SubRoles = @("Resource Attributes", "Resource Monitors")}
 
     #Handle null objects
 
@@ -245,17 +374,17 @@ function Add-WUGDevice {
             templateId          = "WhatsUpGoldPS"
             displayName         = "${displayName}"
             deviceType          = "${deviceType}"
-            snmpOid             = ""
-            snmpPort            = ""
+            snmpOid             = "${snmpOid}"
+            snmpPort            = "${SNMPPort}"
             pollInterval        = "${PollInterval}"
             primaryRole         = "${PrimaryRole}"
-            subRoles            = @("Resource Attributes", "Resource Monitors")
-            os                  = ""
-            brand               = ""
-            actionPolicy        = ""
+            subRoles            = @(${SubRoles})
+            os                  = "${OS}"
+            brand               = "${Brand}"
+            actionPolicy        = "${ActionPolicy}"
             note                = "${note}"
             autoRefresh         = "$true"
-            credentials         = @()
+            credentials         = @(${CredentialObjects})
             interfaces          = @(
                 @{
                     defaultInterface     = "true"
@@ -357,8 +486,8 @@ function Add-WUGDevice {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqPD6lrEYK5Z0h
-# VArBkpiu7TwaTRfwI3yaUcDsAXHuBKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+t5MlCwQkaGj5
+# 9mah5VHo7W39+mSAnCS6JdTJ8J80hKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -459,17 +588,17 @@ function Add-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgIveuRW+UYK2qLAnFOztdJ/5OTwHB1UcZ/4YagSghc2Uw
-# DQYJKoZIhvcNAQEBBQAEggIAHc8dMHkWb7UaLq9CTArwjhGrnlhhGL+zwPxLTwfO
-# cdcgH74ibQkIswPoKiPzN19F29V4VIovABH/2/sUjaHcukuvaXZtkNnMxXqe9apz
-# Z6ygfpmcx2bovbsFZYYhLpzdl9sCYw01088cLItYheWlavaQqNACW8+GGLwIJDBV
-# fKe3VKhJwizELGmTv1ppkmkdjs6fdtIzMfnVnIl6GNWTXR0VVTHYNbGQKSz5jKkQ
-# 7G8OvnzQwcEUt4CLGgI5RLwK7yJyBbo38tQCNPbK5iSRxaij6mqy6eW2fWEePgra
-# j6uw06rrekxVBH+cAYZWOLgvi2+AAryWFQgd8dWC7CpMoCGz4Cptev3JKyxHNNr8
-# n1lQUt7v6CiYDGwcQGolmiafsGlKG/62ghJ3pSa7vnrcKnfeNDaFwAI/G+cxMTXg
-# qODPh+/g1EPYNqmSGPyAFvNCv8CNxJMqKE/WRsa2nyWVKld0tR+AemROpR/oetI4
-# mDftHRwuVSAbHvZpXgS3w1C5OvIOwZhscZbMbdliltzhEsGQ1X/8BDMhhRBj0FJJ
-# PsEWbwDbfnZrQo44KAisQzSlcq4f0qi1vSX1UVISExcGI3YZSjOoU9wLGpP29mlJ
-# CDnZCQkgWPDDwPUnhLwNdCwHeJo4kZOlVn8CxV3WPWfTl+ZeIicQsOU06g89SHJB
-# ryk=
+# BgkqhkiG9w0BCQQxIgQgxc1Fve67brxmHSAp48aMUEe9Wez8OFs2Wa0yR0R49HQw
+# DQYJKoZIhvcNAQEBBQAEggIAHV5b2ciw3lqRnxwZgYubJGtTIn+lfLXHym87LTnq
+# mgGmUrSoMpXXKzSmBcIZ8O707FRjcLoW9ZZmmq/fbRyBH9wH+MxYWUUcuy3GDVeO
+# WZr1qwlwT92yaFzvZruBWCn63c/d9Ep8iPromwcDXg6ze2F5u3ebTGb/jDf34tgC
+# zTXLpvA4r/5jcREZHvMv9iPs/vTB17eOneGZSshtRTwTeffU/Cn85Qxy/y5WbK0a
+# l/7UkcS1SZWOiJySnUruIfHrSpXLPU218l00CdaOtCKmFxceKc9gVNJVafI06868
+# qzklaNy75zmWmY8I+5lSbDgbXpU7PqKwRbwPbXxGZgo6b3B9aw7qkWuVwdUqyllT
+# 0YSDm8D9GhOLAZxjZrNyR0OcNxiOCcD/e6EgjYMuxrt+O4QFnC70qHiG1Mk7IVcF
+# SntdfVC6BYKPrupPkvFdBBNcybtJ89kzZgx4PhOMobFgZx6358Yeg1D36I+Fx8n9
+# J/5r1kDrs15zMBPcJPBHGIi3zwj8oaIzOhjzPS7npD/mjNVfKnl43dZzFiRcEsZW
+# 5hDZZLO0yB8VhbElwKEsWJtn7ccGUryB/SAjeGG/Pk+nXwM+SrTrHfTch51UQS4P
+# FSIwTTlsKzcdq+CPx4GwbrWnuQTXPk8mWYyj7HQWK0pGC0CneJnczWc8+hGTn98L
+# ekY=
 # SIG # End signature block

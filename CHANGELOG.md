@@ -1,5 +1,5 @@
 # WhatsUpGoldPS Release History
-## 0.1.8 - Release Date
+## 0.1.8 - 2024-03-02
 ### Changed
 * Functions
   * Add-WUGDevice - Parameters for credentials and subroles

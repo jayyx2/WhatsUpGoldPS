@@ -1,4 +1,11 @@
 # WhatsUpGoldPS Release History
+## 0.1.8 - Release Date
+### Changed
+* Functions
+  * Add-WUGDevice - Parameters for credentials and subroles
+ 
+## 0.1.1-0.1.7 - Release Date
+### I forgot to document, sorry!
 
 ## Version Number - Release Date
 0.1 - 2023-03-14

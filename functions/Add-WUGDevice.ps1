@@ -1,114 +1,149 @@
 <#
 .SYNOPSIS
-Creates a new device in WhatsUp Gold using the specified parameters.
+Adds a device to WhatsUp Gold using the WhatsUp Gold REST API.
+
+.DESCRIPTION
+The Add-WUGDevice function adds a device to WhatsUp Gold using the WhatsUp Gold REST API.
+It allows configuring various aspects of the device such as display name, IP address, template,
+hostname, device type, polling interval, credentials, monitors, and other attributes.
 
 .PARAMETER displayName
 The display name of the device.
 
 .PARAMETER DeviceAddress
-The IP address or hostname of the device.
+The IP address of the device.
+
+.PARAMETER Template
+The template to use for configuring the device (optional).
+
+.PARAMETER Hostname
+The hostname of the device (optional).
 
 .PARAMETER deviceType
-The type of the device.
+The type of the device (optional).
 
 .PARAMETER PollInterval
-The polling interval for the device, in seconds.
+The polling interval for monitoring the device (optional).
 
 .PARAMETER PrimaryRole
-The primary role of the device.
+The primary role of the device (optional).
 
 .PARAMETER SubRoles
-An array of sub-roles for the device.
+The sub-roles of the device (optional).
 
 .PARAMETER snmpOid
-The SNMP OID for the device.
+The SNMP OID of the device (optional).
 
 .PARAMETER SNMPPort
-The SNMP port for the device.
+The SNMP port of the device (optional).
 
 .PARAMETER OS
-The operating system of the device.
+The operating system of the device (optional).
 
 .PARAMETER Brand
-The brand of the device.
+The brand of the device (optional).
 
 .PARAMETER ActionPolicy
-The action policy for the device.
+The action policy for the device (optional).
 
 .PARAMETER Note
-A note to add to the device.
+Additional notes for the device (optional).
 
 .PARAMETER AutoRefresh
-Whether to enable auto-refresh for the device.
+Whether to enable auto-refresh for the device (optional).
 
-.PARAMETER Credentials
-An array of credentials for the device.
+.PARAMETER CredentialWindows
+Windows credential for the device (optional).
+
+.PARAMETER CredentialSnmpV3
+SNMPv3 credential for the device (optional).
+
+.PARAMETER CredentialSnmpV2
+SNMPv2 credential for the device (optional).
+
+.PARAMETER CredentialSnmpV1
+SNMPv1 credential for the device (optional).
+
+.PARAMETER CredentialAdo
+ADO credential for the device (optional).
+
+.PARAMETER CredentialTelnet
+Telnet credential for the device (optional).
+
+.PARAMETER CredentialSsh
+SSH credential for the device (optional).
+
+.PARAMETER CredentialVMware
+VMware credential for the device (optional).
+
+.PARAMETER CredentialAWS
+AWS credential for the device (optional).
+
+.PARAMETER CredentialAzure
+Azure credential for the device (optional).
+
+.PARAMETER CredentialMeraki
+Meraki credential for the device (optional).
+
+.PARAMETER CredentialRestApi
+REST API credential for the device (optional).
+
+.PARAMETER CredentialRedfish
+Redfish credential for the device (optional).
+
+.PARAMETER CredentialJmx
+JMX credential for the device (optional).
+
+.PARAMETER CredentialSmis
+SMIS credential for the device (optional).
 
 .PARAMETER Interfaces
-An array of interfaces for the device.
+Interfaces configuration for the device (optional).
 
 .PARAMETER Attributes
-An array of attributes for the device.
+Attributes configuration for the device (optional).
 
 .PARAMETER CustomLinks
-An array of custom links for the device.
+Custom links configuration for the device (optional).
 
 .PARAMETER ActiveMonitors
-An array of active monitors for the device.
+Active monitors configuration for the device (optional).
 
 .PARAMETER PerformanceMonitors
-An array of performance monitors for the device.
+Performance monitors configuration for the device (optional).
 
 .PARAMETER PassiveMonitors
-An array of passive monitors for the device.
+Passive monitors configuration for the device (optional).
 
 .PARAMETER Dependencies
-An array of dependencies for the device.
+Dependencies configuration for the device (optional).
 
 .PARAMETER NCMTasks
-An array of NCM tasks for the device.
+NCM tasks configuration for the device (optional).
 
 .PARAMETER ApplicationProfiles
-An array of application profiles for the device.
+Application profiles configuration for the device (optional).
 
 .PARAMETER Layer2Data
-The Layer 2 data for the device.
+Layer 2 data configuration for the device (optional).
 
 .PARAMETER Groups
-An array of groups to which the device should belong.
-
-.EXAMPLE
-$params = @{
-    DeviceAddress = "192.168.1.1"
-    displayName = "My Device"
-    Hostname = "my-device.example.com"
-    deviceType = "Server"
-    PollInterval = 120
-    PrimaryRole = "Switch"
-    SubRoles = @("Role1", "Role2")
-    snmpOid = "1.3.6.1.4.1.9.1.2417"
-    SNMPPort = 161
-    OS = "Linux"
-    Brand = "Cisco"
-    ActionPolicy = "MyActionPolicy"
-    Note = "This is a test device"
-    AutoRefresh = $true
-    Credentials = @("Credential1", "Credential2")
-    Interfaces = @("Interface1", "Interface2")
-    Attributes = @("Attribute1", "Attribute2")
-    CustomLinks = @("Link1", "Link2")
-    ActiveMonitors = @("Ping", "SNMP")
-    PerformanceMonitors = @("PerfMonitor1", "PerfMonitor2")
-    PassiveMonitors = @("PassiveMonitor1", "PassiveMonitor2")
-    Groups = @("Group1", "Group2")
-}
-Add-WUGDevice @params
-
-This example creates a new device with all the specified parameters, including the IP address, display name, active monitors, and more.
+Groups association for the device (optional). ---All devices go to the 'My Network" top-level group
 
 .NOTES
 Author: Jason Alberino
 Date: 2023-03-07
+
+.EXAMPLE
+# Add a device with basic configuration
+Add-WUGDevice -displayName "Server01" -DeviceAddress "192.168.1.100" -Hostname "server01.example.com" -PollInterval 300 -CredentialWindows "Existing-WUG-Cred-Name"
+
+Description
+-----------
+This command adds a device named "Server01" with the IP address "192.168.1.100" and hostname "server01.example.com".
+It specifies to use the Windows Credential named "Existing-WUG-Cred-Name" and sets the polling interval to 300 seconds.
+The device is added with default settings for other parameters not specified in the command.
+#All devices go to the 'My Network" top-level group
 #>
 
 function Add-WUGDevice {
@@ -463,8 +498,6 @@ function Add-WUGDevice {
 
     $jsonBody = $Template | ConvertTo-Json -Depth 5 -Compress
 
-    $jsonBody
-
     $body = "{
         `"options`":[`"all`"],
         `"templates`":[${jsonBody}]
@@ -486,8 +519,8 @@ function Add-WUGDevice {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+t5MlCwQkaGj5
-# 9mah5VHo7W39+mSAnCS6JdTJ8J80hKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANjWC+jnd+op10
+# 5t5ivg3vUPxw1FjLc8unvXSjCvUpNqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -588,17 +621,17 @@ function Add-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgxc1Fve67brxmHSAp48aMUEe9Wez8OFs2Wa0yR0R49HQw
-# DQYJKoZIhvcNAQEBBQAEggIAHV5b2ciw3lqRnxwZgYubJGtTIn+lfLXHym87LTnq
-# mgGmUrSoMpXXKzSmBcIZ8O707FRjcLoW9ZZmmq/fbRyBH9wH+MxYWUUcuy3GDVeO
-# WZr1qwlwT92yaFzvZruBWCn63c/d9Ep8iPromwcDXg6ze2F5u3ebTGb/jDf34tgC
-# zTXLpvA4r/5jcREZHvMv9iPs/vTB17eOneGZSshtRTwTeffU/Cn85Qxy/y5WbK0a
-# l/7UkcS1SZWOiJySnUruIfHrSpXLPU218l00CdaOtCKmFxceKc9gVNJVafI06868
-# qzklaNy75zmWmY8I+5lSbDgbXpU7PqKwRbwPbXxGZgo6b3B9aw7qkWuVwdUqyllT
-# 0YSDm8D9GhOLAZxjZrNyR0OcNxiOCcD/e6EgjYMuxrt+O4QFnC70qHiG1Mk7IVcF
-# SntdfVC6BYKPrupPkvFdBBNcybtJ89kzZgx4PhOMobFgZx6358Yeg1D36I+Fx8n9
-# J/5r1kDrs15zMBPcJPBHGIi3zwj8oaIzOhjzPS7npD/mjNVfKnl43dZzFiRcEsZW
-# 5hDZZLO0yB8VhbElwKEsWJtn7ccGUryB/SAjeGG/Pk+nXwM+SrTrHfTch51UQS4P
-# FSIwTTlsKzcdq+CPx4GwbrWnuQTXPk8mWYyj7HQWK0pGC0CneJnczWc8+hGTn98L
-# ekY=
+# BgkqhkiG9w0BCQQxIgQgh+uW7RMChhgQ4u2HlVhYMr2RXaKxnFoMZ8h3XBZ54Hgw
+# DQYJKoZIhvcNAQEBBQAEggIAmEvAjFnESSapTstcT3EoxoeyYo2SkVgC40l7dhz3
+# 1vlMrcIjT9lAZMx/7OcIBA99Q6BGUcvwA736l6I6+oyaLikfyHDTMGOkD5mO48bh
+# BRfzG60ZSGZSkVi2vK0VFA2rCorQu6Szi2UEKfykYOTykFM+I1AatiwYqc+3mD1T
+# qhZNfbQ0ur0O8LgVBT0D+fb+EgsUqRFQXQTfL01C6zZBFIP+jZlDU/U3bmCVj9lN
+# i2efoU5LzZ205FpKk6bAWmDtXwGQu6zXBz2bob9tfeqmEVCsHZNZmXWUjH2xoPDx
+# D+of66jbKg3dES1DyDMeTqfWtejZmi08YJLMS6btUu69DdOpTuCIDqCJQpw/wDpB
+# qyWOb1CrO8WHtCbZ5WoaSz5u1qA0qa78Q3nS2wUcj78UmtYG8duPQzDvm7gLtTPf
+# 8MQKzUjyITfDwrn50rMYP9+yu5jmgFjFISO/nE6aNL3FfyQvtuDB3OI/xkeSF+T8
+# nv3Wl34Q7AETeD6zfZw1cWxqdukWQr9t/d5PHIwfqxfy/i029R05sUNgZ2GG/0zd
+# LTTX/FcWBxD6DbgYOerzu5O7aqekfhDXIAJpBagZMl7vvzPHh5POz6WENEV42dcz
+# 5tMAlpXSbL1rZxbKIFBjOhyQfNgZoqd7yMpGA1AR2zN8ivhR+SW3lOeJ85tJs4gt
+# dIg=
 # SIG # End signature block

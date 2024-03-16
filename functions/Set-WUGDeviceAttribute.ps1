@@ -15,7 +15,7 @@ The ID of the attribute to update.
 The name of the device attribute.
 
 .PARAMETER Value
-(Optional) The value for the device attribute.
+The value for the device attribute.
 
 .EXAMPLE
 Set-WUGDeviceAttribute -DeviceId "12345" -AttributeId "56789" -Name "Location" -Value "New York"
@@ -24,23 +24,20 @@ This example updates the attribute with ID "56789" for the device with ID "12345
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja) 2023-06-19
-Last modified: Let's see your name here YYYY-MM-DD
+
+Modified 2024-03-15
+    -Made $Value mandatory, it does nothing without this.
+
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/Device_UpdateAttribute
 #>
 
 function Set-WUGDeviceAttribute {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$DeviceId,
-        
-        [Parameter(Mandatory = $true)]
-        [string]$AttributeId,
-        
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-        
-        [string]$Value
+        [Parameter(Mandatory = $true)][string]$DeviceId,
+        [Parameter(Mandatory = $true)][string]$AttributeId,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Value
     )
 
     #Global variables error checking
@@ -63,8 +60,8 @@ function Set-WUGDeviceAttribute {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDD0meJdbxV58UQ
-# 8wHXGzGURiRZ72KSJ7CbnRBWmYusbaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMCZYCk8HrVVmu
+# EcUK0zBv/y5NyxUifcwtaz77czdPsaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -165,17 +162,17 @@ function Set-WUGDeviceAttribute {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgTFoGvrq9HVn0Kb4bujjouJXGbC2cAHTvD8Y6eoTLWVsw
-# DQYJKoZIhvcNAQEBBQAEggIAIT02/syhoeeC9HfEO7aJczCSBpYyBH6evwxzcPXz
-# kTLoAEnK/wqNPpcBoy7kU5Jak/8dlhNJE+wy+ucM96YH1Y2EsBcxG8s55Vd61CSY
-# /yttZqXDvDHeUPhcT058Qlhh4B6LHYW630VEsen7MUhYSbl//uWZt7HrvnHNT/C7
-# mTbTEJMgoqS+OnCl6IE2MwG0ZFtmW7/1H1EOx26P99U44ts+mhEB52ecuh/5UsAK
-# qfxAS9WSRdhOPSArSNaDAU7iZ1ocZXPkjGmPySi09mIkMXMAnkbHLuQlBxfGyiKi
-# u/D94pk7VETBVleVgYKRodMWuWvvSgWMJsO09YJUovC2U6TREbcU+OATp5MUtrQG
-# gS8RVo/3H7TVcLdZRF1/OHf/vR40n/PQlXzJiBRiQuu7znhWW0uFf5FtWh8t5cXX
-# S+7VUgpo/LQ9IZcLPSklpgBd9GYjqv7JH7Bs1Lu3gV81v0LIraTttoD1Ye8jqt4v
-# 8TLvrEMeGoCK+jgbq+YApNWH6VPh4echKJXE0237Ez2KlYU/+x4ew7Zq6amVOEXQ
-# ZhAyGDYhTu22ENjdU4npUqwVA0EIsp7hhSOgoJSmrBPPSbd5vCQvG9L2Q0iHGY15
-# PnXPzZSddWLXjqPRvFSV5xSVyLpuoQURwSiSYwcHHM3lBhp/KanUrwfCo5oUywj+
-# 4l4=
+# BgkqhkiG9w0BCQQxIgQgM3HvArz0r0jGamnRroVw3p2j5yZKI5ckU4Ra+YQrUMUw
+# DQYJKoZIhvcNAQEBBQAEggIAU7gpj0wYuBlr/cTUQxMMD0ySZmwsQf5gU675vFxP
+# wWl5L0gwCbLpZlMyi4nLin5QwTCx+w/pTbzSPap587pwFPitgfiVpSO/5brD4MvG
+# QW12WXBq681na0MOftKAZOnkPlpmPmuHlu0N6srSXqh3rTKqscOASedinVKXOIzG
+# Guu6WapU8+NSB2mKS4Sj1TrwMpd6Oqh8WKJmJvroN8DMH8utgO0L7sKllx0UU36E
+# A0XEGdflNvIE3ilKpQFCc3+7r/nfdM7aBx3NG2cSsPq1ybBbScm5FgcxZ4fzjnKf
+# AgoVe1v7xepin9UFxfgJ7vzd9Fnb1cLq+1yBEimy0VKezh05oPNJyjUP7CTxh+Ow
+# vo8ALirIIQVfFnC/I9OtYJu8mkJMJI0HdCftbI5E4l/NdmrRM9D+2Ka4dd3XOCWO
+# iRI4LkSjcaX6DXGNlpr/aqBm7hKiPnCrDIS5Ug4ynQLkk+6sh0pSM3tRfF70rHaM
+# Zhp64xXvEE5UNyI4kYB4rWCOD/5Z3mYOKxLhCG29WpMxu9wRMShj2blkznSDsU19
+# T93x0wc3LczU9dH4zKa6aZLFDYJaAWquMn/3I83KMP4ZemnM0FHd8zq1qmfDiFmu
+# hffC23Pu8cTlSA1WTSz1rmKqB/yiZ2Zowc1P7w1aw3sKzvo7/SRCsxufNpvx+F92
+# Ccg=
 # SIG # End signature block

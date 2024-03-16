@@ -1,90 +1,94 @@
 <#
 .SYNOPSIS
-Creates new devices in WhatsUp Gold using device templates.
-
-.PARAMETER -templates <array>
-The device templates to use to create the new devices.
-
-.PARAMETER -ApplyL2 [<SwitchParameter>]
-Specifies whether Layer 2 data should be applied.
-
-.PARAMETER -Update [<SwitchParameter>]
-Specifies whether to update existing devices with new templates.
-
-.PARAMETER -UpdateInterfaceState [<SwitchParameter>]
-Specifies whether interface state should be updated.
-
-.PARAMETER -UpdateInterfaceNames [<SwitchParameter>]
-Specifies whether interface names should be updated.
-
-.PARAMETER -UpdateActiveMonitors [<SwitchParameter>]
-Specifies whether active monitors should be updated.
+Retrieves a list of device groups from WhatsUp Gold API.
 
 .DESCRIPTION
-The `Add-WUGDevices` function creates new devices in WhatsUp Gold using the specified device templates. If the `-ApplyL2`
-switch is specified, Layer 2 data will be applied to the new devices. If the `-Update` switch is specified, existing devices
-will be updated with the new templates. If the `-UpdateInterfaceState` switch is specified, the interface state of existing
-devices will be updated. If the `-UpdateInterfaceNames` switch is specified, the interface names of existing devices will be
-updated. If the `-UpdateActiveMonitors` switch is specified, the active monitors of existing devices will be updated.
+The Get-WUGDeviceGroups function retrieves device groups from the WhatsUp Gold API
+based on the specified parameters such as search value, view type, group type, and limit.
 
-EXAMPLES
-Add-WUGDevices -templates "Switch 1", "Router 1"
+.PARAMETER SearchValue
+Specifies the search text to filter device groups. Case-insensitive search by display name.
 
-This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates.
+.PARAMETER View
+Specifies the view type for the returned data. Valid values are "summary" or "detail". Default is "detail".
 
-Add-WUGDevices -templates "Switch 1", "Router 1" -ApplyL2 -Update -UpdateInterfaceState -UpdateInterfaceNames
+.PARAMETER GroupType
+Specifies the type of device groups to retrieve. Valid values are "all", "static_group", "dynamic_group", or "layer2".
+Default is "all".
 
-This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates, applies Layer 2 data, updates
-existing devices with the new templates, updates the interface state of existing devices, and updates the interface names of
-existing devices.
-Author: Jason Alberino
-Date: 2023-03-07
+.PARAMETER Limit
+Specifies the maximum number of device groups to retrieve per page. Must be between 1 and 200. Default is 25.
+
+.NOTES
+Author: Jason Alberino (jason@wug.ninja)
+Date: 2024-03-15
+Modified: [TBD]
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceGroup_Get
 #>
-
-function Add-WUGDevices {
-    param(
-        [Parameter(Mandatory)] [array] $deviceTemplates,
-        [switch]$ApplyL2,
-        [switch]$Update,
-        [switch]$UpdateInterfaceState,
-        [switch]$UpdateInterfaceNames,
-        [switch]$UpdateActiveMonitors
+function Get-WUGDeviceGroups {
+    param (
+        [Parameter(Mandatory = $false)][string]$SearchValue,
+        [Parameter(Mandatory = $false)][ValidateSet("summary", "detail")][string]$View = 'detail',
+        [Parameter(Mandatory = $false)][ValidateSet("all", "static_group", "dynamic_group", "layer2")][string]$GroupType = 'all',
+        [Parameter(Mandatory = $false)][ValidateRange(1, 250)][int]$Limit = 25
     )
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
+    # Write debug information
+    Write-Debug "Function: Get-WUGDeviceGroups"
+    Write-Debug "SearchValue:   ${SearchValue}"
+    Write-Debug "View:          ${View}"
+    Write-Debug "GroupType:     ${GroupType}"
+    Write-Debug "Limit:         ${Limit}"
 
-    #Unsure if these are needed or how to test them properly
-    $options = @("all")
-    if ($ApplyL2) { $options += "l2" }
-    if ($Update) { $options += "update" }
-    if ($UpdateInterfaceState) { $options += "update-interface-state" }
-    if ($UpdateInterfaceNames) { $options += "update-interface-names" }
-    if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
+    # Global variables error checking
+    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer";Connect-WUGServer}
+    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer";Connect-WUGServer} else {Request-WUGAuthToken}
+    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer}
+    # End global variables error checking
+    
+    $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-?view=${View}&groupType=${GroupType}&limit=${Limit}"
+    if ($SearchValue) {$uri += "&search=$SearchValue"}
 
-    #Convert the PowerShell object to a JSON object, up to the specified depth
-    $body = @{
-        options   = @("all")
-        templates = $deviceTemplates
-    } | ConvertTo-Json -Depth 10
+    $allGroups = @()
+    do {
+        $result = Get-WUGAPIResponse -uri $uri -method 'GET'
+        $groups = $result.data.groups
 
-    #Try the request and return the response or write an error if it fails
-    try {
-        $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
-        return $result.data
-    }
-    catch {
-        Write-Error $_
-    }
+        foreach ($group in $groups) {
+            $groupObject = [PSCustomObject]@{
+                Id = $group.id
+                ParentGroupId = $group.parentGroupId
+                Name = $group.name
+                Description = $group.description
+                GroupType = $group.details.groupType
+                MonitorState = $group.details.monitorState
+                ChildrenCount = $group.details.childrenCount
+                DeviceChildrenCount = $group.details.deviceChildrenCount
+                DeviceDescendantCount = $group.details.deviceDescendantCount
+            }
+            $allGroups += $groupObject
+        }
+
+        $pageInfo = $result.paging
+
+        if ($pageInfo.nextPageId) {
+            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-?view=${View}&groupType=${GroupType}&limit=${Limit}&pageId=$($pageInfo.nextPageId)"
+            if ($SearchValue) {
+                $uri += "&search=$SearchValue"
+            }
+            $percentComplete = ($allGroups.Count / $pageInfo.size) * 100
+            Write-Progress -Activity "Retrieved $($allGroups.Count) device groups already, wait for more." -PercentComplete $percentComplete -Status "Page $($pageInfo.nextPageId) of ?? (${Limit} per page)"
+        }
+    } while ($pageInfo.nextPageId)
+
+    return $allGroups
 }
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzf2MafhrAL7rC
-# jPoMWfABM9y+b2GtyOyq60PLIj4bqKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhpEMQX84nb7D6
+# Ovp6estYcpq4YgtpOrSpXKXUVaCPIaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -185,17 +189,17 @@ function Add-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgurSb3/DZ2LrkDwBQ/xcwpvyZPOTLLEie72KbHYj7ugAw
-# DQYJKoZIhvcNAQEBBQAEggIAX/Y1ReZuCggNNtze0nNIRzRdN+ZgzkajjiwyzWxR
-# BbSBRSTkqoT0ud01m2HqmI57D0G3iyhejypy7HgPdO8c7qUAkghrHNIKybr08oGE
-# rojfsFYUUEkyBrMqYuXakxfiUGZmkMgKbTppvCe7+uFH4PwGCTrMDyT73pH1bjcM
-# Kiml4OukvRJYZXQob/qqU0cRv9/dRFLxz4CtQMFhSIVLVVrndWZz1A6UWRxmF7aJ
-# ECasKyKmCsdmiL7MnLgSap2LwFOcv0Nmw0B3kHD08Tm/4jOZDrBhDvMwdp99yo+W
-# 3gjP97O9aaUicX3bCI6YxOrRo2+N3NnEX4WphPiVvrOc0xDrrRhWNNyLrPy88Xvc
-# KW3JTeIbcnYKnSohW90pHpI2AmWla+xpcUdL995iyESRclMpJ6J/hXtJosIH1Wbu
-# C3g5iatxzCtSHR7kIAhVHEfQsnNfCB1vJJNE/XXl1zEOpIgtcUbWRqk85dWFppC6
-# 4U1aI1jA7OwIgt0t/B/0z5cI53GULIR7K21z6rUbR8jiFQInEmqjWQOOzyyF8NJq
-# Ae8ReZ/BP0hlBZfg/HoyjOCPcVk/6PhwwJIqF7fPbMf1G6YPWv8UB+ZUcLzkKemI
-# wxjuv5ERxPjwseAZq9cFVy4sIIaijEnXPK/JAgQ93R6Tln4aAwuO5cgAtrByMm6b
-# yrw=
+# BgkqhkiG9w0BCQQxIgQgmY0XgWT6r2xDkP2yUcxt0Nc01yIGd/I1MWi1pb47iMww
+# DQYJKoZIhvcNAQEBBQAEggIAg1y3XDo7QF3ZoySVrAaEB9BiDUCqFBiRdhq3DK4X
+# Y7rvRh/m2DCAq4ftD9t8fuTW0QM84/GFezglaoDpWaJ+GVf//NEWONLAKGqGNlYF
+# y3snKQ5huFE9Ws2L7agwV2k23XnXSlonc24YQrebw15+FcACR3Z1NKE24AqZvEaC
+# z18TKTT0hwDAHT0AGFVakrKjm0lP1YoT3/3P5/RYlJm7NJAcdA2ae9Y5mh0+hwTJ
+# obQvEy5FfQ4Dkv6Bz+/CEwdEQQDbgegtHzf23hkoUBWozi7yAqUCHRdsVkFE9bFO
+# X9MnKaoc1PoWKA9Ge7uBkpMFz5iGOPr7oi3WxfUuxPJ3o9vj3Cko3QpiVWOiuHuH
+# UzZ/3SsZGql5n9xVakGYLz+r9cvWHtciZm2S09zWzUQTDNFKi1EmItZBsrSFtdxx
+# ANlyf+A4T+d9FrA3xnwn8mZru/NTrMlHH4E4ClcFPMtLt2ODr2PYWcq5Hc4YHKqk
+# Oy8tX/5Gn4leXa9NRUMRkfJDWi76hVvJxGkMLxRwS2V2D2+7zg8FBcqmIgEAPmtD
+# Pp09lS2XTOGPdtcZAUbYBQNtZKlgc0EId3DvvLh96zO7Dp/qdSacLO+ovdCtMnD+
+# JaRSkU1vxfZL1uDzyVLhLYmMsxKABFy496f0BMAfy5Y5evqFl8HsMCS9+p5+77k6
+# SWc=
 # SIG # End signature block

@@ -1,29 +1,28 @@
 <#
 .SYNOPSIS
-    Retrieves a specific attribute for a device in WhatsUp Gold (WUG) using the device ID and attribute ID.
+Retrieves a specific attribute for a device in WhatsUp Gold (WUG) using the device ID and attribute ID.
 
 .DESCRIPTION
-    The Get-WugDeviceAttribute function retrieves a specific attribute for a device in WUG using the device ID and attribute ID.
-    It requires the OAuth 2.0 authorization token to be set, which can be obtained using the Connect-WUGServer function.
-    The function validates the input parameters and handles any errors that occur during the API request.
+The Get-WugDeviceAttribute function retrieves a specific attribute for a device in WUG using the device ID and attribute ID.
+It requires the OAuth 2.0 authorization token to be set, which can be obtained using the Connect-WUGServer function.
+The function validates the input parameters and handles any errors that occur during the API request.
 
 .PARAMETER DeviceID
-    The ID of the device for which to retrieve the attribute. This parameter is mandatory.
+The ID of the device for which to retrieve the attribute. This parameter is mandatory.
 
 .PARAMETER AttributeID
-    The ID of the attribute to retrieve. This parameter is mandatory.
+The ID of the attribute to retrieve. This parameter is mandatory.
 
 .EXAMPLE
-    Get-WugDeviceAttribute -DeviceID "device1" -AttributeID "attribute1"
-    Retrieves the "attribute1" attribute for "device1" in WhatsUp Gold.
+Get-WugDeviceAttribute -DeviceID "device1" -AttributeID "attribute1"
+Retrieves the "attribute1" attribute for "device1" in WhatsUp Gold.
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja) 2023-04-02
-    Last modified: Let's see your name here YYYY-MM-DD
-    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Device-Attributes
+Author: Jason Alberino (jason@wug.ninja) 2023-04-02
+Last modified: 2024-03-15
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Device-Attributes
 #>
 function Get-WUGDeviceAttribute {
-    [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$DeviceId,
         [Parameter(Mandatory)][string]$AttributeId
@@ -48,8 +47,8 @@ function Get-WUGDeviceAttribute {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDnlZVK5l31TS3G
-# 47lRiYfqnqOwTjro7tWkd62guoaanqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmPSB81ZGpyH4f
+# o298syD4Weu47MuMztGIYz4MnUcM9qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -150,17 +149,17 @@ function Get-WUGDeviceAttribute {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgjd7szNLdvaZ5yaN3yi9MVGCa2SXdqYOAoXv39loL7Zow
-# DQYJKoZIhvcNAQEBBQAEggIAkDausGPxdGYKpM/frTMRNzLJQ5XILJORXhHlVqK1
-# ENJAAMUSMqhKx92mzaRh8iUmRWhtQfODb0gL6/Fq2kY66N9wyf2nkEliP1r4biBM
-# WpOt1UZsNfbjmOQgCQSQ/So2DHimy1O4iPlfKr0YdgbS2dc+QbAfsySncf7TwcmM
-# YgvKOTGVmL9g+CcaqNfAxQ9kL0bY35jLzdhrrQD9ivoho3TWCwSjG37MafAZSENX
-# XSqSdgVKt0rS7DW61MtRK2eXtVE70hdVkF4mZ18ZilKww/9E5Sketq06SWGb5ndG
-# VlSUN/tpypUjvy1uFXNZBZr4tyWZll1r6UQrs7r2+QJ37MTCxku1MUxSEvIhj4qz
-# ud1WgnFEMKMkxRAgMddmbZlOQbmn3bV6e/ik629e4tmM3zs4XTlLAmjvMf1v8NSD
-# /J9GOc0BpcwgjYFW5TWvozl8FXWN2BHu2uo08QNjHtm/ZXsBNGLPQIQvAyWolQOY
-# mi/iRKeX1zu5FY6SlAlm8tHjfavLvNHeE0fodU1cjNIh1V6XRdeczEVfhL9pE6PH
-# fS+93jcSU82c6y+5vxoMKz4dpVYE/MCF1N1BK/4gHWQZ/lhxWzpKMYVuhcFyu+T3
-# dMv0hCjCSLnxhij/XLnZi6GNQJ7YROnDoxbN+MIMnmR2cOR4iqvDQ3OFZftU3teQ
-# Slw=
+# BgkqhkiG9w0BCQQxIgQgzJKfvwJja3uGZGrQAB6CF/yrOWuq0z4SMIsldKpvhfkw
+# DQYJKoZIhvcNAQEBBQAEggIAj+9kZ9eSunibxYmM+cv7da5j9NJCggdiOUUDiuPt
+# D1KFpu6Kw0SQXyURL7VZ/3w7Ilk2dJQbLjbe2UYQH1e7v0/3JQmuESp7MYJFvtvq
+# FLEbx3txN+ohQZe0P3BNab+80XygfUIgxpq96+P8CbcL+vR8d1nns02vrg9hzgly
+# tAmGPY2tvzZuaprxaS43gGZv599JJ1UfjDakAMsjF2Z0CAVI+RKkstm2Fw916blc
+# cpBAyP69K7g4+yJM/pRFA7mm4kMvwHGDm8Ys8X3aE+v6/Tv935x7NyWgpErZocNQ
+# YWOz2rKJmwJN8x/kXYEAgKyMcg20yjXt+M7GYOGGHWqngh81UxLxzDl+qVnMgVBa
+# XylJ1JHNbKOllzzhPT0ElwSJWHrVU82zGa7C94+alwTExAti+q1PGWCsKE6QMm+q
+# gFzvbk41Wo2Xr7/ydAUEXP9/CpIk72uClRqO04tbvsoHd8TANxnhFRp5jYea3uuP
+# Hmo8mV98FNsk6F0//s8GCoeBLXZg0LXURY8r+YRlCqW4bPTQmfddTv1knLLC+d43
+# uG/FK9OF1qWwdwgU/fjSQ/tups2bXHFour2qR0Z1lbEHrC/K2/YAZmYV4fbZRF8D
+# IHVkfUex2Vvagv4EGVg9kzmWBMyat/UF2hnbYILXWA8x5L5h86vU7DXu5ZHlOjQ6
+# EJo=
 # SIG # End signature block

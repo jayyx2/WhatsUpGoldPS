@@ -127,8 +127,8 @@ Application profiles configuration for the device (optional).
 .PARAMETER Layer2Data
 Layer 2 data configuration for the device (optional).
 
-.PARAMETER Groups
-Groups association for the device (optional). ---All devices go to the 'My Network" top-level group
+.PARAMETER GroupName
+Name of the static group to add the device to. "My Network" if not set.
 
 .NOTES
 Author: Jason Alberino
@@ -188,7 +188,7 @@ function Add-WUGDevice {
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $NCMTasks,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $ApplicationProfiles,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Layer2Data,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $Groups
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $GroupName
     )
 
     Write-Debug "Function: Add-WUGDevice"
@@ -231,8 +231,7 @@ function Add-WUGDevice {
     Write-Debug "NCMTasks:          ${NCMTasks}"
     Write-Debug "AppProfiles:       ${ApplicationProfiles}"
     Write-Debug "Layer2Data:        ${Layer2Data}"
-    Write-Debug "Groups:            ${Groups}"
-
+    Write-Debug "GroupName:         ${GroupName}"
 
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
@@ -387,6 +386,18 @@ function Add-WUGDevice {
         }
         $CredentialObjects += $CredentialObject
     }
+
+    #Groups
+    $Groups = @()
+    if ($GroupName) {
+        $Groups += @{ name = $GroupName }
+    }
+    <# I can't seem to get GroupId to work from Swagger
+    if ($GroupId) {
+        $Groups += @{ id = $GroupId }
+    }
+    #>
+
     #End data formatting
 
     $options = @("all")
@@ -400,7 +411,8 @@ function Add-WUGDevice {
     if (!$OS) { $OS = "Not Set" }
     if (!$SNMPPort) { $SNMPPort = 161 }
     if(!$SubRoles){ $SubRoles = @("Resource Attributes", "Resource Monitors")}
-
+    if(!$Groups){ $Groups= @(@{name = 'My Network'})}
+    
     #Handle null objects
 
     #Begin template handling
@@ -437,11 +449,7 @@ function Add-WUGDevice {
             ncmTasks            = @()
             applicationProfiles = @()
             layer2Data          = ""
-            groups              = @(
-                @{
-                    name = 'My Network'
-                }
-            )
+            groups              = @(${Groups})
         }
     }
     else {

@@ -8,30 +8,29 @@ and obtains an authorization token using the OAuth 2.0 password grant type flow.
 input parameters and handles credential input, and also allows for ignoring SSL certificate validation errors.
 The authorization token is stored in a global variable for subsequent API requests.
 
-.PARAMETER -serverUri
+.PARAMETER serverUri
 The URI of the WhatsUp Gold server to connect to.
 
-.PARAMETER -Protocol
+.PARAMETER Protocol
 The protocol to use for the connection (http or https). Default is http.
 
-.PARAMETER -Username
+.PARAMETER Username
 The username to use for authentication. If not provided, the function will prompt for it.
 
-.PARAMETER -Password
+.PARAMETER Password
 The password to use for authentication. If not provided, the function will prompt for it.
 
-.PARAMETER -Credential
+.PARAMETER Credential
 A PSCredential object containing the username and password for authentication.
 
-.PARAMETER -TokenEndpoint
+.PARAMETER TokenEndpoint
 The endpoint for obtaining the OAuth 2.0 authorization token. Default is "/api/v1/token".
 
-.PARAMETER -Port
+.PARAMETER Port
 The TCPIP port to use for the connection. Default is 9644.
 
-.PARAMETER -IgnoreSSLErrors
-A switch that allows for ignoring SSL certificate validation errors.
-...which currently does not work.
+.PARAMETER IgnoreSSLErrors
+A switch that allows for ignoring SSL certificate validation errors, which currently does not work.
 
 .EXAMPLE
 Connect-WUGServer -serverUri "whatsup.example.com" -Protocol "https" -Username "admin" -Password "mypassword"
@@ -89,14 +88,13 @@ function Connect-WUGServer {
         [switch] $IgnoreSSLErrors
     )
 
-    #Input validation
+    ###Input validation
     # Check if the hostname or IP address is resolvable
     $ip = $null; try { $ip = [System.Net.Dns]::GetHostAddresses($serverUri) } catch { throw "Cannot resolve hostname or IP address. Please enter a valid IP address or hostname."; }
     if ($null -eq $ip) { throw "Cannot resolve hostname or IP address, ${serverUri}. Please enter a resolvable IP address or hostname." }
     
     # Check if the port is open
     $tcpClient = New-Object System.Net.Sockets.TcpClient; $connectResult = $tcpClient.BeginConnect($ip, $Port, $null, $null); $waitResult = $connectResult.AsyncWaitHandle.WaitOne(500); if (!$waitResult -or !$tcpClient.Connected) { throw "The specified port, ${Port}, is not open or accepting connections." };
-    #$tcpClient.EndConnect($connectResult)
     
     # Check if the credential was input
     if ($Credential) { $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
@@ -110,7 +108,6 @@ function Connect-WUGServer {
             Write-Warning "You are ignoring SSL certificate validation errors, which can introduce security risks. Use this option with caution.";
         }
     }
-    #input validation
     
     #Set the base URI
     $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"

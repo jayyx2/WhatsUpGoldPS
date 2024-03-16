@@ -127,8 +127,8 @@ Application profiles configuration for the device (optional).
 .PARAMETER Layer2Data
 Layer 2 data configuration for the device (optional).
 
-.PARAMETER Groups
-Groups association for the device (optional). ---All devices go to the 'My Network" top-level group
+.PARAMETER GroupName
+Name of the static group to add the device to. "My Network" if not set.
 
 .NOTES
 Author: Jason Alberino
@@ -188,7 +188,7 @@ function Add-WUGDevice {
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $NCMTasks,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $ApplicationProfiles,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Layer2Data,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $Groups
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $GroupName
     )
 
     Write-Debug "Function: Add-WUGDevice"
@@ -231,8 +231,7 @@ function Add-WUGDevice {
     Write-Debug "NCMTasks:          ${NCMTasks}"
     Write-Debug "AppProfiles:       ${ApplicationProfiles}"
     Write-Debug "Layer2Data:        ${Layer2Data}"
-    Write-Debug "Groups:            ${Groups}"
-
+    Write-Debug "GroupName:         ${GroupName}"
 
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
@@ -387,6 +386,18 @@ function Add-WUGDevice {
         }
         $CredentialObjects += $CredentialObject
     }
+
+    #Groups
+    $Groups = @()
+    if ($GroupName) {
+        $Groups += @{ name = $GroupName }
+    }
+    <# I can't seem to get GroupId to work from Swagger
+    if ($GroupId) {
+        $Groups += @{ id = $GroupId }
+    }
+    #>
+
     #End data formatting
 
     $options = @("all")
@@ -400,7 +411,8 @@ function Add-WUGDevice {
     if (!$OS) { $OS = "Not Set" }
     if (!$SNMPPort) { $SNMPPort = 161 }
     if(!$SubRoles){ $SubRoles = @("Resource Attributes", "Resource Monitors")}
-
+    if(!$Groups){ $Groups= @(@{name = 'My Network'})}
+    
     #Handle null objects
 
     #Begin template handling
@@ -437,11 +449,7 @@ function Add-WUGDevice {
             ncmTasks            = @()
             applicationProfiles = @()
             layer2Data          = ""
-            groups              = @(
-                @{
-                    name = 'My Network'
-                }
-            )
+            groups              = @(${Groups})
         }
     }
     else {
@@ -519,8 +527,8 @@ function Add-WUGDevice {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANjWC+jnd+op10
-# 5t5ivg3vUPxw1FjLc8unvXSjCvUpNqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBzixp8FLAAKrqB
+# 59BO700FKgW+qkFZdOuyT3TsDmI7hqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -621,17 +629,17 @@ function Add-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgh+uW7RMChhgQ4u2HlVhYMr2RXaKxnFoMZ8h3XBZ54Hgw
-# DQYJKoZIhvcNAQEBBQAEggIAmEvAjFnESSapTstcT3EoxoeyYo2SkVgC40l7dhz3
-# 1vlMrcIjT9lAZMx/7OcIBA99Q6BGUcvwA736l6I6+oyaLikfyHDTMGOkD5mO48bh
-# BRfzG60ZSGZSkVi2vK0VFA2rCorQu6Szi2UEKfykYOTykFM+I1AatiwYqc+3mD1T
-# qhZNfbQ0ur0O8LgVBT0D+fb+EgsUqRFQXQTfL01C6zZBFIP+jZlDU/U3bmCVj9lN
-# i2efoU5LzZ205FpKk6bAWmDtXwGQu6zXBz2bob9tfeqmEVCsHZNZmXWUjH2xoPDx
-# D+of66jbKg3dES1DyDMeTqfWtejZmi08YJLMS6btUu69DdOpTuCIDqCJQpw/wDpB
-# qyWOb1CrO8WHtCbZ5WoaSz5u1qA0qa78Q3nS2wUcj78UmtYG8duPQzDvm7gLtTPf
-# 8MQKzUjyITfDwrn50rMYP9+yu5jmgFjFISO/nE6aNL3FfyQvtuDB3OI/xkeSF+T8
-# nv3Wl34Q7AETeD6zfZw1cWxqdukWQr9t/d5PHIwfqxfy/i029R05sUNgZ2GG/0zd
-# LTTX/FcWBxD6DbgYOerzu5O7aqekfhDXIAJpBagZMl7vvzPHh5POz6WENEV42dcz
-# 5tMAlpXSbL1rZxbKIFBjOhyQfNgZoqd7yMpGA1AR2zN8ivhR+SW3lOeJ85tJs4gt
-# dIg=
+# BgkqhkiG9w0BCQQxIgQgJ3cNAEsvGBNsxFidXY8vYSiSg7NfxRNmUuNLfcoXpE0w
+# DQYJKoZIhvcNAQEBBQAEggIAYFtR6Nohi4fCsXBDDIbHT1uQaC9+r45efjCtznZ/
+# gaSK1aWtVH3FEYKBIB8Scypc1P5KLH+bFk/2X8438HyIfHNsO0d7zfK/JRY7ZSzq
+# 4EYQ4/oWjLkVFuLMcI5C0bUcsylgsXbOgv4vcEMesnMtCO2QCC2HYwUi36u37jfw
+# hA7mzIlD07Grgzp/9x8iOFBlA7RawSE2FiMQ+MZtuWZpwnAWtSAtBQluXfRTPIx0
+# 0WGRgzJKka3dqkq+F7D5qEC+h4kguPN35LW+a/+u3MC/Lw/YuvRLnnlvirE7oLPP
+# vigY5jD4+toaogEW1vSBZ6W4wTogjHpOd93eWmI8dX50tKNLa9FF1Y0vVY2XWlUF
+# GKlItWgVg98IKncms7Ik/UunfcFKZTdkqzRzGz2fJ0FF4zgjvZVMV1s1239RrDK2
+# jHoBED1wMqZ2UDzjJi8ERGxSv3DDnAH+41zcDmQOEq/dGKjvw8MXba0mBa22xb1T
+# HHOyxpLUwVkQW+4VS8MLxRTdJFrNYkvT0FVDVipjdj7LQXCVJEsKBEiR/rqlP5Cw
+# ljgbsV3joC2XBKx4OoJk2ZfcNMQZd3BZjtM3gJMZHqjkd/X5DjDoeJvjl9IUJ2bw
+# iJGJzYHhy8A6WsCkZTBqONn7ylm20ZcZjx/1RI429xTaLqsnIEG5g+quM+ynsL7o
+# FEY=
 # SIG # End signature block

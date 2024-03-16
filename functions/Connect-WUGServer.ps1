@@ -8,30 +8,29 @@ and obtains an authorization token using the OAuth 2.0 password grant type flow.
 input parameters and handles credential input, and also allows for ignoring SSL certificate validation errors.
 The authorization token is stored in a global variable for subsequent API requests.
 
-.PARAMETER -serverUri
+.PARAMETER serverUri
 The URI of the WhatsUp Gold server to connect to.
 
-.PARAMETER -Protocol
+.PARAMETER Protocol
 The protocol to use for the connection (http or https). Default is http.
 
-.PARAMETER -Username
+.PARAMETER Username
 The username to use for authentication. If not provided, the function will prompt for it.
 
-.PARAMETER -Password
+.PARAMETER Password
 The password to use for authentication. If not provided, the function will prompt for it.
 
-.PARAMETER -Credential
+.PARAMETER Credential
 A PSCredential object containing the username and password for authentication.
 
-.PARAMETER -TokenEndpoint
+.PARAMETER TokenEndpoint
 The endpoint for obtaining the OAuth 2.0 authorization token. Default is "/api/v1/token".
 
-.PARAMETER -Port
+.PARAMETER Port
 The TCPIP port to use for the connection. Default is 9644.
 
-.PARAMETER -IgnoreSSLErrors
-A switch that allows for ignoring SSL certificate validation errors.
-...which currently does not work.
+.PARAMETER IgnoreSSLErrors
+A switch that allows for ignoring SSL certificate validation errors, which currently does not work.
 
 .EXAMPLE
 Connect-WUGServer -serverUri "whatsup.example.com" -Protocol "https" -Username "admin" -Password "mypassword"
@@ -89,14 +88,13 @@ function Connect-WUGServer {
         [switch] $IgnoreSSLErrors
     )
 
-    #Input validation
+    ###Input validation
     # Check if the hostname or IP address is resolvable
     $ip = $null; try { $ip = [System.Net.Dns]::GetHostAddresses($serverUri) } catch { throw "Cannot resolve hostname or IP address. Please enter a valid IP address or hostname."; }
     if ($null -eq $ip) { throw "Cannot resolve hostname or IP address, ${serverUri}. Please enter a resolvable IP address or hostname." }
     
     # Check if the port is open
     $tcpClient = New-Object System.Net.Sockets.TcpClient; $connectResult = $tcpClient.BeginConnect($ip, $Port, $null, $null); $waitResult = $connectResult.AsyncWaitHandle.WaitOne(500); if (!$waitResult -or !$tcpClient.Connected) { throw "The specified port, ${Port}, is not open or accepting connections." };
-    #$tcpClient.EndConnect($connectResult)
     
     # Check if the credential was input
     if ($Credential) { $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
@@ -110,7 +108,6 @@ function Connect-WUGServer {
             Write-Warning "You are ignoring SSL certificate validation errors, which can introduce security risks. Use this option with caution.";
         }
     }
-    #input validation
     
     #Set the base URI
     $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
@@ -151,8 +148,8 @@ function Connect-WUGServer {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoZUo1p5B/d9cK
-# ifFkv5dhIwXXjwCtPc0x7WzfLQ5r5qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/tFj+V5v4ihp8
+# 4Ym2h88YZk5fzviG8wtz/lRD4y0xG6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -253,17 +250,17 @@ function Connect-WUGServer {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgwmsTz+4TGrxtzW5XwHb4xTNk0kDnniqPzDQQo22JO0Ew
-# DQYJKoZIhvcNAQEBBQAEggIAOwG/Wq/v9AxWHMC/RH4hZRvX13Sch4yHkIH6D/BS
-# inB68Mo4Gz5lUKo+SwzGxFoNlF9GxvLvmClaGYIhqH6fchchr00/0w1f9uV7Lqyx
-# V0TqtWrLKjgdRxtZPbuzY5MxGPXnnLw4gRu0tCBPfnbLqd7TdhwFl1dq8haqawvM
-# lCATMyeorFhXuWbVlBpBZ8c4Ij0s2bp1Cb6Cmsm3/wyCjTbxtdlNcpGKRTJoyawu
-# dtOeADrAa6W63BqEK0tDtwsJr75aT5rqAeZxdYUko+/gD7wFt+/g1IH1JcRKfPXm
-# go4JShCeZxLCXk7dKkUbmxHQ/ER6hGnNYmZX3oVnEMhVXESXQ5YAX2z9ybxaa97O
-# 4qM3HnhFecVEHqDL4S+cy8MFrN+BpNL1Ni6BBDPSWg6SusStuqJmfbGKsfPIay6A
-# 9ISEapyDVe64DDE9OVqW0gQzxBj5PUarxbvQYSXeXr21/FawNUzUZGytRIEL5rOs
-# Im/cybSl8HXh42yv9hhDUTY3KyyioBRhq2XPgmF1qo5Q4e+jHJliMiEWDiN4W91t
-# M0ntj5S9BBUyGho0/hkCovPfaoViWD3grXOkbED8BVmIyU4WwwUi7ZdVC+Y7gPVS
-# KEwgY/iHoiLxet+CLaBjgQQEaLSFRptROhwz6iMy1+F72fxrk6ET8E0oSmPwYraA
-# bDs=
+# BgkqhkiG9w0BCQQxIgQgL0Buq1Rhbf3ftsDTNephA3L/zIoWyK/B+01Q8mW8b1ww
+# DQYJKoZIhvcNAQEBBQAEggIATfwKi6xry7yV7CGm3HOUSpqH2wZMbRU1qIE20m2G
+# d7XBuMA1heWOAJobIG2RMWjGZC7BbgS/gIuAiJv5hw+tBPzs+eNCN5G6KYzb5L30
+# zBwZLLX+2D89+3rBemzMbcjikkpPTgy+Vcr1rd2WX3eQnwFxaCSAueEOI2ELbgAs
+# nCeMdUPUqrN3ZkL/WxdVs71ZsbxhKZfejRaqgDzJAfzqQTtJ178IT1mZ+awK4ov0
+# osfvtkYfna6QeeUOfoiFaDfDG/P6YwzWXSQr5dxxGHdMD6pMtS5K3gVh8d+ZajWa
+# 1lhOq/k+rNaIuYyzJ+y9bJNyuj5oUOAOAd+dSzxsnmi1q74DuwsJBHm0ui9rPpUU
+# NuVT1iDkhNlB03JVxLYqgnk5b0J5aG8l5CCiekpJoU6rxvljMqI3eBcpje5Yqc7n
+# r3XqqnfdF/k2TktCGMljMt8wNKzMV79SljVEPoGncIFuq0vfzHxgtKTvnUovSRv1
+# 7GsNkVJ7URPFFaM4UgvOnpFtu0zM2BRSGQDzUXLp01NEZk38R1OwE/fBsKNje8VE
+# Ynz332yPjabJUU+JQZkkjSO2lRNHseIKgaShr59tQO8suQFa5B9gPyJuXZD0R3nI
+# ojdoBy9YisUAhfsaUCXYBIA68331IA9HX4TClyv1yGubdBncXH5VqCxfAyADxn+H
+# 83o=
 # SIG # End signature block

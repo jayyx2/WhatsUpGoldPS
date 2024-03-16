@@ -2,22 +2,23 @@
 .SYNOPSIS
 Retrieves properties of one or more devices in WhatsUp Gold.
 
-.SYNTAX
-Get-WUGDeviceProperties [-DeviceID] <array>
-
 .DESCRIPTION
 The Get-WUGDeviceProperties function allows you to retrieve properties for one or more devices in WhatsUp Gold. You can specify the device ID(s) using the -DeviceID parameter. If you do not specify this parameter, you will be prompted to enter the device ID(s).
 
-.PARAMETERS
 .PARAMETER DeviceID <array>
-    Specifies the device ID(s) of the device(s) for which you want to retrieve properties.
+Specifies the device ID(s) of the device(s) for which you want to retrieve properties.
+
+.EXAMPLE
+Get-WUGDeviceProperties [-DeviceID] <array>
+Get-WugDeviceProperties -DeviceID 1
+$devices = Get-WUGDevices;Get-WUGDevice Properties -DeviceID $devices
+
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja) 2023-04-02
-    Last modified: Let's see your name here YYYY-MM-DD
+Author: Jason Alberino (jason@wug.ninja) 2023-04-02
+Last modified: 2024-03-15
 #>
 function Get-WUGDeviceProperties {
-    [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)] [array] $DeviceID
     )
@@ -47,8 +48,8 @@ function Get-WUGDeviceProperties {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBiNosB3rk/yo8U
-# 9fcDk2baBiQOP/GL0dciVFmkkHWCS6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmvNffRvsurlJn
+# IYLR/Mc7+sQZgfvgD+NYphYaDnyRRKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -149,17 +150,17 @@ function Get-WUGDeviceProperties {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgLT0+9cy82m2y4CMlUSFmcSy3cJE3Rt8Yj9HqbOWAbEww
-# DQYJKoZIhvcNAQEBBQAEggIAks2A7/cCrxBnkrDUM+xn8wA/WkXfY9cNh7wQLQe5
-# MIsYO4Ftd5ZNd4N/6bUd/vTdwUKj40DDA2PBFR3HNNy0+Lo6LjI94TP/IX/TLo2x
-# gavVaSDOWCbmBUdZv2vT0lnuFlCVgLguCbdlcE88ELrfV1sijgZMdhInBsZ1y652
-# lsDb7NeG1Uw7UQu8pXW6VCXjrJydNZcojSQkY1eH61te5Up5nkaEaweimOdTd1i3
-# PT2w4p+AYWRegYyx6YYQMnZ5ggfxgb0J9J0yCUZIfEJK1BX0INAvvmf3r2wWa0lF
-# Nw/QfgzL5By0dRdaMFJ5yQUy1odgUe7LtIa7Rdpdd5jvWo3k/Ci2hO19IaQf8txr
-# h2ja4affSeJmaw7S9a6r/lBd8mElNXF1TA6CQf3aVIPAYwRjBO+Aet73Wd0Nh9Rn
-# cR2bo1JFETkqx9sy2fkPsuBmLl4RI2cG3RR4gl7Ja+tHE9udzzPUvQY2UHQk6Iwu
-# MvZNg10V649iEC6SP39GdgMg429580Wkpg+1nf5XFSRfGVtAGuZHz+63HyPFyTki
-# hxwM00nyLNdARosofxxBK+1amSnFl8NxyTywGcru1I1DbB2zqjg2vYkrqX1pqRCc
-# TO/P2FQV5wA1LJMUTFA0xs4N4oUoJBxGvzK7FRyzuBRLCMq9VsSo0OmXinV9CoAS
-# 7ts=
+# BgkqhkiG9w0BCQQxIgQgCNfjwW9iRuDRQ8VOTkK7T/YSNkpXGnDZAeBwaPB1JiAw
+# DQYJKoZIhvcNAQEBBQAEggIApj+u6TdZ211QPpa0a0qb4urWFJIigFzL/K8iyi9b
+# Zi++69ggRDCxIghkRYdKZvJaQOh9q0l8D/e2jOUD4SgzApPz9mSoWgVXrrmkAlRl
+# CpMLjAAd0sxRC4U94j4D7oA3iDWgbXVlLhvjh4L2r2I1vBctBSFC0LSvc8JC+q1o
+# xOet00kqe9pwZqu5SX5PYAvko0oBH11KvVgjx8ZfOoKlkD+WtTj1fkOKF9oA6pIq
+# DNiCIkO8itJf2/bstN60GUK2GXEALZ/KinfUiJMhcglDV6334ZFTtDVncDBaoREm
+# Ms7j5HIUX3IzYZd12s79hbOx5lq5fbNILX7G5xRq75ZyblmpEY9qW8+Kx2A/PH4M
+# 8qCVaxrqLWIoewhVROz4SdEpz5M+vXAeBypWsg7VaZ6xDh3vgVk59JUgwsNhed2+
+# LyjnQ5UEymDs2OVX9XXDWYNWMtihqVoyW7NRJCWWDOp4nLzTN0/3GucyovTH1A2C
+# qtrRTD+hGLm9AYmQV5PsMaDaH33VtC53+OLvGrgG3TvEicjVqJ7FnD00Y7XLYtYv
+# sJzi42DlZMlPTlFeV4z7qt2e10U/LXnMx3nQneNYIs1KgaJ+SGLHBjEnyBVA/k9+
+# rYkNUcRiBvVxxaB6a38NJ2gT051vXSQMXyQvNWIEFfBbX/Fnw0oJxfy0STYK9Oju
+# T0s=
 # SIG # End signature block

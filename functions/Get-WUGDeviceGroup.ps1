@@ -1,79 +1,84 @@
 <#
 .SYNOPSIS
-    Gets information about a device group in WhatsUp Gold.
+Retrieves device groups from WhatsUp Gold based on specified criteria.
 
-.PARAMETER GroupId
-    The ID of the device group to retrieve information for. This parameter is required.
+.DESCRIPTION
+This function retrieves device groups from WhatsUp Gold using the REST API. It allows you to search for device groups by name, retrieve child groups of a parent group, and specify the view and limit of returned results.
+
+.PARAMETER SearchValue
+Specifies a search value to filter device groups by name.
+
+.PARAMETER ParentGroupName
+Specifies the name of the parent device group to retrieve child groups from.
+
+.PARAMETER View
+Specifies the view of the device group details to be returned. Options include "basic", "card", and "overview".
+
+.PARAMETER Limit
+Specifies the maximum number of device groups to return per page. Default is 25.
 
 .EXAMPLE
-    Get-WUGDeviceGroup -GroupId "12345"
-    Gets information about the device group with ID "12345".
+Get-WUGDeviceGroup -SearchValue "Network" -Limit 50
+Retrieves device groups with names containing "Network" and limits the results to 50.
+
+.EXAMPLE
+Get-WUGDeviceGroup -ParentGroupName "Main Office" -View card
+Retrieves child device groups of the parent group named "Main Office" and returns details in card view.
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja)
-    Date: 2023-04-15
-    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceGroup_Get
+Author: Jason Alberino (jason@wug.ninja)
+Date: 2023-04-15
+Modified: 2024-03-15
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceGroup_Get
 #>
 function Get-WUGDeviceGroup {
     param (
-        [Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0)]
-        [string]$SearchValue,
-        [Parameter(Mandatory=$false,Position=1)]
-        [string]$ParentGroupName,
-        [Parameter(Mandatory=$false)]
-        [string]$View = 'basic',
-        [Parameter(Mandatory=$false)]
-        [string]$Limit = '25'
+        [Parameter(Mandatory = $true, Position = 0)][string]$GroupId,
+        [Parameter(Mandatory = $false)][ValidateSet("summary", "detail")][string]$View = 'detail'
     )
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
+    # Construct the URI
+    $uri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups/${GroupId}?view=${View}"
+    
+    # Write debug information
+    Write-Debug "Function: Get-WUGDeviceGroup"
+    Write-Debug "GroupId:   ${GroupId}"
+    Write-Debug "View:      ${View}"
+    
+    # Global variables error checking
+    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer }
+    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer } else { Request-WUGAuthToken }
+    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer }
+    # End global variables error checking
 
-    $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-/-?view=$View&limit=$Limit"
+    # Make the API request
+    try {
+        $response = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+        $deviceGroup = $response.data
 
-    if (-not [string]::IsNullOrEmpty($ParentGroupName)) {
-        $ParentGroupId = (Get-WUGDeviceGroup -SearchValue $ParentGroupName -View id -Limit 1).id
-        if ($ParentGroupId -eq $null) {
-            Write-Error -Message "Parent device group with name '$ParentGroupName' not found"
-            return
+        # Output in a format similar to Get-WUGDevices
+        $result = [PSCustomObject]@{
+            parentGroupId        = $deviceGroup.parentGroupId
+            groupType            = $deviceGroup.details.groupType
+            monitorState         = $deviceGroup.details.monitorState
+            childrenCount        = $deviceGroup.details.childrenCount
+            deviceChildrenCount  = $deviceGroup.details.deviceChildrenCount
+            deviceDescendantCount = $deviceGroup.details.deviceDescendantCount
+            name                 = $deviceGroup.name
+            id                   = $deviceGroup.id
         }
-        $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/$ParentGroupId/child-groups/-?view=$View&limit=$Limit"
+        return $result
     }
-
-    if (-not [string]::IsNullOrEmpty($SearchValue)) {
-        $uri += "&search=$SearchValue"
+    catch {
+        Write-Error "Error getting device group: $_"
     }
-
-    $currentPage = 1
-    $allGroups = @()
-    do {
-        $result = Get-WUGAPIResponse -uri $uri -method 'GET'
-        $groups = $result.data.groups
-        $allGroups += $groups
-        $pageInfo = $result.paging
-
-        if ($pageInfo.nextPageId) {
-            $currentPage++
-            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/$ParentGroupId/child-groups/-?view=$View&limit=$Limit&pageId=$($pageInfo.nextPageId)"
-            if (-not [string]::IsNullOrEmpty($SearchValue)) {
-                $uri += "&search=$SearchValue"
-            }
-            $percentComplete = ($currentPage / $pageInfo.nextPageId) * 100
-            Write-Progress -Activity "Retrieved $($allGroups.Count) device groups already, wait for more." -PercentComplete $percentComplete -Status "Page $currentPage of ?? ($Limit per page)"
-        }
-    } while ($pageInfo.nextPageId)
-
-    return $allGroups
 }
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbUlNw+yeOOjnv
-# /w5XjFjMuqttbL0sPQ//CLXF9k8DJ6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCECkHry2ypXhq5
+# Zvd8tW20/RdleEdE6SiW5LV8qhtwuqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -174,17 +179,17 @@ function Get-WUGDeviceGroup {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgyZ5UEZsx9fJ1Ed/J5YuFzL6CEihPIMwRhqG+Q9C8QwYw
-# DQYJKoZIhvcNAQEBBQAEggIAnSd+w3kH+a5pCoGRw1VrJNN2zUhi/DsoWi8fppNf
-# 5Iyuw01DI+UWMSpse8rL9KvmQv+Qs32LkHw1/mBYnAcf0mp1Fyu41lipYZ/auoeb
-# 1Wm+MM1Km3kak3d+oKuzg73uXRSduqXL5u+8W1LBQuFhtBs/Lx9Eo/+FR/9SXnOe
-# thJzLerY/Q77GVE4MseF+vko8GboGvhowYy3hkWLsJdUa2+QwM/fYALH3+rz3i5W
-# 9BidHj28Wn3nhC/Owv/1CehRtL6oxSyzCYr7fm6RuQUNElyvmN+Gz1Tghg3/r4Qk
-# y5zsL6aGXa0Q3U5+3SR/mrfjET/yiMFkY3VXeG/4xoOhzgSjoGL1LftFdeLgpoYH
-# Fpv/vQ03/j9rAomQG3xf/z/lGwPZv98Wh8a0CfxHjmYFs9c+wrPt8nub4VabmUWq
-# tI2O08u9wGWa4M5IQ+XmbCGqTsfHUJVvdeAtvWbBjt1P2+P6hEetfS7ugSXiGSPL
-# BSO8ngaJ3m26oYrsyhrwJ2ihJ9grFQ78bTqDOh2CdFAO/TVTb0J8Lb31V1YgFIMw
-# 4ib1bTZq8Q6uRNZG4couQkOLTJ5KQ5wsWg3XGptZRXij7NFjL6fDjtFsAPnCFLKu
-# kc+Hdi3i8Esx6Ed3+hlvF7g6J82/GfFLej++HSWQG1CSL/eigvRb2nxNI04akuMF
-# LHs=
+# BgkqhkiG9w0BCQQxIgQgzFXMhM5TM3mJVOibc8dguiT7C8YGxQgSdKEIdbfS5Zww
+# DQYJKoZIhvcNAQEBBQAEggIAfA2PoViOa1VLXByEG4k6COZMSFqKgR6OGJIRQm8C
+# 0+FzcJGkjJVmJDwEWl8d65dxhu0gSkY0WIhAa0yMa0TBSU8zf9a88peDVteJssuT
+# DxNlh0Pijnbwl70/y0cD/kVZXsjFRmqumcleQ4F7JZnWzK2lnP8Di56pdVNA7bUM
+# RpXBTRGTpEDrv4Ib4UX/mnQQ5nTrKeeHi040FxyWm20W7knNYCTElp8VBJtJnbTz
+# Se3mrmDxxgTXgRGaKRZ+oA72ErCle3H5EpXtaVZX80TSiUPsrduUffNXQtjTQU1E
+# F4LilFz+0LO0FwNrTx5v6JS9k/wLakRM2fPbXQ2T64WuwiFt3ySbB6pjlROa6eto
+# iUgBTl3qYgJaa7vs3SkxBOIuQ9KlyEpNbt7JJW/sylm+Sg6vXOG+IkfLzZ61MpAC
+# nwHULIw3MIAVo0AFxENdqLlqwpeO4LEEAySX21urEtis3mjXwOO4nrHHa+m9RD1Z
+# A8YZIaasOHH1isJ2NmZK29oNiASNjWwLUkNGh7AEuDmJ9ItDx+r1BDNraMoigIrX
+# xi4UzrXcHQqwA1C1pG+Yr5A+Gxt/moBIfzb1VmYKvnWhOpQmjgyfOCa+suXDMcDu
+# YYRnCehFKOonsUkOkr+ocCgVqf1b4uRebBoD5lZSvNCR6ow0r1Hp1/pRf4FNrmoL
+# ytQ=
 # SIG # End signature block

@@ -1,37 +1,36 @@
 <#
 .SYNOPSIS
-    Gets attributes of a device in WhatsUp Gold.
+Gets attributes of a device in WhatsUp Gold.
 
 .PARAMETER DeviceID
-    The ID of the device to retrieve attributes for. This parameter is required.
+The ID of the device to retrieve attributes for. This parameter is required.
 
 .PARAMETER Names
-    An array of attribute names to return. If empty, all attributes will be returned.
+An array of attribute names to return. If empty, all attributes will be returned.
 
 .PARAMETER NameContains
-    A string used to filter and return only attributes with names that contain the specified value. If empty, all attributes will pass.
+A string used to filter and return only attributes with names that contain the specified value. If empty, all attributes will pass.
 
 .PARAMETER ValueContains
-    A string used to filter and return only attributes with values that contain the specified value. If empty, all attributes will pass.
+A string used to filter and return only attributes with values that contain the specified value. If empty, all attributes will pass.
 
 .PARAMETER PageId
-    The page ID to return.
+The page ID to return.
 
 .PARAMETER Limit
-    The maximum number of attributes/values to return.
+The maximum number of attributes/values to return.
 
 .EXAMPLE
-    Get-WUGDeviceAttributes -DeviceID "12345" -Names @("Attribute1", "Attribute2") -Limit 10
-    Gets the first 10 attributes with the names "Attribute1" and "Attribute2" for the device with ID "12345".
+Get-WUGDeviceAttributes -DeviceID "12345" -Names @("Attribute1", "Attribute2") -Limit 10
+Gets the first 10 attributes with the names "Attribute1" and "Attribute2" for the device with ID "12345".
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja) 2023-04-02
-    Last modified: Let's see your name here YYYY-MM-DD
+Author: Jason Alberino (jason@wug.ninja) 2023-04-02
+Last modified: 2024-03-15
     Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/Device_FindAttributes
 #>
 
 function Get-WUGDeviceAttributes {
-    [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$DeviceID,
@@ -85,8 +84,8 @@ function Get-WUGDeviceAttributes {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhLnjK2MFLFVhx
-# fzD3PkUQA9XnTe8jYCyoNQYYx7qurKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC8FIut3vhAzyb1
+# zvvER+B2/DqkPwmJ5PfaO27JPmxI8KCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -187,17 +186,17 @@ function Get-WUGDeviceAttributes {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg6JJqzBLEgZiyGx2z6RovkQHOsUC32R50rDnT22X//mEw
-# DQYJKoZIhvcNAQEBBQAEggIASh2wQd2rEiU2G+gsxTXGPNlsUU0Ks0cBqPQViZIt
-# XCanLI2lu6udSbyLEsdeu38L4MgnxWSUiadeEYjZLP1MyvDWotQQJL014vhyhJQ0
-# K2hWWOowCyr/RFiUJ5m0RCoUYseANh6dZmpUk6LV5tYeGGMtmH5EEN6iXHtCl2qm
-# Ke4htQNEpzdjsQX+k4PYx1ey91S5VsHtz0Euplu+8yjxmm86T98F281jQ9HyOFRs
-# lqMQtIIVJE9fA1lofmIcMXeqPe6S6t/3pn1hBkILK1B8UCtZbZjG+oQqzyCFP1s8
-# ysd4pNELfNV9rw9lZNz/a/Co0BGYYaxmBTg47jLo0+LvPQRY1QNzIP9JVLD+ka4a
-# W22PZTBB7q1WMpKBnXH+RwdSfwEXs3liBJ8eor2TeHGJl20YybgO9CZ6dwNFvR6f
-# e5hNh+KrjxmCxkkA6KdowBL/ioohjbX9hrpyYppZHyG6eKZkBSAfK8XAD29vu3ag
-# VcsojD+1Y+QvakjYfHeqjDwBNWrasD2OIQ4C1m2ZO2Ocpcahp1NSPSOZh4/w1TIu
-# xkXXGb/xTWhuWRZ6UDbgSyysc4Q+SzFgP72dnJKAvg9+CbNxFFHQmrBLP8Pey3R4
-# /4USIUuNOxGjWMXUhxDPyfe6IVXCpmxb6b0lx9h62mie/sJIi1zoR4DwuzwAK7IA
-# 7T8=
+# BgkqhkiG9w0BCQQxIgQgdIpOuUQOejIkUIjthJteXQKW6ZJkbYFOY7yRmhZF+5Iw
+# DQYJKoZIhvcNAQEBBQAEggIAchCMI8KS0jhWuXdSOgoj7ZhaxzcaBIa9cdod/MC+
+# QAAH78jH9jtNeJz+5TY6Wzs5KRwaOJjRvmUv7rsRVXI2soRjf1f3j52bEdpBzuBj
+# ILayJNHHs7zeBcdgtux1bg0qzth+2VGpsAFWYjt5YH7loWFmCRdzur3TnDP3ec/V
+# 8onFpQxXTQjHMAsNyZx8WJbyt+36wXsBhYEz7gqjpnBa6NtiFbKIdZ0t4EvjrTyp
+# N6PX3swiyoyEbq6H3J0N1IsHaJ/y5nVGxGZY9C/rrQ8Yi596vJkxv6w86N3IknDa
+# Q5uyQz/u/1zg9eNTi/5sRDRXXm4ooc/f7Amb2DsdEWUGD+zk8VgJIIAIJARBFLS1
+# xdMa4exMCzUpPKJpVN+gSxng506avAsVrLlVT+iXzkO7krjvasr1UVsR5Bdexu5F
+# qD1slriKOV+NiUMVCsKaw/EN28cmTwmfwEjjXoloShw5Yorz6tTCe8jHyyN0uTTw
+# cVEhIWW0t36PcKxKwKitJCbz7WIiGBGSYx110f6qMw5eNJ71JUAeRx6jF4Xx9sCU
+# egMs80WiC9F4bPsPZ1/QuZ228tryc3no4FehdDh5ieLxtXA80d7dsHQkfAbV316O
+# 1ty9sA86jsCswVcN/ckpxtDgvGXcNiW1Js2JIKjZ0bsBHxr2V9sNdO4k4Bf1IN6F
+# skY=
 # SIG # End signature block

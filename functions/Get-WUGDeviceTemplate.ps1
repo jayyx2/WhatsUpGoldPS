@@ -1,30 +1,30 @@
 <#
 .SYNOPSIS
-    GET the device template for a given deviceid.
-    Endpoint: /api/v1/devices/${id}/config/template?options=${options}
+GET the device template for a given deviceid.
+Endpoint: /api/v1/devices/${id}/config/template?options=${options}
 
 .DESCRIPTION
-    This will give you the template for a device. You can use this template
-    to create new devices in WhatsUp Gold. Store it as a variable if you'd
-    like to change it.
-    $template = Get-WUGDeviceTemplate -Device 20
+This will give you the template for a device. You can use this template
+to create new devices in WhatsUp Gold. Store it as a variable if you'd
+like to change it.
+$template = Get-WUGDeviceTemplate -Device 20
 
 .PARAMETER DeviceID
-    An array of device IDs to get the templates
+An array of device IDs to get the templates
 
 .PARAMETER Options
-    all: all basic options are included. (default)
-    l2: include layer 2 data such as inventory, links and other information used by the system
-    tempip: use ip address as the template id instead of the database identifier.
-    simple: return all data in it simplest form, dropping items like parents, classid, etc.
+all: all basic options are included. (default)
+l2: include layer 2 data such as inventory, links and other information used by the system
+tempip: use ip address as the template id instead of the database identifier.
+simple: return all data in it simplest form, dropping items like parents, classid, etc.
 
 .EXAMPLE
-    Get-WUGDeviceTemplate -DeviceID 20 -options tempip
-    Get-WUGDeviceTemplate -DeviceID $arrayOfIds
+Get-WUGDeviceTemplate -DeviceID 20 -options tempip
+Get-WUGDeviceTemplate -DeviceID $arrayOfIds
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-    Last modified: Let's see your name here YYYY-MM-DD
+Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+Last modified: 2024-03-15
 
 #>
 function Get-WUGDeviceTemplate {
@@ -66,8 +66,8 @@ function Get-WUGDeviceTemplate {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4bnPQXEVQWjBK
-# bKhKlykRHlJ9cPer2C1bT5vSTclRpaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnOsXaZ7G3zDhT
+# qKQkuG5jdNxFD5Ut177zh+fgCzKPl6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -168,17 +168,17 @@ function Get-WUGDeviceTemplate {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgdyfDAWSu5x5yDcWeXyqgAPnTRW/gUsDA9XoQ2dYKQjow
-# DQYJKoZIhvcNAQEBBQAEggIAIkXp2BECEW6MRVE7xei7Mgg6HC89i1fb1zv88Tyn
-# 7m2OxCLi2P4qWJAeoNpbvncIrhJ9JH+rc9pCRZiH4/ZUTlu49xLVmAMM+C12VzPw
-# b7Vq7Qeq3Ckw6SutCWBeyipsAa3LpYRZvf+VwJDeAAbSMW+CBAECsxDOX/FmA/on
-# +aZAQkPme/8oj3ZYEaS8Rtf3fCfxyxUfC/Xr0/TawD0YJm9ZxgQUZjH253ibUM51
-# J6odEQN/4LBDfOKJSxx4PyCT6cqFM0vVhwhl7GS1IXrFYMSrHo5FEsleYD3siEko
-# Q7WFpvjFTTva9OYfiqBVDKRfXKQ9QGMEnEWdahGMq/bxVq0iuK+TgV/V0UDvTiyX
-# niNHtwPWRnmlgdZMuyJ7cS/WYgBSZo7hMANPKpG9R5OesSgvogvQVQDW/eWwzWkw
-# 5NaFSo72FCrkvtoBKw9uvS1Djlj//gk23jiy21/qifCnbtcEgtDQ7Z3uxbwC/5/M
-# NXBFRJORMWzXkKAzvlN1cPIn/xLSuVf6aU5dLnrUt9WgjSPCkf8xsGbcsn4QUC1n
-# EkCsPbT26E+PnKCbszfgM7n1jTzsqnczdRXbhQoAiH8T75hOy2xIZ7bmK7WznyDL
-# OIzJZQ4/qS0BTQWrU5dJ1KDpyR4pPDuGnCGYJbh9F31CV/WDdAsY5a4QMYCs8wph
-# t+M=
+# BgkqhkiG9w0BCQQxIgQgYNqBbYiJ0T1FnLORSDdOVA/XyiOxr53IKKLdNXliRkcw
+# DQYJKoZIhvcNAQEBBQAEggIAPGTE9KwMnQ6kcAHQaBo8eF7NjSONccXl278AaTMw
+# 2ClNfwgcqM4Wl+baiGLjFSe0FNe2jAHMr9uZLDdeZLCeDZaydogqB1OGn31LBZlx
+# 5II3kz8hrgta2tAVN6ddjJhsR5hLeU4VvEgnEi5H+BZ4s0sSt4vfN7BJnV9hnpou
+# PV48zvRrk5SKFseo+rqt8bEz9tLXMKHZdPJGZhrmbA1ovM4MvJM1DPSHiFD8ELFu
+# ojY9u0QWnMepV0vwYARRXdmT5GSsKf/sD7FTTCxiCgsUfvRiuXCIDjK7/k6r1+3a
+# dqHQimitDnkLdiCoF4cFQ27DeLbDmGzYvA+DzwPST2FosIh45eR4vLc0T9hJU9C1
+# J9cntA4wziWU5NNuHMrwwVWCrqXgD8AdS9IM0K0Ax/ZQoUw3zXANzBhVQFeLjSe6
+# y+l5StxuYDStSTRmFHTGUdP+2o++CZqqCfnCZUlgLLQR8WCJMrqTNJGLpY/qr4sR
+# /mQk/cvYqErscr0cFXjteIJ2ohfUS6QsAEJwxceOTbAsODL5WAv9S8+RpgSZte4h
+# tIu/a3gPDCfvc35R7NED46IncDWnU3wlYljk/gl/8V2c2UIe2eTjSzW80TNCqSTF
+# AKwpgeRytaBdc7uF2lndApuNEthp2CJFJawItkKLCA0Tq0bDN6D9HRy0G/dxlnVV
+# KAQ=
 # SIG # End signature block

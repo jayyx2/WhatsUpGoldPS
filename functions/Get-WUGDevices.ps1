@@ -20,6 +20,7 @@ Default is card.
     hostName, notes, totalActiveMonitorsDown, totalActiveMonitors
     card: id, description, name, worstState, bestState, os, brand, role, networkAddress,
     hostName, notes, totalActiveMonitorsDown, totalActiveMonitors, downActiveMonitors
+
 .PARAMETER Limit
 Default and maximum is 500. Specify number of records to return in a single page
 
@@ -29,7 +30,7 @@ Get-WUGDevices -SearchValue 192.168.1. -View overview
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: YouHaveToBeKiddingMe 2023-11-01
+Last modified: YouHaveToBeKiddingMe 2024-03-15
 
 #>
 
@@ -73,8 +74,8 @@ function Get-WUGDevices {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD684pXbr0+mYCc
-# UiJFwgsieGyi+qGcxO/j1OykjD4OhKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8H6t4p3gZjHAy
+# YGuy86jIwpXYgg0cT4DvqsSdBvH2A6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -175,17 +176,17 @@ function Get-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgBjZTU8xtkoWkLf60qIz/lLorXf19lNTGL0swu2Q3tGIw
-# DQYJKoZIhvcNAQEBBQAEggIAE5GeXFO+vsP+YA1Rfhn9FSbKFEZb8C+TJEIV84xf
-# O+QRzqXbnVkns1DspWZlZv0zXz5ja9xiT0BA6gCPV3mKdWN6kQFpamMMWdhgNufk
-# SKakSekNRkAXzavoCaRHtKgjVOgMW4CtU3v22zLlJfIxEhx3D0tBeFQ+FX5pTqOM
-# WazL9F/9M6BCSZKwyP+hMtE3/dnJPH5uAvt4yac0C/TtibA9KCOvV2E3G3IKxhzS
-# NYUUSp640Ntrn95BbRBicjHX0dLFdSC//418o5tyPq3TJAJTLyKdKSZlg76V4XlP
-# Wtt7FM3ov73D1GwD5e0UvcTDTN1IAJj0SacoPLdKy1mxRvyuQmfFrxFmzhWBsBl0
-# kPL1+p+Rgg0zRSKsV7hz7qRl+QAFg9CbfmICX0h9pbnpQXQDQdTG0jCD8/hjXbjZ
-# Zgsl8EiQ8svXSdzfdAzUwThiF9+gmIR++vXJ+ndYLiETZkmJo4hEGV/m6+4BeuQU
-# z3vvjKl/j6a8TW3dAFGtXHpabqTxeNbQv/1OlX6NUYbh7tfvCIbaemt7qGNe1tBl
-# aq0vMWPphiyBV/2YzRMsCT/2B2qf3lq/blojxy1aQoNJZBr0yTzUPQD877p5zOYy
-# gYahusXI1AGnDJDHOJpO5PsPWu/g1gvgn/UcdJxfUQqG5jriKBwFCaAn4MbuFaTC
-# y3A=
+# BgkqhkiG9w0BCQQxIgQgpkPqJEwJhYJ36jVYiLVrz7XeQYeHOET8o45RMhUPZdAw
+# DQYJKoZIhvcNAQEBBQAEggIAneDLvDJ1lr/JKuLj3RHsmocu9WqhvxAG9GZY6FS/
+# oBiLHirHUuU6p5/blqAagUQqy9RMKFIwdLGMjWEbg/E0ampTv8AgD8Q1AL4MgiQc
+# mcPpxOVW0Z7oyPIP7rPVRXXYtchsa29nLmfDhQCqu6OwRO81LgoLNUhr+nfziXs3
+# SpMNTmjXWlt/SCK1zM+qf07WpA/8oG7gA2TzhJ0V7BO6K5+LpYVVJrZvRcOh7Awf
+# ylZy0yJ0CB03wJW0kBWFv39LOgqXp2ezRxt56JBkSn+zIP34OUFMVRimNDFQC61y
+# DqGaJk1I0528ZYHQslRDWHnR6oXKXjQJdPmFec1OrYchPpJMTsjNLhRxn1GVsUBc
+# JrvsMuPsAA9aKz10jHScu1Q3eR60mWdZwH5bLBJPSkIRJacOJ/wsAirNks3aiqwW
+# BEtJhFKoUILkVvVYwv8+W8DZJXgUosv63Rcy9bG5g/sZHruT9CLqGMhEOC/xioTj
+# G1PqFCGPe3Zlp8/d1IVg656Fit+YWkFF3eR0ttAnt85RQzUHBAjQ6GJ2r7EykEb0
+# OjTtQq6UqGCfJ6NXQBfhysVPxHxgQMZx+vzTJUd7wOcwNce/IWb/QJvaECzoscdS
+# 5VvII3bOlVEmVJrF9OWkQitKeWzxTp+fZJcdb8JvFaPnLYSVzt/ugoXgnkNBpUFf
+# N0c=
 # SIG # End signature block

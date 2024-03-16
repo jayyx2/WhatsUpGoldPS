@@ -44,34 +44,34 @@ Version: 1.0
 WhatsUp Gold REST API Handling Session Tokens: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Handling-Session-Tokens
 
 .EXAMPLE
-    ###Example 1: Basic usage with prompt for username and password
+###Example 1: Basic usage with prompt for username and password
     Connect-WUGServer -serverUri "wug.example.com"
     Connects to the WUG server at "http://wug.example.com:9644" with prompts for username and password.
     
-    ###Example 2: Connection using a PSCredential object
+###Example 2: Connection using a PSCredential object
     $Credential = Get-Credential
     Connect-WUGServer -serverUri "wug.example.com" -Credential $Credential -Protocol "https"
     Connects to the WUG server at "https://wug.example.com:9644" using the provided PSCredential object.
     
-    ###Example 3: Connection with specified username
+###Example 3: Connection with specified username
     Connect-WUGServer -serverUri "wug.example.com" -Username "admin"
     Connects to the WUG server at "http://wug.example.com:9644" using the specified username, with a prompt for password.
     
-    ###Example 4: Connection with specified username and password
+###Example 4: Connection with specified username and password
     Connect-WUGServer -serverUri "wug.example.com" -Username "admin" -Password "mypassword"
     Connects to the WUG server at "http://wug.example.com:9644" using the specified username and password.
     
-    ###Example 5: Connection with custom token endpoint
+###Example 5: Connection with custom token endpoint
     Connect-WUGServer -serverUri "wug.example.com" -TokenEndpoint "/api/v2/token"
     Connects to the WUG server at "http://wug.example.com:9644" using the default username and password, but obtains
     the OAuth 2.0 authorization token from the custom endpoint "/api/v2/token".
     
-    ###Example 6: Connection with custom port and SSL protocol
+###Example 6: Connection with custom port and SSL protocol
     Connect-WUGServer -serverUri "wug.example.com" -Port 8443 -Protocol "https"
     Connects to the WUG server at "https://wug.example.com:8443" using the default username and password,
     with SSL certificate validation enabled.
     
-    ###Example 7: Connection with SSL protocol and ignoring SSL errors
+###Example 7: Connection with SSL protocol and ignoring SSL errors
     Connect-WUGServer -serverUri "wug.example.com" -Protocol "https" -IgnoreSSLErrors
     Connects to the WUG server at "https://wug.example.com:9644" using the default username and password,
     but ignores SSL certificate validation errors.
@@ -151,8 +151,8 @@ function Connect-WUGServer {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDyZLAPiKxhtaa1
-# MDT78PvjD4smVYVqQZVuqmwkJSDP4qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoZUo1p5B/d9cK
+# ifFkv5dhIwXXjwCtPc0x7WzfLQ5r5qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -253,17 +253,17 @@ function Connect-WUGServer {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgnfX7RZk++5QzLydQQ2OsAAa4fZaE76ipCYVkmMM1jwow
-# DQYJKoZIhvcNAQEBBQAEggIAgRs6FKkoA6O56OvpPosyR9BfvHg3A7b9wSdjaqlK
-# kNW0/qUxoBpAwlD+grn3daTA2DYtvC9qYyDUMo8eG83Q27neaU+StHY5Hpi/OpSJ
-# pqZ97zPPPCfcvBFW1Ri+z0wsqHHWFTogJzEhUeE0N9WWlj7ws0bfiV+AefxqnFHa
-# gJW3B6czE1NbxXm9x5431fesVCzBgRMsxEAXu/6aSFkSX4ZOg12Wc0B0OpDXXHPD
-# cCl8wCEEtFftRzNgCFAXav7Q6nt3wB1nx+ThDuoxEzZ7FfX3Nt+Am5dUpsMtx1Hi
-# FGHFW1c6IAT5csUhxeGaagktmZWfBk1e2sAR2sM7b5JYhW+wqwY+adOVt/vdbQ91
-# +w6Zkm9GltU0Hc2kD5YOOn8wVU87BwOR7f8Wx3gnkuGjnw4YNt9pXE4sRcnbqxfK
-# CYsKBCrQ0dIZKc0qVAmYuShq5YmXZIGhV1rmwoPHlRvMd3LiW9R0AGouDf97y+2c
-# mMpJN73lYD6W2Ds869SavM2eXhDzCpU+qe/cmcAXsA+4SCKG0C506dhUvac02K90
-# /nmz4I28gm9rzCXAmQFcdvo7cFE2Y16YmVEsYihdP3DuRJdbHneHldV8UzSHKoif
-# yB02Cq0bbZuGUxs70XPWW8o/Oag/i/l7fB1mCwH9oykmP8uVFQSlGskifk52tmQi
-# 7sg=
+# BgkqhkiG9w0BCQQxIgQgwmsTz+4TGrxtzW5XwHb4xTNk0kDnniqPzDQQo22JO0Ew
+# DQYJKoZIhvcNAQEBBQAEggIAOwG/Wq/v9AxWHMC/RH4hZRvX13Sch4yHkIH6D/BS
+# inB68Mo4Gz5lUKo+SwzGxFoNlF9GxvLvmClaGYIhqH6fchchr00/0w1f9uV7Lqyx
+# V0TqtWrLKjgdRxtZPbuzY5MxGPXnnLw4gRu0tCBPfnbLqd7TdhwFl1dq8haqawvM
+# lCATMyeorFhXuWbVlBpBZ8c4Ij0s2bp1Cb6Cmsm3/wyCjTbxtdlNcpGKRTJoyawu
+# dtOeADrAa6W63BqEK0tDtwsJr75aT5rqAeZxdYUko+/gD7wFt+/g1IH1JcRKfPXm
+# go4JShCeZxLCXk7dKkUbmxHQ/ER6hGnNYmZX3oVnEMhVXESXQ5YAX2z9ybxaa97O
+# 4qM3HnhFecVEHqDL4S+cy8MFrN+BpNL1Ni6BBDPSWg6SusStuqJmfbGKsfPIay6A
+# 9ISEapyDVe64DDE9OVqW0gQzxBj5PUarxbvQYSXeXr21/FawNUzUZGytRIEL5rOs
+# Im/cybSl8HXh42yv9hhDUTY3KyyioBRhq2XPgmF1qo5Q4e+jHJliMiEWDiN4W91t
+# M0ntj5S9BBUyGho0/hkCovPfaoViWD3grXOkbED8BVmIyU4WwwUi7ZdVC+Y7gPVS
+# KEwgY/iHoiLxet+CLaBjgQQEaLSFRptROhwz6iMy1+F72fxrk6ET8E0oSmPwYraA
+# bDs=
 # SIG # End signature block

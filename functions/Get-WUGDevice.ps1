@@ -1,35 +1,35 @@
 <#
 .SYNOPSIS
-    When you have the DeviceID, use Get-WUGDevice for returning
-    information for the given DeviceID(s) using the WhatsUp Gold
-    REST API.
+When you have the DeviceID, use Get-WUGDevice for returning
+information for the given DeviceID(s) using the WhatsUp Gold
+REST API.
 
 .DESCRIPTION
-    Get data from the WhatsUp Gold /device/{$DeviceID} endpoint or
-    search all devices using /device-groups/-1/devices/-?view=overview
-    &search=$SearchValue" to find the device id you need
+Get data from the WhatsUp Gold /device/{$DeviceID} endpoint or
+search all devices using /device-groups/-1/devices/-?view=overview
+&search=$SearchValue" to find the device id you need
 
 .PARAMETER DeviceID
-    The ID of the device in the WhatsUp Gold database. You can search
-    for DeviceID using the Get-WUGDevices function
+The ID of the device in the WhatsUp Gold database. You can search
+for DeviceID using the Get-WUGDevices function
 
 .PARAMETER View
-    Default is card. Choose from id, basic, overview, and card.
-    id: id
-    basic: id, name, os, brand, role, networkAddress, hostname, notes
-    overview: id, description, name, worstState, bestState, os, brand, role, networkAddress,
-    hostName, notes, totalActiveMonitorsDown, totalActiveMonitors
-    card: id, description, name, worstState, bestState, os, brand, role, networkAddress,
-    hostName, notes, totalActiveMonitorsDown, totalActiveMonitors, downActiveMonitors
+Default is card. Choose from id, basic, overview, and card.
+id: id
+basic: id, name, os, brand, role, networkAddress, hostname, notes
+overview: id, description, name, worstState, bestState, os, brand, role, networkAddress,
+hostName, notes, totalActiveMonitorsDown, totalActiveMonitors
+card: id, description, name, worstState, bestState, os, brand, role, networkAddress,
+hostName, notes, totalActiveMonitorsDown, totalActiveMonitors, downActiveMonitors
 
 .EXAMPLE
-    Get-WUGDevice -DeviceID 33
-    Get-WUGDevice -DeviceID $ArrayOfDeviceIDs
-    Get-WUGDevice -DeviceID 2,3,4,20
+Get-WUGDevice -DeviceID 33
+Get-WUGDevice -DeviceID $ArrayOfDeviceIDs
+Get-WUGDevice -DeviceID 2,3,4,20
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-    Last modified: Let's see your name here YYYY-MM-DD
+Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+Last modified: 2024-03-15
 
 #>
 function Get-WUGDevice {
@@ -66,8 +66,8 @@ function Get-WUGDevice {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDXSMZ/cqdwLk7m
-# Qhddz+pAjBe3vu76UbvZHOGbC8VMQ6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFBBAIZRVGyoOR
+# K5XSZYVtyhvtLinssomjO3sCBWKje6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -168,17 +168,17 @@ function Get-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgEnTgvoIoO4rfSrFmjCXXrz6tdyuRyRO3BCyyW16k6Zcw
-# DQYJKoZIhvcNAQEBBQAEggIAg14onvG1bhNf0P/a0QinIXaE+SWXNCulfjo47h85
-# o6wCBrs5x7p0CIqOJ/TrnWUv5QtrJHIcZ9/cd9KRD9UHJ16y2MCgS3jzX7V1slNd
-# fCsNHfPc1u03NpLToT2ecqh/YqgcUcIZNpd4z/3HP9w1J6FGtLgm9TiKgvhYLBxY
-# VRuzKTNmcyDd4IPRCMkpAmmd0qgC4o1zxaiYBZbzunE0CN2ONN8GyFrLcUvpE141
-# jLoN0fdOsuv0b++1tEjtilpgOQwMmdFx1/x9M+qvmjlyXsGqGZUqz/7frfFNL9QJ
-# kro7I+9F8XaTC2mxeWt0CEpolhgVrnedLRZWBRRw387bdbg9emAKbAvJbOCzLDXq
-# r8MPFSi7eB0LwtAebFBGKDibdkkaShswl8/I9KLkx7mo974uWqg54IRV9BokOtMV
-# OtgP/0VdhWq+BJNKuJqGKagMa1Mn1o1tSYs6PMwPpD6SsJM7PennNoGsFnZrtoI3
-# Ifs+msNFIbyosoJ5a2PfoplsRhzaIdJkSeQWWLHhx4CjMAgJikGvoDDI23GPRaRV
-# IVI1xlGLyTSMaorVMUbYiZ2s3GT4x10JR3C36Hjg6RrKfD25Fit0HLFavCeATGCV
-# ZmgPt4NQHxdyzkbVCmmTZ3j36DZ2oXT5yaawgQDf+Xahc1GT8ALs+SCf3ZAKeAkN
-# k3w=
+# BgkqhkiG9w0BCQQxIgQgR1gQRTR4MTMrGJCrzWKjOB/AiDw6Z09Afs++cKLzo4ow
+# DQYJKoZIhvcNAQEBBQAEggIAUFG23fJoGvgb5JtkHCgIi9gUwLJH0LxeqwkrZSRl
+# 5VsOpsllmZu5ZjS1MrsZMsnQSfRxBQQMpZxiRbblg+G+/oUeqoLs6xyrTKsFteT4
+# RHpoXs3evQ3DeGGFMTPdKqfhBEJARhbh6tY/wYUC0yrp9II8PsczmPX2EU3aEgpZ
+# Sqrb4mSPAAU7wMKC1JP1yZl7w3qVdVn63g7wtYnuJLNwcC48MQ03ic37fm8amcKE
+# basoslLmY2iMiyQMhIJGOi46hKpgE6MY91bqgC91buqHO05r8H9jAadQ8uRGlz2N
+# TkVfB6W+LbGYI8j+AJkqwSpLwYN7JY5sCTDEDru9GP5JQ9CHHuMA5r8pkT9wd5sY
+# pNpYhIoWA1w0mt+JXMcRQo2K4vdc2GBwx08Wjrl7lhC45KnMJ9v/veQV/Nv2/0VE
+# nhnYFMqBYSAA1PzrhSMrKNtjlIqvpWygCjcfu9br8omML4voX5MpQvQt1ZBYwhE3
+# 4gA3pPBjLL6hGVb3sWKXZV6flvOpDFZNlgWcKcyvghKG8g3OQf/qySwWGU2B77wt
+# aaslXMvjzboIf0iiAQNX2YvsrTc8nZZXmIk0fF3+cJggynbQgi54gfIDxCzli85X
+# qd+EJfJduvVU4y2GKDUPOC0n2K542SeBfyNHpZkOKXQH/qNg82LWiZDI+IPdpQTH
+# XDI=
 # SIG # End signature block

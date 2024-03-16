@@ -8,34 +8,33 @@ Set-WUGDeviceProperties [-DeviceID] <array> [[-DisplayName] <string>] [[-isWirel
 .DESCRIPTION
 The Set-WUGDeviceProperties function allows you to set properties for one or more devices in WhatsUp Gold. You can specify the device ID(s) using the -DeviceID parameter. If you do not specify this parameter, you will be prompted to enter the device ID(s). Other parameters allow you to specify various properties to set for the devices.
 
-PARAMETERS
 .PARAMETER DeviceID <array>
-    Specifies the device ID(s) of the device(s) for which you want to set properties. This parameter is mandatory.
+Specifies the device ID(s) of the device(s) for which you want to set properties. This parameter is mandatory.
 
 .PARAMETER DisplayName <string>
-    Specifies the display name of the device. Default is null.
+Specifies the display name of the device. Default is null.
 
 .PARAMETER  isWireless <boolean>
-    Specifies whether the device is a wireless device. Default is null.
+Specifies whether the device is a wireless device. Default is null.
 
 .PARAMETER collectWireless <boolean>
-    Specifies whether wireless information should be collected for the device. Default is null.
+Specifies whether wireless information should be collected for the device. Default is null.
 
 .PARAMETER keepDetailsCurrent <boolean>
-    Specifies whether details should be kept current for the device. Default is null.
+Specifies whether details should be kept current for the device. Default is null.
 
 .PARAMETER note <string>
-    Specifies notes for the device. Default is null.
+Specifies notes for the device. Default is null.
 
 .PARAMETER snmpOid <string>
-    Specifies the SNMP OID for the device. Default is null.
+Specifies the SNMP OID for the device. Default is null.
 
 .PARAMETER actionPolicy <array>
-    Specifies the action policy for the device. Default is null.
+Specifies the action policy for the device. Default is null.
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-    Last modified: Let's see your name here YYYY-MM-DD
+Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+Last modified: 2024-03-15
 #>
 function Set-WUGDeviceProperties {
     param (
@@ -164,8 +163,8 @@ function Set-WUGDeviceProperties {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAsjWfRFcNadW/F
-# tUcdAZtmU/r2FFZ7BslhmnfHsdaBUaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrPKsosbDyiBiu
+# qtdAJx4Cuf3STiA2iRIoiP4WtireFqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -266,17 +265,17 @@ function Set-WUGDeviceProperties {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg29YARqz+vnpk4TOyaI7uU5z69NBv3MQLNzf3QhKseZEw
-# DQYJKoZIhvcNAQEBBQAEggIAqriDYU5wttvy36pTNhiHwxDmp4WDM025KU7M+lfM
-# fzvbxc/EPsiSJnd/fsZ4mtFKsNlevJM5tthhcSJVAuD4L5dkPRWRifSvLsc98RKk
-# Yhdu1b6JHpL4CVpSYJXvuRIPR2i4TrpQZcx2tF4MqyQ5u6PJMe3sINbiUAhYkQ35
-# tbcSfTdaLccV6p5ze9P3+JdY2c41+Vapbech0wUyhrt7EaOKGrUBrK+cqF5gdHom
-# XsF5TYqP3l/6K3zc/TIHIRrb3MZWd+7c0v6eHLPlsTewB4GQAyOGZ5M25lLvB/6J
-# vsJYO6tqcTheDYXRJL0aJZd6ESeJhz2STqbGeW6oQP41LLu7F0nDtjeMPwYPuabS
-# lXXTM0w35I5xGtPNUQSZrO73BXmhmh35hVZQsDhnAH2NWj71BScO38rl3i2SfBJw
-# DQv5+LPdBTEqJWhfnavfJIaQuzAN0pr9dBAh7t8d/9QEKU/4UzHc93v+P1p9hQ59
-# e5JK3p1iA312hqptq+hOycXp1PaRDLA9jo1KQVckzqUd5TuliqlPN9UkILTfMlo4
-# P/WQhT5OIt6IKlNNmWXHKEzh4i45crnl9WIlZcG07r3O834H2jZa5OWnt6ZXOa2Z
-# KyluxPDZ4QsPQN0JUiDN8SnCRJIOTSRrwSp9I3367sbLE4g5+IjkC1ejZEVqKsMt
-# DEA=
+# BgkqhkiG9w0BCQQxIgQgPQ8ROsfVr87mG3axFVRrmmz6tJN5XuHDdehLybCeHvUw
+# DQYJKoZIhvcNAQEBBQAEggIAbWFu+UcGb0dVsTb9aj+7mVtp3F1oZ2y+R1idDAew
+# BMKLr4vtCXf5/h0ZQnVwibIjCSWbaoxEaQ6JHgfkXAW8pWfzOCJwHoRsbKX3dPac
+# PG6z1f4dZiXHK9M7+7XL9Yh6jrVAe/F4hXnJFYr7i9uHxJrqUNpqQzAQOzbfcJf/
+# 08CzCadrIm4tQ9fVdtlbIyACPi9TbNMC4HGSMTZEF6JUxtyJNDyNv2MiDsQUdW8p
+# NDud88IaWTRwtDaZzhN8pFOXxc5d0y3rng5vFU8A4s8ormzUCiqVpmYPssVVf/Aa
+# FSdktIJd+503D9KeUU00TQCiDGIp0IG6o2tOS0DzHXwwKUtLo9EJdGvF95LphY40
+# TeLhTzqssidBl936fO8u4D7cQn1bYGDtvqUhGbcp+gA5+HP0t2hgQt4jtU+5vP1k
+# K8AU8UNacMgYXyzuS60kGp/T0KAVUnx9cCUmxS1KjhNrzM2UdJVDPeti7SC+hjd2
+# O3WZQJTfOznX8Q2BseBwWHX5glYD4bj5j+GSIxZDjZv8TvLRzJHfb7A+vj6DBvox
+# zrnPjfUNzHME995GimAdaOgMkb+aL7OnD9HySMbNKTIx1gQFlqkHMLJZvJ9WtnDe
+# UhJGudSwf2NaP+AAHak1Se2bcBysZedFtsHsz/sLcolBWMWbL5e9/C1FXXmIVxmF
+# a7g=
 # SIG # End signature block

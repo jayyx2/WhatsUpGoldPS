@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<!--Author: jason@wug.ninja-->
+<!-- Author: jason@wug.ninja                        -->
+<!-- 2024-03-22 tested by running Custom_report.ps1 -->
 <html lang="en">
 
 <head>
@@ -21,8 +22,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core/dist/umd/popper.min.js" crossorigin="anonymous"></script>
     <!-- Add Bootstrap and Bootstrap table-->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap/dist/js/bootstrap.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.js"
-        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.js" crossorigin="anonymous"></script>
     <!-- Add the necessary dependencies for the TableExport plugin -->
     <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
@@ -30,21 +30,14 @@
     <!-- Add tableExport -->
     <script src="https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin/tableExport.min.js" crossorigin="anonymous"></script>
     <style>
-        .export-menu {
-            margin-top: 3rem;
-            margin-right: 15px;
-        }
-
-        button#exportBtn {
-            margin-top: 10px;
-        }
+        .export-menu {margin-top: 3rem;margin-right: 15px;}
+        button#exportBtn {margin-top: 10px;}
     </style>
 </head>
 
 <body>
     <div class="container-fluid">
         <div class="float-end btn-group" role="group">
-
             <button id="exportBtn" type="button" class="btn btn-secondary dropdown-toggle rounded-end" style=""
                 data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                 <i class="bi bi-download" style=""></i>
@@ -60,14 +53,12 @@
                 <li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>
             </ul>
         </div>
-
         <table id="table" data-toolbar="#toolbar"
             data-classes="table table-light table-striped table-responsive table-sm caption-top"
             data-show-export="true"
             data-show-toggle="true"
             data-show-columns="true"
-            data-search="true"
-            >
+            data-search="true">
             <caption class="p-0 bg-secondary text-white">
                 <div id="caption" class="d-flex justify-content-between">
                     <div class="" style=""><h5 class="m-1 bg-secondary text-white">WhatsUpGoldPS Custom Report</h6></div>
@@ -79,11 +70,8 @@
             </caption>
         </table>
     </div>
-
     <script type="text/javascript">
-
         var $table = $('#table');
-
         function formatDownActiveMonitors(value, row, index) {
             if (value) {
                 // Replace '@{' with an empty string and '}' with '}<br>' to add a line break after each '}' character.
@@ -91,7 +79,6 @@
             }
             return '-';
         }
-
         function formatId(value, row, index) {
             if (value) {
                 return `<button class="btn btn-outline-secondary" type="button" id="idDropdown${index}" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
@@ -105,17 +92,14 @@
             }
             return '-';
         }
-
         $(document).ready(function () {
             $table.bootstrapTable({
                 replaceThisHere,
                 toolbar: '#toolbar'
             });
-
             $('#exportBtn').on('click', function () {
                 $('.export-menu').toggle();
             });
-
             $(".export-menu a").click(function () {
                 const exportFormat = $(this).data("type");
                 const $table = $("#table");
@@ -134,8 +118,6 @@
             });
 
         });
-
     </script>
 </body>
-
 </html>

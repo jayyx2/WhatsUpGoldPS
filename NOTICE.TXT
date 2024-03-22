@@ -1,5 +1,5 @@
 WhatsUpGoldPS
-Copyright (c) 2023 Jason Alberino
+Copyright (c) 2023-2024 Jason Alberino
 
 Third-party notices
 -------------------
@@ -9,7 +9,7 @@ Third-party notices
 * Custom Report sample template, found here https://github.com/jayyx2/WhatsUpGoldPS/blob/main/examples/Bootstrap-Table-Sample.html, does use third-party libraries. Here are those licenses.
 
 * https://cdn.jsdelivr.net/npm/bootstrap/dist/js/bootstrap.min.js
-* https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/LICENSE
+* https://cdn.jsdelivr.net/npm/bootstrap/LICENSE
 -------------------
 The MIT License (MIT)
 
@@ -35,7 +35,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 * https://cdn.jsdelivr.net/npm/bootstrap/dist/js/bootstrap.min.js
-* https://cdn.jsdelivr.net/npm/bootstrap-table@1.21.4/LICENSE
+* https://cdn.jsdelivr.net/npm/bootstrap-table/LICENSE
 --------------------
 (The MIT License)
 
@@ -60,7 +60,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 * https://cdn.jsdelivr.net/npm/jquery/dist/jquery.min.js
-* https://cdn.jsdelivr.net/npm/jquery@3.6.4/LICENSE.txt
+* https://cdn.jsdelivr.net/npm/jquery/LICENSE.txt
 ----------------
 Copyright OpenJS Foundation and other contributors, https://openjsf.org/
 
@@ -84,7 +84,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 * https://cdn.jsdelivr.net/npm/@popperjs/core/dist/umd/popper.min.js
-* https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/LICENSE.md
+* https://cdn.jsdelivr.net/npm/@popperjs/core/LICENSE.md
 --------------
 The MIT License (MIT)
 
@@ -108,11 +108,11 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 * https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js
-* https://cdn.jsdelivr.net/npm/file-saver@2.0.5/LICENSE.md
+* https://cdn.jsdelivr.net/npm/file-saver/LICENSE.md
 ----------
 
 * https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js
-* https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/LICENSE
+* https://cdn.jsdelivr.net/npm/xlsx/dist/LICENSE
 ------------
                                  Apache License
                            Version 2.0, January 2004
@@ -317,7 +317,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
    limitations under the License.
 
 * https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js
-* https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/LICENSE
+* https://cdn.jsdelivr.net/npm/html2canvas/LICENSE
 -----------------
 Copyright (c) 2012 Niklas von Hertzen
 
@@ -343,7 +343,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
 * https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin/tableExport.min.js
-* https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin@1.27.0/LICENSE
+* https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin/LICENSE
 -------------
 MIT License
 

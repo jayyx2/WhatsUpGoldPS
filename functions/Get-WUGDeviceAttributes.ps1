@@ -32,22 +32,11 @@ Last modified: 2024-03-15
 
 function Get-WUGDeviceAttributes {
     param (
-        [Parameter(Mandatory = $true)]
-        [string]$DeviceID,
-
-        [Parameter()]
+        [Parameter(Mandatory = $true)][string]$DeviceID,
         [array]$Names,
-
-        [Parameter()]
         [string]$NameContains,
-
-        [Parameter()]
         [string]$ValueContains,
-
-        [Parameter()]
         [string]$PageId,
-
-        [Parameter()]
         [int]$Limit = 0
     )
 
@@ -84,8 +73,8 @@ function Get-WUGDeviceAttributes {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC8FIut3vhAzyb1
-# zvvER+B2/DqkPwmJ5PfaO27JPmxI8KCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwa5YyiO0q4YbM
+# O9Fp2cb6epYhITGXsnxgb00WMq5XVqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -186,17 +175,17 @@ function Get-WUGDeviceAttributes {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgdIpOuUQOejIkUIjthJteXQKW6ZJkbYFOY7yRmhZF+5Iw
-# DQYJKoZIhvcNAQEBBQAEggIAchCMI8KS0jhWuXdSOgoj7ZhaxzcaBIa9cdod/MC+
-# QAAH78jH9jtNeJz+5TY6Wzs5KRwaOJjRvmUv7rsRVXI2soRjf1f3j52bEdpBzuBj
-# ILayJNHHs7zeBcdgtux1bg0qzth+2VGpsAFWYjt5YH7loWFmCRdzur3TnDP3ec/V
-# 8onFpQxXTQjHMAsNyZx8WJbyt+36wXsBhYEz7gqjpnBa6NtiFbKIdZ0t4EvjrTyp
-# N6PX3swiyoyEbq6H3J0N1IsHaJ/y5nVGxGZY9C/rrQ8Yi596vJkxv6w86N3IknDa
-# Q5uyQz/u/1zg9eNTi/5sRDRXXm4ooc/f7Amb2DsdEWUGD+zk8VgJIIAIJARBFLS1
-# xdMa4exMCzUpPKJpVN+gSxng506avAsVrLlVT+iXzkO7krjvasr1UVsR5Bdexu5F
-# qD1slriKOV+NiUMVCsKaw/EN28cmTwmfwEjjXoloShw5Yorz6tTCe8jHyyN0uTTw
-# cVEhIWW0t36PcKxKwKitJCbz7WIiGBGSYx110f6qMw5eNJ71JUAeRx6jF4Xx9sCU
-# egMs80WiC9F4bPsPZ1/QuZ228tryc3no4FehdDh5ieLxtXA80d7dsHQkfAbV316O
-# 1ty9sA86jsCswVcN/ckpxtDgvGXcNiW1Js2JIKjZ0bsBHxr2V9sNdO4k4Bf1IN6F
-# skY=
+# BgkqhkiG9w0BCQQxIgQg5lQ6oo17C9xzp2l8j+FuPJ5p7V6tnVEwwzLENVvfmwMw
+# DQYJKoZIhvcNAQEBBQAEggIAcvOof3c/Xe0GffOi81KY65Ji0CqiZx2RdGigYLLn
+# 1Ky48BMbwyBq8Om3IdG/zDVF8SrhaAonl5Xj3qva3ZAA5JnsbChwJXTHCuoueF3g
+# bHPqKWhe22BZ8uYxFYv2s3/TVIgaCTbWzXPXlaMtdkqoiADABmsJ48nDa5FZ68sE
+# uoLNao1GapWkgFHSI7uzmEYHDy95qPQNXxkqfNOmbLHr2/xCBJPWSElbIIfvHpo3
+# 6IoESjTKa4/rTpFJqDBTX+3IlrKyItGWHtMr5C8tKEvMRjV6rCYFnL7IT+hcjMSv
+# +vjq8dEgnlPqFIcCn++ntqTZapCaZcM0qlCV60FiSWlZKr4dm6IEHlmtu7SW5TfY
+# Myf27qBPEmCi2ioF9Rh2a1pQQzhtulXAS8VL2ltMvWlaBrpgW+KcB88XNA0mClib
+# gS5dIjUcMO67RiFaj1vspPoDfm/Bc3g/qAffntS7Gdjw5ZZwJHooeEtPNOtRkRea
+# bN5MPSWl4OiJHuyzJrp3eKl5JrBuHYPRi2rdZXZM8eYs9HZ/nWFpD5wibRvC1Rqz
+# jjq4qeJdS2+J3G4SgjXWok+kpitqJvQDinsKGGEP5rrS2mQGHTK/T+7u7FAXx0GP
+# jhcHLFWpoWFx1tex8hXieCkuH5QmBs0QEjb6bjxPCfq3rESIBwheyiBLssE/t3VC
+# FX8=
 # SIG # End signature block

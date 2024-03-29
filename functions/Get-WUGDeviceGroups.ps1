@@ -27,10 +27,10 @@ Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#op
 #>
 function Get-WUGDeviceGroups {
     param (
-        [Parameter(Mandatory = $false)][string]$SearchValue,
-        [Parameter(Mandatory = $false)][ValidateSet("summary", "detail")][string]$View = 'detail',
-        [Parameter(Mandatory = $false)][ValidateSet("all", "static_group", "dynamic_group", "layer2")][string]$GroupType = 'all',
-        [Parameter(Mandatory = $false)][ValidateRange(1, 250)][int]$Limit = 25
+       [string]$SearchValue,
+       [ValidateSet("summary", "detail")][string]$View = 'detail',
+       [ValidateSet("all", "static_group", "dynamic_group", "layer2")][string]$GroupType = 'all',
+       [ValidateRange(1, 250)][int]$Limit = 25
     )
 
     # Write debug information
@@ -87,8 +87,8 @@ function Get-WUGDeviceGroups {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhpEMQX84nb7D6
-# Ovp6estYcpq4YgtpOrSpXKXUVaCPIaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA6OBBbKu7bdxwl
+# Njy/9ZHzvUEvxiopT3hjEw5FD5wVJaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -189,17 +189,17 @@ function Get-WUGDeviceGroups {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgmY0XgWT6r2xDkP2yUcxt0Nc01yIGd/I1MWi1pb47iMww
-# DQYJKoZIhvcNAQEBBQAEggIAg1y3XDo7QF3ZoySVrAaEB9BiDUCqFBiRdhq3DK4X
-# Y7rvRh/m2DCAq4ftD9t8fuTW0QM84/GFezglaoDpWaJ+GVf//NEWONLAKGqGNlYF
-# y3snKQ5huFE9Ws2L7agwV2k23XnXSlonc24YQrebw15+FcACR3Z1NKE24AqZvEaC
-# z18TKTT0hwDAHT0AGFVakrKjm0lP1YoT3/3P5/RYlJm7NJAcdA2ae9Y5mh0+hwTJ
-# obQvEy5FfQ4Dkv6Bz+/CEwdEQQDbgegtHzf23hkoUBWozi7yAqUCHRdsVkFE9bFO
-# X9MnKaoc1PoWKA9Ge7uBkpMFz5iGOPr7oi3WxfUuxPJ3o9vj3Cko3QpiVWOiuHuH
-# UzZ/3SsZGql5n9xVakGYLz+r9cvWHtciZm2S09zWzUQTDNFKi1EmItZBsrSFtdxx
-# ANlyf+A4T+d9FrA3xnwn8mZru/NTrMlHH4E4ClcFPMtLt2ODr2PYWcq5Hc4YHKqk
-# Oy8tX/5Gn4leXa9NRUMRkfJDWi76hVvJxGkMLxRwS2V2D2+7zg8FBcqmIgEAPmtD
-# Pp09lS2XTOGPdtcZAUbYBQNtZKlgc0EId3DvvLh96zO7Dp/qdSacLO+ovdCtMnD+
-# JaRSkU1vxfZL1uDzyVLhLYmMsxKABFy496f0BMAfy5Y5evqFl8HsMCS9+p5+77k6
-# SWc=
+# BgkqhkiG9w0BCQQxIgQgMAahVCLKN3+VvYLFlauAknVrpqw1cYL5oEfim/zdY7sw
+# DQYJKoZIhvcNAQEBBQAEggIARwZJzCRRa3A95nBvwynSg9vtqCdnK7tbYN8fUO3V
+# D2IqZt2z6qNmnUOvi5bQc3uPWd466Tsue5gVS1+H+HOlajy6bDqV0L7uWENxM0zx
+# NTWez6X572Wn15CWe2S0FQK1T28qGH6yaKdDl1M66wKH8YX4i9lQnltP+v5pkuHE
+# VMBWMo//jdKJ8o9sfaidyuJ/UqUEDpqPTDkyxDzNd/+VQxYf0yFSeY2ywnui3KKt
+# dnQKjr1UmqSqw6dy0s54r92TjPdDp6CxcV38hSXZtWOEaaUfhpEB+h2EoXpTwlZO
+# znbx2qwdijcVomcO0YOnSDHt3c+AVeg3Sn2hDo4BvdOoI3RhqdJrDGJrd/ZHqT4i
+# sCbFN15dnFkiAYOW0UHdv5KpvUVGAWLI03q8Ye+4UyS6bIyoPfQE1hbecvxEdWbM
+# VEdKSzY3Ly6DNxuIe9dtzX0/KOi52kTdUfjcn1B8LVwrPDyFxRYN1lGjG2J2r3eS
+# M/1rbPFjP5IZyx2szBGEqyDtB92aT1rQOsy5eip/2Hv0XYcPdkOwxwrrS8RMuClP
+# fH8EygUhxTn8ME7LLINBHPx3TYTxBbCIZK5CEnviAS+wUDBbZVBwbIKrcyirXSWI
+# 1pys6HwrOKnVbMDtVCBPCHrjgFRzkyhS5B9dAfSW8t8r5jzzTvJfl5Wnzvm+MdRf
+# nfg=
 # SIG # End signature block

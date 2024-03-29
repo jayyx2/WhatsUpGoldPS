@@ -1,4 +1,23 @@
 # WhatsUpGoldPS Release History
+## 0.1.10 - 2024-03-29
+### Changed
+* Functions
+  * Get-WUGDeviceReportCpu added
+  * Get-WUGDeviceReportDisk added
+  * Get-WUGDeviceReportDiskSpaceFree added
+  * Get-WUGDeviceReportInterface added
+  * Get-WUGDeviceReportInterfaceDiscards added
+  * Get-WUGDeviceReportInterfaceErrors added
+  * Get-WUGDeviceReportInterfaceTraffic added
+  * Get-WUGDeviceReportMemory added
+  * Get-WUGDeviceReportPingAvailability added
+  * Get-WUGDeviceReportPingResponseTime added
+  * Get-WUGDeviceReportStateChange added
+  * Small formatting changes on Get-WUGDeviceGroup, Get-WUGDeviceGroups, and Get-WUGDeviceAttributes
+
+## 0.1.9 - ??
+### I forgot to document, sorry!
+
 ## 0.1.8 - 2024-03-02
 ### Changed
 * Functions

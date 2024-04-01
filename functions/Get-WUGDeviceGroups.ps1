@@ -22,7 +22,8 @@ Specifies the maximum number of device groups to retrieve per page. Must be betw
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
 Date: 2024-03-15
-Modified: [TBD]
+Modified: 2024-03-29
+
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceGroup_Get
 #>
 function Get-WUGDeviceGroups {
@@ -30,7 +31,7 @@ function Get-WUGDeviceGroups {
        [string]$SearchValue,
        [ValidateSet("summary", "detail")][string]$View = 'detail',
        [ValidateSet("all", "static_group", "dynamic_group", "layer2")][string]$GroupType = 'all',
-       [ValidateRange(1, 250)][int]$Limit = 25
+       [ValidateRange(0, 250)][int]$Limit
     )
 
     # Write debug information
@@ -87,8 +88,8 @@ function Get-WUGDeviceGroups {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA6OBBbKu7bdxwl
-# Njy/9ZHzvUEvxiopT3hjEw5FD5wVJaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASaIx4zMwm/YAy
+# QGEIhpvcAUSfjSSM1Ydys02jiPLdJ6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -189,17 +190,17 @@ function Get-WUGDeviceGroups {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgMAahVCLKN3+VvYLFlauAknVrpqw1cYL5oEfim/zdY7sw
-# DQYJKoZIhvcNAQEBBQAEggIARwZJzCRRa3A95nBvwynSg9vtqCdnK7tbYN8fUO3V
-# D2IqZt2z6qNmnUOvi5bQc3uPWd466Tsue5gVS1+H+HOlajy6bDqV0L7uWENxM0zx
-# NTWez6X572Wn15CWe2S0FQK1T28qGH6yaKdDl1M66wKH8YX4i9lQnltP+v5pkuHE
-# VMBWMo//jdKJ8o9sfaidyuJ/UqUEDpqPTDkyxDzNd/+VQxYf0yFSeY2ywnui3KKt
-# dnQKjr1UmqSqw6dy0s54r92TjPdDp6CxcV38hSXZtWOEaaUfhpEB+h2EoXpTwlZO
-# znbx2qwdijcVomcO0YOnSDHt3c+AVeg3Sn2hDo4BvdOoI3RhqdJrDGJrd/ZHqT4i
-# sCbFN15dnFkiAYOW0UHdv5KpvUVGAWLI03q8Ye+4UyS6bIyoPfQE1hbecvxEdWbM
-# VEdKSzY3Ly6DNxuIe9dtzX0/KOi52kTdUfjcn1B8LVwrPDyFxRYN1lGjG2J2r3eS
-# M/1rbPFjP5IZyx2szBGEqyDtB92aT1rQOsy5eip/2Hv0XYcPdkOwxwrrS8RMuClP
-# fH8EygUhxTn8ME7LLINBHPx3TYTxBbCIZK5CEnviAS+wUDBbZVBwbIKrcyirXSWI
-# 1pys6HwrOKnVbMDtVCBPCHrjgFRzkyhS5B9dAfSW8t8r5jzzTvJfl5Wnzvm+MdRf
-# nfg=
+# BgkqhkiG9w0BCQQxIgQgUBKxLSPajfDYJ/pAHj7IDxp9e5zpFRTW4VsJRqCuxTcw
+# DQYJKoZIhvcNAQEBBQAEggIACL6jGAYOsBSDSTLTy3mX52fM6lC8nZU9ZKUvGQ4R
+# sQGXhBNAVTaUenIzGgqcGYQd311c+bpR+VSEla4S26krFztWLs32m7AEhktWKN+Y
+# AfWrAtysL8hbyleIIkmEPAvfA9teHBJYZRX9d6hE3jpKIvTMtR4JH476JQQGAbzn
+# HUKsi0W7vynIf0F87pJxwlEVPfs+dJ1f+qQgKcPx+gKZKprlT31Q8QtHSfPG/qYf
+# ZiJ1O1cOGlnZkAVNVqODeoRc4rAIIw4wpvFwnLHcvwMRLFnyqHtZqRUxUm95vDYV
+# STxme/P0cJDBjy3EpCCRCMrukJQ3OGg/cv9QdSUXQCg2+pfKu7KdwK6Z7JpSe4Zo
+# wCf3wBU1zZrbiu41Y5XUw1pjzwtxN5gEBxHH6XIhlPPsK64A08rLphKjoO7Yf7hp
+# zsEGwE9a0q2C+6zk2u5iE1imbf9vr9OTmXakuXNbkeOXaZid2w59dU6Bpar1fyaK
+# a5ERjWCNTm2e5i21C1kaQfhbM2qliDMwvlBdFmZ66Q7GIlMNEcGKTvYXuiBLHiDF
+# h3LU1LqumgDjkg3jsCBM6QIhuq5GPvplhzsIYnsAsfsby78tFv5pILk2b18FNjVG
+# cPeMU87jKqSibVImvA4xYkmaSE/oqSarW8BQfAaShjcucH15i0p5DCbZ97tEIWcU
+# NAY=
 # SIG # End signature block

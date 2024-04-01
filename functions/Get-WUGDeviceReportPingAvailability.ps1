@@ -83,7 +83,7 @@ function Get-WUGDeviceReportPingAvailability {
         [int]$BusinessHoursId,
         [ValidateSet("true", "false")][string]$RollupByDevice,
         [string]$PageId,
-        [int]$Limit = 25,
+        [ValidateRange(0, 250)][int]$Limit,
         [ValidateSet("true", "false")][string]$availableApplyThreshold,
         [ValidateSet("true", "false")][string]$availableOverThreshold,
         [double]$percentageAvailableThresholdValue,
@@ -138,10 +138,14 @@ function Get-WUGDeviceReportPingAvailability {
             $pageCount = 0
     
             do {
-                $pagedUri = if ($currentPageId) { "${baseUri}/${id}/reports/${endUri}?${queryString}&pageId=${currentPageId}" } else { "${baseUri}/${id}/reports/${endUri}?$queryString" }
-    
+                if ($currentPageId) {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
+                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                } else {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
+                }
                 try {
-                    $result = Get-WUGAPIResponse -uri $pagedUri -method "GET"
+                    $result = Get-WUGAPIResponse -uri $uri -method "GET"
                     #Conditional data addtions/conversions
                     #foreach ($data in $result.data) {
                     #    #Do Nothing
@@ -181,8 +185,8 @@ function Get-WUGDeviceReportPingAvailability {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBeEx7JEZrDzIB4
-# zA2soCtS9TeSJF2oM5oazGhmtNuCg6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvkUy4/bvKNPDu
+# N1YDOZ+Vlut9GQnwHLhJ1j7C8VVgqKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -283,17 +287,17 @@ function Get-WUGDeviceReportPingAvailability {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgOVMwj8pi0TiUtUHs2ysbWr4XkSahJfV5WBviYH3lybgw
-# DQYJKoZIhvcNAQEBBQAEggIADdyeRf3zUWXqoSd4r3B3sZX/FSJ3RCDaQIuhyLL0
-# CLgXvvbVEEG+Mvqt0iTDZG52gckhflA1BolR2rvNBb5gZeGPcX4Hx7NhKr3RlBgu
-# prqBxWoWgf2+s5O9XExh1k3e4D8NJPAHzpre/adX3zjAPB3qzchaYnTiYWjFb6um
-# Y/U+G6bL9Jz0NGf9KMTqmrISY8RAoKvCv2N2bsgjBpv+MBdAf79EhoQJMDGhNdYo
-# KvKPq754hNuj9klYfwmwtIwaynbMYIDKpOHFlFmGr/7wLzA6BlCO0WpUqXouUf4m
-# kMlOCKdQrCcfhjwTgysCbIb+vGK4VUT1Hj8gkC2D1oAUVJnA+yBnvWO7Jj0e9JV2
-# i1CqHumlrZUwVeb4UvvREDZ9Iz3RpTuhv1LsS05c1Xb02BrjnkWLJX6w8j/qpA11
-# ARrYlytyni15Go3ub7W0r20TGz246efNT0bVOlqTlY0HqKEkwZARvavi3/1j97L8
-# kNKq0nbax8vwoln8jtfWmqzl10kq6YRd0BwV997T1xaqTuU7bPsamI43wpJIGqET
-# SN+cSnb6/eM2xA8BgLjS9wXZnwipWkADj1IaC1S1DlEe+hWOWelWqace0cdwYpKL
-# gfCzd9KSBcvm+FP7MQ8GyiLMrJW4PCrXF2qEg27/kk4tbNrvyxITeLM2jvtERG5R
-# a+A=
+# BgkqhkiG9w0BCQQxIgQgPup0qyfYcjw6RL+MCbcJcs8yAyuwAqd1YRY6/mYLxnYw
+# DQYJKoZIhvcNAQEBBQAEggIArXolpEr8sbvm0V6/6k+7azieSmMXTYWaUp9wW/A/
+# sppT0eGsph2y+6dmIy1/8izxkG8LzD9VaCYHiuZ/MVmVvBP9jLYT8KgSz1AYNG5y
+# o0bzInAINNXdtcwVvMk1CwzRvnOCKwFRx71MMIqX16LswUMqKr85FsSuLrPvrV1w
+# 8qjrFZ7dp5XWpvJ/epswvQBEW4pmIxmYzHjnl3NkKuB2gCvx3V57HzvUd6kg15ep
+# YW7mbAPLv61hI/qBfbE941Vw6wd832Wt22+POC99agwp0TLoj4UWfukwA2AnD39C
+# 2S5YAa+8R9foF5r0tpAWY+6RxtHWORThGJdpfQHZ0tU9+O0jzthoIP7QaXP72rZo
+# 7ZSRjMNY17DC8aAiaSmi1W2Lywu49L2DiJWrKMAaVJ6v8Qf80g9nn0k5wTpH6K0T
+# 464Nu4jBU95oVrv43wFYFEh3U1F+EK0HfoPvTGP6lWnD9SOKxIY5W876oUkFiIjY
+# UpJ3/RHqzd69WP070UkJUnXqtqC9T5u9Q6IkaTRK4in6O5nWaNo2nBi2vn1MWIPX
+# TNeis5JrZqcR1mAZMVJFku+q0TBqLW5Hk45NOrNMYeiht64n3cYajzPX3MyJctJw
+# zJr+sJON0SEB9Th7hD/sJFAcduKnow3BKR93XWp4LjMTUt21IPyC7ZAaUkEqFHeY
+# aao=
 # SIG # End signature block

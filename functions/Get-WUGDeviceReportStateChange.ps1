@@ -94,7 +94,7 @@ function Get-WUGDeviceReportStateChange {
         [int]$BusinessHoursId,
         [ValidateSet("true", "false")][string]$RollupByDevice,
         [string]$PageId,
-        [int]$Limit = 200
+        [ValidateRange(0, 250)][int]$Limit
     )
 
     begin {
@@ -140,10 +140,14 @@ function Get-WUGDeviceReportStateChange {
             $pageCount = 0
     
             do {
-                $pagedUri = if ($currentPageId) { "${baseUri}/${id}/reports/${endUri}?${queryString}&pageId=${currentPageId}" } else { "${baseUri}/${id}/reports/${endUri}?$queryString" }
-    
+                if ($currentPageId) {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
+                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                } else {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
+                }
                 try {
-                    $result = Get-WUGAPIResponse -uri $pagedUri -method "GET"
+                    $result = Get-WUGAPIResponse -uri $uri -method "GET"
                     #Conditional data addtions/conversions
                     #foreach ($data in $result.data) {
                     #    #Do Nothing
@@ -183,8 +187,8 @@ function Get-WUGDeviceReportStateChange {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjcYWigOLgHG3I
-# 9nc8ftsL3DEneZ9IRTuUMfwvnGtmbaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAi5Ya6f5n3FW6V
+# cp4rISgs1NYImYbQD5EAI/464oULF6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -285,17 +289,17 @@ function Get-WUGDeviceReportStateChange {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgIXKbfDuADg1PmslWFXwIR/KX8fqkFBTCJ+yQSIxccwQw
-# DQYJKoZIhvcNAQEBBQAEggIAHY5A4ca0JlGZ5qnUikCqQV5lQXSy/rwQJGCpBg3a
-# xSenVoEw2MXzLDoA2gViIi/v169/vRUCpo/TTM7LqhH0+wGEhZ3q7b2ZWO3XyjB2
-# bdRkK/RK2vfV+HgVTjnw/rrc8tVnReXe2I6XganW8D/4OWzOqiNOqpbA+6p9KgiL
-# LR4zvWbFR3//jsCAsYe6JqT0mx91YA6A0cXvWhJWzDee1xUDGLKeFpGLJp5lVX/D
-# Td53+907AEfXOMwjHwBRQ/lqrHlHiQ/oq3tu4rvOtu4AY304MgkwsPg9kOauuDkX
-# sQzUC0kd7RqtWYmUI6hnb9qRFw/5zAs+ehgiBzl4scesLSYkyLFOw1glS005D/Qk
-# ez1asMI5lCCVPNzt3Rh2OCRBkMGznrXGZ4TXCchHvfVc9NB32pxvtfHGU80b4ULT
-# MjZo7C5fv6Nh2D6qDor0aIsko+OdM9geu8O05841PSLoeqj4cXitRo+0bDWevn+r
-# 9WSIY8xJU+rHvVEHW4V+ti7cjBqulaAxYSGKwmHkKydk4ZSdjEy1ZYMIV7d/F2Uh
-# N6G65KMfV0voNhNYJU5TEMy99vEyH/ig15iXf3QMSHuhYQq2ljiv6zd0+PELKOlB
-# sHH+7vaOoC6KRUdUKRNbqBukwjDhKjDlk+zqecIRp8Zi5hATqfCzqseFeFwJCqRG
-# YV0=
+# BgkqhkiG9w0BCQQxIgQgL65VJR3RSh8E0cYvsT2O+wsG5dmyOZHJCmwEkc9+HcYw
+# DQYJKoZIhvcNAQEBBQAEggIAflFGWHiU8LEe4fF7oLw+keiUvIgyA06g3xy6mgni
+# LxXbiLqBNBqVn/9ufdam0n24QbzMRE6R/t0NvP3U6G1NxtbFzqVgCAD6MwzdIgx6
+# n6l6UtVTcCxvdxf0QzpiRbSTT+jNaw1463f2yOtFXnpBS+yYEJfq6hfi83MQ6OyY
+# tcQGvSbERd5ZU1FqcXVuu4AXFC7RkeTH7T0gC8itjxF4X75FoVD3KpbGEfn8CYuy
+# uQ4XjI9DLn7zR+AdYIsJVa6gBC2wU/XZ0H3UOzaBII8H2S5ENS7c7xZV2PfWVKmV
+# /7T9RWb/HVoLPXw2lPwRyU+d54trV1PP+P0YQ0NiLBRRQZY1VSfhRLosusz5yi9i
+# p5CX5EgANHmtV+yaRXViKihA6BuTo0DZyB+lMm+++AwCP/kTotJSootls+0sopcE
+# 8Ma9MKxUnGixg59AXmGIiFO6H1f1FGyo55ypB3Xe+aqes/jp4gD4ZbQZU+VSlH/c
+# WCz7LvU8qmWFF7d7vfsrF2yQgZRS7qDgLfrofsK8TPdka+H+5br/5BAWacIujT2V
+# SCWtglS8foCo/jQ8K50DBli0Ilx2yQWMJinz6ru9BOC7YhYOuMNdUWgPPTD2+Fqr
+# s5vFUYZTMmgeABQPswMPQaiShjTOvDSFmOxadtGUtD1BHOmckMJ9+1eEBfSbQlbO
+# oNU=
 # SIG # End signature block

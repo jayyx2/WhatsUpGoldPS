@@ -83,7 +83,7 @@ function Get-WUGDeviceReportPingResponseTime {
         [int]$BusinessHoursId,
         [ValidateSet("true", "false")][string]$RollupByDevice,
         [string]$PageId,
-        [int]$Limit = 25,
+        [ValidateRange(0, 250)][int]$Limit,
         [ValidateSet("true", "false")][string]$applyThreshold,
         [ValidateSet("true", "false")][string]$overThreshold,
         [double]$thresholdValue
@@ -133,10 +133,14 @@ function Get-WUGDeviceReportPingResponseTime {
             $pageCount = 0
     
             do {
-                $pagedUri = if ($currentPageId) { "${baseUri}/${id}/reports/${endUri}?${queryString}&pageId=${currentPageId}" } else { "${baseUri}/${id}/reports/${endUri}?$queryString" }
-    
+                if ($currentPageId) {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
+                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                } else {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
+                }
                 try {
-                    $result = Get-WUGAPIResponse -uri $pagedUri -method "GET"
+                    $result = Get-WUGAPIResponse -uri $uri -method "GET"
                     #Conditional data addtions/conversions
                     #foreach ($data in $result.data) {
                     #    #Do Nothing
@@ -176,8 +180,8 @@ function Get-WUGDeviceReportPingResponseTime {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrWyTc0NPLLeYW
-# iX1b97aDtPPedulvGhNdQhponZVTrKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNOGLI0ttiD29w
+# nUMkCIlcoCzjPYhZp8ZqoYf1CXc+y6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -278,17 +282,17 @@ function Get-WUGDeviceReportPingResponseTime {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgAsBhBqjgEHc7BlFDv/7Rze4NJcyLmFWeR3wQGjKEJVEw
-# DQYJKoZIhvcNAQEBBQAEggIAUb5oSSRkZ21lsaWdqttlBmYBCTH/JkmMomkzWKKa
-# Ue84Kxt2FWQD01fnVoGOM1+kuBX+XWxvojdFYSOcpzabcrgqyWv5R6geRDbMVDcb
-# h8wiADjHr3fjHaP/DUcoXNLyjcTrJuklJ+wKsbif5w2EPn6QZCMZqyl2svCtpow0
-# P3sFXGohn/hbK7m96OWwfme6be+4gOjC8j4eh11zXUWOmJdg8M85SO5otp87sVm7
-# 6C2AF417dTC9qp2U5+TmoKbSyHZFqiId61xluWl6O3wkbAl/X/iKmGNF/0gjGeZ1
-# 4ydwzBGHJ+R6vnHTDcxxBwACplkYmto84vx2VUAhVgBizHZd4/caxRQ+YNLtsK3Y
-# HpUO8XAISvVlSVJxqfrzwqAgTYBlYeET52L0kF8h/j2bGXy17Qa2KhRspvPUPcuF
-# KL8brWusU3B+uj0E9CLUXKxZv4C1Z+vKLTyNatI19ZP3O6mhD0TTpAOa/gdim6qF
-# +8ltXIq8zwkMTYBUwXuHsndZ2+TJk3F9nBahbfkPK0+bx8Fqz1URczniJPMjojFl
-# j9l5gVwKD4I1kxOihEZfCYZGiJCVXyg/ONHkJPMGKXPo2gCDEaDCVsTsAk18ofyJ
-# cFPZZ8bnmBwqVP04lYWEzMeSECU+WqFbDuvUs54P3oksC97aKMfkpVeV8SiOjy/S
-# 7F8=
+# BgkqhkiG9w0BCQQxIgQgfdZVoIfKHB4LcWzdjFgE3k7XXSfHaYT5bRIdcEvIqa8w
+# DQYJKoZIhvcNAQEBBQAEggIAY9Join5qKRikDg5ClO6lKK4ciwtR9LtE5uZPFy2z
+# 9wMOKF6Tca8mb55WH0KS29bUcSHicGr9oy4wN0a/v056/CwtDjm+OKQQyOBhz2D/
+# ukPzDKAc8KLgqSK2cEjPGSh+m77lMEywtRXc5enR61NeObybsXqHLJEv90kbRBZF
+# YQS0Jn8KOHGfd7t3MRC0oMN9/Ba+vuvXDD5qAMPcYUN9WZAQ23/2kFZzHbjVCt02
+# btmrqb0JWYx/zpKbQeXiIjgw12tiiVooIT5K3MVcojMUPLYCUcqI+reVd8jUJPmp
+# La0mhJ+HK15642Na3s+uv48kk5zlNsfQaeC1Z6QOgH+B1Ni7+3YEsAX8HyNquRmA
+# kMrh6TP48hHsTQA4xzPSv/Nc5Y86TC2B0sFgKTdfTdhvst350qcIxPWnDGjXJz/w
+# dRv9WZZkAADjBatKjCEgmSqvM1HXN2x92rj/Uk8nuFukZgVZskNLh68I4Ix3JYIP
+# N6HFoqZeaitNbfM562+5uIS/+VZBPjomVUW/VxRl2MhH+3lBcP6mm44mKQ1DaU9s
+# ae0cy1HHwGLkP1oC0nDC+m0FwmAsSijbNephZLec/xbt2LZ6B8BYw2ypd7WlL/f9
+# UxXIFP4vDJCqhlteH9Net9uQ6kDdxMuwk8WUlQNRusuXejA7cv9wI7cmGXyP/1Rp
+# whE=
 # SIG # End signature block

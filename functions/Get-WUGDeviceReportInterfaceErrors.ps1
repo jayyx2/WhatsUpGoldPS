@@ -73,6 +73,7 @@ Fetches Interface error reports for device 4 for the first week of January 2023.
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja) 2024-03-24
+Modified: 2024-03-29
 
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceReport_DeviceInterfaceErrorsReport
 Provides an interface to WhatsUp Gold's REST API for fetching detailed interface error reports across devices, with support for extensive filtering and pagination.
@@ -84,7 +85,7 @@ function Get-WUGDeviceReportInterfaceErrors {
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
-        [int]$RangeN = 1,
+        [int]$RangeN,
         [ValidateSet("defaultColumn","id","deviceName","interfaceName","interfaceId","pollTimeUtc","timeFromLastPollSeconds","rxMin","rxMax","rxAvg","rxTotal","txMin","txMax","txAvg","txTotal","totalAvg")][string]$SortBy,
         [ValidateSet("asc", "desc")][string]$SortByDir,
         [ValidateSet("noGrouping","id","deviceName","interfaceName","interfaceId","pollTimeUtc","timeFromLastPollSeconds","rxMin","rxMax","rxAvg","rxTotal","txMin","txMax","txAvg","txTotal","totalAvg")][string]$GroupBy,
@@ -95,7 +96,7 @@ function Get-WUGDeviceReportInterfaceErrors {
         [int]$BusinessHoursId,
         [ValidateSet("true", "false")][string]$RollupByDevice,
         [string]$PageId,
-        [int]$Limit = 25
+        [ValidateRange(0, 250)][int]$Limit
     )
 
     begin {
@@ -141,10 +142,14 @@ function Get-WUGDeviceReportInterfaceErrors {
             $pageCount = 0
     
             do {
-                $pagedUri = if ($currentPageId) { "${baseUri}/${id}/reports/${endUri}?${queryString}&pageId=${currentPageId}" } else { "${baseUri}/${id}/reports/${endUri}?$queryString" }
-    
+                if ($currentPageId) {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
+                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                } else {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
+                }
                 try {
-                    $result = Get-WUGAPIResponse -uri $pagedUri -method "GET"
+                    $result = Get-WUGAPIResponse -uri $uri -method "GET"
                     #Conditional data addtions/conversions
                     #foreach ($data in $result.data) {
                     #    #Do Nothing
@@ -185,8 +190,8 @@ function Get-WUGDeviceReportInterfaceErrors {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4Q4O5V+FZnKl2
-# VlPhz35qUWPw2Ay/nTid+JqGIZGt/aCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsTfRhEVstJS9i
+# QWA3Vc2UudQKsQCvjUuW+RWFr10g/6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -287,17 +292,17 @@ function Get-WUGDeviceReportInterfaceErrors {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgR+1VHxTWcR54WXbxW7c8VXa1wcX9+Z2Foy3mGz1bI10w
-# DQYJKoZIhvcNAQEBBQAEggIAXZdd6xY35IzNeOuHTz/2rlpK3uVDEsxugqZkjgA0
-# tCuceionIs3RzhBVugCWjbwZTla952XWXbeNPPp8XeS45qnFaWl3K74/Z8a7rA+r
-# UEcgWIRvIh9I3JfpP62dJSniqrkeX0fpJeDJiv6/yp/MQjVC7+xn6Rf69p4vWS7o
-# jiQKeswBL/SKqhwAal+jO0r8pwXHBsvU4Tq/j4gQ0aBydwHTogL+yi/U682RrdCw
-# 025w+UX+9P+8LnET9egr0AIAaTpH9CpaCIBIEs5hNst4K15sckGAQMKZvYfzfq6f
-# Sv/tTyPUgyrexAbJODexs/zT4HN7QU07ltBaJoAbXErfX+JyPZc4RHh6kG6KEVcj
-# HkPD2njTvs9yW3Rp2bfO87tfRSgq/1NPjyFmYPTGiCeHA7jacot4hpMRhe4VJ8ql
-# Q9Z3yj+GqC9ccrXTLNG7LN6Btu/zYoDdPbVkpfbR85jyfDmei+ZkKm4yIWVMn66Z
-# iHGuA4I7UipBwqm4tz6ISPFX/QzhPI1+q71DjdcsU+bQCfb/W7Sr4R9quihtcWdn
-# UFJdNMf8+bFLDHNKcqOILlljVHqeOF8+xLvCmEDHXSrSXV0c2Oz/PHJIy9g1vS0k
-# UAabLy+BeGRUe2exskOGm1Rqo1oHSLc4xx980v8btcvGbmnKqYrVkWkulBovaAfj
-# ve4=
+# BgkqhkiG9w0BCQQxIgQgs0F95M06J2/eplNpKOZJkcfp4CohHzTtvZAeEHIwvLUw
+# DQYJKoZIhvcNAQEBBQAEggIAGBiQS034xcVYCx4g7qpLhkmnYqrJllSJr0Rirbb+
+# MFKq+xUdPawJNaPh9tTo0RxvJ11ukdjKdIWPhK/1usf56Xm+jHjuNlxbhWvdgsqV
+# e9nEDiezErz8IDbZ+GXh+Np7ElnZADLFNx27x0fzjLtm913O3L/ma++36nAg6xWr
+# JSD25xbFnWfHvYtgnKaDvu1xOu/J+N7M1szrw3NF4YCDFn0C8QJOzTKu7BzJ9O/t
+# +MA5ByBLiWz4BPsg3+vm1u163xjeye2M5JCubs+ANwh3zPxVS6uIXJysvA7mF8qW
+# y1SxQyHmH0J9Nz7tEz/JL0G2bZYe6HZXEgn8rw9Z2wwek4ddJDzA+rKl0wCFnfRx
+# Ul+ZXXBp58h9CPiakCqd+VhFeqDoc1CaM99ca/CbiZXA2xLw8c+7WpnvaMfKujSi
+# fcG5mPh5TcpDdv4g7UgZOUrducXYHE8B/BM2WReblyb8dyg9VKL/odMKgzdZgSLN
+# LaptTVDHwOlop5kn82/oTcZ7Vtteu2SxPrTRigQX4zRAqinp9+gcOpO61v3aNb7d
+# 0SVqf2UdpBtTGeIRbM9noCecP1dvenA3EuAFAh9VGkr9l+UVaDddhQV6SgBhgP3W
+# EWywYq5ty9hDVXpHMXkcmIMgmlEQFqP4M07ZAKd00ShyvliIpfbR9Ww3xuv7AAHv
+# OLw=
 # SIG # End signature block

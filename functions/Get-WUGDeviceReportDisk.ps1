@@ -67,6 +67,8 @@ Fetches disk utilization reports for device 4 for the first week of January 2023
 Author: Jason Alberino (jason@wug.ninja) 2024-03-24
 -Converts to gigabytes automatically
 -Adds percen to the data returned
+Modified: 2024-03-29
+
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceReport_DeviceDiskUtilizationReport
 #>
 function Get-WUGDeviceReportDisk {
@@ -75,7 +77,7 @@ function Get-WUGDeviceReportDisk {
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
-        [int]$RangeN = 1,
+        [int]$RangeN,
         [ValidateSet("defaultColumn", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minUsed", "maxUsed", "avgUsed", "avgFree", "minPercent", "maxPercent", "avgPercent")][string]$SortBy,
         [ValidateSet("asc", "desc")][string]$SortByDir,
         [ValidateSet("noGrouping", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "mi", "ma", "av")][string]$GroupBy,
@@ -86,7 +88,7 @@ function Get-WUGDeviceReportDisk {
         [int]$BusinessHoursId,
         [ValidateSet("true", "false")][string]$RollupByDevice,
         [string]$PageId,
-        [int]$Limit = 25
+        [ValidateRange(0, 250)][int]$Limit
     ) 
 
     begin {
@@ -132,10 +134,14 @@ function Get-WUGDeviceReportDisk {
             $pageCount = 0
     
             do {
-                $pagedUri = if ($currentPageId) { "${baseUri}/${id}/reports/${endUri}?${queryString}&pageId=${currentPageId}" } else { "$baseUri/$id/reports/${endUri}?$queryString" }
-    
+                if ($currentPageId) {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
+                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                } else {
+                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
+                }
                 try {
-                    $result = Get-WUGAPIResponse -uri $pagedUri -method "GET"
+                    $result = Get-WUGAPIResponse -uri $uri -method "GET"
                     #Conditional data addtions/conversions
                     foreach ($data in $result.data) {
                         $data.size = [math]::Round($data.size / 1073741824, 2)
@@ -185,8 +191,8 @@ function Get-WUGDeviceReportDisk {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAW4cwH4t4tTcZT
-# ACjrDM+sVU2i02Tyfd7vklZSpYsxtqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCP8WN15e1AT0KF
+# I1X14MI2JRg1KhqsphZPFAzi2Z089qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -287,17 +293,17 @@ function Get-WUGDeviceReportDisk {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgceRhxOylqrgUCbTGXMJoCBlbwuq/cXi0QaCuXIoPVg8w
-# DQYJKoZIhvcNAQEBBQAEggIAEgLzAOX4gqzeju1DmikQg12PvmAAVV24j60OUseD
-# IGOi0+II/MFxSqE7FtBJQAVB7OStsqFcTTMLtnvXjBEdVQf5f+RZ6rbJ0Hcg6KNG
-# ul0sI0Zr+pqcKSFPXQyImxQT0LyUsqi7GrvSpjrmIhtnWARxAYyXPxfBYyXTKwtc
-# C6cGtmQI13FY34DXDjzxwsyGk5tqfwUkawvRXp5/Xxn85Y1pWCTLGboevCyWmE9w
-# l71SZ83iInUGqoYH6BxB1L0TTOwNQHpA1rhKzlEyHG3r6uaKyOaGx5DBphlCcKGM
-# qWREfwYrzTYZ4T+t8xlBOqxd4xW2vA8ffmHzUvIzBCKJwRpdw3I+phMyHyNThJ0O
-# y34jz1FTxXaQkmx1V5mCAM3uzg3kVZQdtlLg1OVSeCuv/Q8rbTnIbNv5EpXcrcqh
-# yV3/RuE9pFz+NJvvlFnbL4tnmJoWBqb6kem5o8IPHl35VjYeKkuzjrSMiqRAholR
-# itBH7NvXlJoXt9O2q8sDvp0BG7aix7xiAVl8nNkltt9++I28lIPr6DpYDW+qSHgq
-# vtub5ckYjYwsni3/rpKngfj2ByRWwVkVasotSaSUn8O7If/l8O5zJym36qMTBgU+
-# 0Vwy08j3VbloJ7BC+vsZG7f0fjNK6clP6dbYPCuhOtxnk3yj+8TZOkdhRlAUGx31
-# 150=
+# BgkqhkiG9w0BCQQxIgQg5n8tCEiNABTWhYM97E441GyVH4hELkcdrgJQq73eIEkw
+# DQYJKoZIhvcNAQEBBQAEggIAMaltCsODsatGqjcLKbwhAd1jtXM4tevgzqln+x8B
+# wuysDP4VeYV4ufJAdvOtSS3tEMQDpXtppYEn6KywLHYnytKWvTNpQ7TTta2EsHMQ
+# YYTbIlu/OrLLX3AHyG7SZdmD1MsvIp3YQLwVbwkGWI3DYHxHeGslRRk8tfgh+M03
+# HnG5MiY56WaDZCqobcokjaSPIOURLPupM+KOhAdTOLZciwX8Ec7LlBCko58YWmQN
+# y7pTculhmblC50vN7cuFaRL8oGbqqP0pQXYDATqnmz3NDX80MVoeCRWw5TTB8Il8
+# DvN9JNsaE0SVerD10dbxNa9PNo/or4QjgdA7Vp5k8bVKTpGhHnqXepvJFvIx3YBh
+# iNZCOHulx6PIhUAFgaA2ufNhOioG0jvSNdrgfPZEdyDpQVQFTDzGX6aOVKwZIz6q
+# SOE6gROuz+LkJZ6SNZfAo0r4lqLztR2svZbaUGXYobm01YliihZH8xtNoXwmo1HH
+# MAEWbvtdiWkMFEYD/OlkCVZ6WT9k9YBBjY8RdEihhKCyHJy6TMJ8eutf/M/jQAZh
+# I9hXaMknqQOeZvvmwa/DHcsYC1i51S1rulA1TtQfHk5SZsUBwdjP7HTilHgSTDgx
+# rXZSgPvPvNt7ndXpd8EaCxdjguhC0JMAHwqP+Balzm3KBa/tziYA92dnChFFwX3u
+# Ogw=
 # SIG # End signature block

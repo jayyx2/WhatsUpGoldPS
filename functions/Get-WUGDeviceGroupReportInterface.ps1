@@ -1,87 +1,81 @@
 <#
 .SYNOPSIS
-Retrieves Interface utilization reports for specified devices from WhatsUp Gold.
+Retrieves interface utilization reports for devices within specified groups from WhatsUp Gold.
 
 .DESCRIPTION
-The Get-WUGDeviceReportInterface function fetches Interface utilization reports for a list of device IDs from WhatsUp Gold. It supports filtering by time range, sorting, grouping, applying thresholds, and automatically handles pagination. The function provides progress feedback during execution.
+The Get-WUGDeviceGroupReportInterface function fetches interface utilization reports for all devices within the specified group IDs from WhatsUp Gold's API. It supports a range of filtering options, including time range, sorting, grouping, thresholds, and pagination. It also allows for the inclusion of devices from sub-groups within the specified groups.
 
-.PARAMETER DeviceId
-An array of device IDs for which Interface utilization reports are requested. This parameter is mandatory and accepts multiple values.
+.PARAMETER GroupId
+An array of group IDs from which to fetch interface utilization reports. This parameter is mandatory.
+
+.PARAMETER ReturnHierarchy
+Specifies whether to include devices from sub-groups. Accepts 'true' or 'false'. Default is 'false'.
 
 .PARAMETER Range
-Specifies the time range for the report. Valid entries include:
-- "today": Returns data generated today.
-- "lastPolled": Returns data from the last poll.
-- "yesterday": Returns data generated yesterday.
-- "lastWeek", "lastMonth", "lastQuarter": Data from the last week, month, or quarter.
-- "weekToDate", "monthToDate", "quarterToDate": Data since the beginning of the current week, month, or quarter.
-- "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths": Data from the last N units of time.
-- "custom": Data between 'rangeStartUtc' and 'rangeEndUtc'.
-Default is 'today'.
+Specifies the time range for the report. Accepts predefined ranges or 'custom' for specifying a custom range.
 
 .PARAMETER RangeStartUtc
-The start date for the report in UTC format (YYYY-MM-DDTHH:MM:SSZ). Required if Range is set to 'custom'.
+The start of the custom time range in UTC format. Required if Range is set to 'custom'.
 
 .PARAMETER RangeEndUtc
-The end date for the report in UTC format (YYYY-MM-DDTHH:MM:SSZ). Required if Range is set to 'custom'.
+The end of the custom time range in UTC format. Required if Range is set to 'custom'.
 
 .PARAMETER RangeN
-Used with 'lastN' ranges as a multiplier to specify the number for the data filter. For example, 'lastNHours=2' would fetch data from the last 2 hours.
+The multiplier for the 'lastN' ranges, specifying the number for the data filter.
 
 .PARAMETER SortBy
-Specifies the field to sort the report by. Valid options include "defaultColumn","id","deviceName","interfaceName","interfaceId","pollTimeUtc","timeFromLastPollSeconds","rxMin","rxMax","rxAvg","rxTotal","txMin","txMax","txAvg","txTotal","totalAvg"
+Specifies the field to sort the report by.
 
 .PARAMETER SortByDir
-The direction to sort the report. Options are 'asc' for ascending or 'desc' for descending. Default is 'desc'.
+The direction of sorting. Accepts 'asc' for ascending or 'desc' for descending.
 
 .PARAMETER GroupBy
-Specifies the field to group the report by. Similar options as SortBy.
+Specifies the field to group the report by.
 
 .PARAMETER GroupByDir
-The direction to group the report. Options are 'asc' or 'desc'.
+The direction of grouping.
 
 .PARAMETER ApplyThreshold
-Indicates whether the threshold filter is applied. Accepts 'true' or 'false'.
+Indicates whether the threshold filter is applied.
 
 .PARAMETER OverThreshold
-Indicates if the threshold value is applied when over or under. Accepts 'true' or 'false'.
+Indicates if the threshold value is applied when over or under.
 
 .PARAMETER ThresholdValue
-The threshold filter value as a string. Default is '0.0'.
+Specifies the threshold filter value.
 
 .PARAMETER BusinessHoursId
-The business hour filter ID to apply. Default is '0' (no filter applied).
+Specifies the business hours ID filter to apply.
 
 .PARAMETER RollupByDevice
-Indicates if the report should be summarized at the device level. Accepts 'true' or 'false'. Default is 'true'.
+Indicates if the report should be summarized at the device level.
 
 .PARAMETER PageId
 Used for pagination, specifies the page ID to start from.
 
 .PARAMETER Limit
-Limits the number of entries per page. Default is 25.
+Limits the number of entries per page.
 
 .EXAMPLE
-PS> Get-WUGDeviceReportInterface -DeviceId @("1", "2", "3") -Range "lastWeek"
+PS> Get-WUGDeviceGroupReportInterface -GroupId @("1", "2") -Range "lastWeek" -SortBy "avgPercent" -SortByDir "desc" -Limit 50
+Fetches last week's interface utilization reports for devices within groups with IDs 1 and 2, sorted by average percent in descending order, with a limit of 50 entries per page.
 
-Fetches last week's Interface utilization reports for devices with IDs 1, 2, and 3.
-
-.EXAMPLE
-PS> Get-WUGDeviceReportInterface -DeviceId @("4") -Range "custom" -RangeStartUtc "2023-01-01T00:00:00Z" -RangeEndUtc "2023-01-07T23:59:59Z"
-
-Fetches Interface utilization reports for device 4 for the first week of January 2023.
+$Cred = Get-Credential
+Connect-WUGServer -serverUri 192.168.1.250 -Credential $Cred
+$groups = Get-WUGDeviceGroups
+Get-WUGDeviceGroupReportInterface -GroupId $groups
 
 .NOTES
-Author: Jason Alberino (jason@wug.ninja) 2024-03-24
-Modified: 2024-03-29
+Author: Jason Alberino (jason@wug.ninja) 2024-03-31
 
-Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceReport_DeviceInterfaceUtilizationReport
-Provides an interface to WhatsUp Gold's REST API for fetching detailed Interface utilization reports across devices, with support for extensive filtering and pagination.
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceGroupReport_DeviceInterfaceUtilizationReport
+Provides an interface to WhatsUp Gold's REST API for fetching detailed device group reports with support for extensive filtering and pagination.
 #>
-function Get-WUGDeviceReportInterface {
-    [CmdletBinding()]
+
+function Get-WUGDeviceGroupReportInterface {
     param (
-        [Parameter(Mandatory = $true)][array]$DeviceId,
+        [array]$GroupId,
+        [ValidateSet("true", "false")][string]$ReturnHierarchy,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
@@ -100,17 +94,17 @@ function Get-WUGDeviceReportInterface {
     )
 
     begin {
-        #Input validation
-        if (-not $global:WUGBearerHeaders) { Write-Error "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-        if ((Get-Date) -ge $global:expiry) { Write-Error "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
+        if (-not $global:WUGBearerHeaders) { Write-Error "Authorization header not set, running Connect-WUGServer"; return }
+        if ((Get-Date) -ge $global:expiry) { Write-Error "Token expired, running Connect-WUGServer"; return }
+        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; return }
         #Set static variables
         $finaloutput = @()
-        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
-        $endUri = "interface-utilization"
+        $reportType = "interface-utilization"
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups/"
+        $endUri = "/devices/reports/${reportType}/"
         $queryString = ""
-        $totalDevices = $DeviceId.Count
-        $currentDeviceIndex = 0
+        $totalGroups = $GroupId.Count
+        $currentGroupIndex = 0
         # Building the query string
         if ($Range) { $queryString += "range=$Range&" }
         if ($RangeStartUtc) { $queryString += "rangeStartUtc=$RangeStartUtc&" }
@@ -132,66 +126,47 @@ function Get-WUGDeviceReportInterface {
     }
 
     process {
-        foreach ($id in $DeviceId) {
-            $currentDeviceIndex++
-            $percentCompleteDevices = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100, 2)
-            # Main progress for device processing with Id 1
-            Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "Processing Device $currentDeviceIndex of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
-    
+        foreach ($id in $GroupId) {
+            $currentGroupIndex++
+            $percentCompleteGroups = [Math]::Round(($currentGroupIndex / $totalGroups) * 100, 2)
+            Write-Progress -Id 1 -Activity "Fetching ${reportType} report for groups" -Status "Processing Group $currentGroupIndex of $($GroupId.Count) (GroupID: $id)" -PercentComplete $percentCompleteGroups
             $currentPageId = $null
             $pageCount = 0
-    
             do {
                 if ($currentPageId) {
-                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
+                    $uri = "${baseUri}${id}${endUri}?pageId=$currentPageId"
                     if(!$null -eq $queryString){$uri += "&${queryString}"}
-                } else {
-                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
-                }
+                } else {$uri = "${baseUri}${id}${endUri}?${queryString}"}
                 try {
                     $result = Get-WUGAPIResponse -uri $uri -method "GET"
-                    #Conditional data addtions/conversions
-                    #foreach ($data in $result.data) {
-                    #    #Do Nothing
-                    #}
                     $finaloutput += $result.data
                     $currentPageId = $result.paging.nextPageId
                     $pageCount++
-    
-                    # Page progress for the current device with Id 2
-                    if ($result.paging.totalPages) {
-                        $percentCompletePages = ($pageCount / $result.paging.totalPages) * 100
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
+                    if ($result.paging.totalPages -and $result.paging.totalPages -gt 0) {
+                        $percentCompletePage = [Math]::Round(($pageCount / $result.paging.totalPages) * 100, 2)
+                        Write-Progress -Id 2 -Activity "Fetching ${reportType} report for GroupID: ${id}" -Status "Page ${pageCount} of $($result.paging.totalPages)" -PercentComplete $percentCompletePage
                     } else {
-                        # Indicate ongoing progress if total pages aren't known
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
+                        Write-Progress -Id 2 -Activity "Fetching ${reportType} report for GroupID: ${id}" -Status "Processing page ${pageCount}" -PercentComplete 0
                     }
-    
                 } catch {
-                    Write-Error "Error fetching device report ${endUri} for DeviceID ${id}: $_"
-                    $currentPageId = $null
+                    Write-Error "Error fetching ${reportType} report for GroupID ${id}: $_"
+                    $currentPageId = $null # Ensure loop termination on error
                 }
-    
-            } while ($currentPageId)
-    
-            # Clear the page progress for the current device after all pages are processed
-            Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Completed" -Completed
+            } while ($currentPageId)       
+            # Clear page progress for the current group after all pages are processed
+            Write-Progress -Id 2 -Activity "Fetching ${reportType} report for GroupID: ${id}" -Status "Completed" -Completed
         }
-    
-        # Clear the main device progress after all devices are processed
-        Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "All devices processed" -Completed
     }
-    
-
-    end {
-        return $finaloutput
+            
+        end {
+            return $finaloutput
+        }
     }
-}
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQGjZIjqcr5tbo
-# TOHUU1Ph4r1I2JNbLvXO0kfqPwWkA6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsueJnxCPC0tkx
+# crAiFqArJFrtEO/rakGKpeD1v9/xFqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -292,17 +267,17 @@ function Get-WUGDeviceReportInterface {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQggfTMs7TYCzMy2P+5rXWVZ5LEZUwxfoYltzTSKd0Wav4w
-# DQYJKoZIhvcNAQEBBQAEggIAhzDWw6FRBevpQqud9LlONnK6MiSAyumDRsgv95/4
-# YCvjRBsT/cv9QNz51MKLeiQj0euCmzknyUGbXrljD2sWZqofX4Lri7cyXiCTZOLC
-# eg5Yh/Z57Gll/erKGafmO3OvDINR1N3BRJfvs+TfpReBF3hY8gqN3VK6KfmND5xi
-# 8noqOK3BHThbdjLfj8ZgLmV5atkKtbteQbtwoLX7TI91l6W7sX/wh0q0sR2aRDsX
-# Zn4yTg3Q0Jcp2YTFES0/LCpgRkFjxJQpE957AruMqdz7Jf9om06+XcV6oBF0c95j
-# RiSYst8itSvmCEy0jlPHd/qurQtKFuq6iL+99bN4KHsRqHebuCpxMUDzK3yOok3/
-# 9lhcu4vg7EibvJBvw9Ue8Ld1BWn6A/0PGdxeMgeLO1x5NFYupjEqn/CYEYTzyS4b
-# NGsalh+rymo2Do79gjGsWtj9SxFpiA4cbK13TLqYkB/a3q4BXVGVNDdtXikTdO+1
-# T6G22uSKe+rNoKd8euB6mM7N6tgAIBbGLmOo225RXvpElW7pGC8fM8xpTe1ksZrt
-# u+3OeQfKaRfsu6VCJSIPYBDo4j4AEVF+TgpcsUGB3nfl+cc6f6oXYuVsOUJs4OJF
-# E2BO1USCyFInYsbadVK755jmSw9Zn/eG1Cc5d0rh3oEgWePPda6usCv8lgVocR9U
-# CcQ=
+# BgkqhkiG9w0BCQQxIgQg8kaJTKu04Vz8m95mjJtMD3ICTlrsyJpbi35LFtnvRCAw
+# DQYJKoZIhvcNAQEBBQAEggIAbNAEMr11H2SN5sCLt9dSKKydvB06IOjH6ITNXeAv
+# Exaf11BsVCR3+iAmlrgEZV8tz4y8M3c1Z9mjdvppF8bV3vPkM+xuLNHkTDiw+5TF
+# TQK6Lg5pajrfJkXGs42XjaLgn47B03LOBwSX6UjBRyWp6R6q1TMxybCyWtsnpsXN
+# PaSnOzqXuSpj/WVOL7DaTWHR7PEdbYsd0nGbxP8LnWwLqyoPtVtS+5yY0unmjPsx
+# vT5NPNdrOq107OXrXOwYMz8hu0XWX6Nm/uRVvfElQ9OOqwsLQT6dFYBuHAdrR8OU
+# 7AHW2/Axsj1roA3QrAqEKLEo0d5CKG+JHb40zEjRea6eJuuqOSl82U2AojtFfkt5
+# AHu5LfCpaur4ABz9F/u6nw+8tee5ahvI6eJoy0bdPOthZ0RMwVBPHPxpuutnOom/
+# EsDXcCwcWk1+FsJSVorEsHZ5qAt8sq8OZ/8QMQ3TcFia3MnjPLIRQudFKzn+xT6h
+# +so9wsl/gH37aevCfs15MJryhuZaxB8KjnABZO5wKrfALpwXw/i1RMozotiG4LS+
+# 3z5NrG/2v2/V8IEQ1TmLDWBrIrOYiNocDXjHDGLvAlpMMg9o5MgdGDtBPKx6xpZn
+# 8rNJDpGSM2ZUazibR02AS0inKbogm9O76MAyYRUgksdkBi6q6tUOvkpmZfEwOMNE
+# aW8=
 # SIG # End signature block

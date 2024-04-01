@@ -1,4 +1,27 @@
 # WhatsUpGoldPS Release History
+## 0.1.11 - 2024-04-31
+### Changed
+* Functions
+  * Added
+   * Get-WUGDeviceGroupReportCpu
+   * Get-WUGDeviceGroupReportDiskSpaceFree
+   * Get-WUGDeviceGroupReportDisk
+   * Get-WUGDeviceGroupReportinterfaceDiscards
+   * Get-WUGDeviceGroupReportinterfaceErrors
+   * Get-WUGDeviceGroupReportinterfaceTraffic
+   * Get-WUGDeviceGroupReportinterface
+   * Get-WUGDeviceGroupReportMaintenance
+   * Get-WUGDeviceGroupReportMemory
+   * Get-WUGDeviceGroupReportPingAvailability
+   * Get-WUGDeviceGroupReportPingResponseTime
+   * Get-WUGDeviceGroupReportStateChange
+
+ 
+  * Changed
+   * -Limit parameter was set to a default value on some fuctions
+   * -Limit parameter now has input validation on all functions
+   * Fixed empty query string problems caused by the above change
+  
 ## 0.1.10 - 2024-03-29
 ### Changed
 * Functions

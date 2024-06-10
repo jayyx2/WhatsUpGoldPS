@@ -102,13 +102,6 @@ function Connect-WUGServer {
     elseif ($Password -and -not $Username) { $Username = Read-Host "Enter the username associated with the password."; $Password = $Password; }
     elseif (!$Credential) { $Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
     
-    # Set SSL validation callback if the IgnoreSSLErrors switch is present
-    if ($Protocol -match "https") {
-        if ($IgnoreSSLErrors) {
-            Write-Warning "You are ignoring SSL certificate validation errors, which can introduce security risks. Use this option with caution.";
-        }
-    }
-    
     #Set the base URI
     $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
     
@@ -123,7 +116,14 @@ function Connect-WUGServer {
     
     #Attempt to connect
     try {
-        $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody
+         # Set SSL validation callback if the IgnoreSSLErrors switch is present
+        if (($Protocol -match "https") -and ($IgnoreSSLErrors)) {
+            Write-Warning "You are ignoring SSL certificate validation errors, which can introduce security risks. Use this option with caution.";
+            $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody -SkipCertificateCheck;
+        }
+        else {
+            $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody;
+        }
     }
     catch {
         $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"

@@ -28,27 +28,54 @@ function Get-WUGDeviceAttribute {
         [Parameter(Mandatory)][string]$AttributeId
     )
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
-
-    $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/attributes/${AttributeId}"
-
-    try {
-        $result = Get-WUGAPIResponse -uri $uri -Method GET
-        return $result.data
+    begin {
+        Write-Debug "Starting Get-WUGDeviceAttribute function"
+        
+        # Global variables error checking
+        if (-not $global:WUGBearerHeaders) {
+            Write-Error "Authorization header not set, attempting to connect to WUG Server."
+            Connect-WUGServer
+        }
+        if ((Get-Date) -ge $global:expiry) {
+            Write-Error "Token expired, attempting to refresh or reconnect."
+            Connect-WUGServer
+        }
+        if (-not $global:WhatsUpServerBaseURI) {
+            Write-Error "Base URI not found. Attempting to connect to the WUG Server."
+            Connect-WUGServer
+        }
+        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/attributes/${AttributeId}"
+        Write-Debug "Prepared URI: $uri"
     }
-    catch {
-        Write-Error "Error getting device attribute: $($_.Exception.Message)"
+
+    process {
+        Write-Debug "Processing Get-WUGDeviceAttribute function"
+        Write-Progress -Activity "Fetching Attribute" -Status "Requesting attribute $AttributeId for device $DeviceId" -PercentComplete 0
+        
+        try {
+            $result = Get-WUGAPIResponse -uri $uri -Method GET
+            Write-Progress -Activity "Fetching Attribute" -Status "Received data for device $DeviceId" -PercentComplete 100
+            return $result.data
+        }
+        catch {
+            Write-Error "Error getting device attribute: $($_.Exception.Message)"
+            Write-Progress -Activity "Fetching Attribute" -Status "Failed to fetch attribute" -Completed $true
+            throw
+        }
+    }
+
+    end {
+        Write-Debug "Completed Get-WUGDeviceAttribute function"
+        Write-Progress -Activity "Fetching Attribute" -Completed $true
     }
 }
+
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmPSB81ZGpyH4f
-# o298syD4Weu47MuMztGIYz4MnUcM9qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBP/qBkVrV2gjQl
+# 8WrXW//XBWa3cA8ZwSqC/XKJ9C+aCqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -149,17 +176,17 @@ function Get-WUGDeviceAttribute {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgzJKfvwJja3uGZGrQAB6CF/yrOWuq0z4SMIsldKpvhfkw
-# DQYJKoZIhvcNAQEBBQAEggIAj+9kZ9eSunibxYmM+cv7da5j9NJCggdiOUUDiuPt
-# D1KFpu6Kw0SQXyURL7VZ/3w7Ilk2dJQbLjbe2UYQH1e7v0/3JQmuESp7MYJFvtvq
-# FLEbx3txN+ohQZe0P3BNab+80XygfUIgxpq96+P8CbcL+vR8d1nns02vrg9hzgly
-# tAmGPY2tvzZuaprxaS43gGZv599JJ1UfjDakAMsjF2Z0CAVI+RKkstm2Fw916blc
-# cpBAyP69K7g4+yJM/pRFA7mm4kMvwHGDm8Ys8X3aE+v6/Tv935x7NyWgpErZocNQ
-# YWOz2rKJmwJN8x/kXYEAgKyMcg20yjXt+M7GYOGGHWqngh81UxLxzDl+qVnMgVBa
-# XylJ1JHNbKOllzzhPT0ElwSJWHrVU82zGa7C94+alwTExAti+q1PGWCsKE6QMm+q
-# gFzvbk41Wo2Xr7/ydAUEXP9/CpIk72uClRqO04tbvsoHd8TANxnhFRp5jYea3uuP
-# Hmo8mV98FNsk6F0//s8GCoeBLXZg0LXURY8r+YRlCqW4bPTQmfddTv1knLLC+d43
-# uG/FK9OF1qWwdwgU/fjSQ/tups2bXHFour2qR0Z1lbEHrC/K2/YAZmYV4fbZRF8D
-# IHVkfUex2Vvagv4EGVg9kzmWBMyat/UF2hnbYILXWA8x5L5h86vU7DXu5ZHlOjQ6
-# EJo=
+# BgkqhkiG9w0BCQQxIgQgsCb6fm+ngp7pvs9LEjfWk0twomKF6Iq/7uRa3/HH/mYw
+# DQYJKoZIhvcNAQEBBQAEggIAO/hoMbSQMZ4dBnHKUzenqizbcz+n3moS9ipa2418
+# /PsOiMXwLWvunNB5PGHSdmuwQ6IgxWh0C/icuv+L7woqeu4E4JxeWucuTJGPqOJx
+# QaGvK0msWCUZK+gFsGcnCqKrpUuA34flg2fdcWcdQI9KpfQvYZQoXK7yRirKt/cR
+# JRc7iG37aHZtAo1KR5nYcsW2gtJaowgsag4fB7dg0Glm6/kKt333pBbkFUcBXC1N
+# 86hkD40W5Ut/mE6s0wGYlbVMpQ99Q/1BFBD7H1GIGPFAduNVVHctPOdliIaa7UCm
+# AANHn9SoFzKxwnh+i+mKj3S75ffN3vNlB6ZH1acQcpqEH6pGtAd/7QBohd8Wl6v6
+# zoFooCmc12sHFuUxDDnMSxHvW56d1t8ravgCa4nJ60IlenGmuczYxuGtLpMMVd1m
+# Uflh4LNt0fvVDPwf6A59FKzbT+8727O9NHlM5mK03YduGf+76pEEm88xQ4SKsFLG
+# sfVTvnl0Bir7KjLzwu5pX/7fbFFNl6x/BeT7OpYk0zTcwCuW0tv0ur3OKa9oZmWq
+# wXir09N23Kph8YaqbL1wElDGzBFx+I9WseceAARL7xDWqKxbD90kZsWS6LhpeVVX
+# jrCbVqrwMmKCqbEGUDmGh29ObamNeQHrW4YO8azlu1BcF27mExAu9legTW80s5RP
+# Ed0=
 # SIG # End signature block

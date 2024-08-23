@@ -1,5 +1,11 @@
 # WhatsUpGoldPS Release History
-## 0.1.11 - 2024-04-31
+## 0.1.12 - 2024-08-23
+### Changed
+* Changed
+  * Connect-WUGServer -IgnoreSSLErrors parameter now tries to force ignoring certificate errors
+  * Refactor Connnect-WUGServer, Disconnect-WUGServer, Get-WUGAPIResponse, Get-WUGDevice, Get-WUGDeviceAttribute Get-WUGDeviceAttributes, Get-WUGDeviceGroup, Get-WUGDeviceGroups, Get-WUGDevices, Get-WUGDeviceTemplate, Remove-WUGDevice, Remove-WUGDevices, Set-WUGDeviceAttribute, Set-WUGDeviceAttributes, Set-WUGDeviceMaintenance, Set-WUGDeviceProperties
+
+## 0.1.11 - 2024-04-01
 ### Changed
 * Functions
   * Added

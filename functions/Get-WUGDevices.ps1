@@ -30,52 +30,77 @@ Get-WUGDevices -SearchValue 192.168.1. -View overview
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: YouHaveToBeKiddingMe 2024-03-15
+Last modified: Jason Alberino 2024-06-15
 
 #>
 
 function Get-WUGDevices {
-    param (
-        [Parameter()] [string] $SearchValue,
-        [Parameter()] [string] $DeviceGroupID = "-1",
-        [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "id",
-        [ValidateRange(0, 250)][int]$Limit
-    )
-
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
-
-    $uri = ${global:WhatsUpServerBaseURI}
-    $uri += "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}"
-    if ($SearchValue) {$uri += "&search=${SearchValue}"}
+        [CmdletBinding()]
+        param (
+            [Parameter()] [string] $SearchValue,
+            [Parameter()] [string] $DeviceGroupID = "-1",
+            [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "id",
+            [ValidateRange(1, 250)][int]$Limit = 250
+        )
     
-    $currentPage = 1
-    $allDevices = @()
-    do {
-        $result = Get-WUGAPIResponse -uri $uri -method "GET"
-        $devices = ${result}.data.devices
-        $allDevices += $devices
-        $pageInfo = ${result}.paging
-        if (${pageInfo}.nextPageId) {
-            $currentPage++
-            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/${DeviceGroupID}/devices/-?view=${View}&limit=${Limit}&pageId=$(${pageInfo}.nextPageId)"
-            if ($SearchValue) {$uri += "&search=${SearchValue}"}
-            $percentComplete = ($currentPage / ${pageInfo}.nextPageId) * 100
-            Write-Progress -Activity "Retrieved $($allDevices.Count) devices already, wait for more." -PercentComplete $percentComplete -Status "Page $currentPage of ?? (${Limit} per page)"
-        } else {
-            #Do Nothing
+        begin {
+            # Global variables error checking
+            if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer";Connect-WUGServer;}
+            if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer";Connect-WUGServer;}
+            if (-not $global:WhatsUpServerBaseURI) {Write-Error -Message "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
+    
+            $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups/${DeviceGroupID}/devices/-?"
+            $queryString = ""
+
+            # Building the query string
+            if ($SearchValue) {$queryString += "search=${SearchValue}&"}
+            if ($View) {$queryString += "view=${View}&"}
+            if ($Limit) {$queryString += "limit=${Limit}&"}
+            # Trimming the trailing "&" if it exists
+            $queryString = $queryString.TrimEnd('&')
+            $uri = "${baseUri}${queryString}"
+            # Init variables
+            $allDevices = @()
+            $currentPageId = $null
         }
-    } while (${pageInfo}.nextPageId)
-    return $allDevices
-}
+    
+        process {
+            do {
+                # Check if there is a current page ID and modify the URI accordingly
+                if ($currentPageId) {
+                    $currentUri = "${uri}&pageId=$currentPageId"
+                } else {
+                    $currentUri = $uri
+                }
+        
+                try {
+                    $result = Get-WUGAPIResponse -uri $currentUri -method "GET"
+                    $allDevices += $result.data.devices
+                    $currentPageId = $result.paging.nextPageId
+                    
+                    if ($result.paging.totalPages) {
+                        $pageCount = [Math]::Ceiling($allDevices.Count / $Limit)
+                        $percentComplete = ($pageCount / $result.paging.totalPages) * 100
+                        Write-Progress -Activity "Retrieving devices" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentComplete
+                    }
+                } catch {
+                    Write-Error "Error fetching devices: $_"
+                    break # Ensure exit from loop on error
+                }
+            } while ($currentPageId)
+        }
+    
+        end {
+            Write-Output $allDevices
+        }
+    }
+
+    
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3XLT5VhzO9jkn
-# /Ez3p5wmksnaFTDGAdHSS/pfFPVOR6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCitvsg5Aov6Tl6
+# jf5qMIMCehIKsPTKCd11wLau5OxP7KCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -176,17 +201,17 @@ function Get-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQghKKixlrxz/2xCwgTt3q3kOR1j1HKWfYeAkoA2Rh9PyEw
-# DQYJKoZIhvcNAQEBBQAEggIAHSW57tnfvJ469DoGX89whGc0GYLGdTqFffwus6q2
-# dPRdh+KehI0aYs82lLMJN7WUVhF77Vgeqw1XXSBxIaHWYn1ogJL5EoTlZi0pIeAw
-# BAaRlPwUhDqDlUxUBnDS4nRAunfCwO/vrqF7bInwXwNn9vgJsIJ6v+/NdlVdMgtb
-# LhGPwdjju8gyd7e2km60JO6hjzLfVc8BTxrmOPvBSgwtBL/O77kCzGmvQdV76V6Q
-# tfZPzIr2AisGVq+d4j70pjDUy8Jcoc4lI5l2OrUM4n2NW5Z1rfFngQcveP4wab7U
-# Dhu0L/zbNR8EhgKVWmE3B9ota1gY0tN576JInmC51ZtqMJ1FCqgu1IEGd8+npCSs
-# XkL2JBAZh83kWCxM5JFSSY8e+Wl3lBYg2zeEQgAQkV7o30xus81s6cbaZaS4uFOu
-# LsbkZl85hRwPnOA3MZtEeP8tzZG355CQhZklX5e/sZEXzgjMcXIBIQH/sn855/X5
-# oV/ONahr8ljpXPi7j7eSh5GXjA2PCgJenEx1yHJT3b0ceqj2S997hbR9amdYZtlv
-# 06lb1UN0MX0yW9w/mj4GrfTq9LY6KEvjntx4Vaosygz3/MeooeuJLEO6sSmcts6k
-# HUTx4/8DH2ow9tDlmxbwopROE9Zcm4lP/+m8oRFN5Jsn2VdxwoDvDYhmXPjQ1jSo
-# LS0=
+# BgkqhkiG9w0BCQQxIgQgMtv2yDpiTg/vG8DVE/y4+n4rswRwmZNxvakk/ydC3Lsw
+# DQYJKoZIhvcNAQEBBQAEggIAAi+pHslCALNNY9No9Y4HPb/It2O10ph0i4I+KCL0
+# baYBwmL54jGZnB/z5Wxo9262Omu995Geem12cnrJmoHAO6q6PIZIupIEyvdEE4MZ
+# 6hWwpM97bfCYSbAHPzgLRax9UMwT4yqIlrzMz0mgK5aBdUOkszOmSWHTK7/Q5z6O
+# +7xXtAsOxFgHV4Bvx4lCXDyfmtOD357W6A4A44Dcb3+j/cho7LvLmj2mx1hjj/tA
+# 4HkMpkSgQMI6Tqrl9wkPIQdOTkmDVN7tjXNy08NuzLwsxr3P7USePmRvoMbPGf5D
+# Yf0Zvr/x5kN/tLlOFVA2s8ffFdLhMYsw8EPLcs5krFnavZ5TVdPXV3+8mdfyYAoi
+# Ub8TnHEKaY+p6YGtxzefE+U5vuUbqzmWfaWw+oTVHxHk8NfgBU1jY8lf/DqBCkCk
+# bMAkTATuRdxFNd0xIVgcQUYMjMnc9o5SN1ktxSeD8TFBeDsdueTFLTq84JeaLWYc
+# bBMI04npZHkpEJOwl5g0Mi+OsL7xU8HGcy1uvba9/nYOy99px5Zxf6om/caw6Pqt
+# N6vLoK7ZMSEhQH5pEI2n7fYX0ZaP8NyiCCWd/1xdiYIako0Cyhx+Wuf3WfMx3AvW
+# 18cFsQpVI+ni9icmaEljVyPWPffGLiIFPy7oKf1M60XfHBCoe8NWtatTar+7Rqvg
+# mhw=
 # SIG # End signature block

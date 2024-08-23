@@ -23,33 +23,39 @@ function Get-WUGDeviceProperties {
         [Parameter(Mandatory = $true)] [array] $DeviceID
     )
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
+    begin {
+        #Global variables error checking
+        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+        if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
+        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
+        #End global variables error checking
+        $properties = @()
+    }
 
-    $properties = @()
-
-    foreach ($id in $DeviceID) {
-        $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/$id/properties"
-        try {
-            $result = Get-WUGAPIResponse -uri $uri -method "GET"
-            $properties += $result.data
-        }
-        catch {
-            Write-Error "Error getting device properties for device ID ${id}: $_"
+    process {
+        foreach ($id in $DeviceID) {
+            $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/$id/properties"
+            try {
+                $result = Get-WUGAPIResponse -uri $uri -method "GET"
+                $properties += $result.data
+            }
+            catch {
+                Write-Error "Error getting device properties for device ID ${id}: $_"
+            }
         }
     }
 
-    return $properties
+    end {
+        Write-Debug "Completed Get-WUGDeviceProperties function"
+        return $properties
+    }
 }
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmvNffRvsurlJn
-# IYLR/Mc7+sQZgfvgD+NYphYaDnyRRKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZOvRVpFVsvvs2
+# P6fyOILDqhkImInSCBOaLy6rxP5x3qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -150,17 +156,17 @@ function Get-WUGDeviceProperties {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgCNfjwW9iRuDRQ8VOTkK7T/YSNkpXGnDZAeBwaPB1JiAw
-# DQYJKoZIhvcNAQEBBQAEggIApj+u6TdZ211QPpa0a0qb4urWFJIigFzL/K8iyi9b
-# Zi++69ggRDCxIghkRYdKZvJaQOh9q0l8D/e2jOUD4SgzApPz9mSoWgVXrrmkAlRl
-# CpMLjAAd0sxRC4U94j4D7oA3iDWgbXVlLhvjh4L2r2I1vBctBSFC0LSvc8JC+q1o
-# xOet00kqe9pwZqu5SX5PYAvko0oBH11KvVgjx8ZfOoKlkD+WtTj1fkOKF9oA6pIq
-# DNiCIkO8itJf2/bstN60GUK2GXEALZ/KinfUiJMhcglDV6334ZFTtDVncDBaoREm
-# Ms7j5HIUX3IzYZd12s79hbOx5lq5fbNILX7G5xRq75ZyblmpEY9qW8+Kx2A/PH4M
-# 8qCVaxrqLWIoewhVROz4SdEpz5M+vXAeBypWsg7VaZ6xDh3vgVk59JUgwsNhed2+
-# LyjnQ5UEymDs2OVX9XXDWYNWMtihqVoyW7NRJCWWDOp4nLzTN0/3GucyovTH1A2C
-# qtrRTD+hGLm9AYmQV5PsMaDaH33VtC53+OLvGrgG3TvEicjVqJ7FnD00Y7XLYtYv
-# sJzi42DlZMlPTlFeV4z7qt2e10U/LXnMx3nQneNYIs1KgaJ+SGLHBjEnyBVA/k9+
-# rYkNUcRiBvVxxaB6a38NJ2gT051vXSQMXyQvNWIEFfBbX/Fnw0oJxfy0STYK9Oju
-# T0s=
+# BgkqhkiG9w0BCQQxIgQgTGF9GVDeGRd5m0ggJ2ZWkLEmpRsISKhU/WbEcPvCjLsw
+# DQYJKoZIhvcNAQEBBQAEggIAQo4H7+9wOwqF4awxcgQzeXD5TayvgO3v8SDp5BuM
+# hDq8qEVWRTruzff9aoN7HhBIRzKC+tPE0uquMveTzNzz0522emnc9DBXhqhxGsIw
+# +1WC73+rFTP3kMyose4ve7JMVx6LkUG67b7bfRaB3wU43jtQC/zK9EXNZwI1+V5p
+# loLGFk4taGbCesj7vS79IOHgHFKpNv8+ui6LlchYKkydb3ik41ZomGxrQox9DSxV
+# W349Eu+TCzPsib5fMgSbgWSpmRcGI/xgYhXGJXxfTBCZRHCpO2Jfg86g06acqheJ
+# Ac9NeAC8R5bjlCSvw9wkJAuFR6zG3M7yQmPU5wgoIAb88srFRt521F9rzIMpWuR3
+# 6MJPk14mXXD++T+J7lTu7SvXwsMlnT/KWZ5zLZ6U1EdMAP93akJrf/LXMarxnp8A
+# JNE0v+5WolGPGgw+XiDQB5QZuudwdpwSJ/gyotGdO3+hKtucBP+amPrRTd5BY3G4
+# U4uu3DkclAITjuhWkfvWDC2ZVNdxBFeYTzUdK0S8W9kqPIwgZ8f9kTnjD3YzTToB
+# cBuZyj7P90SwKlk/aLIvB3ke4KHoNpWpjl3ilMGViOKODCqvOh+qCzqoy6fCZc48
+# Fn7pSSnveUpxSkZmifmlmuXMAvAR6ZMquvxOzQJVGu0tAhlKR+mz7fY6SfgmR+Td
+# 7P4=
 # SIG # End signature block

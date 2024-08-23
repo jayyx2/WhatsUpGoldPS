@@ -26,7 +26,7 @@ Sends a GET request to the specified REST API endpoint, and assigns the 'data' p
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: Let's see your name here YYYY-MM-DD
+Last modified: 2024-04-14
 
 #>
 function Get-WUGAPIResponse {
@@ -35,58 +35,68 @@ function Get-WUGAPIResponse {
         [Parameter()] [ValidateSet('GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH')] [string] $Method,
         [Parameter()] [string] $body
     )
-    Write-Debug "Function: Get-WUGAPIResponse"
-    Write-Debug "URI: $uri"
-    Write-Debug "Method: $Method"
-    Write-Debug "Body: $body"
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
+    begin {
+        Write-Debug "Starting Get-WUGAPIResponse function"
+        Write-Debug "URI: $uri"
+        Write-Debug "Method: $Method"
+        Write-Debug "Body: $body"
 
-    #input validation
-    if (-not $Uri) { $Uri = Read-Host "Enter the fully qualified REST API endpoint."; }
-    If (-not $Method) { $Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD)."; }
-    #end input validation
-
-    If (-not $body) {
-        try {
-            $response = Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders}
-            Write-Debug "Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders}"
-            Write-Debug "Response: ${response}"
+        # Global variables error checking
+        if (-not $global:WUGBearerHeaders) {
+            Write-Error "Authorization header not set, attempting to connect to the WUG Server."
+            Connect-WUGServer
         }
-        catch {
-            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
-            Write-Error $message
-            throw
+        if ((Get-Date) -ge $global:expiry) {
+            Write-Error "Token expired, attempting to refresh or reconnect."
+            Connect-WUGServer
         }
-    }
-    else {
-        try {
-            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $body
-            Write-Debug "Invoke-RestMethod -Uri ${Uri} -Method ${Method} -Headers ${global:WUGBearerHeaders} -Body ${body}"
-            Write-Debug "Response: ${response}"
+        if (-not $global:WhatsUpServerBaseURI) {
+            Write-Error "Base URI not found. Attempting to connect to the WUG Server."
+            Connect-WUGServer
         }
-        catch {
-            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method"
-            Write-Error $message
-            Write-Error "URI: $uri"
-            Write-Error "Method: $Method"
-            Write-Error "Body: $body"
-            throw
+        # Input validation
+        if (-not $Uri) {
+            Write-Debug "URI is not provided, prompting user for input."
+            $Uri = Read-Host "Enter the fully qualified REST API endpoint."
+        }
+        if (-not $Method) {
+            Write-Debug "HTTP method is not provided, prompting user for input."
+            $Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD)."
         }
     }
 
+    process {
+        # Attempt to make the HTTP request
+        try {
+            if (-not $body) {
+                $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders
+                Write-Debug "Invoked REST Method without body."
+            }
+            else {
+                $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $body
+                Write-Debug "Invoked REST Method with body."
+            }
+            Write-Debug "Response received: ${response}"
+        }
+        catch {
+            $errorMessage = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method `n Body: $body"
+            Write-Error $errorMessage
+            throw $errorMessage
+        }
+    }
 
-    return $response
+    end {
+        Write-Debug "Completed Get-WUGAPIResponse function"
+        return $response
+    }
 }
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC14N0wWX/NxXbD
-# a/Vf/9Bkc80jgQYqyzwoiKt7h62+9KCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzmV9+18/Vqdvc
+# 6eCdSQoF39I12tGKuupt/jQUCHMURKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -187,17 +197,17 @@ function Get-WUGAPIResponse {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgqDvBP94kTv7gzbm/IiUlCbE19uqfP9YWHGikKxX/bTAw
-# DQYJKoZIhvcNAQEBBQAEggIAREsijeyvl9xxHjdSUCQcBzwzlzdNGNrzicSl/wN0
-# ZNpWM6pfynrBxjvlW7qbuXu/Sdsdnm9hisCsXZDuhrjHy6O2s8q27b1aax+pBYjG
-# 2/BfXIVtSCj++NR2D0GgKbphMV9dKBG0gQYGlRTDN/uyLEXRsDCKV9AT+SDDcfSK
-# 2N//vlOjFDC46blzmuEPJdwA+3I5bj8pDURbIAPObwluic/rPn8eklm8yTb8R+kI
-# SKE48Na4N1exTYrSixbWuQPHEhf4d6xH9tcYRxRev/9AvjbYogdlP9lTHud9dtlC
-# gj/xdA7F8Cr+sqxCNtquh4EnYmBEu4b2K7H8ijozR5g7RqPywUp6fe+zAxem/WJZ
-# aAImf57PwG+UzvWEvc0eb4f4tuvVlOcfGC8bRurlxmvnsQljlpW/xiAvZZrVha/v
-# w1bu8fSGtYkAZeZwYqJB/pOFop+RPcZ/iAkWqIW1LkIo9RKJyvKnhxTi0fFPVYB4
-# oprQuZ1qZW1m3DQEmzUbCmApeONGen2GDNuMXwwGLjT2Mr8J6/yvsloNiy0JSzTo
-# khNK2IWe8NvRfmspJ4NENkYP+l73Qzl5TtOm8jDB4b5d6oKe5XN7EtLKafqYPCWD
-# dfrxjX2aJ4aQXDwCN87UfxVK6qjzctLERXUU99wXAaGbANHn/E0K72G8i7tSNgI9
-# UqI=
+# BgkqhkiG9w0BCQQxIgQg+UnZ8RT97738jemmZSnihXo20BBXTgxrDvpkR6k6Rusw
+# DQYJKoZIhvcNAQEBBQAEggIAhC4oSpRn43rOhbkGcOYAKf0tEyODYkQnM8B1dihB
+# F+Uy0ocucV3rft9K4xhlsSTIn68TeFelu51r4PmcaCVCj3KLA8hIf2qM2byb0rCo
+# ZkRGmKpjVodJ2p0P8DFkLgaujYtFv4TZkOuRclnzRdJ9McEFRW/lTNSgkf8DUObW
+# jaFubc53RRfMNhnZ9ZPz/Ms/sdRIJq7aNhNwX3/bzLnGUgbTP+uJn+fhmufMfbHn
+# 39C7pGSNvZE4HB4uOrlzm29EAg1amgtjc9ld26ms9njaD3Ur6YLGlqetUZlH99dF
+# JfIA5iRLEk0VFQhSLSnmLv8ksyznSVuB4lsUojfJMKbaa4DgB3pQ2W55ksQ8dwPC
+# szEdXEh4rbkqdlzU3qsIl6udhnjuy7v2sB9ybkt2X/kGcSzdoz9VbOP9fWDZFu5c
+# AXrDzl3fpnEw4U05yY1BDC3t+Co47jC1fJxzDkdGmFsCfIawlHudrHnPELJXa2Dv
+# kvd9bJThi1Y14hYj0ZuZO6B3ktHN5QxuXlDIzDghfaRkeDHT0m27UONJhCYfTQfk
+# cjMVckOH42YmrPIt5gfirLmr+xnCxuXlasu26zVK9DzHnSkPAAk9Y7bGDXrRQQMc
+# cBIBFQJ8fSmZ+OiuxOpZIdDcSObNnHuw9FfXKEvg+FUuit2OcxqkyVpSJD6Mxx2y
+# ywA=
 # SIG # End signature block

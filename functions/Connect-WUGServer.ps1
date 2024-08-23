@@ -39,7 +39,7 @@ OAuth 2.0 authorization token.
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
-Version: 1.0
+Last Modified: 2024-04-12
 WhatsUp Gold REST API Handling Session Tokens: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Handling-Session-Tokens
 
 .EXAMPLE
@@ -79,7 +79,7 @@ WhatsUp Gold REST API Handling Session Tokens: https://docs.ipswitch.com/NM/What
 function Connect-WUGServer {
     param (
         [Parameter(Mandatory = $true)] [string] $serverUri,
-        [Parameter(Mandatory = $false)] [ValidateSet("http", "https")] [string] $Protocol = "http",
+        [Parameter(Mandatory = $false)] [ValidateSet("http", "https")] [string] $Protocol = "https",
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Username,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Password,
         [System.Management.Automation.Credential()][PSCredential]$Credential = $null,
@@ -88,68 +88,63 @@ function Connect-WUGServer {
         [switch] $IgnoreSSLErrors
     )
 
-    ###Input validation
-    # Check if the hostname or IP address is resolvable
-    $ip = $null; try { $ip = [System.Net.Dns]::GetHostAddresses($serverUri) } catch { throw "Cannot resolve hostname or IP address. Please enter a valid IP address or hostname."; }
-    if ($null -eq $ip) { throw "Cannot resolve hostname or IP address, ${serverUri}. Please enter a resolvable IP address or hostname." }
+    begin {
+        Write-Debug "Starting Connect-WUGServer function"
+        Write-Debug "Server URI: $serverUri, Protocol: $Protocol, Port: $Port"
+        # Input validation
+        # Check if the hostname or IP address is resolvable
+        $ip = $null; try { $ip = [System.Net.Dns]::GetHostAddresses($serverUri) } catch { throw "Cannot resolve hostname or IP address. Please enter a valid IP address or hostname." }; if ($null -eq $ip) { throw "Cannot resolve hostname or IP address, ${serverUri}. Please enter a resolvable IP address or hostname."; }
+        # Check if the port is open
+        $tcpClient = New-Object System.Net.Sockets.TcpClient; $connectResult = $tcpClient.BeginConnect($ip, $Port, $null, $null); $waitResult = $connectResult.AsyncWaitHandle.WaitOne(500); if (!$waitResult -or !$tcpClient.Connected) { $tcpClient.Close(); throw "The specified port, ${Port}, is not open or accepting connections."; } $tcpClient.Close();
+        # Handling credentials
+        if ($Credential) { $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
+        elseif ($Username -and -not $Password) { $Password = (Get-Credential -UserName $Username -Message "Enter password for ${Username}").GetNetworkCredential().Password; }
+        elseif ($Password -and -not $Username) { $Username = Read-Host "Enter the username associated with the password."; }
+        elseif (!$Username -or !$Password) { $Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
+        # SSL Certificate Validation Handling
+        if ($IgnoreSSLErrors -and $Protocol -eq "https") {
+            if ($PSVersionTable.PSEdition -eq 'Core') { $Script:PSDefaultParameterValues["invoke-restmethod:SkipCertificateCheck"] = $true; $Script:PSDefaultParameterValues["invoke-webrequest:SkipCertificateCheck"] = $true; } else { [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }; };
+            Write-Warning "Ignoring SSL certificate validation errors. Use this option with caution.";
+        }    
+        # Set variables
+        $global:WhatsUpServerBaseURI = "${Protocol}://${serverUri}:${Port}";
+        $global:tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}";
+        $global:WUGBearerHeaders = @{"Content-Type" = "application/json" };
+        $tokenBody = "grant_type=password&username=${Username}&password=${Password}";
+    }
     
-    # Check if the port is open
-    $tcpClient = New-Object System.Net.Sockets.TcpClient; $connectResult = $tcpClient.BeginConnect($ip, $Port, $null, $null); $waitResult = $connectResult.AsyncWaitHandle.WaitOne(500); if (!$waitResult -or !$tcpClient.Connected) { throw "The specified port, ${Port}, is not open or accepting connections." };
-    
-    # Check if the credential was input
-    if ($Credential) { $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
-    elseif ($Username -and -not $Password) { $Username = $Username; $Password = (Get-Credential -UserName $Username -Message "Enter password for ${Username}").GetNetworkCredential().Password; }
-    elseif ($Password -and -not $Username) { $Username = Read-Host "Enter the username associated with the password."; $Password = $Password; }
-    elseif (!$Credential) { $Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
-    
-    # Set SSL validation callback if the IgnoreSSLErrors switch is present
-    if ($Protocol -match "https") {
-        if ($IgnoreSSLErrors) {
-            Write-Warning "You are ignoring SSL certificate validation errors, which can introduce security risks. Use this option with caution.";
+    process {
+        # Attempt to connect and retrieve the token
+        try {
+            $token = Invoke-RestMethod -Uri $global:tokenUri -Method Post -Headers $global:WUGBearerHeaders -Body $tokenBody
+            # Check if the token contains all necessary fields
+            if (-not $token.token_type -or -not $token.access_token -or -not $token.expires_in) {
+                throw "Token retrieval was successful but did not contain all necessary fields (token_type, access_token, expires_in)."
+            }
         }
-    }
-    
-    #Set the base URI
-    $global:WhatsUpServerBaseURI = "${protocol}://${serverUri}:${Port}"
-    
-    #Set the token URI
-    $global:tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}"
-    
-    #Set the required header(s)
-    $tokenHeaders = @{"Content-Type" = "application/json" }
-    
-    #Set the required body for the token request
-    $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
-    
-    #Attempt to connect
-    try {
-        $token = Invoke-RestMethod -Uri $tokenUri -Method Post -Headers $tokenHeaders -Body $tokenBody
-    }
-    catch {
-        $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $tokenUri"
-        Write-Error -message $message
-        throw
+        catch {
+            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $global:tokenUri"
+            Write-Error -message $message
+            throw
+        }
+        # Update the headers with the Authorization token for subsequent requests
+        $global:WUGBearerHeaders["Authorization"] = "$($token.token_type) $($token.access_token)"
+        # Store the token expiration
+        $global:expiry = (Get-Date).AddSeconds($token.expires_in)
+        # Store the refresh token
+        $global:WUGRefreshToken = $token.refresh_token
     }
 
-    #Store the headers for usage in calls
-    $global:WUGBearerHeaders = @{
-        "Content-Type"  = "application/json"
-        "Authorization" = "$($token.token_type) $($token.access_token)"
+    end {
+        # Output connection status and return the token details
+        return "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at $global:expiry UTC."
     }
-
-    #Store the token expiration
-    $global:expiry = (Get-Date).AddSeconds($token.expires_in)
-    # Store the refresh_token
-    $global:WUGRefreshToken = $token.refresh_token
-
-    return "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at $global:expiry UTC."
-
 }
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/tFj+V5v4ihp8
-# 4Ym2h88YZk5fzviG8wtz/lRD4y0xG6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsmvvoWJMxSsqw
+# ACsB9ifStqqJAkcnx6Mz1eVhx6X8rKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -250,17 +245,17 @@ function Connect-WUGServer {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgL0Buq1Rhbf3ftsDTNephA3L/zIoWyK/B+01Q8mW8b1ww
-# DQYJKoZIhvcNAQEBBQAEggIATfwKi6xry7yV7CGm3HOUSpqH2wZMbRU1qIE20m2G
-# d7XBuMA1heWOAJobIG2RMWjGZC7BbgS/gIuAiJv5hw+tBPzs+eNCN5G6KYzb5L30
-# zBwZLLX+2D89+3rBemzMbcjikkpPTgy+Vcr1rd2WX3eQnwFxaCSAueEOI2ELbgAs
-# nCeMdUPUqrN3ZkL/WxdVs71ZsbxhKZfejRaqgDzJAfzqQTtJ178IT1mZ+awK4ov0
-# osfvtkYfna6QeeUOfoiFaDfDG/P6YwzWXSQr5dxxGHdMD6pMtS5K3gVh8d+ZajWa
-# 1lhOq/k+rNaIuYyzJ+y9bJNyuj5oUOAOAd+dSzxsnmi1q74DuwsJBHm0ui9rPpUU
-# NuVT1iDkhNlB03JVxLYqgnk5b0J5aG8l5CCiekpJoU6rxvljMqI3eBcpje5Yqc7n
-# r3XqqnfdF/k2TktCGMljMt8wNKzMV79SljVEPoGncIFuq0vfzHxgtKTvnUovSRv1
-# 7GsNkVJ7URPFFaM4UgvOnpFtu0zM2BRSGQDzUXLp01NEZk38R1OwE/fBsKNje8VE
-# Ynz332yPjabJUU+JQZkkjSO2lRNHseIKgaShr59tQO8suQFa5B9gPyJuXZD0R3nI
-# ojdoBy9YisUAhfsaUCXYBIA68331IA9HX4TClyv1yGubdBncXH5VqCxfAyADxn+H
-# 83o=
+# BgkqhkiG9w0BCQQxIgQg/1x5ouH2Isi2eP79Hm58P86DRh0EyWYUGSLynlPqceow
+# DQYJKoZIhvcNAQEBBQAEggIANyCuTcp7TzTmP2q/rf/ZQLGr7owFkKmZKEMXzEjQ
+# TFKrmcyZF69WsCZvXSqYv6Q5HrZfU/MsLb/3jBPrRtfn/FvQ5jSmceyTvHl5vKA0
+# Q6vqJr1rcfKJb/OOwheimGA1Z6qVYdZPB+gFEBOrw1RUr9l/91wlu47UlGTbBkdy
+# 8ahptDk2tpfwl0nLjw8XLl7DyBHMGZAhc7Fe1fX6Ng7Py9JnDkfauXAxkkezgygO
+# wue3G6/z9cECpjwpUbQdcwkf3wIN5xpSyUYhxz1o8ZNNs5ShczoqR9qiI8iBMTtx
+# jjIKMxDHMqGk0T/3N5TeOPUdk8SOgxZNqGVOG2r0BR/BalQD0h4AcLDny8JZ0CyS
+# np7pvL8QIwKw6BOflGqcO6Duw0cipM4H7WtSusipOtfBIpVZEEm5h4TDmb4/mCx7
+# h0yhUOfXA3wLMVH2g06wVnKX9LhOKHP1P49Dg7C8gPcSyZcbpPkJ6sUEKwhCGI8M
+# FAuvVtGBelXauOEtgMROaKF3tN8GSrDaV869cCJns+Wm6LpOwiUfT/7VoNf5CIRV
+# jDz0wS5XTdo19tQ0wCDTwuMFCxZ2FIwSliys2nOmkpVXbdEZt4czTuMPtWMIzehu
+# Wgeds+07AaNmu+gflThnnBGMG4xwYpSTfR9E/kJNAnwK/UxQkJRK7DRjqKUyTOeb
+# SwM=
 # SIG # End signature block

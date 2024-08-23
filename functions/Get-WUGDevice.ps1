@@ -29,45 +29,77 @@ Get-WUGDevice -DeviceID 2,3,4,20
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: 2024-03-15
+Last modified: 2024-04-14
 
 #>
+
 function Get-WUGDevice {
     param (
         [Parameter(Mandatory = $true)] [array] $DeviceID,
         [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "card"
     )
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
+    begin {
+        Write-Debug "Starting Get-WUGDevice function"
+        Write-Debug "DeviceID: ${DeviceID}" 
+        Write-Debug "View: ${View}"
 
-    $uri = $global:WhatsUpServerBaseURI
-    $finaloutput = @()
+        # Global variables error checking
+        if (-not $global:WUGBearerHeaders) {
+            Write-Error "Authorization header not set, attempting to connect to WUG Server."
+            Connect-WUGServer
+        }
+        if ((Get-Date) -ge $global:expiry) {
+            Write-Error "Token expired, attempting to refresh or reconnect."
+            Connect-WUGServer
+        }
+        if (-not $global:WhatsUpServerBaseURI) {
+            Write-Error "Base URI not found. Attempting to connect to the WUG Server."
+            Connect-WUGServer
+        }
+        $uri = $global:WhatsUpServerBaseURI
+    }
 
-    if ($DeviceID) {
+    process {
+        Write-Debug "Processing Get-WUGDevice function"
+        $finaloutput = @()
+        $totalDevices = $DeviceID.Count
+        $currentDeviceIndex = 0
+        
         foreach ($id in $DeviceID) {
+            $currentDeviceIndex++
+            $percentComplete = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100)
+            
+            Write-Progress -Activity "Fetching device information" -Status "Processing Device ID $id ($currentDeviceIndex of $totalDevices)" -PercentComplete $percentComplete
+
             $deviceUri = "${uri}/api/v1/devices/${id}?view=${View}"
+            Write-Debug "Fetching device info from URI: $deviceUri"
+            
             try {
                 $result = Get-WUGAPIResponse -uri $deviceUri -method "GET"
-                Write-Debug "Result from Get-WUGAPIResponse -uri ${deviceUri} -method `"GET`"`r`n:${result}"
+                Write-Debug "Result from Get-WUGAPIResponse for Device ID ${id}: ${result}"
                 $finaloutput += $result.data
             } 
             catch {
-                Write-Error "No results returned for -DeviceID ${id}. Try using Get-WugDevices -SearchValue instead."
+                Write-Error "No results returned for Device ID ${id}. Try using a different ID or method."
+                Write-Debug "Error fetching device with ID ${id}: $_"
             }
         }
     }
 
-    return $finaloutput
+    end {
+        Write-Progress -Activity "Fetching device information" -Completed $true
+        Write-Debug "Completed Get-WUGDevice function"
+        return $finaloutput
+    }
 }
+
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFBBAIZRVGyoOR
-# K5XSZYVtyhvtLinssomjO3sCBWKje6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUsw05KuYYI81b
+# G0nk9+tjub0Jl5lk0M0yOqpzPm4pVKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -168,17 +200,17 @@ function Get-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgR1gQRTR4MTMrGJCrzWKjOB/AiDw6Z09Afs++cKLzo4ow
-# DQYJKoZIhvcNAQEBBQAEggIAUFG23fJoGvgb5JtkHCgIi9gUwLJH0LxeqwkrZSRl
-# 5VsOpsllmZu5ZjS1MrsZMsnQSfRxBQQMpZxiRbblg+G+/oUeqoLs6xyrTKsFteT4
-# RHpoXs3evQ3DeGGFMTPdKqfhBEJARhbh6tY/wYUC0yrp9II8PsczmPX2EU3aEgpZ
-# Sqrb4mSPAAU7wMKC1JP1yZl7w3qVdVn63g7wtYnuJLNwcC48MQ03ic37fm8amcKE
-# basoslLmY2iMiyQMhIJGOi46hKpgE6MY91bqgC91buqHO05r8H9jAadQ8uRGlz2N
-# TkVfB6W+LbGYI8j+AJkqwSpLwYN7JY5sCTDEDru9GP5JQ9CHHuMA5r8pkT9wd5sY
-# pNpYhIoWA1w0mt+JXMcRQo2K4vdc2GBwx08Wjrl7lhC45KnMJ9v/veQV/Nv2/0VE
-# nhnYFMqBYSAA1PzrhSMrKNtjlIqvpWygCjcfu9br8omML4voX5MpQvQt1ZBYwhE3
-# 4gA3pPBjLL6hGVb3sWKXZV6flvOpDFZNlgWcKcyvghKG8g3OQf/qySwWGU2B77wt
-# aaslXMvjzboIf0iiAQNX2YvsrTc8nZZXmIk0fF3+cJggynbQgi54gfIDxCzli85X
-# qd+EJfJduvVU4y2GKDUPOC0n2K542SeBfyNHpZkOKXQH/qNg82LWiZDI+IPdpQTH
-# XDI=
+# BgkqhkiG9w0BCQQxIgQg0B9Y/O45ljWhrFSivWAorhTOhi+okxw2qrZ2IQUI9UYw
+# DQYJKoZIhvcNAQEBBQAEggIAnsxOEV3ukej2qjsFDlgwC22GYEnOSwuOKd2B/iIz
+# x3y+eMigHEGw2tsAWddPkFWG0eK3a8fK18qMZSrdSoUkIe5yHkAlpbSOOoCTvcOs
+# TflR29BDUYgwMKgqMfkvhV+TmtrOCN8yXs8Pglf4WOGKYxMzUGA4XR/gG/MQ/RCN
+# JGNC7PzaaJcw2LjcMgX1+PELe+S4EvZMZZxUE77b4cpFEqwM6t7SRF1jXTlL7fZY
+# T5lVz9okZkWNrXDa+aAzXSgmUDgPhZD20Ymjl4x1AdWvI4RP9ORA/pFcLyCFoE0W
+# tGl7sdXMfZS73fxY2i3Nq/YAvDO8dC82EkHllyNXw2VPW3aZYrRs80Fsyqs+yYJg
+# OTbRY4d0R59dSvswT4npcw2q8scjVx5WVExSVceEwU7eo+ImFatmWjf7tomxjEJq
+# gGQ16z1Z0da4AaOAPO/6R15sW9Sflf5BAuqxditadXof0cXwtftkOgEQfzP/nKpw
+# Amrofv/JQ8/2VTCmo7ToEXXKLYRr0JHPY80gZJHS+qevxHEFxLIYfQZxLv3BeBc0
+# w73himcio2nFjICY149u/8t6gYd/56j5fAJ7cXNK/ztypW7uaCn2JNBWAcBlR4MI
+# RDzH0ZzekqjfZ/n9KZ9lJsXug6r/9AXsuOCHrs98XYoFt9d6DuUjAb4cBqF+07fQ
+# Bko=
 # SIG # End signature block

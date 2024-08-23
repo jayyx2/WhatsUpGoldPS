@@ -20,47 +20,56 @@ Removes the device with ID "12345" from the WhatsUp Gold monitoring system, alon
 This function requires the user to be authenticated using Connect-WUGServer before it can be run.
 
 Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: Let's see your name here YYYY-MM-DD
+Last modified: Jason Alberino 2024-06-15
 
 #>
 function Remove-WUGDevice {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string]$DeviceId,
         [switch]$DeleteDiscoveredDevices
     )
-    
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
-    
-    # Invoke the API
-    $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}"
-    if ($DeleteDiscoveredDevices) {
-        $uri += "?deleteDiscoveredDevices=true"
-    }
-    try {
-        $result = Get-WUGAPIResponse -Uri $uri -Method DELETE
-        if ($result.data.success) {
-            Write-Output "Device $($DeviceId) removed successfully."
-        }
-        else {
-            Write-Error "Failed to remove device $($DeviceId)."
+
+    begin {
+        # Global variables error checking
+        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+        if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
+        if (-not $global:WhatsUpServerBaseURI) { Write-Error -Message "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
+
+        # Construct the API endpoint URI
+        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/$DeviceId"
+        if ($DeleteDiscoveredDevices) {
+            $uri += "?deleteDiscoveredDevices=true"
         }
     }
-    catch {
-        Write-Error "Failed to remove device $($DeviceId). $($Error[0].Exception.Message)"
+
+    process {
+        try {
+            $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
+            if ($result.data.success) {
+                Write-Information "Device ${DeviceId} removed successfully."
+            }
+            else {
+                Write-Error "Failed to remove device ${DeviceId}."
+            }
+        }
+        catch {
+            Write-Error "Failed to remove device ${DeviceId}: $_"
+        }
+    }
+
+    end {
+        return $result
     }
 }
+
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBw9lbFq3TO+7CZ
-# v1JWBd3E2EHeLxZDj9LTz94CWO9HfaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSKTnFcSshd4xU
+# cbHrUAlnSXhW4ev9NKApm5wUAu9TuaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -161,17 +170,17 @@ function Remove-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgXOvlOhBgtyae9hSzL6lTBoQ34gg+uf4NFbRuyer9590w
-# DQYJKoZIhvcNAQEBBQAEggIATdGAE2/aTIjWjoHYpCl4kQgT3fAI/d8uEbBLn09J
-# Df9HRbhVXgNSIS2vIoeeDw+BPCAWOSO0kE2pE2Y9QQPwHwOFAX3C1qADgwRLLbAZ
-# IcucXXb3L6ThbFVSAh00XNsqXzthvYybOVRs1/w/lJ5Mlolo64lftZ6tiB7PXC9M
-# d4G7HXqBCxgdMDs1uX5Co+8A/HQkxDLHujLFqsFga1ZFAI4dx1iQLjVA+do0D1Bq
-# t3mOm7luu7u1kHrezWMLpY+bK593UH++dCOXU7KBT57NhAMz4HLbNGkURpG0EbSf
-# OwO3P5zAGmK5objsj7bvjtORRX8nk9+j6Dc2RL6nPyzDS7TM+ePN49QetQSGoRS0
-# uCYHXWi39GDWHHtFbKVrQnr+EQY1uf91OO/0E3NDoN42oz3s6OhtoUfgHJB63NUs
-# lfBbbUbkXxpJqIgY8DEatWkDIPbSCYLzPE0cRO4txRadHVb0vh7hRyMLaxOIWLV4
-# yIlFIAQHIppqKLWh1DgVWKPTy3wv27UkOf4WsPFgN35uwDtWA3QMTM10XaxWlMaX
-# wx3H7jk5Y/do+QMXW+1fLGTuIzB1224Xii1X5Uv6ZQc2jgxqiRf98Q9AVnMOkJYG
-# XXmToQbPX2eWcGC52IvEZdT/LwKAQy/ARRerXKpJSAs1FGx0iRMCu0ywHuxys7Ov
-# aqs=
+# BgkqhkiG9w0BCQQxIgQgnuZxSNq8NmOJQVDTct0W0Tk9gLL+N+f9aGiDoth9vd4w
+# DQYJKoZIhvcNAQEBBQAEggIAdqbcrVa+byZj3Gg5hL8c5+oc9nKYeOk8yN9TK9jg
+# cbn5iOu6LAR2Kl/Ic422Ll0afgSuvafg29jxHrdr0vhlxCF14wqsl5G989PuOMEv
+# m38WpDGyNWa9ENChczFqvHt6FiFOPvtB5ZGm4UF6vi4qvJk4tlbF5kLvKUmEBt2W
+# uxy3XWLfmSi0NDqjLEFyk93sbpoKh//SFmUsfRGVBOt53vmGlXUpWzGbVphgYRnl
+# rAfC48aLItziTRCnlc9ouLmPXfBcyjncSB/iKcxo4IKfLsgt7HnBCiQsYrPxLB2I
+# 4rCKaHrxBsErCUjHoOvj+REZqXIRuzMuMmRxG4vInbRw8ROnIHowHbihX9GNyaBF
+# Ugb6IoLmhyWUyWSVMFb8mUbo8ULF8yQATPd14XOHtsSEMdwbLYGrTxWsH3kPAoC5
+# dtCHfugUSUpFFDAPGcVoLjIZiyIdxMpeUZWKfEKV2uCtWufq8tFNUvXwWOUSkBKz
+# TKoeox8g0+Lc0FkfVPjjzkFkqdH2mpulj40+mneHLI0NtoeXMwgp8UP+Ox26YKpu
+# 3cuw7RmtNW+8Er7dHvX7MBwJPddwyjg0bMnVNBnRarM7HaF5bVW9eaciEcCpp5G8
+# fCokbTQT0U+RXZwMUL95rjZTHLnhIeACg6CHBobHqeCnKP7cq8xEAyXBpdWTvpFg
+# Uo4=
 # SIG # End signature block

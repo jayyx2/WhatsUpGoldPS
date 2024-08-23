@@ -37,48 +37,52 @@ function Get-WUGDeviceGroup {
         [ValidateSet("summary", "detail")][string]$View = 'detail'
     )
 
+    begin {
     # Construct the URI
     $uri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups/${GroupId}?view=${View}"
-    
     # Write debug information
-    Write-Debug "Function: Get-WUGDeviceGroup"
-    Write-Debug "GroupId:   ${GroupId}"
-    Write-Debug "View:      ${View}"
-    
+    Write-Debug "Function: Get-WUGDeviceGroup -- GroupId:${GroupId} View:${View}"
     # Global variables error checking
     if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer }
     if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer } else { Request-WUGAuthToken }
     if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer }
     # End global variables error checking
+    }
 
+    process {
     # Make the API request
     try {
         $response = Get-WUGAPIResponse -Uri $uri -Method 'GET'
         $deviceGroup = $response.data
-
         # Output in a format similar to Get-WUGDevices
         $result = [PSCustomObject]@{
-            parentGroupId        = $deviceGroup.parentGroupId
-            groupType            = $deviceGroup.details.groupType
-            monitorState         = $deviceGroup.details.monitorState
-            childrenCount        = $deviceGroup.details.childrenCount
-            deviceChildrenCount  = $deviceGroup.details.deviceChildrenCount
-            deviceDescendantCount = $deviceGroup.details.deviceDescendantCount
-            name                 = $deviceGroup.name
-            id                   = $deviceGroup.id
+            parentGroupId           = $deviceGroup.parentGroupId
+            groupType               = $deviceGroup.details.groupType
+            monitorState            = $deviceGroup.details.monitorState
+            childrenCount           = $deviceGroup.details.childrenCount
+            deviceChildrenCount     = $deviceGroup.details.deviceChildrenCount
+            deviceDescendantCount   = $deviceGroup.details.deviceDescendantCount
+            name                    = $deviceGroup.name
+            id                      = $deviceGroup.id
         }
-        return $result
     }
     catch {
         Write-Error "Error getting device group: $_"
     }
 }
 
+end {
+    Write-Debug "Completed Function: Get-WUGDeviceGroup"
+    return $result
+}
+
+}
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBSeuX3D/voTjai
-# 8QEaVPLuRHs9t4G7wQ/awKGG9ltdg6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAr3/gJR0yO5MGB
+# qOLkVd2Vz/fmDDoDZbvbdA4TkLjus6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -179,17 +183,17 @@ function Get-WUGDeviceGroup {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgjQnLr/kQH6TEVu05Rd6Zk+MwMuukB6wp4yUavm7tZNww
-# DQYJKoZIhvcNAQEBBQAEggIAB5LqxgZ4rfMjc5dGrUv17MtvlrkwT6TK4O3pKpMu
-# 7jnryGkV821j+l7IdEG2FxV1CztEMCnqPx9SgC2HHG+xliNmSh/R3eMtXFwwvo7P
-# +V4TOzIxKeRtW+FjM9HH3pPnRRTrqnF1md2Tgobjf9yK8FYK/lIU/bP2hy+VnOiB
-# fqgE1fS2pBareJUrijxhn0oa/vwr1XJnyR0gLz3PsO4SLIl4IZC1veYkK8q51xuF
-# SzD4TtQqaAQlFnHal/Cb8nVQjLGvpUyV3hdd96efU6NqjGbIwm6UEvQk05XSByp/
-# /KMN1wMuuDvS8uC2xEhZM6JpnGIC9NZ4RNkSfcHDEk4DeGMGd6fgSAZUasYvgR90
-# LcpqCq4sMrDdRmFXH80IdQrdVY6nyHv9FJEz7bIXEVNeVDuLtXsYeuZe+0XhMo1s
-# lnkMSOvu2T5HqRpfSfFIXNjmrCi+9ka8nNEgBlzQShvheZZVK9ELBXnNqiGxwoUM
-# fCnN/4J7l5qlSV+0GMfcGlzThllyqCGUyMkHkdPRYNylBRORgTknmVYbtoV8LrBG
-# vyx9XPNnYJNhbcPRz4Nj2VwBOVvnicL3Ahy3Y4c1PM9AGjUBCgUazUi0DtJpqorG
-# w5aIgpTkpWb2l9UAhq4EdpZPq9NtyPSTHBCWh0cFdKdssrz8R087OOpQL210xMi7
-# pFc=
+# BgkqhkiG9w0BCQQxIgQgfjVAi7pOa41AGk+kXrPSM+ovmu9PN7GtAA7j0BBR0/Yw
+# DQYJKoZIhvcNAQEBBQAEggIAL0ICX/uDcmM8qy4e5Nozh0jfO2zLlcsiZE5M5DNJ
+# ah0LQPbe5Cn0/Iad3TJMBcWfoMPEP76XxnfAvN1mHBB92qd1YMOIH811zOenSc3y
+# bHzldUous3LxRYe9oQNfqVvY30XZ/2x7E7bklMdQMt7WwSQCzCYTnAH5BPV8QcI8
+# 4iyvC0UASlP2JPb+nQMJ5lX9Bf8IaPOB38xrJKkAKGyyZ5N89EZQKHqWAjv1FWYu
+# wyG+XGpYs/U+xBgmbE+dj/2eeC7bMMw7zPEbbCM05oFLg7RQSVIgWRk0bVCTc9LQ
+# V/m7k5lO6Iuv1es4agqb/fU6rXciKKXXOW3EddgsAdkI+CWxsuPLokquSKwVrc43
+# e2bbKe4NmDvAubbsli1wEpB/rRDS7w+wcPEQjJPglsE/SpIptmoFOYumFK/T1BgQ
+# AAQXE5a4Agw9WftZs6WnLPvsAQhezFxF6zSkeIBxGmZyw0K8idGZOMKeBPREuJtp
+# 0c+3pDKq0k/uXelgKCwU6LqBnKwGE5jry2gRKMkOGrB9UCvliC3ZKrGH1L/1zMt2
+# nyTil+IEgF8NXvHxJYQTf3m67laFb01a0/LSWebq4TKz3saGeR1VCYArEztyO0aF
+# ld/uzUuzXf1hJZPpMZ/sBv8EGw8un0V8x6VLcPG/qcKwf4aW0igbzLAh1HnKjj08
+# sZI=
 # SIG # End signature block

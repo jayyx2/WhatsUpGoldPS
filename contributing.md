@@ -8,7 +8,7 @@ Here are some guidelines for contributing to this project. They are not hard rul
 
 This project maintains a [code of conduct](code-of-conduct.md) that establishes how the project is governed and how everyone involved is expected to behave.
 
-You can report unacceptable behavior to [alberino@progress.com](mailto:alberino@progress.com).
+You can report unacceptable behavior to [jason@wug.ninja](mailto:jason@wug.ninja).
 
 ## TL;DR
 

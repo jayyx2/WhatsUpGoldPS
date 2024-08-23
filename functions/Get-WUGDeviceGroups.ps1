@@ -27,69 +27,88 @@ Modified: 2024-03-29
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceGroup_Get
 #>
 function Get-WUGDeviceGroups {
+    [CmdletBinding()]
     param (
-       [string]$SearchValue,
-       [ValidateSet("summary", "detail")][string]$View = 'detail',
-       [ValidateSet("all", "static_group", "dynamic_group", "layer2")][string]$GroupType = 'all',
-       [ValidateRange(0, 250)][int]$Limit
+        [string]$SearchValue,
+        [ValidateSet("summary", "detail")]
+        [string]$View = 'detail',
+        [ValidateSet("all", "static_group", "dynamic_group", "layer2")]
+        [string]$GroupType = 'all',
+        [ValidateRange(1, 250)]
+        [int]$Limit = 250
     )
 
-    # Write debug information
-    Write-Debug "Function: Get-WUGDeviceGroups"
-    Write-Debug "SearchValue:   ${SearchValue}"
-    Write-Debug "View:          ${View}"
-    Write-Debug "GroupType:     ${GroupType}"
-    Write-Debug "Limit:         ${Limit}"
+    begin {
+        Write-Debug "Function: Get-WUGDeviceGroups -- SearchValue:${SearchValue} View:${View} GroupType:${GroupType} Limit:${Limit}"
+        
+        #Global variables error checking
+        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+        if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
+        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
+        #End global variables error checking
 
-    # Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer";Connect-WUGServer}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer";Connect-WUGServer} else {Request-WUGAuthToken}
-    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer}
-    # End global variables error checking
-    
-    $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-?view=${View}&groupType=${GroupType}&limit=${Limit}"
-    if ($SearchValue) {$uri += "&search=$SearchValue"}
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups/-"
+        if ($view) { $queryString = "view=$View&" }
+        if ($SearchValue) { $queryString += "search=$SearchValue&" }
+        if ($GroupType) { $queryString += "groupType=$GroupType&" }
+        if ($Limit) { $queryString += "limit=$Limit&" }
+        # Trimming the trailing "&" if it exists
+        $queryString = $queryString.TrimEnd('&')
+        $uri = "${baseUri}?${queryString}"
+        Write-Debug "Constructed URI: $uri"
+    }
 
-    $allGroups = @()
-    do {
-        $result = Get-WUGAPIResponse -uri $uri -method 'GET'
-        $groups = $result.data.groups
-
-        foreach ($group in $groups) {
-            $groupObject = [PSCustomObject]@{
-                Id = $group.id
-                ParentGroupId = $group.parentGroupId
-                Name = $group.name
-                Description = $group.description
-                GroupType = $group.details.groupType
-                MonitorState = $group.details.monitorState
-                ChildrenCount = $group.details.childrenCount
-                DeviceChildrenCount = $group.details.deviceChildrenCount
-                DeviceDescendantCount = $group.details.deviceDescendantCount
+    process {
+        $allGroups = @()
+        do {
+            try {
+                $result = Get-WUGAPIResponse -uri $uri -method 'GET'
+                foreach ($group in $result.data.groups) {
+                    if ($View -eq 'detail') {
+                        $groupObject = [PSCustomObject]@{
+                            Id                    = $group.id
+                            ParentGroupId         = $group.parentGroupId
+                            Name                  = $group.name
+                            Description           = $group.description
+                            GroupType             = $group.details.groupType
+                            MonitorState          = $group.details.monitorState
+                            ChildrenCount         = $group.details.childrenCount
+                            DeviceChildrenCount   = $group.details.deviceChildrenCount
+                            DeviceDescendantCount = $group.details.deviceDescendantCount
+                        }
+                    }
+                    else {
+                        $groupObject = [PSCustomObject]@{
+                            Id            = $group.id
+                            ParentGroupId = $group.parentGroupId
+                            Name          = $group.name
+                        }
+                    }
+                    $allGroups += $groupObject
+                }
+                if ($result.paging.nextPageId) {
+                    $uri = "$baseUri?$queryString&pageId=" + $result.paging.nextPageId
+                }
             }
-            $allGroups += $groupObject
-        }
-
-        $pageInfo = $result.paging
-
-        if ($pageInfo.nextPageId) {
-            $uri = $global:WhatsUpServerBaseURI + "/api/v1/device-groups/-?view=${View}&groupType=${GroupType}&limit=${Limit}&pageId=$($pageInfo.nextPageId)"
-            if ($SearchValue) {
-                $uri += "&search=$SearchValue"
+            catch {
+                Write-Error "Error fetching device groups: $_"
+                break # Exit the loop on error
             }
-            $percentComplete = ($allGroups.Count / $pageInfo.size) * 100
-            Write-Progress -Activity "Retrieved $($allGroups.Count) device groups already, wait for more." -PercentComplete $percentComplete -Status "Page $($pageInfo.nextPageId) of ?? (${Limit} per page)"
-        }
-    } while ($pageInfo.nextPageId)
+        } while ($result.paging.nextPageId)
+    }
 
-    return $allGroups
+    end {
+        Write-Debug "Completed Get-WUGDeviceGroups function"
+        return $allGroups
+    }
 }
+
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASaIx4zMwm/YAy
-# QGEIhpvcAUSfjSSM1Ydys02jiPLdJ6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWpnAhr1bVSstD
+# dF6wtXoZRH5IDQmhQ+wPOGXnbp40i6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -190,17 +209,17 @@ function Get-WUGDeviceGroups {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgUBKxLSPajfDYJ/pAHj7IDxp9e5zpFRTW4VsJRqCuxTcw
-# DQYJKoZIhvcNAQEBBQAEggIACL6jGAYOsBSDSTLTy3mX52fM6lC8nZU9ZKUvGQ4R
-# sQGXhBNAVTaUenIzGgqcGYQd311c+bpR+VSEla4S26krFztWLs32m7AEhktWKN+Y
-# AfWrAtysL8hbyleIIkmEPAvfA9teHBJYZRX9d6hE3jpKIvTMtR4JH476JQQGAbzn
-# HUKsi0W7vynIf0F87pJxwlEVPfs+dJ1f+qQgKcPx+gKZKprlT31Q8QtHSfPG/qYf
-# ZiJ1O1cOGlnZkAVNVqODeoRc4rAIIw4wpvFwnLHcvwMRLFnyqHtZqRUxUm95vDYV
-# STxme/P0cJDBjy3EpCCRCMrukJQ3OGg/cv9QdSUXQCg2+pfKu7KdwK6Z7JpSe4Zo
-# wCf3wBU1zZrbiu41Y5XUw1pjzwtxN5gEBxHH6XIhlPPsK64A08rLphKjoO7Yf7hp
-# zsEGwE9a0q2C+6zk2u5iE1imbf9vr9OTmXakuXNbkeOXaZid2w59dU6Bpar1fyaK
-# a5ERjWCNTm2e5i21C1kaQfhbM2qliDMwvlBdFmZ66Q7GIlMNEcGKTvYXuiBLHiDF
-# h3LU1LqumgDjkg3jsCBM6QIhuq5GPvplhzsIYnsAsfsby78tFv5pILk2b18FNjVG
-# cPeMU87jKqSibVImvA4xYkmaSE/oqSarW8BQfAaShjcucH15i0p5DCbZ97tEIWcU
-# NAY=
+# BgkqhkiG9w0BCQQxIgQgyqZDWuch7M/T0e0lhd3FbrXLKuj5b39s3rVdBeE1F/Ew
+# DQYJKoZIhvcNAQEBBQAEggIAARtPGnJzEvfCqMOtTdRUvlbdEJ0806KGac7azfxB
+# VUOvT00FBcp9IUVZhSpFQAVFvQK5MYj5yoUZZKhXFpskAwXCmBTR3dLINI+iMvYL
+# D3dQ0tA2h8Psj/pGGiOi4oxjQCeRY3RFy1R9A/posa+LJyqnXrtl0P1Ur3LO+atD
+# tNjNvVD75Q5xC0N67QdnP5KQonB9K/rZYMYDK4BlJG8Sgy2zuSaZ9EB7kKvae6ku
+# wLdbBI0diYVV6wCMzUochqhA+VOiEx+NT22MeXGNvGA+jlgqxw7mrLRDmGet0JP3
+# qNnIAZ5xm+NY0kIgu/mkq2UwXRL0jz3gFdZPXvIHCtqZOFNbNscXHRMMjNXo+Lyr
+# ++snyb6msKO4XhuL/EX0WekEl/WILBqMeWgvkJWuIEnhOp+YvRglKXvjD08ddUIp
+# /DXbzov+fryB7feWjgP39F5wjFuIIkAnMfNUfX8YJseRUDeRgaSZ9ZOEohgOkz/y
+# B1pBKyz1JZU0FJagEFKHfupHVCtNFYvRXJEhEHOBkpWe3SGOynT9MnLewQ1Hhft7
+# y/D5PENUfc+awhK9cNnu3UOGRKPUyXfi7CztT7nuOmYn4DonuLf1W08tqAwfeSnW
+# xWMoAUx0ItKXhP9NKKfWPjxxqehhcHaplbBL5qMpr5cfw6hE+FaGKiQOJPxuVu+C
+# T+I=
 # SIG # End signature block

@@ -45,7 +45,7 @@ function Set-WUGDeviceMaintenance {
         [Parameter()][string]$EndUTC,
         [Parameter()][ValidatePattern("^(?<Value>\d+)\s*(?<Unit>m|minutes|h|hours|d|days|s|seconds)$")][string]$TimeInterval
     )
-
+    begin{
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
     if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
@@ -89,18 +89,20 @@ function Set-WUGDeviceMaintenance {
         }
     }
     #End input validation
-        
     $totalDevices = $DeviceID.Count
     $batchSize = 499
+
     if ($totalDevices -le $batchSize) {
         $batchSize = $totalDevices
     }
+
     
     $devicesProcessed = 0
     $successes = 0
     $errors = 0
     $percentComplete = 0
-    
+}
+process{
     while ($percentComplete -ne 100) {
         $batch = $DeviceID[$devicesProcessed..($devicesProcessed + $batchSize - 1)]
     
@@ -140,14 +142,19 @@ function Set-WUGDeviceMaintenance {
         $resultData.success = $false
     }
     
-    return $resultData
+
     
+}
+
+end {
+Write-Output $resultData
+}
 }
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdcSbCV4ENDHRM
-# loe9yiHocY3QAPMA/ok6jIds1Xloy6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVJsS+595RirZG
+# BMJ5LUTOQQXbzxUUcRoy8WMGca7dfqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -248,17 +255,17 @@ function Set-WUGDeviceMaintenance {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgUq4gCE2djholJy1rhOgIk7snkT2TRJPBntA2AeIAx6Qw
-# DQYJKoZIhvcNAQEBBQAEggIAqgIeDvPYAuSQkc/EbUXmZ1EDCZj6g/AQiE45E0Ta
-# QWhvXqGNFIAn7813Fo+nF0taM+anz1VpBIWypJLYCcuf/TqmAMb5B31VWLEZJXyk
-# loxNtbqnBP7ejkHy2gMO9lItWVW3y9LIwtyktlXKM5JaGiV5I3ex9xA5B4nitwtX
-# 4ZLxwVTwZS8D9HxNGrOz3PryctQJWx+RCcw+eMtRAT6l335Fom+T+cf8xO3oSMV6
-# CrUrBLEz3bTizQP5j29/s9uhvrcaJiUID/nn1IKqbr+LGCpaJ43u88pvIUooHFGq
-# fOhefiljdAESQuEFjMLxCYIc2cLF7Bt6igcsMCsR2Z9uCCkbT5wlnHyiRyVxerwP
-# 14+i9kUZ68f8VClY7f1WcoAK+5nAuDa8nYUGZQMohC0Jk6ZmV5rjnH0CTwW2U6rH
-# StocjhybvtBWbcAfI9RL9HDJrKL+f84m+OOF6Fr74rfBcsSrVXdhCidD+xe/ZH7p
-# alsM5Hf8rDKMDb/+dZW27m8oQABD3DTA88lRmB6hMpilW8f6IFXkNAhKdeGeFnJU
-# ySRQ8CASWjc3EiX6NzuQqjW+u7HXfDFB9Aq5F65fO/7nJfI3FQN4KGfRmCBGr07v
-# FuMTxcDXxDaaEorwbIgWiHCetDwKMgylx6JThFvxtvHVA2vnwbclFttP0MZDtGd/
-# a3k=
+# BgkqhkiG9w0BCQQxIgQgZXOZFnLqyHQ5uKkLuOBx6yHlFnSgZHwrGIwv+o50uTww
+# DQYJKoZIhvcNAQEBBQAEggIACtBsBf7+DL/i0Di2SB0m5Re/3Y6vtpI1vAbPRCvw
+# HoWPymCXIXNIT0SlH4oGvtKoeFyIqaO7ENdSZGIV1K5E3E2sTBgxRky5XotSfCg1
+# mILkeI4WoPL6cwkTaqA0Rap9aBsV04B4PE6MJN8OySkQKZJHIQk2MU5fExMarAxm
+# 5jQNYgbf6PVg0/xL1sPFZ4RAX09rHC2UEjXKMfSusuTr31p1hR5AvsJ2WMHI/wIW
+# AuOAi6OBvVdg2+pD/LORVNKGSyYCQQUCbFnsp5wBzk0AeTcsALgHZrbT6+Hh2K54
+# 85J9Q76FCzfVm5yhvc1HmBB8RvNOkZwp2UGkeMnvCExfSdfSue1T6LLb/3jwtr79
+# Gstu86iEbotD6ERKphiVwqKeUG/5fhIrThZgINepKCJ+ZYwGhx+9uscFtjJbNhJH
+# O7ddjjsVP4WSxoZS2tJbL3lkNQQGYec0IlHjy+D2OBTssR2enUFgH8KqS45uXJYb
+# 5zpzZTvUslivRV5Si5Z0E4IJedimPV81tHPNhQwpoxwIoJYayvECMni4Xet7N6uE
+# YYlotKTOANKq33Fs4LjZkcoTD+j+gcTBCS8MvdL+6UuyuTMTQCW0B66WcdvppkFj
+# FAX4rLyzdY2JoXH+X+s6Uyml1ausj+1XerzsdU4oP3q3W5yj1Cyw6CPvpFaZCZ89
+# pAE=
 # SIG # End signature block

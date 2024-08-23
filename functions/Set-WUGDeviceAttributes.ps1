@@ -61,21 +61,19 @@ Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#op
 function Set-WUGDeviceAttributes {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)]
-        [string]$DeviceId,
-
-        [Parameter()]
-        [PSCustomObject]$BatchData
+        [Parameter(Mandatory = $true)][string]$DeviceId,
+        [Parameter()][PSCustomObject]$BatchData
     )
-
+    begin{
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
     if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
     if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     #End global variables error checking
-    
     $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/attributes"
+    }
 
+    process{
     if ($BatchData.deleteAllAttributes -and ($BatchData.attributesToDelete -or $BatchData.attributeNamesToDelete -or $BatchData.attributeNameContainsToDelete -or $BatchData.attributeValueContainsToDelete)) {
         Write-Error "Combining 'DeleteAllAttributes' with other delete statements is not allowed."
         return
@@ -83,18 +81,22 @@ function Set-WUGDeviceAttributes {
     
     try {
         $result = Get-WUGAPIResponse -Uri $uri -Method PUT -Body ($BatchData | ConvertTo-Json -Depth 10)
-        return $result
     }
     catch {
         Write-Error "Error performing batch operation on device attributes: $($_.Exception.Message)"
     }
 }
 
+end {
+    Write-Output $result
+}
+}
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDj0g41eu19KwGb
-# WsOHGMgS3fsFTTmxj0EFrylUU3OfNqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZijcow8f+9o0W
+# s7LHd1Ub6A0cpet+o2pdF75DnrkMDqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -195,17 +197,17 @@ function Set-WUGDeviceAttributes {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgvGPq/1x6mjdc1Hm5O5jgh4uIwv1yrn9iXfpQaWFLvvYw
-# DQYJKoZIhvcNAQEBBQAEggIAC6hq3Fz9E6epDHVSVlA7zQPp9yc1GSJn7pxqz2ks
-# sr2axEgT4M61krmimOmZ4znxYncgHSg2yf6wf6AAhRIuIj1yym3YQ8CubrT/JutA
-# 7fc7OGFmEJZEaCkowWKmCosdel9aMUOc4xpmATrR55Z9CnLBp8Ke50OlpKv64v1N
-# mc6bPdDXE58SQxuRBEKDCdDgoXwqeHQEwvKWBw2UduslotkVfmFSRYMBfl0KTye0
-# ELnvI0w+OtZbgRFxA5IjYD5RRE/MRqV9pRmN5SgGv2bCYWFkNnIPnI2u7bx31VAq
-# pBM2QgUt4JH7WI7T/C25C/tZC3KoRTDDQn+Pbbfh4GY5KhRYzxC4U5LmviyqB1nG
-# g42Kb8sJKNWBls50wpMshVJTeRYXO3kIsI/Jvnqz6gC32rPS7wn8DBsLCaQ9Iyic
-# zH5wSvFzO0fl908TVaKqETDyKaU31qbvYnJAZcrpF3hBg6Tb1SRIgtQ7tYgD8T7X
-# hITx2cWUTWOv426XzjdcCe7AFBeDjmw3TE95UnwGPBvT5zoIuwLVuYfQJ6ZPxlzt
-# bxmIi2PvI0GVroJ1o7p9vUXpviBERyg0r4ENCQoiNBcpYoQ6R2yJApsZhOHzWoDM
-# B7M66+hqMPKcl2TqmbXqxaT8SaGP7mPPmc5AHReyIoLE3xRw3YRRpMLlj/al/MWy
-# ILA=
+# BgkqhkiG9w0BCQQxIgQg5TOnJBVkNXQy5gGHTokkXh3dG7YbFu4WpmZUCUA1AEAw
+# DQYJKoZIhvcNAQEBBQAEggIAZ8Kh27E4LtlkxkUjq2J1qFbj24RNZ1wqtu5TMEsX
+# 7DUSP6gRMXr1YZJjhtOD6LrGXQwwYC0PsGi3LSz9q4r9w6FtsX/BTSBDpjYgHcZz
+# 83se2sreqVSVnsWRGBo2SftReTTw9oSUMSqfBZr7N7xWHzIca2NxutKUBlCfx3gG
+# 1GadtlZ24ajkcTxPrwVZOSrjW91ULW35Bl6z4mi5znPNFAg0yM+XwG/iKIqIcEQB
+# vBxeEmdtBXeoErt8YJ3M+aggt3qsO+FPxRl75nK78APXKi9KZhJOhJ+cctiF6H4A
+# 10z1cnuruQ+JU5vVJwOCWDHRKCgHtaAAV4K5PhrxH+K5uSx+qIJhX9lLDMI+eAm5
+# lna9t1p5N+VuFkXxBeciJ2pQ2SvJiPbcXts4GCUABmJrVqiofY+8wkbbZ0+66EGV
+# LU3ALf6ZFXIBA+Yfhsj5RQRkoyh1rDkL/Wn3Yy1qVsyilclh57MHe7e+lEobxJyd
+# dY9uzWe2wGLwi1kX1Ng22yUjDF2b1WHONHD2KS7mECaImJYwp8BjfZsZPn1WbdPV
+# ie3O2MUs+Vf/fCmiixwwjsMpCIctS6VTZzqZesWllvaPeW4vrYsegUzgA3XEmE2h
+# K8/W7q+lex1JL601R5a7A57Dpl9/yJJuGA9fCC2LCU8DRQJLeaKuzYBM95sNRTad
+# rdc=
 # SIG # End signature block

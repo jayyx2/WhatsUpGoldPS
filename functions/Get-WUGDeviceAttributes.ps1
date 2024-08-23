@@ -26,55 +26,86 @@ Gets the first 10 attributes with the names "Attribute1" and "Attribute2" for th
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja) 2023-04-02
-Last modified: 2024-03-15
+Last modified: 2024-04-14
     Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/Device_FindAttributes
 #>
 
 function Get-WUGDeviceAttributes {
     param (
-        [Parameter(Mandatory = $true)][string]$DeviceID,
-        [array]$Names,
-        [string]$NameContains,
-        [string]$ValueContains,
-        [string]$PageId,
-        [int]$Limit = 0
+        [Parameter(Mandatory = $true)] [array] $DeviceIDs,
+        [array] $Names,
+        [string] $NameContains,
+        [string] $ValueContains,
+        [string] $PageId,
+        [int] $Limit
     )
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
+    begin {
+        Write-Debug "Starting Get-WUGDeviceAttributes function"
 
-    $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/$deviceId/attributes/-?"
+        # Construct the base query string using provided parameters
+        $queryString = ""
+        if ($names) { $querystring += "names=$names&" }
+        if ($nameContains) { $querystring += "nameContains=$nameContains&" }
+        if ($valueContains) { $querystring += "valueContains=$valueContains&" }
+        if ($pageId) { $querystring += "pageId=$pageId&" }
+        if ($limit) { $querystring += "limit=$limit&" }
+        if ($querystring) {
+            $querystring = $querystring.Trim('&')
+        }
 
-    if ($names) { $querystring += "names=$names&" }
-    if ($nameContains) { $querystring += "nameContains=$nameContains&" }
-    if ($valueContains) { $querystring += "valueContains=$valueContains&" }
-    if ($pageId) { $querystring += "pageId=$pageId&" }
-    if ($limit) { $querystring += "limit=$limit&" }
-    if($querystring){
-        $querystring = $querystring.Trim('&')
+        # Global variables error checking
+        if (-not $global:WUGBearerHeaders) {
+            Write-Error "Authorization header not set, attempting to connect to WUG Server."
+            Connect-WUGServer
+        }
+        if ((Get-Date) -ge $global:expiry) {
+            Write-Error "Token expired, attempting to refresh or reconnect."
+            Connect-WUGServer
+        }
+        if (-not $global:WhatsUpServerBaseURI) {
+            Write-Error "Base URI not found. Attempting to connect to the WUG Server."
+            Connect-WUGServer
+        }
     }
-    $uri += $querystring
 
-    Write-Debug "URI: $uri"
-    Write-Debug "Global URI: $global:WhatsUpServerBaseURI"
+    process {
+        Write-Debug "Processing Get-WUGDeviceAttributes function"
+        $finaloutput = @()
+        $totalDevices = $DeviceIDs.Count
+        $currentDeviceIndex = 0
 
-    try {
-        $response = Get-WUGAPIResponse -uri $uri -method "GET"
-        return $response.data
+        foreach ($deviceId in $DeviceIDs) {
+            $currentDeviceIndex++
+            $percentComplete = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100)
+            $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/$deviceId/attributes/-?$queryString"
+            Write-Progress -Activity "Fetching Attributes" -Status "Device ID: $deviceId" -PercentComplete $percentComplete
+            Write-Debug "Fetching attributes from URI: $uri"
+
+            try {
+                $response = Get-WUGAPIResponse -uri $uri -method "GET"
+                $finaloutput += $response.data
+                Write-Debug "Result for Device ID ${deviceId}: ${response}"
+            }
+            catch {
+                Write-Error "Error getting attributes for Device ID ${deviceId}: $_"
+            }
+        }
     }
-    catch {
-        Write-Error "Error getting device attributes: $_"
+
+    end {
+        Write-Progress -Activity "Fetching Attributes" -Completed $true
+        Write-Debug "Completed Get-WUGDeviceAttributes function"
+        return $finaloutput
     }
 }
+
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwa5YyiO0q4YbM
-# O9Fp2cb6epYhITGXsnxgb00WMq5XVqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA5/izvZptOcU2M
+# PDMzvbVWfDgEoRNhTIK3EEk7Qib1IaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -175,17 +206,17 @@ function Get-WUGDeviceAttributes {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg5lQ6oo17C9xzp2l8j+FuPJ5p7V6tnVEwwzLENVvfmwMw
-# DQYJKoZIhvcNAQEBBQAEggIAcvOof3c/Xe0GffOi81KY65Ji0CqiZx2RdGigYLLn
-# 1Ky48BMbwyBq8Om3IdG/zDVF8SrhaAonl5Xj3qva3ZAA5JnsbChwJXTHCuoueF3g
-# bHPqKWhe22BZ8uYxFYv2s3/TVIgaCTbWzXPXlaMtdkqoiADABmsJ48nDa5FZ68sE
-# uoLNao1GapWkgFHSI7uzmEYHDy95qPQNXxkqfNOmbLHr2/xCBJPWSElbIIfvHpo3
-# 6IoESjTKa4/rTpFJqDBTX+3IlrKyItGWHtMr5C8tKEvMRjV6rCYFnL7IT+hcjMSv
-# +vjq8dEgnlPqFIcCn++ntqTZapCaZcM0qlCV60FiSWlZKr4dm6IEHlmtu7SW5TfY
-# Myf27qBPEmCi2ioF9Rh2a1pQQzhtulXAS8VL2ltMvWlaBrpgW+KcB88XNA0mClib
-# gS5dIjUcMO67RiFaj1vspPoDfm/Bc3g/qAffntS7Gdjw5ZZwJHooeEtPNOtRkRea
-# bN5MPSWl4OiJHuyzJrp3eKl5JrBuHYPRi2rdZXZM8eYs9HZ/nWFpD5wibRvC1Rqz
-# jjq4qeJdS2+J3G4SgjXWok+kpitqJvQDinsKGGEP5rrS2mQGHTK/T+7u7FAXx0GP
-# jhcHLFWpoWFx1tex8hXieCkuH5QmBs0QEjb6bjxPCfq3rESIBwheyiBLssE/t3VC
-# FX8=
+# BgkqhkiG9w0BCQQxIgQg0Eo57cEMR04CSqBskFipAVI8d8xLxO3BEfj1dMo7aAIw
+# DQYJKoZIhvcNAQEBBQAEggIAmPt5B3NvsZ9W8dTJOV6Q9Iga7N64Z29EO+1bPA1y
+# j+bxjtCpdPFUrSHwhF44NN0ywcCTQESg6nKQ3BMSMFYXH1wlVA5TAIC2tuhkhnye
+# U//dRqD7ck/LKkSJ361evCDYqzJTRlRgA/wu+uJ/vya+YN5BpZsMFI8jCMNEzwyl
+# PU9HHsNLL9APlJNmcmS4tdP//rThoO7K40GmDVrNU63zdQWALgBofumXLH73zqbp
+# dqJzzGTn+/GUyhruB22bowR76ZHGFQh+bZwRkq87eNLWBZW3imRgZ4arndT+vMS7
+# QFZgfeocKwAmhZv4hV5aRm9wkPvt/tICjjk3XygRpNVp/nUAtMSJEWbqDzK8eZSu
+# WyLU5CM1y33bIcowzaf/u92av/JS0Esh48Gy4o2U3jlRdG9KiWxqPcEF2bErnchV
+# ieNgolL5CAELi1NkMsrAjzPw/mzE5BtU933wl3/KbacmCBycCzLXI3NVbBJFSL5g
+# 39PkUpuK4gqbfw487PyyZ5BJ018913sRV6/n7qWRJPPcmf6VjHdRMjGvOYqa2z2c
+# LOzMRbApclE6eQoJbjTAw45LBJiesbwbsz0IJ45wbEDeKCor8Cv9SKDHoGAm6XMH
+# NYzxKkAFdvX8E4Fk8uKyHOY59gaO3zjV7AQplBb1rJHPyoH59JthC0CTbq98ANGm
+# ODE=
 # SIG # End signature block

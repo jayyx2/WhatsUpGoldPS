@@ -47,9 +47,7 @@ function Set-WUGDeviceProperties {
         [Parameter()] [string] $snmpOid,
         [Parameter()] [string] $actionPolicyName,
         [Parameter()] [string] $actionPolicyId
-        #[Parameter()][string]$JsonData
     )
-    # Your existing code to make the API call using $JsonData
     # TBD using call from Get-WUGDeviceTemplate or Get-WUGDeviceProperties
     #Global variables error checking
     if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
@@ -163,8 +161,8 @@ function Set-WUGDeviceProperties {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrPKsosbDyiBiu
-# qtdAJx4Cuf3STiA2iRIoiP4WtireFqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7zX6yZnA6Nqtb
+# XFDLXV0No7kpvPh2cp7fl7FDuDF3hKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -265,17 +263,17 @@ function Set-WUGDeviceProperties {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgPQ8ROsfVr87mG3axFVRrmmz6tJN5XuHDdehLybCeHvUw
-# DQYJKoZIhvcNAQEBBQAEggIAbWFu+UcGb0dVsTb9aj+7mVtp3F1oZ2y+R1idDAew
-# BMKLr4vtCXf5/h0ZQnVwibIjCSWbaoxEaQ6JHgfkXAW8pWfzOCJwHoRsbKX3dPac
-# PG6z1f4dZiXHK9M7+7XL9Yh6jrVAe/F4hXnJFYr7i9uHxJrqUNpqQzAQOzbfcJf/
-# 08CzCadrIm4tQ9fVdtlbIyACPi9TbNMC4HGSMTZEF6JUxtyJNDyNv2MiDsQUdW8p
-# NDud88IaWTRwtDaZzhN8pFOXxc5d0y3rng5vFU8A4s8ormzUCiqVpmYPssVVf/Aa
-# FSdktIJd+503D9KeUU00TQCiDGIp0IG6o2tOS0DzHXwwKUtLo9EJdGvF95LphY40
-# TeLhTzqssidBl936fO8u4D7cQn1bYGDtvqUhGbcp+gA5+HP0t2hgQt4jtU+5vP1k
-# K8AU8UNacMgYXyzuS60kGp/T0KAVUnx9cCUmxS1KjhNrzM2UdJVDPeti7SC+hjd2
-# O3WZQJTfOznX8Q2BseBwWHX5glYD4bj5j+GSIxZDjZv8TvLRzJHfb7A+vj6DBvox
-# zrnPjfUNzHME995GimAdaOgMkb+aL7OnD9HySMbNKTIx1gQFlqkHMLJZvJ9WtnDe
-# UhJGudSwf2NaP+AAHak1Se2bcBysZedFtsHsz/sLcolBWMWbL5e9/C1FXXmIVxmF
-# a7g=
+# BgkqhkiG9w0BCQQxIgQgOzGDO0Lx+DWEl/6fpCiceBGr6YO6fM5dRRdzBCqIWtQw
+# DQYJKoZIhvcNAQEBBQAEggIAa8gie1it5hcXu+tq3K5Mh3DRAiDB0QB6uOj8dDAD
+# 9JxSort9PSCkRl+C8fFKkLeII1WYqYbqNTkvBrN/sN+2VuRTN5NbS8UwG+KfpxX0
+# r8ck8Z2jIWI/UeqamKVH1sKltdZg3LLhfQMyLC/psbUniWwD8Yj93eZe0f4Pi4vH
+# 7eF6BaqheZYuVFVEtLPxofm4wr6iftN3UDXuD7WxS2zSlpIwOMquhRKKA1b2XKx3
+# Z7sVS1esUaaK3bW8QBzoqwQmGssRGZCkrRMPsR2fTKe/fO/lKc/G9bMnnWkwPxUH
+# lF9tBH0UXT5twzaEhQn/dDR5k9pYe+pEp5aILKoLgD5tTc/K077aeGxl+Ff0GHUY
+# mTvR8YMpNCxY5kvjc+hxGxdjdGZYB2bqOl2AzCEG2d4ye010LFcse3XmwgsvEUE/
+# 7+d/ClRXepbwN4SETMOEBcUPrlvMXGUGIsKOe15ab0kEWMnpjMWcGKIa97xwN+ZC
+# p3udKCb6GeG8Q8w49ScNls7DGLKzJYeQ/UrTWjRQdGMQ58Nw5e/S3KsGB3Z+Ljyq
+# f3osRVKuLCVVnvhY314InBAW31PfJJcJjEOQII+85qU468fdmjDTwHe9/2Pg6IhX
+# /XQoegjcJyzFDU1DVUtcvIM2wFxWXNbJKdPRk7DVteyy3T1xQ+RA9rk4BhfrXqnb
+# 2Ws=
 # SIG # End signature block

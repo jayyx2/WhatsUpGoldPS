@@ -26,76 +26,76 @@ Removes all devices that have the word "Printer" in their name.
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: Let's see your name here YYYY-MM-DD
+Last modified: Let's see your name here 2024-06-15
 
 #>
 
 function Remove-WUGDevices {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][array]$DeviceID,
-        [Parameter()][bool]$DeleteDiscoveredDevices
+        [Parameter(Mandatory = $true)]
+        [array]$DeviceID,
+
+        [Parameter()]
+        [bool]$DeleteDiscoveredDevices = $false
     )
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) {Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer;}
-    if ((Get-Date) -ge $global:expiry) {Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer;} else {Request-WUGAuthToken}
-    if (-not $global:WhatsUpServerBaseURI) {Write-Error "Base URI not found. running Connect-WUGServer";Connect-WUGServer;}
-    #End global variables error checking
-
-    $totalDevices = $DeviceID.Count
-    $batchSize = 499
-    if ($totalDevices -le $batchSize) {
-        $batchSize = $totalDevices
+    begin {
+        # Global variables error checking
+        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+        if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
+        if (-not $global:WhatsUpServerBaseURI) { Write-Error -Message "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
     }
 
-    $devicesProcessed = 0
-    $successes = 0
+    process {
+        $totalDevices = $DeviceID.Count
+        $batchSize = [math]::Min(499, $totalDevices)
+        $devicesProcessed = 0
+        $successes = 0
 
-    do {
-        $devices = $DeviceID[$devicesProcessed..($devicesProcessed + $batchSize - 1)]
-        $devicesProcessed += $batchSize
+        while ($devicesProcessed -lt $totalDevices) {
+            $batchEnd = [math]::Min($devicesProcessed + $batchSize, $totalDevices)
+            $devices = $DeviceID[$devicesProcessed..($batchEnd - 1)]
+            $devicesProcessed += $devices.Count
 
-        $body = @{
-            operation = "delete"
-            devices = $devices
+            $body = @{
+                operation = "delete"
+                devices = $devices
+                removeDiscoveredResources = $DeleteDiscoveredDevices
+            }
+
+            $jsonBody = $body | ConvertTo-Json -Depth 5
+
+            try {
+                $result = Get-WUGAPIResponse -Uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-" -Method "PATCH" -Body $jsonBody
+                if ($result.data.success) {
+                    $successes += $devices.Count
+                }
+            } catch {
+                Write-Error "Error processing devices: $_"
+            }
+
+            $percentComplete = ($devicesProcessed / $totalDevices) * 100
+            Write-Progress -Activity "Removing devices" -Status "$devicesProcessed of $totalDevices devices processed" -PercentComplete $percentComplete
         }
-
-        if ($DeleteDiscoveredDevices) {
-            $body["removeDiscoveredResources"] = $true
-        }
-
-        $jsonBody = $body | ConvertTo-Json -Depth 5
-
-        $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-" -method "PATCH" -body $jsonBody
-
-        if ($result.data.success -eq $true) {
-            $successes += $devices.Count
-        }
-
-        $percentComplete = ($devicesProcessed / $totalDevices) * 100
-        if ($percentComplete -gt 100) {$percentComplete = 100;}
-                
-        Write-Progress -Activity "Removing devices" -PercentComplete $percentComplete -Status "$devicesProcessed of $totalDevices devices processed"
-    } while ($devicesProcessed -lt $totalDevices)
-
-    $result = @{
-        successfulOperations = $successes
-        resourcesNotAllowed = $null
-        resourcesWithErros = $null
-        errors = $null
-        limitReached = $false
-        maximumReached = $false
-        success = $true
     }
 
-    return $result
+    end {
+        $result = @{
+            successfulOperations = $successes
+            totalDevices = $totalDevices
+            success = ($successes -eq $totalDevices)
+        }
+
+        return $result
+    }
 }
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD8Yu5M2Uhmix13
-# SAi18F9njFU5NgS3dNWCou/VDwr8+6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfWw+mz90kIIWa
+# zQOOdQMpep7Pl0GamPjlISIzdkFBrKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -196,17 +196,17 @@ function Remove-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgMM4A8TkZQ7eiaoRtYYTp8CV/S37Pz32937NwilkfsM0w
-# DQYJKoZIhvcNAQEBBQAEggIAQyozmFHKV0tuUSo08xSsjYLJAzq8w5dP9LnFFkHG
-# 3gbvJycTvBuX1V5+iCm9eIcOrPaFYYywppg7u+VijO7esKDh1PexMLsjDoEhoDzC
-# 52aBJJBpOGYJd9zQ1lUqfTbcnR1Tm7PUQAGlJ1LqddBYfGg947L687lUuYNR3rTs
-# lHWtflIoASSA5We1SwGunAmadT6fua/0buPekTTcm1BYvkWk0D2i36jT3V2Xi8GV
-# 7EvzOl56BM8WBLTwu7Dl2PeD1H+oZNUsN/GnYdyVTzfWH3MrhyGcDGIENaKVn1Ar
-# eRVeDZYvm1zShkU0Uf4CznlU7faR6nVzVzXPV6xi7d446hHYhUPxJofPC0sv71Wg
-# c807EgfXJDQS6YtHrsHxVHEoG/nZMRZDHZWF2EdwZh0DmAFqO4mB4szPqD3EnMjr
-# RrSKcwalAGNQCh+xG/UQozrTH2Q+VH8Bk1Hrd5pDZaLXwOkt6r3qBvu6EXJPxj71
-# ZKCmtrUYB4/iNZ6XylDQ3VRDFZOssCQlpmnkmaOOEqe4xkJGWaAFD4+m2iK+A6vT
-# Hes6Hu1qvnbTYeliPvUwqzGzUmbRHyyblgi6CtGHg7jMOjOpLjpWu5OV3HLRGy9Y
-# sPUVkL6HpNSAs+u35v31P+mpunA3mlytsmqC/xONKrU9jTHTrgETQW566PHS1UoU
-# OPo=
+# BgkqhkiG9w0BCQQxIgQgMfmRyQV5u39zJ1WHlVxIdbRFEmJH5CgxqQATvqLIRd8w
+# DQYJKoZIhvcNAQEBBQAEggIADc2xieOh8/3udy0KBY88kxZDJ3KVz5nfnD5TmAvH
+# 8ya3hOi2aH8jXCRhqRH4y6bNM3y8B3lmvcPDbfAqoE1s8otzDPcpKHFMUhcawDyB
+# qS3wycFJcVUkErvq/aTLqJ+ht9ucKUA2MRDmT/yxoDfFHrBFHjO98uuIlReAkc20
+# 5V2K7mYQrGQjh7tL1cd6AG+/OZ9CTs6WcVDYNx197pnC6RbqApaH/PU4cTaIOYoX
+# NPlFKExSZWAxSqIYA/akgvOFOLUDA013bWS/6p6rh9Mn9uECAgaFWfuysCVdeieH
+# f0mymT9fsrF0KRdZHWZuYTQbM3B8/N4kGGRXSDtzw/HYrL5EHlSlOKU2yNaVKfgu
+# 5i8d9ra5scUha61fthZt0h+9mDQwb6UCb18O8IhRz75kBahzQuu/ip9T+8GS9H+g
+# Y0S5gLip1Lp7Xn3sfopnIIPgoXz9Y/6ML5lkpal2q7jcKZ/Aht/B8ML9Thojy8EY
+# Eqkjey6P35Og9pgYTfPXsQpADiPJXYbN7kY1B4BVBq6INjowjbIFis9XGSvSy+w+
+# mp+iU7GpEbsYR6n/f6NlTSS39kBumAmSH4dMIjXmpGXSnwTxXKnHRZe+7RFCijkr
+# Xfoa9kpI7KkRem3YgSipGuWSfiwXSky3/HIREzrqjLBWGX0SRrIpfvmEWVRbWEGe
+# +W0=
 # SIG # End signature block

@@ -14,31 +14,49 @@ Disconnects from the connected WhatsUp Gold server and clears the global variabl
 
 .NOTES
 Author: Jason Alberino
-Version: 1.0
+Modified 2024-04-14
 
 #>
 
 function Disconnect-WUGServer {
-    if ($global:WhatsUpServerBaseURI) {
-        Write-Information "You've disconnected from $global:WhatsUpServerBaseURI"
-    }
-    else {
-        Write-Information "No active connection found."
+    begin {
+        Write-Debug "Starting Disconnect-WUGServer function"
+        
+        # Check if there is an active connection
+        if ($global:WhatsUpServerBaseURI) {
+            Write-Debug "Active connection found: $global:WhatsUpServerBaseURI"
+        } else {
+            Write-Debug "No active connection to disconnect."
+        }
     }
 
-    # Clear global variables
-    $global:WUGBearerHeaders = $null
-    $global:expiry = $null
-    $global:WhatsUpServerBaseURI = $null
-    $global:tokenUri = $null
-    $global:WUGRefreshToken = $null
+    process {
+        # Inform the user about the disconnection
+        if ($global:WhatsUpServerBaseURI) {
+            Write-Information "You've disconnected from $global:WhatsUpServerBaseURI"
+        } else {
+            Write-Information "No active connection found."
+        }
+
+        # Clear global variables
+        Write-Debug "Clearing global variables related to the WUG server connection"
+        $global:WUGBearerHeaders = $null
+        $global:expiry = $null
+        $global:WhatsUpServerBaseURI = $null
+        $global:tokenUri = $null
+        $global:WUGRefreshToken = $null
+    }
+
+    end {
+        Write-Debug "Completed Disconnect-WUGServer function"
+    }
 }
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCb7CWODwsHD5qm
-# RLr9ydA5/wWmeolxFNFjgQn3XI5QMqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAicBtY/YLtj/x
+# Nnwpk2W0QGs0QMIeR+lYPMPFlC+MfKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -139,17 +157,17 @@ function Disconnect-WUGServer {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgX/oozWHHzoufPbFFZH9RhOZGjtcGL43ULa3/mdMlGtow
-# DQYJKoZIhvcNAQEBBQAEggIAQ/h7CPIwmau493COAc0fthV/whzL3fi7KxgMcnfe
-# VQZN3E2J+Sm8f86l6ipne/qmXxenmN8HK6tPLl6j6vdj7qLE48h+aMR+dhe0i1iV
-# lCGvZr9FrAZYHtoiJuvIqKMm2phl8JLytF0qSX/o7+ccv9QJ/34xY6EWJbx4CYsK
-# RWmUaraVCOezu38RQXTj8sIEMVe0K5dGTVAhEbOtv3qezxuB6NkhDCmmmgevCOdc
-# yhaeMiudCsxQTny1/dPtcObUnExbDeHYDHdYPceV9uG6+PQUFKWho//o4NgEVMQh
-# 1/JIBYm/ZtynVxFtjp9LbJiqU6Pq6pYAeTug6JQjSyk4LdgE1LAlQv4lnjWjwgsR
-# 5GJVF4nhQE3dwn0bN9M5cufKQdBelu9l1njw4LBhBlnR6yLEZ+Vh5MsXUt7OOdjZ
-# Bpvflly0AFD3P4ag5G1gOjKqEDcNzlrw2NzDGnpUOgtTdncXj3veTwzsrDmufSdO
-# 1DL6MooexXCm/fSQ/+woTOy/C4vSBAyZ2burIjBESlkO77sul4XR/Co7C3DiXcNa
-# PHHuNEEvxXRWbWDcS9ECs85HuBL5rZOFqe8MQOcYosIkE7pX/+BT2S3vRtcu4xkU
-# 4f2o/hIojuMkyJktR+EDWOd9JOSjkXdBLt0ZH0QZdjBBu0VClNna1bAsQYoCSYW+
-# hfE=
+# BgkqhkiG9w0BCQQxIgQgYtqk2rz2Vca//xcX4iJrbYpvMZfCL8htlHXX7CPXbDow
+# DQYJKoZIhvcNAQEBBQAEggIAHBeafvB4lOVNcilKY6vSzLsNkL68KTvoytOnio4V
+# 0DvGXwpMu+Rhb2iSUFuevYVMdSn0eaqi7reRQr1j4gZbxl/b3legejGlLlxXxPu3
+# yuvnFGUA0ec/HW02H6bCXnOzRb7y48B+tbfEib34lKTHVwvHKRM1d/n9JNetRl10
+# 7at6Rd5UjHhxCKH11aM/61C+HBZHTDT9x/jTwiGZculZaWWgILNvFYURJvDnpcRK
+# xo90YMYaPzZe/ywCGPN+CLwG0BGdqxgHCROSxn8iTAj2J8NYbflaoSspINt4xEqk
+# s3dwKMSRAIvqpCa/Y2/GnRf/g9eowIP+Xl+9iBxuNS6mrMajLPL8FpQwBo7appEP
+# mBA7Sg1wUj/654VnmPJ6O9AJ6nrG9CLqp09B0Lpd9JJl4+U6a2drR8dIF484rzaD
+# 9w2lDQh/mZlsbGYDcdsRUzfHchEf+y4GXiUZH/WD5A1wf0AF0IyAqw6NXs/lFUDc
+# /pqARReqlygtaICA9KpEInXxhJSHQVEqg5OHG6VEvgj8U2lov9T0wZlGHThq1eHp
+# zR173FSu77KDoRsfGpjfrI6n1BNugCg7A1XBM7VWo3z6Fkf1MYMyLiuUDvoeZ6UE
+# 4jbI2ezVyPHQzXFy8Rzx7yjjTSkjEvubCRoreA0YK6D93/egX78ybbhjJ8tmSd+D
+# xio=
 # SIG # End signature block

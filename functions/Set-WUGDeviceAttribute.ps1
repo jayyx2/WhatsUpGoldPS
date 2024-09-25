@@ -40,28 +40,28 @@ function Set-WUGDeviceAttribute {
         [Parameter(Mandatory = $true)][string]$Value
     )
 
-    begin{
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
-    $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/attributes/${AttributeId}?name=${Name}&value=${Value}"
+    begin {
+        #Global variables error checking
+        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
+        if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
+        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
+        #End global variables error checking
+        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/attributes/${AttributeId}?name=${Name}&value=${Value}"
     }
 
-    process{
-    try {
-        $result = Get-WUGAPIResponse -Uri $uri -Method PUT
-        $output = $result.data
+    process {
+        try {
+            $result = Get-WUGAPIResponse -Uri $uri -Method PUT
+            $output = $result.data
+        }
+        catch {
+            Write-Error "Error updating device attribute: $($_.Exception.Message)"
+        }
     }
-    catch {
-        Write-Error "Error updating device attribute: $($_.Exception.Message)"
-    }
-}
-}
 
-end {
-    Write-Output $output
+    end {
+        Write-Output $output
+    }
 }
 
 # SIG # Begin signature block

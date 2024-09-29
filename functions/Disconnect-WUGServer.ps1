@@ -25,7 +25,8 @@ function Disconnect-WUGServer {
         # Check if there is an active connection
         if ($global:WhatsUpServerBaseURI) {
             Write-Debug "Active connection found: $global:WhatsUpServerBaseURI"
-        } else {
+        }
+        else {
             Write-Debug "No active connection to disconnect."
         }
     }
@@ -33,18 +34,19 @@ function Disconnect-WUGServer {
     process {
         # Inform the user about the disconnection
         if ($global:WhatsUpServerBaseURI) {
+            # Clear global variables
+            Write-Debug "Clearing global variables related to the WUG server connection"
+            $global:WUGBearerHeaders = $null
+            $global:expiry = $null
+            $global:WhatsUpServerBaseURI = $null
+            $global:tokenUri = $null
+            $global:WUGRefreshToken = $null
+            $global:IgnoreSSLErrors = $null
             Write-Information "You've disconnected from $global:WhatsUpServerBaseURI"
-        } else {
+        }
+        else {
             Write-Information "No active connection found."
         }
-
-        # Clear global variables
-        Write-Debug "Clearing global variables related to the WUG server connection"
-        $global:WUGBearerHeaders = $null
-        $global:expiry = $null
-        $global:WhatsUpServerBaseURI = $null
-        $global:tokenUri = $null
-        $global:WUGRefreshToken = $null
     }
 
     end {
@@ -55,8 +57,8 @@ function Disconnect-WUGServer {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAicBtY/YLtj/x
-# Nnwpk2W0QGs0QMIeR+lYPMPFlC+MfKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbqQz1Iswl1C3e
+# lFgQsRzKYy5VOn4UR6txWXtH957OYqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -157,17 +159,17 @@ function Disconnect-WUGServer {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgYtqk2rz2Vca//xcX4iJrbYpvMZfCL8htlHXX7CPXbDow
-# DQYJKoZIhvcNAQEBBQAEggIAHBeafvB4lOVNcilKY6vSzLsNkL68KTvoytOnio4V
-# 0DvGXwpMu+Rhb2iSUFuevYVMdSn0eaqi7reRQr1j4gZbxl/b3legejGlLlxXxPu3
-# yuvnFGUA0ec/HW02H6bCXnOzRb7y48B+tbfEib34lKTHVwvHKRM1d/n9JNetRl10
-# 7at6Rd5UjHhxCKH11aM/61C+HBZHTDT9x/jTwiGZculZaWWgILNvFYURJvDnpcRK
-# xo90YMYaPzZe/ywCGPN+CLwG0BGdqxgHCROSxn8iTAj2J8NYbflaoSspINt4xEqk
-# s3dwKMSRAIvqpCa/Y2/GnRf/g9eowIP+Xl+9iBxuNS6mrMajLPL8FpQwBo7appEP
-# mBA7Sg1wUj/654VnmPJ6O9AJ6nrG9CLqp09B0Lpd9JJl4+U6a2drR8dIF484rzaD
-# 9w2lDQh/mZlsbGYDcdsRUzfHchEf+y4GXiUZH/WD5A1wf0AF0IyAqw6NXs/lFUDc
-# /pqARReqlygtaICA9KpEInXxhJSHQVEqg5OHG6VEvgj8U2lov9T0wZlGHThq1eHp
-# zR173FSu77KDoRsfGpjfrI6n1BNugCg7A1XBM7VWo3z6Fkf1MYMyLiuUDvoeZ6UE
-# 4jbI2ezVyPHQzXFy8Rzx7yjjTSkjEvubCRoreA0YK6D93/egX78ybbhjJ8tmSd+D
-# xio=
+# BgkqhkiG9w0BCQQxIgQghBjbSbzs5BOVbj45Z1eeTryyhFPVqqFey1s7VWiSducw
+# DQYJKoZIhvcNAQEBBQAEggIAjlDuS6HGbWAqBrm4o2T5dG2YdEzv0EIQZcnFOCf9
+# QGzqvL5UtS5gIdz+re3DDCPDAcISvXEMB7RoxuTpPWCOoSpxsOVtpwepKo0MV07b
+# r6cxFkotJ5eItRpyDcMdpkQ9dEaZympVSQe2EyIhGVkfWY8uqrm0+v09fnnU5ij7
+# w/NlAMqbU6EjjkKhXYJbC2Vk/z9q8yi44az8zk5Hh8Ikkj50VHyGnc3Gq/wPsolb
+# 1eL5+SHz3VGgk3pQwEqmWiQ77JfnpRXAEahr/1KUKRKJ9ve5hc001TqFF5DFLROJ
+# ZboxEuiPt/FWVqMDW+DLLFhwhMYj9jzrDNXQb7/UxKOPG3p/Zp25YRrWKGKvx8eW
+# rqKeM2/vnQg2gy8iNmK0sfk8ls++ffZjDNGtLVZ5P//Lua+IlAflEipz8M9ZZM+9
+# lfWECYIAegXK63YUhc6fSOUGPNQxBL0z/EJE0bKbeoMggqGX0NtfFDqOk7n3IzXz
+# oJV7/5nq90UsZlTFz1NS0G0yCxALtrDIzYfHJsBIckLcEuWPJKgsdGoWzdkqXnrr
+# +2I3OHbnizGo7hELhz1Vd1Iw8gjO1taPFG64nzxpKc92BCGPlbaZZq0oMw0CWRu6
+# HZKKCJGJ1qtiNyObummg0F5ihIVBIheGyzsrO4EJ9Jqad8rrIn8f2MzR4FbQohrq
+# MpI=
 # SIG # End signature block

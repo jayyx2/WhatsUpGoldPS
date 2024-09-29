@@ -83,8 +83,9 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed CPU utili
 function Get-WUGDeviceReportCpu {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)][array]$DeviceId,
-        [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
+        [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")]
+        [string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
         [int]$RangeN,
@@ -102,18 +103,15 @@ function Get-WUGDeviceReportCpu {
     )
 
     begin {
-        #Input validation
-        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-        if ((Get-Date) -ge $global:expiry) { Write-Error "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-        #Set static variables
+
+        # Initialize variables
         $finaloutput = @()
+        $DeviceIds = @()  # Collect Device IDs here
         $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
         $endUri = "cpu-utilization"
+
+        # Build the query string
         $queryString = ""
-        $totalDevices = $DeviceId.Count
-        $currentDeviceIndex = 0
-        # Building the query string
         if ($Range) { $queryString += "range=$Range&" }
         if ($RangeStartUtc) { $queryString += "rangeStartUtc=$RangeStartUtc&" }
         if ($RangeEndUtc) { $queryString += "rangeEndUtc=$RangeEndUtc&" }
@@ -129,70 +127,75 @@ function Get-WUGDeviceReportCpu {
         if ($RollupByDevice) { $queryString += "rollupByDevice=$RollupByDevice&" }
         if ($PageId) { $queryString += "pageId=$PageId&" }
         if ($Limit) { $queryString += "limit=$Limit&" }
-        # Trimming the trailing "&" if it exists
+        # Trim the trailing "&" if it exists
         $queryString = $queryString.TrimEnd('&')
     }
 
     process {
-        foreach ($id in $DeviceId) {
+        # Collect Device IDs
+        $DeviceIds += $DeviceId
+    }
+
+    end {
+        $totalDevices = $DeviceIds.Count
+        $currentDeviceIndex = 0
+
+        foreach ($id in $DeviceIds) {
             $currentDeviceIndex++
             $percentCompleteDevices = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100, 2)
             # Main progress for device processing with Id 1
             Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "Processing Device $currentDeviceIndex of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
-            
+
             $currentPageId = $null
             $pageCount = 0
-    
+
             do {
                 if ($currentPageId) {
                     $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
-                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                    if ($queryString) { $uri += "&${queryString}" }
                 } else {
-                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
+                    $uri = "${baseUri}/${id}/reports/${endUri}"
+                    if ($queryString) { $uri += "?${queryString}" }
                 }
+
                 try {
                     $result = Get-WUGAPIResponse -uri $uri -method "GET"
-                    #Conditional data addtions/conversions
-                    #foreach ($data in $result.data) {
-                    #    #Do Nothing
-                    #}
                     $finaloutput += $result.data
                     $currentPageId = $result.paging.nextPageId
                     $pageCount++
-    
+
                     # Page progress for the current device with Id 2
                     if ($result.paging.totalPages) {
                         $percentCompletePages = ($pageCount / $result.paging.totalPages) * 100
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
+                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
                     } else {
                         # Indicate ongoing progress if total pages aren't known
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
+                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
                     }
-    
+
                 } catch {
                     Write-Error "Error fetching device report ${endUri} for DeviceID ${id}: $_"
                     $currentPageId = $null
                 }
-    
+
             } while ($currentPageId)
-    
+
             # Clear the page progress for the current device after all pages are processed
             Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Completed" -Completed
         }
-    
+
         # Clear the main device progress after all devices are processed
         Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "All devices processed" -Completed
-    }
 
-    end {
         return $finaloutput
     }
 }
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTBgzTAafKitrP
-# fpbdMFuaO5XEcVcgR6kcPyfw5N5ow6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDI2DTDlZ3INMlX
+# Czeo43tKxynXS5Qe7H4yI8VgqPWKEaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -293,17 +296,17 @@ function Get-WUGDeviceReportCpu {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgL9vitgq4jA2JU1wKFnMuy22D4t1X0eRKdrvVzA7N6asw
-# DQYJKoZIhvcNAQEBBQAEggIAkN9dPm9BzfhGsbwA0YqYjGbqJEXESKb+0KSpNPUE
-# GYSTy23y9LMbKPATkjmE7CYImJNUH+hCdqMSCZEiO5AO5I3Sf9+6Wz5zdG4sYMnx
-# pt2bQYuWDjqXVewCjgK1T/gnVB1EMhksaLdgDgJa74sAYIj0xgs8R1T+Z0uyjTjc
-# eJhbSlaDCdaKxq1IglfUUhGJGRXkjm/hfYVXacQ/ZpUX6u4a/EPhRgmH615bh1Hb
-# aZi5HUe9GJQOuzEQuNmcFuX5nXobtEtaxOrZH7dZAcZJ+EIYvjFnJ1UvF8ZMlCGk
-# redFCq/AzMYKSQLD4p1ncoCE850B0PhBrrvEIWZanB8YAlPaZ/onbxO4j98cvVW6
-# rJIq1+X5258lS5XxCc17OVoPNNqQcu8BKryUIhiBfjhZDbuBLKS5ASsbcOuuDaty
-# uAC8Yr+oLlVpItjzAF875kOXOwn5EKkXGdJlP1xO86jRVKeL5BMNPcSmJguFa8wE
-# 2951Bs9gC9EMPkBHdf4lWivYStjPJQnXBtJYz+g0QOuQRPFnbDa7DMy5tqAE2cID
-# UMrlN/OQ4Kws8eLwJnH6NT3TCLw83WzvJqzsWIsBI6PsFoLvKO5W5n8RvEtjnpxS
-# ne0bl0R/9DQJ22E/RsBcT0VMTeiB0T9t07DyV2JSjdUoUMRaUr4VqIlRxnKLcSwF
-# 33s=
+# BgkqhkiG9w0BCQQxIgQgwZJ+FHswZR+6D8rp0vzPi143aNh+CDN7bDNTOQh7c8Uw
+# DQYJKoZIhvcNAQEBBQAEggIAN4Isbd4AsslXcqSZ/ZNioPNPRm7lTSj35IV5JjkO
+# oPdGu9MpFeiDwzxybI3WUalLIN+sxBJlHF9Clla097XjGFbiQxBTK9SWsxrtC5W4
+# 3wVFSNtLHVk8mmFM8IravPtycy78W7SKsJjq3DIGQ5+FQyLdOVMfyxH8lMy1fI7L
+# /7sdQx3g8aF0geL+acyu8eHm/SPO2TCSJFgxLP3Z/KqQviXbX4MfNi1tMekU5msv
+# W9DdJprGJWk5R0GDb6TdrLp8iUHEo8z620RsrvE5EaLn98Z5WW8oJLaZaUatkgon
+# fL7fBdlgyOlkcVmJjLMkNIET49OHsRtgT8XhI0yR8gRQOqbtVgvmALghVOSH6N2v
+# ezzRkcqU5bmCndAzDpS6dB1NWaaKkt9UmjAKnp7lbljXhmwBFGuHitNdrd5u20hV
+# kCEqdBNrXHCTZE5uYgLvEvbVwSPJg/LmDLhKbESEx1DLSvXukCgvmnfBhj9/wcll
+# bXnlPRrAIC+p27Yol/I57VUpM8HehE2A81eO6YlqeaQG4AZNk8TsrGXRZkMgY1UC
+# lF8RgzsqnABI2BTQ8+mSHXLqKWZgLsNA5jO6KLbkI+Q/R1fffw3tnkQWV1zOtEL4
+# aR0kwkiWHetOkyggWojCGC0P1Cznqe+giT+ZX4bQx+ozZgdqFSeLD3/FnNE7NJ34
+# iAc=
 # SIG # End signature block

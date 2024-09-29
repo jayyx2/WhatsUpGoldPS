@@ -1,105 +1,177 @@
-<#
-.SYNOPSIS
-When you have the DeviceID, use Get-WUGDevice for returning
-information for the given DeviceID(s) using the WhatsUp Gold
-REST API.
+    <#
+    .SYNOPSIS
+    Retrieves device information from the WhatsUp Gold API.
 
-.DESCRIPTION
-Get data from the WhatsUp Gold /device/{$DeviceID} endpoint or
-search all devices using /device-groups/-1/devices/-?view=overview
-&search=$SearchValue" to find the device id you need
+    .DESCRIPTION
+    Fetches devices by specified Device IDs or searches for devices using search parameters.
+    If -DeviceID is specified, it retrieves devices with those IDs.
+    If -DeviceID is not specified, it searches for devices based on provided criteria.
 
-.PARAMETER DeviceID
-The ID of the device in the WhatsUp Gold database. You can search
-for DeviceID using the Get-WUGDevices function
+    .PARAMETER DeviceId
+    The ID(s) of the device(s) to retrieve.
 
-.PARAMETER View
-Default is card. Choose from id, basic, overview, and card.
-id: id
-basic: id, name, os, brand, role, networkAddress, hostname, notes
-overview: id, description, name, worstState, bestState, os, brand, role, networkAddress,
-hostName, notes, totalActiveMonitorsDown, totalActiveMonitors
-card: id, description, name, worstState, bestState, os, brand, role, networkAddress,
-hostName, notes, totalActiveMonitorsDown, totalActiveMonitors, downActiveMonitors
+    .PARAMETER SearchValue
+    A search string to find devices when DeviceId is not specified.
 
-.EXAMPLE
-Get-WUGDevice -DeviceID 33
-Get-WUGDevice -DeviceID $ArrayOfDeviceIDs
-Get-WUGDevice -DeviceID 2,3,4,20
+    .PARAMETER DeviceGroupID
+    The ID of the device group to search within. Default is "-1" (All Devices).
 
-.NOTES
-Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: 2024-04-14
+    .PARAMETER View
+    The level of detail to retrieve. Valid options are "id", "basic", "card", "overview". Default is "card".
 
-#>
+    .PARAMETER Limit
+    The maximum number of devices to retrieve. Default is 250.
 
-function Get-WUGDevice {
-    param (
-        [Parameter(Mandatory = $true)] [array] $DeviceID,
-        [Parameter()] [ValidateSet("id", "basic", "card", "overview")] [string] $View = "card"
+    .EXAMPLE
+    Get-WUGDevice -DeviceId 2367, 2368
+
+    Retrieves devices with IDs 2367 and 2368.
+
+    .EXAMPLE
+    Get-WUGDevice -SearchValue "Server"
+
+    Searches for devices with "Server" in their properties.
+
+    .EXAMPLE
+    Get-WUGDevice
+
+    Retrieves all devices (up to the limit).
+
+    #>
+    function Get-WUGDevice {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
+        [Parameter()][string] $SearchValue,
+        [Parameter()][string] $DeviceGroupID = "-1",  # Default to All Devices
+        [Parameter()][ValidateSet("id", "basic", "card", "overview")][string] $View = "card",
+        [ValidateRange(1, 250)][int]$Limit = 250
     )
 
     begin {
-        Write-Debug "Starting Get-WUGDevice function"
-        Write-Debug "DeviceID: ${DeviceID}" 
-        Write-Debug "View: ${View}"
+        Write-Debug "Initializing Get-WUGDevice function."
+        Write-Debug "DeviceId: $DeviceId"
+        Write-Debug "SearchValue: $SearchValue"
+        Write-Debug "DeviceGroupID: $DeviceGroupID"
+        Write-Debug "View: $View"
+        Write-Debug "Limit: $Limit"
 
         # Global variables error checking
-        if (-not $global:WUGBearerHeaders) {
-            Write-Error "Authorization header not set, attempting to connect to WUG Server."
+        if ($null -eq $global:WUGBearerHeaders) {
+            Write-Error -Message "Authorization header not set. Please run Connect-WUGServer first."
             Connect-WUGServer
         }
-        if ((Get-Date) -ge $global:expiry) {
-            Write-Error "Token expired, attempting to refresh or reconnect."
+        if ($null -eq $global:WhatsUpServerBaseURI) {
+            Write-Error -Message "Base URI not found. Running Connect-WUGServer."
             Connect-WUGServer
         }
-        if (-not $global:WhatsUpServerBaseURI) {
-            Write-Error "Base URI not found. Attempting to connect to the WUG Server."
-            Connect-WUGServer
-        }
-        $uri = $global:WhatsUpServerBaseURI
+
+        # Initialize variables
+        $finalOutput = @()
+        $uri = "$($global:WhatsUpServerBaseURI)/api/v1"
     }
 
     process {
-        Write-Debug "Processing Get-WUGDevice function"
-        $finaloutput = @()
-        $totalDevices = $DeviceID.Count
-        $currentDeviceIndex = 0
-        
-        foreach ($id in $DeviceID) {
-            $currentDeviceIndex++
-            $percentComplete = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100)
-            
-            Write-Progress -Activity "Fetching device information" -Status "Processing Device ID $id ($currentDeviceIndex of $totalDevices)" -PercentComplete $percentComplete
+        if ($DeviceId) {
+            Write-Debug "DeviceId specified. Fetching devices by ID."
 
-            $deviceUri = "${uri}/api/v1/devices/${id}?view=${View}"
-            Write-Debug "Fetching device info from URI: $deviceUri"
-            
-            try {
-                $result = Get-WUGAPIResponse -uri $deviceUri -method "GET"
-                Write-Debug "Result from Get-WUGAPIResponse for Device ID ${id}: ${result}"
-                $finaloutput += $result.data
-            } 
-            catch {
-                Write-Error "No results returned for Device ID ${id}. Try using a different ID or method."
-                Write-Debug "Error fetching device with ID ${id}: $_"
+            $totalDevices = $DeviceId.Count
+            $currentDeviceIndex = 0
+
+            foreach ($id in $DeviceId) {
+                $currentDeviceIndex++
+                $percentComplete = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100)
+
+                Write-Progress -Activity "Fetching device information" -Status "Processing Device ID $id ($currentDeviceIndex of $totalDevices)" -PercentComplete $percentComplete
+
+                $deviceUri = "${uri}/devices/${id}?view=${View}"
+                Write-Debug "Fetching device info from URI: $deviceUri"
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $deviceUri -Method "GET"
+                    Write-Debug "Result from Get-WUGAPIResponse for Device ID ${id}: $result"
+                    if ($null -ne $result.data) {
+                        $finalOutput += $result.data
+                    } else {
+                        Write-Warning "No data returned for Device ID $id."
+                    }
+                }
+                catch {
+                    Write-Error "Error fetching device with ID ${id}: $_"
+                }
             }
+        }
+        else {
+            Write-Debug "No DeviceId specified. Using search functionality."
+
+            # Build base URI for device search
+            $baseUri = "${uri}/device-groups/${DeviceGroupID}/devices/-?"
+
+            # Build query string
+            $queryString = ""
+            if ($SearchValue) { $queryString += "search=$([System.Web.HttpUtility]::UrlEncode($SearchValue))&" }
+            if ($View) { $queryString += "view=$([System.Web.HttpUtility]::UrlEncode($View))&" }
+            if ($Limit) { $queryString += "limit=$Limit&" }
+            $queryString = $queryString.TrimEnd('&')
+
+            $searchUri = "$baseUri$queryString"
+            Write-Debug "Search URI: $searchUri"
+
+            $currentPageId = $null
+            $pageNumber = 0
+
+            do {
+                # Check if there is a current page ID and modify the URI accordingly
+                if ($null -ne $currentPageId) {
+                    $currentUri = "$searchUri&pageId=$currentPageId"
+                }
+                else {
+                    $currentUri = $searchUri
+                }
+
+                Write-Debug "Fetching devices from URI: $currentUri"
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $currentUri -Method "GET"
+                    Write-Debug "Result from Get-WUGAPIResponse: $result"
+
+                    if ($null -ne $result.data.devices) {
+                        $finalOutput += $result.data.devices
+                    }
+
+                    $currentPageId = $result.paging.nextPageId
+                    $pageNumber++
+
+                    # Update progress
+                    if ($null -ne $result.paging.totalPages -and $result.paging.totalPages -gt 0) {
+                        $percentComplete = ($pageNumber / $result.paging.totalPages) * 100
+                        Write-Progress -Activity "Retrieving devices" -Status "Page $pageNumber of $($result.paging.totalPages)" -PercentComplete $percentComplete
+                    } else {
+                        Write-Progress -Activity "Retrieving devices" -Status "Processing page $pageNumber" -PercentComplete (($pageNumber % 100))
+                    }
+                }
+                catch {
+                    Write-Error "Error fetching devices: $_"
+                    break # Ensure exit from loop on error
+                }
+            } while ($null -ne $currentPageId)
         }
     }
 
     end {
-        Write-Progress -Activity "Fetching device information" -Completed $true
+        Write-Progress -Activity "Fetching device information" -Completed
         Write-Debug "Completed Get-WUGDevice function"
-        return $finaloutput
+        return $finalOutput
     }
 }
+
 
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUsw05KuYYI81b
-# G0nk9+tjub0Jl5lk0M0yOqpzPm4pVKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCa4x1uw/PGmTDP
+# Uz/LhRJ5DVg02SIlCvdv8L71llVfQaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -200,17 +272,17 @@ function Get-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg0B9Y/O45ljWhrFSivWAorhTOhi+okxw2qrZ2IQUI9UYw
-# DQYJKoZIhvcNAQEBBQAEggIAnsxOEV3ukej2qjsFDlgwC22GYEnOSwuOKd2B/iIz
-# x3y+eMigHEGw2tsAWddPkFWG0eK3a8fK18qMZSrdSoUkIe5yHkAlpbSOOoCTvcOs
-# TflR29BDUYgwMKgqMfkvhV+TmtrOCN8yXs8Pglf4WOGKYxMzUGA4XR/gG/MQ/RCN
-# JGNC7PzaaJcw2LjcMgX1+PELe+S4EvZMZZxUE77b4cpFEqwM6t7SRF1jXTlL7fZY
-# T5lVz9okZkWNrXDa+aAzXSgmUDgPhZD20Ymjl4x1AdWvI4RP9ORA/pFcLyCFoE0W
-# tGl7sdXMfZS73fxY2i3Nq/YAvDO8dC82EkHllyNXw2VPW3aZYrRs80Fsyqs+yYJg
-# OTbRY4d0R59dSvswT4npcw2q8scjVx5WVExSVceEwU7eo+ImFatmWjf7tomxjEJq
-# gGQ16z1Z0da4AaOAPO/6R15sW9Sflf5BAuqxditadXof0cXwtftkOgEQfzP/nKpw
-# Amrofv/JQ8/2VTCmo7ToEXXKLYRr0JHPY80gZJHS+qevxHEFxLIYfQZxLv3BeBc0
-# w73himcio2nFjICY149u/8t6gYd/56j5fAJ7cXNK/ztypW7uaCn2JNBWAcBlR4MI
-# RDzH0ZzekqjfZ/n9KZ9lJsXug6r/9AXsuOCHrs98XYoFt9d6DuUjAb4cBqF+07fQ
-# Bko=
+# BgkqhkiG9w0BCQQxIgQg9yqKey/JB71UMLo4hcerze102XJL+uKhhDnE6ifHGrEw
+# DQYJKoZIhvcNAQEBBQAEggIAG9liP/YTaIA+qN//5GoOPN6mK/vkfW4sJj91IjFa
+# Ijx4+1GkpLX6abOUpT9aiggBFQCMZsx8sgpNlDzx/cBG+1nvti89EIN/BfskoLLp
+# jPEagG4vdlBPDf7dMC+/kvxKhe/NSfU9ppcqmZ3Vjjiw5eS92kGrx/ngpkq0yNJC
+# QMy7X1KFfWnw81C6dLHH1g43x0U36IYIQdhMwOR5bbu8A4yVu/Kg0WTTDgs/pwfu
+# o58radqnLUE4T/XP+ff+fshne2kWRy3pnqjl6KQEpXzGyP9e2ZnE7Td0xHnx5pc0
+# FvG8NZ90CP1h/dMMhGOycSI51/cPeP4I41Xf5nRJojJFQRe0tMW8iiEW5JT8IQf8
+# sS1+KcueM55leW+hLERRNY/Et3nABGydHr7/QDJgZHw8PNmB/I0iAlvH3+spDLwm
+# Yb2mNqeGlm9Zo3tqtiSLaA6rZspyoHsi2vlRNNNRTGWbaPg8ZM3gqYQvUWQyzKzr
+# H/Pt4mYZQygtXSrzgz7a39g+MWWSoWjWl88Kun4agF0tdT/yPPxzJaQcDd+RkcZA
+# 6hmXkjO2QVtmgsQnlFLkb8G9sKdv7L1xcSAsDkn7nJFQ9IOMeElHGkyMnHuHlQOb
+# 9zas4XmnTPKVJ6HFGKHHtKbssYejfxWt1isI5oDba7SL3NgLefKn5KV9wRuENiUp
+# KK0=
 # SIG # End signature block

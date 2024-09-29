@@ -1,74 +1,198 @@
 <#
 .SYNOPSIS
-Updates or changes a device attribute in WhatsUp Gold.
+Adds or updates an attribute for one or more devices in WhatsUp.
 
 .DESCRIPTION
-The Set-WUGDeviceAttribute function allows you to update or change a specific attribute for a device in WhatsUp Gold. It utilizes the PUT /api/v1/devices/{deviceId}/attributes/{attributeId} endpoint to perform the update.
+The Set-WUGDeviceAttribute function allows users to add a new attribute or update an existing attribute for specified devices in WhatsUp. If an attribute with the given name exists (case-insensitive), it will be updated with the new value. If it does not exist, a new attribute will be created.
 
 .PARAMETER DeviceId
-The ID of the device to update.
-
-.PARAMETER AttributeId
-The ID of the attribute to update.
+The ID(s) of the device(s) to which the attribute will be added or updated.
 
 .PARAMETER Name
-The name of the device attribute.
+The name of the attribute to add or update.
 
 .PARAMETER Value
-The value for the device attribute.
+The value to set for the specified attribute.
 
 .EXAMPLE
-Set-WUGDeviceAttribute -DeviceId "12345" -AttributeId "56789" -Name "Location" -Value "New York"
+# Add/update attribute named 'Location' with value 'Data Center 1' to device with ID 12345
+Set-WUGDeviceAttribute -DeviceId 12345 -Name "Location" -Value "Data Center 1"
 
-This example updates the attribute with ID "56789" for the device with ID "12345" in WhatsUp Gold. The attribute name is set to "Location" and its value is set to "New York".
+.EXAMPLE
+# Update the attribute 'Owner' with value 'John Doe' for multiple devices
+Set-WUGDeviceAttribute -DeviceId 12345, 67890, 54321 -Name "Owner" -Value "John Doe"
 
 .NOTES
-Author: Jason Alberino (jason@wug.ninja) 2023-06-19
+# Author: Jason Alberino (jason@wug.ninja) 2024-09-26
+# Still need to test weird attirbute names that are similar
 
-Modified 2024-03-15
-    -Made $Value mandatory, it does nothing without this.
-
-Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/Device_UpdateAttribute
+.LINK
+# Link to related documentation or resources
+https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#operation/Device_FindAttributes
+https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#operation/Device_AddAttribute
+https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#operation/Device_UpdateAttribute
 #>
 
 function Set-WUGDeviceAttribute {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][string]$DeviceId,
-        [Parameter(Mandatory = $true)][string]$AttributeId,
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$Value
     )
-
-    begin{
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
-    $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/attributes/${AttributeId}?name=${Name}&value=${Value}"
+    
+    begin {
+        # Initialize collection for DeviceIds
+        $collectedDeviceIds = @()
+    
+        # Debug message with all parameters
+        Write-Debug "Function: Set-WUGDeviceAttribute -- DeviceId=${DeviceId} Name=${Name} Value=${Value}"
+        
+        # Set static variables
+        $finaloutput = @()
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
     }
-
-    process{
-    try {
-        $result = Get-WUGAPIResponse -Uri $uri -Method PUT
-        $output = $result.data
+    
+    process {
+        # Collect DeviceIds from pipeline
+        foreach ($id in $DeviceId) {
+            $collectedDeviceIds += $id
+            Write-Debug "Collected DeviceID: $id"
+        }
     }
-    catch {
-        Write-Error "Error updating device attribute: $($_.Exception.Message)"
+    
+    end {
+        # Total number of devices to process
+        $totalDevices = $collectedDeviceIds.Count
+        Write-Debug "Total Devices to Process: $totalDevices"
+    
+        if ($totalDevices -eq 0) {
+            Write-Warning "No valid DeviceIDs provided."
+            return
+        }
+    
+        $devicesProcessed = 0
+        $percentCompleteDevices = 0
+    
+        foreach ($id in $collectedDeviceIds) {
+            $devicesProcessed++
+            $percentCompleteDevices = [Math]::Round(($devicesProcessed / $totalDevices) * 100, 2)
+            Write-Progress -Id 1 -Activity "Setting device attributes" -Status "Processing Device $devicesProcessed of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
+            Write-Debug "Processing DeviceID: $id"
+    
+            try {
+                # Step 1: Get all existing attributes for the device
+                $getUri = "${baseUri}/$id/attributes/-"
+                Write-Debug "Fetching existing attributes with URI: $getUri"
+                    
+                try {
+                    $existingAttributesResponse = Get-WUGAPIResponse -uri $getUri -Method "GET"
+                }
+                catch {
+                    Write-Error "Failed to fetch existing attributes for DeviceID: $id. Error: $_"
+                    continue
+                }
+    
+                # Initialize matchingAttribute to $null
+                $matchingAttribute = $null
+    
+                # Check if the API returned data
+                if ($null -ne $existingAttributesResponse.data -and $existingAttributesResponse.data.Count -gt 0) {
+                    # Look for an exact match on the attribute name (case-insensitive)
+                    $matchingAttribute = $existingAttributesResponse.data | Where-Object { $_.name -ieq $Name } | Select-Object -First 1
+                    if ($matchingAttribute) {
+                        Write-Debug "Attribute '$Name' exists with AttributeID: $($matchingAttribute.attributeId). Preparing to update."
+                    }
+                    else {
+                        Write-Debug "Attribute '$Name' does not exist for DeviceID: $id. Proceeding to create."
+                    }
+                }
+                else {
+                    Write-Debug "No existing attributes found for DeviceID: $id. Proceeding to create attribute '$Name'."
+                }
+    
+                if ($matchingAttribute) {
+                    # Attribute exists, perform PUT to update
+                    $attributeId = $matchingAttribute.attributeId
+                    Write-Debug "Attribute ID: $attributeId"
+    
+                    # No need to encode attributeId
+                    $encodedName = [uri]::EscapeDataString($Name)
+                    $encodedValue = [uri]::EscapeDataString($Value)
+                    $updateUri = "${baseUri}/${id}/attributes/${attributeId}?name=${encodedName}&value=${encodedValue}"
+    
+                    Write-Debug "Updating attribute with URI: $updateUri"
+                        
+                    try {
+                        $updateResponse = Get-WUGAPIResponse -uri $updateUri -Method "PUT"
+                    }
+                    catch {
+                        Write-Error "Failed to update attribute '$Name' for DeviceID: $id. Error: $_"
+                        continue
+                    }
+    
+                    # Check if update was successful
+                    if ($updateResponse.data -and $updateResponse.data.success -eq $true) {
+                        Write-Debug "Successfully updated attribute '$Name' for DeviceID: $id"
+                        # Optionally, add the updated attribute to final output
+                        $finaloutput += $matchingAttribute
+                    }
+                    else {
+                        Write-Warning "Failed to update attribute '$Name' for DeviceID: $id"
+                    }
+                }
+                else {
+                    # Attribute does not exist, perform POST to create
+                    $encodedName = [uri]::EscapeDataString($Name)
+                    $encodedValue = [uri]::EscapeDataString($Value)
+                    $postUri = "${baseUri}/$id/attributes/-?name=$encodedName&value=$encodedValue"
+    
+                    Write-Debug "Creating attribute with URI: $postUri"
+                        
+                    try {
+                        $createResponse = Get-WUGAPIResponse -uri $postUri -Method "POST"
+                    }
+                    catch {
+                        Write-Error "Failed to create attribute '$Name' for DeviceID: $id. Error: $_"
+                        continue
+                    }
+    
+                    # Check if creation was successful
+                    if ($createResponse.data -and $createResponse.data.attributeId) {
+                        Write-Debug "Successfully created attribute '$Name' for DeviceID: $id"
+                        # Add the created attribute data to $finaloutput
+                        $finaloutput += $createResponse.data
+                    }
+                    else {
+                        Write-Warning "Failed to create attribute '$Name' for DeviceID: $id"
+                    }
+                }
+            }
+            catch {
+                Write-Error "Error setting attribute '$Name' for DeviceID ${id}: $_"
+            }
+    
+            # Clear the progress for this device
+            Write-Progress -Id 1 -Activity "Setting device attributes" -Status "Completed DeviceID: $id" -PercentComplete $percentCompleteDevices
+            Write-Debug "Completed DeviceID: $id"
+        }
+    
+        # Clear the main device progress after all devices are processed
+        Write-Progress -Id 1 -Activity "Setting device attributes" -Status "All devices processed" -Completed
+        Write-Debug "All devices have been processed."
+    
+        # Return the collected data
+        Write-Debug "Total Data Collected: $($finaloutput.Count)"
+        return $finaloutput
     }
 }
-}
 
-end {
-    Write-Output $output
-}
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDAFeRTNPIhldFf
-# 0Ipp3jY6cuSmfKfabmtypu9KZvdzgaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHMuFiph52SyP4
+# VG4hYE0AYWWULo5WWEd79qhndiaGE6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -169,17 +293,17 @@ end {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgQWQx1QR19feeRP/nBS5ooVOEe1g+PUZ2gHH5n6FtBVow
-# DQYJKoZIhvcNAQEBBQAEggIAmlosqgmBPehQJ38KGuOTWddRIv7LwkSzKlXSR4dt
-# YdYcZqlElMXKrUZu9KiGmXEmACyiWMsyIkMXrmtvpWcbm+XLMSbaGNVcNAD06bw8
-# IgNbVIoFYmWcRAae8Mo7s1tS8Foz0G7bHLym2EU3aEaRO3DZDq+WVMQchDRvnCTy
-# p8T4PKv0v/unDwrPkxTgs3cfd2zjMi4vTpZdoMG0APBtEZr8A0NttpfYC0YpMRZ8
-# tYdOiYtKkYvphKYgBStQp2E+dubFUMzdsWhI/HuH7Zm1dQ33qktPKutGAJlo+S3C
-# nBbQBSJSqmPoXe8DTtbyJoAhmGCezINueALxAPAb4NroDxZdUiZVs4lS8juZynI8
-# k3QcLjWZc66IR6IUSlf+a0Ph03WuKYqMcg/yiy/hnnnWVkWnCQZ/PXg14dDonTu3
-# gUJp1+3wuenfL5J8jeq2znOmXv1rJcycIw6dCgMQsBdcU+05mSHphO2Fud/Fz9zV
-# 16j6C8ICNBH31zyDc5WpHniMy1g9ATnce5g7j594m8jUpkaBwzAEpaoLDlVOmc5G
-# hHLpVtNjSPzxhyVcNBr5IukO0yTFARnnQKYK+EyezY9rfT86bnZDghIzPnxXPXB7
-# KGeTznAqjuEWLn1NbwfBVENT9ZxZum+Mw70TyIbdEEvxnN+YdwUWD2Myj92QwXWP
-# JNg=
+# BgkqhkiG9w0BCQQxIgQgYlHaUwaIridjdpbVQD4cRmYIlJno+hJ/+UvttQXfOLQw
+# DQYJKoZIhvcNAQEBBQAEggIAKnvcaiPzDbZsh/1Xunrji9UGHsRlc4nP9R1v0++/
+# acG0ASa7phYvA1i09plACp1W/ybs+VN/Oi7u6o58MeclNvYUjpn7QlGd73D6ZUlu
+# RDF1Wvv4e+q4fWb6sw/caAOks/bVQA9VoeHOh+CeOdihphuFqc8nkysDJxA08DgL
+# IPa3PlEsS5oC5okXlbOYqH5pfKiWdIQGt6h7C4TlbM1N3/HWtCPR83HV/QPDciQZ
+# i0Rx9tmzd48PgmbGtNtpUOl+66qxRFj1jgy/Z0cfJpe7JBEducygHSHQF+wlkRbJ
+# DUMsEBchEkc9UF0zRKKuRNf5hQ8mV1zzn2/vCm+WDif9A2ClpAmLwQzOOOlCCTUm
+# mXtvifSOmwCEmBA+DlcSqgpR0PRnuaFVt7idaLIMLfOQ5/aXXR5J90L2KrB/M+uP
+# vwUMMuAWcAegPwT1IFcBwvkO48VzNRSQj10kY0th36JKZ9CsF7ByfEQm2IJ5JLlA
+# CXlXLC5Sb4E9dyVuWPkfjDtQ6T0rrwJ8wohLhfso11Lb8hk6lxOyqxD7dTBn7NDH
+# 6oaQBMjO3AOyo8fAPj8iTzYUu5Viu51d2CShfCpk5Qtl7u1ZbSIU7ELUYRqTu/Mc
+# mxVeEiNiL3/j3fac6POF/x/lCZqTu/4CvxceokRbmVD098WwvOzJslD1f70GtX/A
+# OmI=
 # SIG # End signature block

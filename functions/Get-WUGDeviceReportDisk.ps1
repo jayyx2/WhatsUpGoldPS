@@ -72,37 +72,40 @@ Modified: 2024-03-29
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceReport_DeviceDiskUtilizationReport
 #>
 function Get-WUGDeviceReportDisk {
-    [CmdletBinding()]param (
-        [Parameter(Mandatory = $true)][array]$DeviceId,
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
-        [int]$RangeN,
+        [int]$RangeN = 1,
         [ValidateSet("defaultColumn", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minUsed", "maxUsed", "avgUsed", "avgFree", "minPercent", "maxPercent", "avgPercent")][string]$SortBy,
         [ValidateSet("asc", "desc")][string]$SortByDir,
         [ValidateSet("noGrouping", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "mi", "ma", "av")][string]$GroupBy,
         [ValidateSet("asc", "desc")][string]$GroupByDir,
         [ValidateSet("true", "false")][string]$ApplyThreshold,
         [ValidateSet("true", "false")][string]$OverThreshold,
-        [double]$ThresholdValue,
-        [int]$BusinessHoursId,
+        [double]$ThresholdValue = 0.0,
+        [int]$BusinessHoursId = 0,
         [ValidateSet("true", "false")][string]$RollupByDevice,
         [string]$PageId,
         [ValidateRange(0, 250)][int]$Limit
     ) 
 
     begin {
-        #Input validation
-        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-        if ((Get-Date) -ge $global:expiry) { Write-Error "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-        #Set static variables
+        # Initialize collection for DeviceIds
+        $collectedDeviceIds = @()
+
+        # Debug message with all parameters
+        Write-Debug "Function: Get-WUGDeviceReportDisk -- DeviceId=${DeviceId} Range=${Range} RangeStartUtc=${RangeStartUtc} RangeEndUtc=${RangeEndUtc} RangeN=${RangeN} SortBy=${SortBy} SortByDir=${SortByDir} GroupBy=${GroupBy} GroupByDir=${GroupByDir} ApplyThreshold=${ApplyThreshold} OverThreshold=${OverThreshold} ThresholdValue=${ThresholdValue} BusinessHoursId=${BusinessHoursId} RollupByDevice=${RollupByDevice} PageId=${PageId} Limit=${Limit}"
+
+        # Set static variables
         $finaloutput = @()
         $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
         $endUri = "disk-utilization"
         $queryString = ""
         $totalDevices = $DeviceId.Count
-        $currentDeviceIndex = 0
+
         # Building the query string
         if ($Range) { $queryString += "range=$Range&" }
         if ($RangeStartUtc) { $queryString += "rangeStartUtc=$RangeStartUtc&" }
@@ -119,80 +122,204 @@ function Get-WUGDeviceReportDisk {
         if ($RollupByDevice) { $queryString += "rollupByDevice=$RollupByDevice&" }
         if ($PageId) { $queryString += "pageId=$PageId&" }
         if ($Limit) { $queryString += "limit=$Limit&" }
+
         # Trimming the trailing "&" if it exists
         $queryString = $queryString.TrimEnd('&')
+
+        Write-Debug "Constructed Query String: $queryString"
     }
 
     process {
+        # Collect DeviceIds from pipeline
         foreach ($id in $DeviceId) {
-            $currentDeviceIndex++
-            $percentCompleteDevices = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100, 2)
-            # Main progress for device processing with Id 1
-            Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "Processing Device $currentDeviceIndex of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
-            
+            $collectedDeviceIds += $id
+            Write-Debug "Collected DeviceID: $id"
+        }
+    }
+
+    end {
+        # Total number of devices to process
+        $totalDevices = $collectedDeviceIds.Count
+        Write-Debug "Total Devices to Process: $totalDevices"
+
+        if ($totalDevices -eq 0) {
+            Write-Warning "No valid DeviceIDs provided."
+            return
+        }
+
+        # Determine batch size (max 499)
+        $batchSize = 499
+        if ($totalDevices -le $batchSize) { 
+            $batchSize = $totalDevices 
+        }
+        Write-Debug "Batch Size: $batchSize"
+
+        $devicesProcessed = 0
+        $percentCompleteDevices = 0
+
+        foreach ($id in $collectedDeviceIds) {
+            $devicesProcessed++
+            $percentCompleteDevices = [Math]::Round(($devicesProcessed / $totalDevices) * 100, 2)
+            Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "Processing Device $devicesProcessed of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
+            Write-Debug "Processing DeviceID: $id"
+
             $currentPageId = $null
             $pageCount = 0
-    
+
             do {
                 if ($currentPageId) {
-                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
-                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId&$queryString"
+                    Write-Debug "Constructed URI with pageId: $uri"
                 } else {
-                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
+                    $uri = "${baseUri}/${id}/reports/${endUri}?$queryString"
+                    Write-Debug "Constructed URI: $uri"
                 }
+
                 try {
-                    $result = Get-WUGAPIResponse -uri $uri -method "GET"
-                    #Conditional data addtions/conversions
-                    foreach ($data in $result.data) {
-                        $data.size = [math]::Round($data.size / 1073741824, 2)
-                        $data.minUsed = [math]::Round($data.minUsed / 1073741824, 2) 
-                        $data.maxUsed = [math]::Round($data.maxUsed / 1073741824, 2)
-                        $data.avgUsed = [math]::Round($data.avgUsed / 1073741824, 2)
-                        $data.avgFree = [math]::Round($data.avgFree / 1073741824, 2)
-                        #foreach ($series in $data.series) {
-                        #Do Nothing
-                        #}
+                    $result = Get-WUGAPIResponse -uri $uri -Method "GET"
+                    Write-Debug "API Call Successful for URI: $uri"
+
+                    if ($null -eq $result.data -or $result.data.Count -eq 0) {
+                        Write-Warning "No data returned for DeviceID: $id on URI: $uri"
+                        break
                     }
-                    $finaloutput += $result.data
+
+                    foreach ($data in $result.data) {
+                        # Check if required properties exist
+                        $requiredProps = @('size', 'minUsed', 'maxUsed', 'avgUsed', 'avgFree')
+                        $missingProps = $requiredProps | Where-Object { -not $data.PSObject.Properties.Match($_) }
+                        if ($missingProps.Count -gt 0) {
+                            Write-Warning "DeviceID: $id is missing properties: $($missingProps -join ', '). Skipping this object."
+                            continue
+                        }
+
+                        # Ensure required properties are numeric
+                        $isValid = $true
+                        foreach ($prop in $requiredProps) {
+                            if (-not ($data.$prop -is [double] -or $data.$prop -is [int] -or $data.$prop -is [long])) {
+                                Write-Warning "DeviceID: $id has non-numeric '$prop': $($data.$prop). Skipping this object."
+                                $isValid = $false
+                                break
+                            }
+                        }
+                        if (-not $isValid) { continue }
+
+                        # Calculate percent used
+                        $percentUsed = if ($data.size -gt 0) { [math]::Round(($data.avgUsed / $data.size) * 100, 2) } else { 0 }
+
+                        # Convert 'size' to appropriate unit
+                        $conversion = Convert-BytesToUnit -Bytes $data.size
+                        $unit = $conversion.Unit
+                        $sizeValue = $conversion.Value
+
+                        # Convert 'minUsed', 'maxUsed', 'avgUsed', 'avgFree' using the same unit
+                        switch ($unit) {
+                            'TB' {
+                                $minUsedDisplay = [math]::Round($data.minUsed / 1TB, 2)
+                                $maxUsedDisplay = [math]::Round($data.maxUsed / 1TB, 2)
+                                $avgUsedDisplay = [math]::Round($data.avgUsed / 1TB, 2)
+                                $avgFreeDisplay = [math]::Round($data.avgFree / 1TB, 2)
+                            }
+                            'GB' {
+                                $minUsedDisplay = [math]::Round($data.minUsed / 1GB, 2)
+                                $maxUsedDisplay = [math]::Round($data.maxUsed / 1GB, 2)
+                                $avgUsedDisplay = [math]::Round($data.avgUsed / 1GB, 2)
+                                $avgFreeDisplay = [math]::Round($data.avgFree / 1GB, 2)
+                            }
+                            'MB' {
+                                $minUsedDisplay = [math]::Round($data.minUsed / 1MB, 2)
+                                $maxUsedDisplay = [math]::Round($data.maxUsed / 1MB, 2)
+                                $avgUsedDisplay = [math]::Round($data.avgUsed / 1MB, 2)
+                                $avgFreeDisplay = [math]::Round($data.avgFree / 1MB, 2)
+                            }
+                            'KB' {
+                                $minUsedDisplay = [math]::Round($data.minUsed / 1KB, 2)
+                                $maxUsedDisplay = [math]::Round($data.maxUsed / 1KB, 2)
+                                $avgUsedDisplay = [math]::Round($data.avgUsed / 1KB, 2)
+                                $avgFreeDisplay = [math]::Round($data.avgFree / 1KB, 2)
+                            }
+                            default {
+                                # If unit is not recognized, skip conversion
+                                $minUsedDisplay = $data.minUsed
+                                $maxUsedDisplay = $data.maxUsed
+                                $avgUsedDisplay = $data.avgUsed
+                                $avgFreeDisplay = $data.avgFree
+                            }
+                        }
+
+                        # Create a new PSCustomObject with existing and new properties
+                        $newData = [PSCustomObject]@{
+                            deviceName      = $data.deviceName
+                            disk            = $data.disk
+                            diskId          = $data.diskId
+                            pollTimeUtc     = $data.pollTimeUtc
+                            timeFromLastPollSeconds = $data.timeFromLastPollSeconds
+                            size            = $data.size
+                            minUsed         = $data.minUsed
+                            maxUsed         = $data.maxUsed
+                            avgUsed         = $data.avgUsed
+                            avgFree         = $data.avgFree
+                            id              = $data.id
+                            percentUsed     = $percentUsed
+                            sizeDisplay     = "{0:N2} {1}" -f $sizeValue, $unit
+                            minUsedDisplay  = "{0:N2} {1}" -f $minUsedDisplay, $unit
+                            maxUsedDisplay  = "{0:N2} {1}" -f $maxUsedDisplay, $unit
+                            avgUsedDisplay  = "{0:N2} {1}" -f $avgUsedDisplay, $unit
+                            avgFreeDisplay  = "{0:N2} {1}" -f $avgFreeDisplay, $unit
+                        }
+
+                        # (Optional) Process series data if available
+                        # If your data includes a 'series' property similar to the previous function,
+                        # apply the same conversion logic here.
+
+                        # Add the new data object to the final output
+                        $finaloutput += $newData
+                        Write-Debug "Processed DeviceID: $id with disk: $($newData.disk)"
+                    }
+
                     $currentPageId = $result.paging.nextPageId
                     $pageCount++
-    
+
                     # Page progress for the current device with Id 2
                     if ($result.paging.totalPages) {
-                        $percentCompletePages = ($pageCount / $result.paging.totalPages) * 100
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
-                    }
-                    else {
+                        $percentCompletePages = [Math]::Round(($pageCount / $result.paging.totalPages) * 100, 2)
+                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
+                        Write-Debug "Processing Page: $pageCount of $($result.paging.totalPages)"
+                    } else {
                         # Indicate ongoing progress if total pages aren't known
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
+                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
+                        Write-Debug "Processing Page: $pageCount (Total Pages Unknown)"
                     }
-    
+
                 }
                 catch {
                     Write-Error "Error fetching device report ${endUri} for DeviceID ${id}: $_"
+                    # Exit the pagination loop on error
                     $currentPageId = $null
                 }
-    
+
             } while ($currentPageId)
-    
+
             # Clear the page progress for the current device after all pages are processed
             Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Completed" -Completed
+            Write-Debug "Completed DeviceID: $id"
         }
-    
+
         # Clear the main device progress after all devices are processed
         Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "All devices processed" -Completed
-    }
-    
+        Write-Debug "All devices have been processed."
 
-    end {
+        # Return the collected data
+        Write-Debug "Total Data Collected: $($finaloutput.Count)"
         return $finaloutput
     }
 }
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCP8WN15e1AT0KF
-# I1X14MI2JRg1KhqsphZPFAzi2Z089qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC6+Ems23zkJhWU
+# xXES+ombdPmvd+E4NN+9KtXxJcBaNqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -293,17 +420,17 @@ function Get-WUGDeviceReportDisk {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg5n8tCEiNABTWhYM97E441GyVH4hELkcdrgJQq73eIEkw
-# DQYJKoZIhvcNAQEBBQAEggIAMaltCsODsatGqjcLKbwhAd1jtXM4tevgzqln+x8B
-# wuysDP4VeYV4ufJAdvOtSS3tEMQDpXtppYEn6KywLHYnytKWvTNpQ7TTta2EsHMQ
-# YYTbIlu/OrLLX3AHyG7SZdmD1MsvIp3YQLwVbwkGWI3DYHxHeGslRRk8tfgh+M03
-# HnG5MiY56WaDZCqobcokjaSPIOURLPupM+KOhAdTOLZciwX8Ec7LlBCko58YWmQN
-# y7pTculhmblC50vN7cuFaRL8oGbqqP0pQXYDATqnmz3NDX80MVoeCRWw5TTB8Il8
-# DvN9JNsaE0SVerD10dbxNa9PNo/or4QjgdA7Vp5k8bVKTpGhHnqXepvJFvIx3YBh
-# iNZCOHulx6PIhUAFgaA2ufNhOioG0jvSNdrgfPZEdyDpQVQFTDzGX6aOVKwZIz6q
-# SOE6gROuz+LkJZ6SNZfAo0r4lqLztR2svZbaUGXYobm01YliihZH8xtNoXwmo1HH
-# MAEWbvtdiWkMFEYD/OlkCVZ6WT9k9YBBjY8RdEihhKCyHJy6TMJ8eutf/M/jQAZh
-# I9hXaMknqQOeZvvmwa/DHcsYC1i51S1rulA1TtQfHk5SZsUBwdjP7HTilHgSTDgx
-# rXZSgPvPvNt7ndXpd8EaCxdjguhC0JMAHwqP+Balzm3KBa/tziYA92dnChFFwX3u
-# Ogw=
+# BgkqhkiG9w0BCQQxIgQgnyIDIgaMBzCsgcRtfa5Yyy2k3+bMNXUJypgYO5bEuQww
+# DQYJKoZIhvcNAQEBBQAEggIAe3M1EE8jJ8YhKQdZgNeCK1HKBQ0IDiPRj02LJtTQ
+# s8csv33jsejsrRjTlbBnH3MJWmo5aYu+6Pg7EB5bCH8S5PfmOMUrOW0zfv6gD7j3
+# vUZCODkEQp37zqEDGYvan2chcKQX9bOganXNvd/824cE9SJc6wTg0qCWgWwwH/VF
+# P0CuRdzbmqrg9RPGgn+ORYQkgR+NbLzIUTW9uofHb3NE00IT7J9SUxr0U0SV89NA
+# J4SdTmREq5CmfEeHF3osTteMdvu68mWItS3ihWEyDF+Nba0VE2QBX4WC6PJpCfZh
+# m7qHJf3S49/uMGt2GBv1CK1b5lwSJBn1J3/s1MGOc1uBuwYjKNvKaFUrScb8QibY
+# 5u3Dii2P4OsH8uPP34X8Aqvr1/G1GQa758yKCOJxjS9oO1g0BMCvGvG4Tu+Uy6fR
+# PgEOSEaECi/JclEMbLJDhsHetiJuEgltgQPCqTrXDtp+BPTXYYMR141xl+OYxPSL
+# ZlDIGswGCGsG0ybP2B8T+0kBRmITVgQyS2juIYTE7V0ZzH4jneNw2ogooO3MsdxX
+# 0ThtcWdrQDUDHwtZhhWZmFBRZkHmhSpJROvQv7CxWBykttdE38Koubp0gbd4SDha
+# PQwNqixvaB/tYDztdAJoJmtwI+oO3A/JvLXR0cLu4ukSFD842AQEpT7Rwremj29v
+# KD4=
 # SIG # End signature block

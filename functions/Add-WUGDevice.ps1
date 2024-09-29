@@ -233,12 +233,6 @@ function Add-WUGDevice {
     Write-Debug "Layer2Data:        ${Layer2Data}"
     Write-Debug "GroupName:         ${GroupName}"
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
-
     #Begin Input validation
     if ($SubRoles) { if ($SubRoles -is [array]) { foreach ($item in $SubRoles) { if ($item -isnot [string]) { throw "SubRoles parameter must be a one-dimensional array of strings." } } } else { throw "SubRoles parameter must be a one-dimensional array of strings." } }
     if ($ActiveMonitors) { if ($ActiveMonitors -is [array]) { foreach ($item in $ActiveMonitors) { if ($item -isnot [string]) { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } }
@@ -527,8 +521,8 @@ function Add-WUGDevice {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBzixp8FLAAKrqB
-# 59BO700FKgW+qkFZdOuyT3TsDmI7hqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtO3QV/Dt42LJN
+# 0j59xxLxaWd7hSi9Sf7s0q5ZQOKgt6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -629,17 +623,17 @@ function Add-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgJ3cNAEsvGBNsxFidXY8vYSiSg7NfxRNmUuNLfcoXpE0w
-# DQYJKoZIhvcNAQEBBQAEggIAYFtR6Nohi4fCsXBDDIbHT1uQaC9+r45efjCtznZ/
-# gaSK1aWtVH3FEYKBIB8Scypc1P5KLH+bFk/2X8438HyIfHNsO0d7zfK/JRY7ZSzq
-# 4EYQ4/oWjLkVFuLMcI5C0bUcsylgsXbOgv4vcEMesnMtCO2QCC2HYwUi36u37jfw
-# hA7mzIlD07Grgzp/9x8iOFBlA7RawSE2FiMQ+MZtuWZpwnAWtSAtBQluXfRTPIx0
-# 0WGRgzJKka3dqkq+F7D5qEC+h4kguPN35LW+a/+u3MC/Lw/YuvRLnnlvirE7oLPP
-# vigY5jD4+toaogEW1vSBZ6W4wTogjHpOd93eWmI8dX50tKNLa9FF1Y0vVY2XWlUF
-# GKlItWgVg98IKncms7Ik/UunfcFKZTdkqzRzGz2fJ0FF4zgjvZVMV1s1239RrDK2
-# jHoBED1wMqZ2UDzjJi8ERGxSv3DDnAH+41zcDmQOEq/dGKjvw8MXba0mBa22xb1T
-# HHOyxpLUwVkQW+4VS8MLxRTdJFrNYkvT0FVDVipjdj7LQXCVJEsKBEiR/rqlP5Cw
-# ljgbsV3joC2XBKx4OoJk2ZfcNMQZd3BZjtM3gJMZHqjkd/X5DjDoeJvjl9IUJ2bw
-# iJGJzYHhy8A6WsCkZTBqONn7ylm20ZcZjx/1RI429xTaLqsnIEG5g+quM+ynsL7o
-# FEY=
+# BgkqhkiG9w0BCQQxIgQgQa0qU5q9TOY+1CKEKTdr7Y17Lr6Z4cbFheprzhbdm8gw
+# DQYJKoZIhvcNAQEBBQAEggIAl4rD8GSEf1SAIDAyo1/+Z1fAIhEh/U7ygRoj4g+9
+# 58q9lCdvlsH8qAVeAe3kZdrvlAdoG12NpFMScVLmd2frMB4GdTwnAbUzm4GbCLYq
+# 1Q5Y0k/gdtS4HChJlsiLIRCiO8KxQY/O70lfqoFbQ8n2mZ/cRj9KY/bEh9MS2XoT
+# K5C0fkxH22QOKzuLOd1W0zlIAJE30w4ZV1WjHGmvsOFgcE6hGD1f+uUOmKoQlAFt
+# QWDuesLg1ilhFdRwu77n3nttR00jSXFf/vIIguHJ2fuMAbMdgdNy4taDZxkCJGzV
+# AsOSvI5Re0Qmzd8KdR+J6DY9HYuh1NZ37zVBgVvdNBE6lOA9bNeGLkhSORxdX6kW
+# 3nm37HH3zXLrxONa+zhYG2NKLk/0jyivbyeefnztCqvoo/3OMGPsSS3m4IUKCh4K
+# d45K7JGclj1/XuV28lQpBrqF3GYehp9kVcKJfhan9pJj2Sao5XgaPGtYyIuptBVG
+# 58nUEFQa0lMpx55Ly7AJp+8z5PHBJaKTWexI4W0chDxWJDaxL5I2L5UFjvog2fD1
+# 8LTmtga59TbOCTUCwrlUJ1/J4lvUqer5MpQoi4/1bJrg5lpdMDkrZAAa3Sa41XNZ
+# 1k71AqQrGa4YmvlmkOmvuiR9w3XQSMNdh1zU00JNjVAzqh0bjXu7/6uVFLVYvZv6
+# 6/M=
 # SIG # End signature block

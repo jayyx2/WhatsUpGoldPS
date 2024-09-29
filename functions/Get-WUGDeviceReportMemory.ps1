@@ -80,7 +80,7 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed Memory ut
 function Get-WUGDeviceReportMemory {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)][array]$DeviceId,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
@@ -99,10 +99,6 @@ function Get-WUGDeviceReportMemory {
     )
 
     begin {
-        #Input validation
-        if (-not $global:WUGBearerHeaders) { Write-Error "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-        if ((Get-Date) -ge $global:expiry) { Write-Error "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
         #Set static variables
         $finaloutput = @()
         $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
@@ -189,8 +185,8 @@ function Get-WUGDeviceReportMemory {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrBEtR72TuZ9te
-# ZZQoyxmITpcSx/3aqR9llsLhO/mHr6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCykXldwOj72bgd
+# gU/wmpSGFNiN/AwanYAI4+hVxBIU26CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -291,17 +287,17 @@ function Get-WUGDeviceReportMemory {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgPG3Vu4Uhk+1QHnSTiWYD8uOa2ENaXz+OrKeVVcFwebkw
-# DQYJKoZIhvcNAQEBBQAEggIAFuS9YW8R86X5JUVH5+EjAVggfMHMlfpoHFzfD7g3
-# MKoBlvjh0/7sqgRcnG+sRBBtXLUBXqN4NYWn5TFPJYTbnv9TaYcZEyDgRkaHG7O7
-# ATE4zVawqRe8mV08VJJExRkgB/ruqNnMNr37oxSEVyeVK5Zgptlt3ft8LEJfeVAA
-# 85bgAEWDpuQFGIemFyCHJeElb4tcNoDm6xwiuQU982hbZiufCPo7pA3ZHx9UI1Ms
-# QyQazEweyzEnZeSOphbKF2Hbiw6CK+4TVmu0+68z9nmZ02p07DhqJPIBhaZTeXgF
-# I9PaoyInK9iKgp3n3GOIgbdpoCQLjRbgX5PveviMyd5E9Me+JSsbKbgmPSIJuTE2
-# EcP9GtJLmbBZ1r9FoDDMPlUB5ysKa8a33NSEyOOzy+rU7F9AWo8UJGpMhcPEPHij
-# jRVxYGRKScPMYRakd2iobD3YFLJqs5UdpdGLtifHS2rqd8XBEnZshHsIwEoiTn6j
-# FMPpZuF/1RW3QWuZZe2pN5UwRBxCsxuSmxQoyAClb1gjM5kyiX+uTgXjlf+j3aZb
-# /yJJZzxRMONZe27ehn2q3Mf1HUbF21TZjmg3MMDPszrUX2qAHP6AHn5ixFyzUqQG
-# qSK1QFwl89e6V6qiG49VopYUwt26KTMQeFF716ha3R3rHPpBRVp9AyuINzfrms/g
-# G+c=
+# BgkqhkiG9w0BCQQxIgQgi+3Of1NQn0SFLsDevk6jtLji0/DNhDVyx0E9dnSsX3ww
+# DQYJKoZIhvcNAQEBBQAEggIAkXvfbZnnkyePiJUCa6z/HWDS9betqFfJEKKkJD4F
+# jLSa9oeGXxDYRzw8DxrGKHbV+bcKzH66cgjk3zQewzuZoBuqw/hJUzftUV6lnumE
+# 5pa6TRcnfQySFuuDMabDd44jmSB3RCyVpGFft6g73EXRcfoRSv+BuCZ6T2L1R2pU
+# /gVD2McdcTTLmosluJZpi1SBCDdI01szxb4vIaf3bFadq/SWbZ/A3hi2y8Q3XDXc
+# mbMFyrw784OOAon5Xg0jesAU1rSWi2f4Hsz90ukaQU05R7GDCtPBM4+wDggcEZoM
+# 6FUmrJmu0oGBc6+BxlIb8FG21VhzMRXqrY4BmO2teQeGjCYYIpC/Igxjdzfkrl1e
+# TzCCtP5TjAW4ZeozSz6rQZa/qTIjzgSWHKumxliDSe4yAVE5RKaKEPmuk0nfv9LD
+# gl2Ii4BWjUl2Jkox3RLCZpFI5FnRLZmLbifLOAYw3EgZwwhUUZg93PHPpaQ0+p2l
+# 4OJ1Fefplxm0MAiKr1wYf84rw8AfvvdLcdys/HhHgmo1WJTeXPFiFW8iEoc/SMeX
+# QqFEQw59ep2jA8BSgId7fePIABIs+tSHNvYgtulvzkpTtDzt5ZHTymUliuL9V9Up
+# 7UJdvBKi0mV8uC/9PVt21ajQCJvs3lkdwzHh215F3M3fuXHQDfewmYgorzdLKlnh
+# iW0=
 # SIG # End signature block

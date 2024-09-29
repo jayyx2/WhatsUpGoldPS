@@ -1,81 +1,285 @@
-<#
-.SYNOPSIS
-Retrieves a specific attribute for a device in WhatsUp Gold (WUG) using the device ID and attribute ID.
+    <#
+    .SYNOPSIS
+    Retrieves device attributes from the WhatsUp Gold API.
 
-.DESCRIPTION
-The Get-WugDeviceAttribute function retrieves a specific attribute for a device in WUG using the device ID and attribute ID.
-It requires the OAuth 2.0 authorization token to be set, which can be obtained using the Connect-WUGServer function.
-The function validates the input parameters and handles any errors that occur during the API request.
+    .DESCRIPTION
+    Fetches attributes for specified devices, with options to filter by names, name contains, value contains, or attribute IDs.
+    Supports fetching specific attributes using AttributeId.
+    Handles paging and error handling efficiently.
 
-.PARAMETER DeviceID
-The ID of the device for which to retrieve the attribute. This parameter is mandatory.
+    .PARAMETER DeviceId
+    The ID(s) of the device(s) to retrieve attributes from.
 
-.PARAMETER AttributeID
-The ID of the attribute to retrieve. This parameter is mandatory.
+    .PARAMETER Names
+    An array of attribute names to filter the results.
 
-.EXAMPLE
-Get-WugDeviceAttribute -DeviceID "device1" -AttributeID "attribute1"
-Retrieves the "attribute1" attribute for "device1" in WhatsUp Gold.
+    .PARAMETER NameContains
+    A string to match attribute names that contain this value.
 
-.NOTES
-Author: Jason Alberino (jason@wug.ninja) 2023-04-02
-Last modified: 2024-03-15
-Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Device-Attributes
-#>
-function Get-WUGDeviceAttribute {
-    param(
-        [Parameter(Mandatory)][string]$DeviceId,
-        [Parameter(Mandatory)][string]$AttributeId
-    )
+    .PARAMETER ValueContains
+    A string to match attribute values that contain this value.
 
-    begin {
-        Write-Debug "Starting Get-WUGDeviceAttribute function"
-        
-        # Global variables error checking
-        if (-not $global:WUGBearerHeaders) {
-            Write-Error "Authorization header not set, attempting to connect to WUG Server."
-            Connect-WUGServer
+    .PARAMETER AttributeId
+    The ID(s) of specific attributes to retrieve.
+
+    .PARAMETER Limit
+    The maximum number of attributes to retrieve per device (default is 250).
+
+    .EXAMPLE
+    Get-WUGDeviceAttribute -DeviceId 2367 -Names "TestAttribute"
+
+    Retrieves the attribute named "TestAttribute" for device 2367.
+
+    .EXAMPLE
+    Get-WUGDeviceAttribute -DeviceId 2367 -AttributeId 28852, 28853
+
+    Retrieves the attributes with IDs 28852 and 28853 for device 2367.
+
+    .NOTES
+    When specifying -AttributeId, you can only specify one DeviceId.
+    #>
+    function Get-WUGDeviceAttribute {
+        [CmdletBinding(DefaultParameterSetName = 'Default')]
+        param(
+            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'Default', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByNames', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByNameContains', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByValueContains', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByAttributeId', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Alias('id')]
+            [int[]]$DeviceId,
+    
+            [Parameter(Mandatory = $true, ParameterSetName = 'ByNames')]
+            [string[]]$Names,
+    
+            [Parameter(Mandatory = $true, ParameterSetName = 'ByNameContains')]
+            [string]$NameContains,
+    
+            [Parameter(Mandatory = $true, ParameterSetName = 'ByValueContains')]
+            [string]$ValueContains,
+    
+            [Parameter(Mandatory = $true, ParameterSetName = 'ByAttributeId')]
+            [int[]]$AttributeId,
+    
+            [Parameter(ParameterSetName = 'ByNames')]
+            [Parameter(ParameterSetName = 'ByNameContains')]
+            [Parameter(ParameterSetName = 'ByValueContains')]
+            [Parameter(ParameterSetName = 'Default')]
+            [ValidateRange(1, 250)]
+            [int]$Limit = 250
+        )
+    
+        begin {
+            Write-Debug "Initializing Get-WUGDeviceAttribute function."
+            Write-Debug "ParameterSetName: $($PSCmdlet.ParameterSetName)"
+            Write-Debug "DeviceId: $DeviceId"
+            Write-Debug "Names: $Names"
+            Write-Debug "NameContains: $NameContains"
+            Write-Debug "ValueContains: $ValueContains"
+            Write-Debug "AttributeId: $AttributeId"
+            Write-Debug "Limit: $Limit"
+    
+            # Enforce that when -AttributeId is specified, only one DeviceId can be specified
+            if ($PSCmdlet.ParameterSetName -eq 'ByAttributeId' -and $DeviceId.Count -gt 1) {
+                throw "When specifying -AttributeId, you can only specify one DeviceId."
+            }
+    
+            # Initialize the pipeline flag
+            $bpipeline = $false
+    
+            # Initialize collections
+            $finalOutput = @()
+            $collectedDeviceInfo = @()
         }
-        if ((Get-Date) -ge $global:expiry) {
-            Write-Error "Token expired, attempting to refresh or reconnect."
-            Connect-WUGServer
+    
+        process {
+            # Process input objects
+            if ($null -ne $_ -and $_.PSObject.Properties.Match('id').Count -gt 0) {
+                # Input is a device object
+                $inputObject = $_
+                $deviceId = $inputObject.id
+                $deviceName = $inputObject.name
+                $networkAddress = $inputObject.networkAddress
+                $hostName = $inputObject.hostName
+    
+                $collectedDeviceInfo += @{
+                    DeviceId       = $deviceId
+                    DeviceName     = $deviceName
+                    NetworkAddress = $networkAddress
+                    HostName       = $hostName
+                }
+                $bpipeline = $true
+                Write-Debug "Pipeline input detected. DeviceId: $deviceId"
+            }
+            else {
+                # Input is an array of Device IDs
+                foreach ($id in $DeviceId) {
+                    $collectedDeviceInfo += @{
+                        DeviceId = $id
+                    }
+                    Write-Debug "Added DeviceId: $id to collectedDeviceInfo"
+                }
+            }
         }
-        if (-not $global:WhatsUpServerBaseURI) {
-            Write-Error "Base URI not found. Attempting to connect to the WUG Server."
-            Connect-WUGServer
+    
+        end {
+            Write-Debug "Processing collected device information."
+    
+            $totalDevices = $collectedDeviceInfo.Count
+            $currentDeviceIndex = 0
+    
+            foreach ($device in $collectedDeviceInfo) {
+                $deviceId = $device.DeviceId
+                $deviceName = $device.DeviceName
+                $networkAddress = $device.NetworkAddress
+                $hostName = $device.HostName
+    
+                $currentDeviceIndex++
+                $devicePercentComplete = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100, 2)
+                Write-Progress -Id 1 -Activity "Fetching Attributes" -Status "Processing Device $currentDeviceIndex of $totalDevices (DeviceID: $deviceId)" -PercentComplete $devicePercentComplete
+    
+                if ($PSCmdlet.ParameterSetName -eq 'ByAttributeId') {
+                    # Fetch specific attributes for a single device
+                    foreach ($attrId in $AttributeId) {
+                        $attributesUri = "$($global:WhatsUpServerBaseURI)/api/v1/devices/$deviceId/attributes/$attrId"
+    
+                        Write-Verbose "Requesting URI: $attributesUri"
+    
+                        try {
+                            # Make the API call and retrieve the response
+                            $result = Get-WUGAPIResponse -Uri $attributesUri -Method GET
+    
+                            if ($result.data) {
+                                $attribute = $result.data
+    
+                                # Add additional device properties if available
+                                if ($bpipeline) {
+                                    if ($deviceName) {
+                                        $attribute | Add-Member -NotePropertyName "DeviceName" -NotePropertyValue $deviceName -Force
+                                    }
+                                    if ($networkAddress) {
+                                        $attribute | Add-Member -NotePropertyName "NetworkAddress" -NotePropertyValue $networkAddress -Force
+                                    }
+                                    if ($hostName) {
+                                        $attribute | Add-Member -NotePropertyName "HostName" -NotePropertyValue $hostName -Force
+                                    }
+                                }
+    
+                                $finalOutput += $attribute
+                            }
+    
+                        }
+                        catch {
+                            Write-Error "Error fetching attribute ID $attrId for DeviceID ${deviceId}: $($_.Exception.Message)"
+                        }
+                    }
+                }
+                else {
+                    # Build the query string if filters are specified
+                    $queryString = ""
+                    if ($PSBoundParameters.ContainsKey('Names') -and $Names -and $Names.Count -gt 0) {
+                        foreach ($name in $Names) {
+                            if (![string]::IsNullOrWhiteSpace($name)) {
+                                $queryString += "names=$([System.Web.HttpUtility]::UrlEncode($name))&"
+                            }
+                        }
+                    }
+                    if ($PSBoundParameters.ContainsKey('NameContains') -and ![string]::IsNullOrWhiteSpace($NameContains)) {
+                        $queryString += "nameContains=$([System.Web.HttpUtility]::UrlEncode($NameContains))&"
+                    }
+                    if ($PSBoundParameters.ContainsKey('ValueContains') -and ![string]::IsNullOrWhiteSpace($ValueContains)) {
+                        $queryString += "valueContains=$([System.Web.HttpUtility]::UrlEncode($ValueContains))&"
+                    }
+                    if ($PSBoundParameters.ContainsKey('Limit') -and $Limit -gt 0) {
+                        $queryString += "limit=$Limit&"
+                    }
+                    # Trim the trailing "&" if it exists
+                    $queryString = $queryString.TrimEnd('&')
+    
+                    # Construct the URI for fetching attributes
+                    $attributesUri = "$($global:WhatsUpServerBaseURI)/api/v1/devices/$deviceId/attributes/-"
+                    if (-not [string]::IsNullOrWhiteSpace($queryString)) {
+                        $attributesUri += "?$queryString"
+                        Write-Debug "Query String: $queryString"
+                    }
+    
+                    $currentPageId = $null
+                    $pageCount = 0
+    
+                    do {
+                        if ($currentPageId) {
+                            $uri = "$attributesUri&pageId=$currentPageId"
+                        }
+                        else {
+                            $uri = $attributesUri
+                        }
+    
+                        Write-Verbose "Requesting URI: $uri"
+    
+                        try {
+                            # Make the API call and retrieve the response
+                            $result = Get-WUGAPIResponse -Uri $uri -Method GET
+    
+                            if ($result.data) {
+                                foreach ($attribute in $result.data) {
+                                    # Add additional device properties if available
+                                    if ($bpipeline) {
+                                        if ($deviceName) {
+                                            $attribute | Add-Member -NotePropertyName "DeviceName" -NotePropertyValue $deviceName -Force
+                                        }
+                                        if ($networkAddress) {
+                                            $attribute | Add-Member -NotePropertyName "NetworkAddress" -NotePropertyValue $networkAddress -Force
+                                        }
+                                        if ($hostName) {
+                                            $attribute | Add-Member -NotePropertyName "HostName" -NotePropertyValue $hostName -Force
+                                        }
+                                    }
+    
+                                    $finalOutput += $attribute
+                                }
+                            }
+    
+                            $currentPageId = $result.paging.nextPageId
+                            $pageCount++
+    
+                            # Update paging progress
+                            if ($result.paging.totalPages) {
+                                $percentCompletePages = ($pageCount / $result.paging.totalPages) * 100
+                                Write-Progress -Id 2 -Activity "Fetching Attributes for DeviceID: $deviceId" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
+                            } else {
+                                Write-Progress -Id 2 -Activity "Fetching Attributes for DeviceID: ${deviceId}" -Status "Processing page $pageCount" -PercentComplete 0
+                            }
+    
+                        }
+                        catch {
+                            Write-Error "Error fetching attributes for DeviceID ${deviceId}: $($_.Exception.Message)"
+                            $currentPageId = $null
+                        }
+    
+                    } while ($null -ne $currentPageId)
+    
+                    # Clear the paging progress for the current device after all pages are processed
+                    Write-Progress -Id 2 -Activity "Fetching Attributes for DeviceID: $deviceId" -Status "Completed" -Completed
+                }
+            }
+    
+            # Clear the main device progress after all devices are processed
+            Write-Progress -Id 1 -Activity "Fetching Attributes" -Status "All devices processed" -Completed
+            Write-Debug "Get-WUGDeviceAttribute function completed."
+    
+            # Output the final data
+            return $finalOutput
         }
-        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/attributes/${AttributeId}"
-        Write-Debug "Prepared URI: $uri"
     }
-
-    process {
-        Write-Debug "Processing Get-WUGDeviceAttribute function"
-        Write-Progress -Activity "Fetching Attribute" -Status "Requesting attribute $AttributeId for device $DeviceId" -PercentComplete 0
-        
-        try {
-            $result = Get-WUGAPIResponse -uri $uri -Method GET
-            Write-Progress -Activity "Fetching Attribute" -Status "Received data for device $DeviceId" -PercentComplete 100
-            return $result.data
-        }
-        catch {
-            Write-Error "Error getting device attribute: $($_.Exception.Message)"
-            Write-Progress -Activity "Fetching Attribute" -Status "Failed to fetch attribute" -Completed $true
-            throw
-        }
-    }
-
-    end {
-        Write-Debug "Completed Get-WUGDeviceAttribute function"
-        Write-Progress -Activity "Fetching Attribute" -Completed $true
-    }
-}
+    
+    
 
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBP/qBkVrV2gjQl
-# 8WrXW//XBWa3cA8ZwSqC/XKJ9C+aCqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKcabOnI0Hf40w
+# UHKKIJiwJrCFj4ilHutx7M4WptaSX6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -176,17 +380,17 @@ function Get-WUGDeviceAttribute {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgsCb6fm+ngp7pvs9LEjfWk0twomKF6Iq/7uRa3/HH/mYw
-# DQYJKoZIhvcNAQEBBQAEggIAO/hoMbSQMZ4dBnHKUzenqizbcz+n3moS9ipa2418
-# /PsOiMXwLWvunNB5PGHSdmuwQ6IgxWh0C/icuv+L7woqeu4E4JxeWucuTJGPqOJx
-# QaGvK0msWCUZK+gFsGcnCqKrpUuA34flg2fdcWcdQI9KpfQvYZQoXK7yRirKt/cR
-# JRc7iG37aHZtAo1KR5nYcsW2gtJaowgsag4fB7dg0Glm6/kKt333pBbkFUcBXC1N
-# 86hkD40W5Ut/mE6s0wGYlbVMpQ99Q/1BFBD7H1GIGPFAduNVVHctPOdliIaa7UCm
-# AANHn9SoFzKxwnh+i+mKj3S75ffN3vNlB6ZH1acQcpqEH6pGtAd/7QBohd8Wl6v6
-# zoFooCmc12sHFuUxDDnMSxHvW56d1t8ravgCa4nJ60IlenGmuczYxuGtLpMMVd1m
-# Uflh4LNt0fvVDPwf6A59FKzbT+8727O9NHlM5mK03YduGf+76pEEm88xQ4SKsFLG
-# sfVTvnl0Bir7KjLzwu5pX/7fbFFNl6x/BeT7OpYk0zTcwCuW0tv0ur3OKa9oZmWq
-# wXir09N23Kph8YaqbL1wElDGzBFx+I9WseceAARL7xDWqKxbD90kZsWS6LhpeVVX
-# jrCbVqrwMmKCqbEGUDmGh29ObamNeQHrW4YO8azlu1BcF27mExAu9legTW80s5RP
-# Ed0=
+# BgkqhkiG9w0BCQQxIgQgaT3tdq7ugi//XkMoHhGjE5ciXdSNc5l+PBDc23Vs8sAw
+# DQYJKoZIhvcNAQEBBQAEggIAl8+cpkt0idewCg3quf9NielqcUiPkDYobe000wX7
+# GMLiYHj2bQybM8nrkIXeGE8EVpnIYrKfSjkz3e0dPkAby4We4k/byumFtIVsyAei
+# 1b6IRCIgY1lMOYaVe2+lOLfvDJzrFfBoI4mGdKV9XykdZ9NKUbXMYAm80DBE0VEG
+# DzVP3D0lQxGnVuAYURNwOWr1C7BFlWQPdfjZwcTl9F6yLPljEkuJUFBPJ12x37vk
+# UNpAghkevTjmyvL/JketM+Kxq3z8XClcJBWYbWx5IfqdXXyJKga/6RYIzvwd1mS7
+# RX6gZuLVX+TSmhOJaPzzTITwTtIgEPrBwzcAQpMsBD/Irt/NTZf2OGZoUDucxnxx
+# i7aMtj0g8wD6oPlGi7199DbdudnFvE4R5jzhrL5li8xrWXqzIdsPbULeIL7esz5I
+# elJc20fB34s56hAGe3bjO3DM7IkjqG3mb2rtb3BwWpUOcnyi3smeGAwRtdtUNij/
+# rcFRlzTugPjmuRFVg8NmMT7rJwa+MGO9C0onJbMjrEjE0JQ+QIQMJ1rF5WQ01Xtc
+# OXt+UzV5TAfmlCXmazBtHQtVvYV8TBm0UAfnAewC1emBqn8SiA8oULSLIkHZB9yP
+# n8nUuaQt6UDPVwJBPpnnYB+MZ5YAduM5Zxbobw9KgbixmCiRcCmAvCDdBIfEVQH1
+# WLk=
 # SIG # End signature block

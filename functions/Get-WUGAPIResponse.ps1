@@ -1,89 +1,197 @@
 <#
-.SYNOPSIS
-Connects to a REST API endpoint by specifying a full URI and an HTTP verb, and returns the response.
+    .SYNOPSIS
+    Sends an HTTP request to the WhatsUp Gold REST API endpoint and returns the response, handling authentication token refresh as needed.
 
-.DESCRIPTION
-The Get-WUGAPIResponse function sends an HTTP request to the specified REST API endpoint using the specified HTTP verb.
-The function returns the response from the REST API.
+    .DESCRIPTION
+    The `Get-WUGAPIResponse` function sends an HTTP request to the specified WhatsUp Gold REST API endpoint using the specified HTTP method.
+    It automatically handles authentication token expiration by refreshing the token if necessary before making the API call.
+    The function returns the response from the REST API.
 
-.PARAMETER Uri
-The entire URI of the REST API endpoint to connect to.
+    This function relies on global variables and functions (`$global:WUGBearerHeaders`, `$global:WhatsUpServerBaseURI`, and `Connect-WUGServer`) to manage authentication and connection details.
 
-.PARAMETER Method
-The HTTP verb to use when connecting to the REST API endpoint.
-Valid options are: GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH.
+    .PARAMETER Uri
+    The full URI of the WhatsUp Gold REST API endpoint to connect to.
 
-.PARAMETER body
-The request body to include in the REST API request. This parameter is used for POST, PUT, and PATCH requests.
+    .PARAMETER Method
+    The HTTP method to use when connecting to the REST API endpoint.
+    Valid options are: GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH.
 
-.EXAMPLE
-Get-WUGAPIResponse -Uri "http://192.168.1.212:9644/api/v1/product/api" -Method GET
-Sends a GET request to the specified REST API endpoint, and returns the response.
+    .PARAMETER Body
+    The request body to include in the REST API request.
+    This parameter is used for methods like POST, PUT, and PATCH where a request body is required.
 
-.EXAMPLE
-$dataObject = (Get-WUGAPIResponse -Uri "http://192.168.1.212:9644/api/v1/product/api" -Method GET).data
-Sends a GET request to the specified REST API endpoint, and assigns the 'data' property of the response to a variable.
+    .PARAMETER RefreshMinutes
+    The number of minutes before token expiration to attempt a token refresh.
+    If the authentication token is set to expire within this timeframe, the function will refresh it before making the API call.
+    Default is 5 minutes.
 
-.NOTES
-Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: 2024-04-14
+    .EXAMPLE
+    # Example 1: Send a GET request to retrieve information about the API
+    Get-WUGAPIResponse -Uri "https://192.168.1.212:9644/api/v1/product/api" -Method GET
 
+    .NOTES
+    *** This function should be used within all other functions when making API calls
+    Author: Jason Alberino (jason@wug.ninja)
+    Created: 2023-03-24
+    Last Modified: 2024-09-28
+
+    This function requires prior authentication using `Connect-WUGServer` to set up necessary global variables.
+    The function also handles SSL certificate validation based on the `$global:ignoreSSLErrors` flag set in Connect-WUGServer
 #>
+
 function Get-WUGAPIResponse {
+    [CmdletBinding()]
     param(
-        [Parameter()] [string] $uri,
-        [Parameter()] [ValidateSet('GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH')] [string] $Method,
-        [Parameter()] [string] $body
+        [Parameter(Mandatory = $true)][string] $Uri,
+        [Parameter(Mandatory = $true)][ValidateSet('GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH')][string] $Method,
+        [Parameter()][string] $Body = $null,
+        [Parameter()]
+        [int] $RefreshMinutes = 5  # Number of minutes before expiry to refresh the token
     )
 
     begin {
+        # Write debug information
         Write-Debug "Starting Get-WUGAPIResponse function"
-        Write-Debug "URI: $uri"
+        Write-Debug "URI: $Uri"
         Write-Debug "Method: $Method"
-        Write-Debug "Body: $body"
+        Write-Debug "Body: $Body"
 
         # Global variables error checking
         if (-not $global:WUGBearerHeaders) {
-            Write-Error "Authorization header not set, attempting to connect to the WUG Server."
-            Connect-WUGServer
-        }
-        if ((Get-Date) -ge $global:expiry) {
-            Write-Error "Token expired, attempting to refresh or reconnect."
+            Write-Error -Message "Authorization header not set. Please run Connect-WUGServer first."
             Connect-WUGServer
         }
         if (-not $global:WhatsUpServerBaseURI) {
-            Write-Error "Base URI not found. Attempting to connect to the WUG Server."
+            Write-Error -Message "Base URI not found. Running Connect-WUGServer."
             Connect-WUGServer
         }
-        # Input validation
-        if (-not $Uri) {
-            Write-Debug "URI is not provided, prompting user for input."
-            $Uri = Read-Host "Enter the fully qualified REST API endpoint."
+
+        # Ignore SSL errors if flag is present
+        if ($global:ignoreSSLErrors) {
+            if ($PSVersionTable.PSEdition -eq 'Core') {
+                $Script:PSDefaultParameterValues["Invoke-RestMethod:SkipCertificateCheck"] = $true
+                $Script:PSDefaultParameterValues["Invoke-WebRequest:SkipCertificateCheck"] = $true
+            }
+            else {
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+            }
+            Write-Verbose "Ignoring SSL certificate validation errors."
         }
-        if (-not $Method) {
-            Write-Debug "HTTP method is not provided, prompting user for input."
-            $Method = Read-Host "Enter the HTTP verb to use (GET, POST, PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE, HEAD)."
+
+        # Check if the token is within specified minutes of expiry and refresh if necessary
+        if ((Get-Date).AddMinutes($RefreshMinutes) -ge $global:expiry) {
+            Write-Verbose "Token is about to expire or has expired. Refreshing token."
+            $refreshTokenUri = "$($global:tokenUri)"
+            $refreshTokenHeaders = @{ "Content-Type" = "application/json" }
+            $refreshTokenBody = "grant_type=refresh_token&refresh_token=$($global:WUGRefreshToken)"
+
+            try {
+                $newToken = Invoke-RestMethod -Uri $refreshTokenUri -Method Post -Headers $refreshTokenHeaders -Body $refreshTokenBody -ErrorAction Stop
+
+                # Update global variables with the new token information
+                $global:WUGBearerHeaders = @{
+                    "Content-Type"  = "application/json"
+                    "Authorization" = "$($newToken.token_type) $($newToken.access_token)"
+                }
+                $global:WUGRefreshToken = $newToken.refresh_token
+                $global:expiry = (Get-Date).AddSeconds($newToken.expires_in)
+
+                Write-Output "Refreshed authorization token which now expires at $($global:expiry.ToUniversalTime()) UTC."
+            }
+            catch {
+                $errorMessage = "Error refreshing token: $($_.Exception.Message)`nURI: $refreshTokenUri"
+                Write-Error -Message $errorMessage
+                throw $errorMessage
+            }
+        }
+        else {
+            Write-Verbose "Token is valid. Expires at $($global:expiry.ToUniversalTime()) UTC."
         }
     }
 
     process {
-        # Attempt to make the HTTP request
-        try {
-            if (-not $body) {
-                $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders
-                Write-Debug "Invoked REST Method without body."
+        $retryCount = 0
+        $maxRetries = 1  # Number of retries after token refresh
+
+        do {
+            try {
+                Write-Debug "Attempting to invoke REST method. Retry attempt: $retryCount"
+                if (-not $Body) {
+                    $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -ErrorAction Stop
+                    Write-Debug "Invoked REST Method without body."
+                }
+                else {
+                    $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $Body -ErrorAction Stop
+                    Write-Debug "Invoked REST Method with body."
+                }
+                Write-Debug "Response received: $response"
+                break  # Exit loop if successful
             }
-            else {
-                $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -Body $body
-                Write-Debug "Invoked REST Method with body."
+            catch [System.Net.WebException] {
+                $webResponse = $_.Exception.Response
+                if ($null -ne $webResponse) {
+                    $statusCode = [int]$webResponse.StatusCode
+                    $statusDescription = $webResponse.StatusDescription
+
+                    # Read the response body
+                    $stream = $webResponse.GetResponseStream()
+                    $reader = New-Object System.IO.StreamReader($stream)
+                    $responseBody = $reader.ReadToEnd()
+                    $reader.Close()
+                    $stream.Close()
+
+                    $errorMessage = "HTTP Error $statusCode ($statusDescription): $responseBody`nURI: $Uri`nMethod: $Method`nBody: $Body"
+                    Write-Error $errorMessage
+
+                    if ($statusCode -eq 401 -and $retryCount -lt $maxRetries) {
+                        Write-Verbose "Received 401 Unauthorized. Attempting to refresh the auth token and retry."
+                        # Refresh the auth token immediately
+                        try {
+                            # Refresh the token without delay
+                            $refreshTokenUri = "$($global:tokenUri)"
+                            $refreshTokenHeaders = @{ "Content-Type" = "application/json" }
+                            $refreshTokenBody = "grant_type=refresh_token&refresh_token=$($global:WUGRefreshToken)"
+
+                            $newToken = Invoke-RestMethod -Uri $refreshTokenUri -Method Post -Headers $refreshTokenHeaders -Body $refreshTokenBody -ErrorAction Stop
+
+                            # Update global variables with the new token information
+                            $global:WUGBearerHeaders = @{
+                                "Content-Type"  = "application/json"
+                                "Authorization" = "$($newToken.token_type) $($newToken.access_token)"
+                            }
+                            $global:WUGRefreshToken = $newToken.refresh_token
+                            $global:expiry = (Get-Date).AddSeconds($newToken.expires_in)
+
+                            Write-Output "Refreshed authorization token which now expires at $($global:expiry.ToUniversalTime()) UTC."
+                            # Update retry count and continue
+                            $retryCount++
+                            continue  # Retry the request
+                        }
+                        catch {
+                            $refreshError = "Error refreshing token after 401 Unauthorized: $($_.Exception.Message)`nURI: $refreshTokenUri"
+                            Write-Error -Message $refreshError
+                            throw $refreshError
+                        }
+                    }
+                    else {
+                        # Other HTTP errors
+                        throw $errorMessage
+                    }
+                }
+                else {
+                    # No response from server
+                    $errorMessage = "Network error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method`nBody: $Body"
+                    Write-Error $errorMessage
+                    throw $errorMessage
+                }
             }
-            Write-Debug "Response received: ${response}"
-        }
-        catch {
-            $errorMessage = "Error: $($_.Exception.Response.StatusDescription) `n URI: $Uri `n Method: $Method `n Body: $body"
-            Write-Error $errorMessage
-            throw $errorMessage
-        }
+            catch {
+                # Other exceptions
+                $errorMessage = "Error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method`nBody: $Body"
+                Write-Error $errorMessage
+                throw $errorMessage
+            }
+        } while ($retryCount -le $maxRetries)
     }
 
     end {
@@ -95,8 +203,8 @@ function Get-WUGAPIResponse {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzmV9+18/Vqdvc
-# 6eCdSQoF39I12tGKuupt/jQUCHMURKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/vicGv7e+9YgH
+# UI67bwL+/turJ/8w8QVYjORkvBG0+aCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -197,17 +305,17 @@ function Get-WUGAPIResponse {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg+UnZ8RT97738jemmZSnihXo20BBXTgxrDvpkR6k6Rusw
-# DQYJKoZIhvcNAQEBBQAEggIAhC4oSpRn43rOhbkGcOYAKf0tEyODYkQnM8B1dihB
-# F+Uy0ocucV3rft9K4xhlsSTIn68TeFelu51r4PmcaCVCj3KLA8hIf2qM2byb0rCo
-# ZkRGmKpjVodJ2p0P8DFkLgaujYtFv4TZkOuRclnzRdJ9McEFRW/lTNSgkf8DUObW
-# jaFubc53RRfMNhnZ9ZPz/Ms/sdRIJq7aNhNwX3/bzLnGUgbTP+uJn+fhmufMfbHn
-# 39C7pGSNvZE4HB4uOrlzm29EAg1amgtjc9ld26ms9njaD3Ur6YLGlqetUZlH99dF
-# JfIA5iRLEk0VFQhSLSnmLv8ksyznSVuB4lsUojfJMKbaa4DgB3pQ2W55ksQ8dwPC
-# szEdXEh4rbkqdlzU3qsIl6udhnjuy7v2sB9ybkt2X/kGcSzdoz9VbOP9fWDZFu5c
-# AXrDzl3fpnEw4U05yY1BDC3t+Co47jC1fJxzDkdGmFsCfIawlHudrHnPELJXa2Dv
-# kvd9bJThi1Y14hYj0ZuZO6B3ktHN5QxuXlDIzDghfaRkeDHT0m27UONJhCYfTQfk
-# cjMVckOH42YmrPIt5gfirLmr+xnCxuXlasu26zVK9DzHnSkPAAk9Y7bGDXrRQQMc
-# cBIBFQJ8fSmZ+OiuxOpZIdDcSObNnHuw9FfXKEvg+FUuit2OcxqkyVpSJD6Mxx2y
-# ywA=
+# BgkqhkiG9w0BCQQxIgQgUIboDpVBP6ligqJ8mJWr6gnE0dS72l+D3QUFroDFtE0w
+# DQYJKoZIhvcNAQEBBQAEggIAmXscuOBLfmIbDJgbbLwYyjz3Ksp3ZVtD2U9gtUUA
+# UQoy3kiBFcZhKAsaTIiUAm5AASgP0UuFq6B+X+SF5XQeQnJTp1w6X1vH21dRUSbu
+# VP/Q+enll90CZyuEeq1NfvrFmmgsoGb8hGAqrrA+Lt0AqSrEFMZQ958yUt53kJ9u
+# Eqj682yY9VThfoMmnnK8wf0AvofS5Y0e35BWOE1zWP2SA8UVXDt0aziUOWdZGolT
+# ITTikt+btg1+qXqs3C2Jk2d1UEczpWZhB4R/FvxTF8Kv9IgoovTF6mDhwyAcz+DT
+# D2lgZYscm43pUxoD+JjALhX8zX9jkvihZRK/6CAL2Jn3nMqdzU8Ym+q/QRfjl0B5
+# Amp6lkk0j9EafS6nSyZ2h5e4wa3eBD40da68vLuFVlKKE3EKM4p9vYKWIGRMOAnH
+# 1c1KZUQhHyYkkVyk4SvsAHDR3oMK2YDSLAMqRoedP33eHm7zpiVXzqO/NoIsGkjc
+# us/WOueY15ccIjNQlN5Eh8yZJdXBN3WcDa7jnrWSwGkgQOl0nUa2WOIVbTbpIQUB
+# c3O6FDlm1UC0nvnhe5U+ag94Xvfwjgcg4VBW2dpGJsrb8ni7HgwqksQqtFhKEJYJ
+# 5Q3f40xsh4LW68Yk/+9kZZ+ckiKI6B6rroPM8N2XxktASwIxc6o5KqPt3g+NCd3S
+# gDw=
 # SIG # End signature block

@@ -11,7 +11,7 @@ An array of device IDs for which Interface traffic reports are requested. This p
 .PARAMETER Range
 Specifies the time range for the report. Valid entries include:
 - "today": Returns data generated today.
-- "lastPolled": Returns data from the last poll.
+- "lastPolled": Returns data from the last poll. #Returns no data
 - "yesterday": Returns data generated yesterday.
 - "lastWeek", "lastMonth", "lastQuarter": Data from the last week, month, or quarter.
 - "weekToDate", "monthToDate", "quarterToDate": Data since the beginning of the current week, month, or quarter.
@@ -81,7 +81,7 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed interface
 function Get-WUGDeviceReportInterfaceTraffic {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)][array]$DeviceId,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
@@ -100,17 +100,24 @@ function Get-WUGDeviceReportInterfaceTraffic {
     )
 
     begin {
-        #Input validation
-        if (-not $global:WUGBearerHeaders) { Write-Error "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-        if ((Get-Date) -ge $global:expiry) { Write-Error "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-        #Set static variables
+        # Initialize collection for DeviceIds
+        $collectedDeviceIds = @()
+
+        # Initialize counters for successes and errors (if needed)
+        $successes = 0
+        $errors = 0
+
+        # Debug message with all parameters
+        Write-Debug "Function: Get-WUGDeviceReportInterfaceTraffic -- DeviceId:${DeviceId} Range:${Range} RangeStartUtc:${RangeStartUtc} RangeEndUtc:${RangeEndUtc} RangeN:${RangeN} SortBy:${SortBy} SortByDir:${SortByDir} GroupBy:${GroupBy} GroupByDir:${GroupByDir} ApplyThreshold:${ApplyThreshold} OverThreshold:${OverThreshold} ThresholdValue:${ThresholdValue} BusinessHoursId:${BusinessHoursId} RollupByDevice:${RollupByDevice} PageId:${PageId} Limit:${Limit}"
+
+        # Set static variables
         $finaloutput = @()
         $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
         $endUri = "interface-traffic"
         $queryString = ""
         $totalDevices = $DeviceId.Count
         $currentDeviceIndex = 0
+
         # Building the query string
         if ($Range) { $queryString += "range=$Range&" }
         if ($RangeStartUtc) { $queryString += "rangeStartUtc=$RangeStartUtc&" }
@@ -127,71 +134,108 @@ function Get-WUGDeviceReportInterfaceTraffic {
         if ($RollupByDevice) { $queryString += "rollupByDevice=$RollupByDevice&" }
         if ($PageId) { $queryString += "pageId=$PageId&" }
         if ($Limit) { $queryString += "limit=$Limit&" }
+
         # Trimming the trailing "&" if it exists
         $queryString = $queryString.TrimEnd('&')
+
+        Write-Debug "Constructed Query String: $queryString"
     }
 
     process {
+        # Collect DeviceIds from pipeline
         foreach ($id in $DeviceId) {
-            $currentDeviceIndex++
-            $percentCompleteDevices = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100, 2)
-            # Main progress for device processing with Id 1
-            Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "Processing Device $currentDeviceIndex of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
-    
+            $collectedDeviceIds += $id
+            Write-Debug "Collected DeviceID: $id"
+        }
+    }
+
+    end {
+        # Total number of devices to process
+        $totalDevices = $collectedDeviceIds.Count
+        Write-Debug "Total Devices to Process: $totalDevices"
+
+        if ($totalDevices -eq 0) {Write-Warning "No valid DeviceIDs provided."; return;}
+
+        # Determine batch size (max 499)
+        $batchSize = 499
+        if ($totalDevices -le $batchSize) {$batchSize = $totalDevices}
+        Write-Debug "Batch Size: $batchSize"
+
+        $devicesProcessed = 0
+        $percentCompleteDevices = 0
+
+        foreach ($id in $collectedDeviceIds) {
+            $devicesProcessed++
+            $percentCompleteDevices = [Math]::Round(($devicesProcessed / $totalDevices) * 100, 2)
+            Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "Processing Device $devicesProcessed of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
+            Write-Debug "Processing DeviceID: $id"
+
             $currentPageId = $null
             $pageCount = 0
-    
+
             do {
                 if ($currentPageId) {
-                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
-                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId&$queryString"
+                    Write-Debug "Constructed URI with pageId: $uri"
                 } else {
-                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
+                    $uri = "${baseUri}/${id}/reports/${endUri}?$queryString"
+                    Write-Debug "Constructed URI: $uri"
                 }
+
                 try {
-                    $result = Get-WUGAPIResponse -uri $uri -method "GET"
-                    #Conditional data addtions/conversions
+                    $result = Get-WUGAPIResponse -uri $uri -Method "GET"
+                    Write-Debug "API Call Successful for URI: $uri"
+
+                    # Conditional data additions/conversions
                     #foreach ($data in $result.data) {
                     #    #Do Nothing
                     #}
+
+                    Write-Debug "Data Received Count: $($result.data.Count)"
                     $finaloutput += $result.data
+                    Write-Debug "Accumulated Data Count: $($finaloutput.Count)"
                     $currentPageId = $result.paging.nextPageId
                     $pageCount++
-    
+
                     # Page progress for the current device with Id 2
                     if ($result.paging.totalPages) {
-                        $percentCompletePages = ($pageCount / $result.paging.totalPages) * 100
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
+                        $percentCompletePages = [Math]::Round(($pageCount / $result.paging.totalPages) * 100, 2)
+                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
+                        Write-Debug "Processing Page: $pageCount of $($result.paging.totalPages)"
                     } else {
                         # Indicate ongoing progress if total pages aren't known
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
+                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
+                        Write-Debug "Processing Page: $pageCount (Total Pages Unknown)"
                     }
-    
+
                 } catch {
                     Write-Error "Error fetching device report ${endUri} for DeviceID ${id}: $_"
+                    # Exit the pagination loop on error
                     $currentPageId = $null
                 }
-    
+
             } while ($currentPageId)
-    
+
             # Clear the page progress for the current device after all pages are processed
             Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Completed" -Completed
+            Write-Debug "Completed DeviceID: $id"
         }
-    
+
         # Clear the main device progress after all devices are processed
         Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "All devices processed" -Completed
-    }
-    
+        Write-Debug "All devices have been processed."
 
-    end {
+        # Return the collected data
+        Write-Debug "Total Data Collected: $($finaloutput.Count)"
         return $finaloutput
     }
 }
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaprs08lZqlTCo
-# eGOvA97qt5DUAW/DNSdq6oI6in2bkqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBcGL9CRkdIxz8Z
+# +FTv0/aAX/kJCHftc8NQZCERgHzSoKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -292,17 +336,17 @@ function Get-WUGDeviceReportInterfaceTraffic {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgo6Ieyn0jIYPMsXT9iMY7zN/ccUDjZtLC9hL+iQvlJ0Uw
-# DQYJKoZIhvcNAQEBBQAEggIAfxkv7zg30Nal5wSXuu+tI8ifxEdRZFK88rZwMVS5
-# cxBTSWE160KHqMTy5TH4JjfF8EYvltHv8knMS2BuFztetFNkVO7xGyAzEq1SFWrU
-# N2eriiCg9g58l+zJIcpjH9aPd3YhbiZgCjrkCYbDBzEw6HcNEP0sOfP0tLAMSwz+
-# nCu1k05ivkOiUHYtAB+xOtoyX7CzpX1qDLTRF2IEQZQcRUzXtk309IDVbiUikUni
-# WaWSO6EHanq4FWhVDmPtlTcTo0mid1hmjfYEHq4UbPSNg90iZPvLpG0F7bsAUk7r
-# Q+KWQMAeK+FpG7rwj8IrkUG8uvaksCUywrkfche4qSRYA0yuroG3sgI2Ki8buew3
-# wq3030vxhoP0ye0tQb6e5Y8ahKJPvp0NtNTuMB3w9Hu73TAcW/lJtontVjGx8T17
-# wS9H7TXRMvE/bNddAlrbpVPSygiEfCBcUsUkI+CR19qVQJg+OgoVbrfXBH06v1zX
-# 3yIitto7Q2hmB15nlCe2X/hyYCREbejXQPZj2jbOI8qDorVJxlCtVhlD4eWlzrEQ
-# xo/JIXB2uNckcXzCAw7lsE1vw4S/RAuU9/0TFIlB3l3FSr9pWY7MIJPtmO4zzfTo
-# +t0JipK6qslixhLCPOBBT6vdY/4odkPQfJVzM3ZYbVMcgqAZdVcsvMlumCbLEvPY
-# eG0=
+# BgkqhkiG9w0BCQQxIgQgCMI0J/kw2nbhPRier6oqdT6DD1Zlv3u+sHZNYSrH7LYw
+# DQYJKoZIhvcNAQEBBQAEggIAZ8xMk2BncYY1T6nXyOPMa2MXVOJoK4Mcg49xVu2i
+# Fw0p+WI+tcds5lbl5hMwRQRiEBgYMmr1Z2QBVDpmi7nPEwt7NNnMVaZPsFd4ea40
+# tu/mrx9AhfOcsmUR+KL0UMqVjnQwvjQxwy80pM+2F3M0cRt2THPmJXWw4GTN9uNc
+# vP7iCazHJktes91jVKRzzASB1pwmpeVRjKnFdQoMtJenVVUGEXDYV+ckb1Fk2EHe
+# /EhYpEWag9buDZuokTJtqjW150OOqNlAH91tAmjqxjLpL1FryOBWLgn7fwR51v4j
+# 3k39+5aGLi1E63IMZ0KQSDtA3FDcL9ZoDd4M5Ga1FGDnZqNLPuv9nmqfrMVuF7kw
+# nAeOTqxH+OFLkxceDHc6RQzqZMA32tAil2gOR1CQvcl8/2qXSVHdzeXaantcY+/H
+# FRreU6m/dOJqYBvdEYbDtxGq1N5FhbRenGbqk6+3RAlx/vltdNBQIXcnLScSBNDi
+# pl/OU6+bJ8jx+0lCF82kybFiFY3XzV8YVfXbdN0dnxjLe7K1bpZ7++b1ygFK3F5j
+# KonWEM/WNCMZvdmaAIQ2Hdyuhdn+Ag8kJFvcIPnFtgDuZWB76sWcKnfu9mJdHO7W
+# yFOxhjJ3zvKuD2r28A8GtlLGeo8Npq4J0GbQfImOd9JYUcGuc/nAKL9rpeSk+J9Z
+# iQo=
 # SIG # End signature block

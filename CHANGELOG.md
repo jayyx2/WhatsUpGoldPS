@@ -1,4 +1,20 @@
 # WhatsUpGoldPS Release History
+## 0.1.13 - 2024-09-28
+* Changed
+   * Refactor many functions to accept value from pipeline, example: Get-WUGDevice | Get-WUGDeviceCPUReport
+   * Moved  global variable checking into Get-WUGAPIRequest, which attempts to auto refreshes existing tokens
+   * Learning parameter sets
+
+* Added
+   * Get-WUGDeviceMaintenanceSchedule, Set-WUGDeviceMaintenanceSchedule
+
+* Removed
+   * Request-WUGAuthToken, built into Get-WUGAPIResponse
+   * Get-WUGDeviceAttributes, built into Get-WUGDeviceAttribute
+   * Set-WUGDeviceAttributes, built into Set-WUGDeviceAttribute
+   * Get-WUGDevices, built into Get-WUGDevice.
+   * Get-WUGDeviceGroups, built into Get-WUGDeviceGroup
+
 ## 0.1.12 - 2024-08-23
 ### Changed
 * Changed

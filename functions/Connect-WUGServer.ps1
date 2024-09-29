@@ -12,16 +12,16 @@ The authorization token is stored in a global variable for subsequent API reques
 The URI of the WhatsUp Gold server to connect to.
 
 .PARAMETER Protocol
-The protocol to use for the connection (http or https). Default is http.
+The protocol to use for the connection (http or https). Default is https.
 
 .PARAMETER Username
-The username to use for authentication. If not provided, the function will prompt for it.
+Plaintext username to use for authentication. Required when using the UserPassSet parameter set. For best security, use -Crdential
 
 .PARAMETER Password
-The password to use for authentication. If not provided, the function will prompt for it.
+Plaintext password to use for authentication. Required when using the UserPassSet parameter set. For best security, use -Credential
 
 .PARAMETER Credential
-A PSCredential object containing the username and password for authentication.
+A PSCredential object containing the username and password for authentication. Required when using the CredentialSet parameter set.
 
 .PARAMETER TokenEndpoint
 The endpoint for obtaining the OAuth 2.0 authorization token. Default is "/api/v1/token".
@@ -30,87 +30,125 @@ The endpoint for obtaining the OAuth 2.0 authorization token. Default is "/api/v
 The TCPIP port to use for the connection. Default is 9644.
 
 .PARAMETER IgnoreSSLErrors
-A switch that allows for ignoring SSL certificate validation errors, which currently does not work.
+A switch that allows for ignoring SSL certificate validation errors. WARNING: Use this option with caution
+For best security, use a valid certificate
 
 .EXAMPLE
-Connect-WUGServer -serverUri "whatsup.example.com" -Protocol "https" -Username "admin" -Password "mypassword"
+Connect-WUGServer -serverUri "whatsup.example.com" -Username "admin" -Password "mypassword"
 Connects to the WhatsUp Gold server at "https://whatsup.example.com:9644" with the provided credentials, and obtains an
 OAuth 2.0 authorization token.
 
+$Cred = Get-Credential
+Connect-WUGServer -serverUri 192.168.1.250 -Credential $Cred -IgnoreSSLErrors
+
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
-Last Modified: 2024-04-12
-WhatsUp Gold REST API Handling Session Tokens: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#section/Handling-Session-Tokens
+Last Modified: 2024-09-26
 
-.EXAMPLE
-###Example 1: Basic usage with prompt for username and password
-    Connect-WUGServer -serverUri "wug.example.com"
-    Connects to the WUG server at "http://wug.example.com:9644" with prompts for username and password.
-    
-###Example 2: Connection using a PSCredential object
-    $Credential = Get-Credential
-    Connect-WUGServer -serverUri "wug.example.com" -Credential $Credential -Protocol "https"
-    Connects to the WUG server at "https://wug.example.com:9644" using the provided PSCredential object.
-    
-###Example 3: Connection with specified username
-    Connect-WUGServer -serverUri "wug.example.com" -Username "admin"
-    Connects to the WUG server at "http://wug.example.com:9644" using the specified username, with a prompt for password.
-    
-###Example 4: Connection with specified username and password
-    Connect-WUGServer -serverUri "wug.example.com" -Username "admin" -Password "mypassword"
-    Connects to the WUG server at "http://wug.example.com:9644" using the specified username and password.
-    
-###Example 5: Connection with custom token endpoint
-    Connect-WUGServer -serverUri "wug.example.com" -TokenEndpoint "/api/v2/token"
-    Connects to the WUG server at "http://wug.example.com:9644" using the default username and password, but obtains
-    the OAuth 2.0 authorization token from the custom endpoint "/api/v2/token".
-    
-###Example 6: Connection with custom port and SSL protocol
-    Connect-WUGServer -serverUri "wug.example.com" -Port 8443 -Protocol "https"
-    Connects to the WUG server at "https://wug.example.com:8443" using the default username and password,
-    with SSL certificate validation enabled.
-    
-###Example 7: Connection with SSL protocol and ignoring SSL errors
-    Connect-WUGServer -serverUri "wug.example.com" -Protocol "https" -IgnoreSSLErrors
-    Connects to the WUG server at "https://wug.example.com:9644" using the default username and password,
-    but ignores SSL certificate validation errors.
+.LINK
+# Link to related documentation or resources
+https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#section/Handling-Session-Tokens
 
 #>
 function Connect-WUGServer {
+    [CmdletBinding(DefaultParameterSetName = 'CredentialSet')]
     param (
-        [Parameter(Mandatory = $true)] [string] $serverUri,
-        [Parameter(Mandatory = $false)] [ValidateSet("http", "https")] [string] $Protocol = "https",
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $Username,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $Password,
-        [System.Management.Automation.Credential()][PSCredential]$Credential = $null,
-        [Parameter()] [ValidateNotNullOrEmpty()][ValidatePattern("^(/[a-zA-Z0-9]+)+/?$")] [string] $TokenEndpoint = "/api/v1/token",
-        [Parameter()] [ValidateRange(1, 65535)] [int32] $Port = 9644,
-        [switch] $IgnoreSSLErrors
-    )
+        # Common Parameters for Both Parameter Sets
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [string]$serverUri,
 
+        [Parameter()]
+        [ValidateSet("http", "https")]
+        [string]$Protocol = "https",
+
+        [Parameter()]
+        [ValidatePattern("^(/[a-zA-Z0-9]+)+/?$")]
+        [string]$TokenEndpoint = "/api/v1/token",
+
+        [Parameter()]
+        [ValidateRange(1, 65535)]
+        [int32]$Port = 9644,
+
+        [Parameter()]
+        [switch]$IgnoreSSLErrors,
+
+        # Unique Parameters for 'CredentialSet'
+        [Parameter(Mandatory = $true, ParameterSetName = 'CredentialSet')]
+        [System.Management.Automation.Credential()]
+        [PSCredential]$Credential,
+
+        # Unique Parameters for 'UserPassSet'
+        [Parameter(Mandatory = $true, ParameterSetName = 'UserPassSet')]
+        [string]$Username,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'UserPassSet')]
+        [string]$Password
+    )
+    
     begin {
         Write-Debug "Starting Connect-WUGServer function"
         Write-Debug "Server URI: $serverUri, Protocol: $Protocol, Port: $Port"
+        
         # Input validation
         # Check if the hostname or IP address is resolvable
-        $ip = $null; try { $ip = [System.Net.Dns]::GetHostAddresses($serverUri) } catch { throw "Cannot resolve hostname or IP address. Please enter a valid IP address or hostname." }; if ($null -eq $ip) { throw "Cannot resolve hostname or IP address, ${serverUri}. Please enter a resolvable IP address or hostname."; }
+        $ip = $null
+        try { 
+            $ip = [System.Net.Dns]::GetHostAddresses($serverUri) 
+        } catch { 
+            throw "Cannot resolve hostname or IP address. Please enter a valid IP address or hostname." 
+        }
+        if ($null -eq $ip) { 
+            throw "Cannot resolve hostname or IP address, ${serverUri}. Please enter a resolvable IP address or hostname." 
+        }
+    
         # Check if the port is open
-        $tcpClient = New-Object System.Net.Sockets.TcpClient; $connectResult = $tcpClient.BeginConnect($ip, $Port, $null, $null); $waitResult = $connectResult.AsyncWaitHandle.WaitOne(500); if (!$waitResult -or !$tcpClient.Connected) { $tcpClient.Close(); throw "The specified port, ${Port}, is not open or accepting connections."; } $tcpClient.Close();
-        # Handling credentials
-        if ($Credential) { $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
-        elseif ($Username -and -not $Password) { $Password = (Get-Credential -UserName $Username -Message "Enter password for ${Username}").GetNetworkCredential().Password; }
-        elseif ($Password -and -not $Username) { $Username = Read-Host "Enter the username associated with the password."; }
-        elseif (!$Username -or !$Password) { $Credential = Get-Credential; $Username = $Credential.GetNetworkCredential().UserName; $Password = $Credential.GetNetworkCredential().Password; }
+        try {
+            $tcpClient = New-Object System.Net.Sockets.TcpClient
+            $connectResult = $tcpClient.BeginConnect($ip[0], $Port, $null, $null)
+            $waitResult = $connectResult.AsyncWaitHandle.WaitOne(500)
+            if (!$waitResult -or !$tcpClient.Connected) { 
+                $tcpClient.Close(); 
+                throw "The specified port, ${Port}, is not open or accepting connections." 
+            } 
+            $tcpClient.Close()
+        }
+        catch {
+            throw "The specified port, $Port, is not open or accepting connections."
+        }
+    
+        # Handle Credentials Based on Parameter Set
+        switch ($PSCmdlet.ParameterSetName) {
+            'CredentialSet' {
+                Write-Debug "Using Credential parameter set."
+                $Username = $Credential.GetNetworkCredential().UserName
+                $Password = $Credential.GetNetworkCredential().Password
+            }
+            'UserPassSet' {
+                Write-Debug "Using Username and Password parameter set."
+                # Username and Password are already provided
+            }
+            default {
+                throw "Invalid parameter set. Please specify either -Credential or both -Username and -Password."
+            }
+        }
+    
         # SSL Certificate Validation Handling
         if ($IgnoreSSLErrors -and $Protocol -eq "https") {
-            if ($PSVersionTable.PSEdition -eq 'Core') { $Script:PSDefaultParameterValues["invoke-restmethod:SkipCertificateCheck"] = $true; $Script:PSDefaultParameterValues["invoke-webrequest:SkipCertificateCheck"] = $true; } else { [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }; };
-            Write-Warning "Ignoring SSL certificate validation errors. Use this option with caution.";
+            if ($PSVersionTable.PSEdition -eq 'Core') { 
+                $Script:PSDefaultParameterValues["invoke-restmethod:SkipCertificateCheck"] = $true
+                $Script:PSDefaultParameterValues["invoke-webrequest:SkipCertificateCheck"] = $true
+            } else { 
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+            }
+            Write-Warning "Ignoring SSL certificate validation errors. Use this option with caution."
         }    
+    
         # Set variables
-        $global:WhatsUpServerBaseURI = "${Protocol}://${serverUri}:${Port}";
-        $global:tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}";
-        $global:WUGBearerHeaders = @{"Content-Type" = "application/json" };
-        $tokenBody = "grant_type=password&username=${Username}&password=${Password}";
+        $global:IgnoreSSLErrors = $IgnoreSSLErrors
+        $global:WhatsUpServerBaseURI = "${Protocol}://${serverUri}:${Port}"
+        $global:tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}"
+        $global:WUGBearerHeaders = @{"Content-Type" = "application/json" }
+        $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
     }
     
     process {
@@ -123,9 +161,16 @@ function Connect-WUGServer {
             }
         }
         catch {
-            $message = "Error: $($_.Exception.Response.StatusDescription) `n URI: $global:tokenUri"
-            Write-Error -message $message
-            throw
+            if ($_.Exception.Response) {
+                $statusCode = $_.Exception.Response.StatusCode.value__
+                $statusDescription = $_.Exception.Response.StatusDescription
+                $errorMsg = "Error: Response status code does not indicate success: $statusCode ($statusDescription).`nURI: $global:tokenUri"
+            }
+            else {
+                $errorMsg = "Error: $($_.Exception.Message)`nURI: $global:tokenUri"
+            }
+            Write-Error $errorMsg
+            throw $errorMsg
         }
         # Update the headers with the Authorization token for subsequent requests
         $global:WUGBearerHeaders["Authorization"] = "$($token.token_type) $($token.access_token)"
@@ -137,14 +182,15 @@ function Connect-WUGServer {
 
     end {
         # Output connection status and return the token details
-        return "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at $global:expiry UTC."
+        return "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at ${global:expiry} UTC."
     }
 }
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsmvvoWJMxSsqw
-# ACsB9ifStqqJAkcnx6Mz1eVhx6X8rKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGuPsceAeVIxV/
+# iyK/sXcGG1o85ctSCz2k11xg0guWxKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -245,17 +291,17 @@ function Connect-WUGServer {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg/1x5ouH2Isi2eP79Hm58P86DRh0EyWYUGSLynlPqceow
-# DQYJKoZIhvcNAQEBBQAEggIANyCuTcp7TzTmP2q/rf/ZQLGr7owFkKmZKEMXzEjQ
-# TFKrmcyZF69WsCZvXSqYv6Q5HrZfU/MsLb/3jBPrRtfn/FvQ5jSmceyTvHl5vKA0
-# Q6vqJr1rcfKJb/OOwheimGA1Z6qVYdZPB+gFEBOrw1RUr9l/91wlu47UlGTbBkdy
-# 8ahptDk2tpfwl0nLjw8XLl7DyBHMGZAhc7Fe1fX6Ng7Py9JnDkfauXAxkkezgygO
-# wue3G6/z9cECpjwpUbQdcwkf3wIN5xpSyUYhxz1o8ZNNs5ShczoqR9qiI8iBMTtx
-# jjIKMxDHMqGk0T/3N5TeOPUdk8SOgxZNqGVOG2r0BR/BalQD0h4AcLDny8JZ0CyS
-# np7pvL8QIwKw6BOflGqcO6Duw0cipM4H7WtSusipOtfBIpVZEEm5h4TDmb4/mCx7
-# h0yhUOfXA3wLMVH2g06wVnKX9LhOKHP1P49Dg7C8gPcSyZcbpPkJ6sUEKwhCGI8M
-# FAuvVtGBelXauOEtgMROaKF3tN8GSrDaV869cCJns+Wm6LpOwiUfT/7VoNf5CIRV
-# jDz0wS5XTdo19tQ0wCDTwuMFCxZ2FIwSliys2nOmkpVXbdEZt4czTuMPtWMIzehu
-# Wgeds+07AaNmu+gflThnnBGMG4xwYpSTfR9E/kJNAnwK/UxQkJRK7DRjqKUyTOeb
-# SwM=
+# BgkqhkiG9w0BCQQxIgQg8KX7ZvLSeNj6DNwzjRN71lyw5FJJMT0dEMg28hpcoSAw
+# DQYJKoZIhvcNAQEBBQAEggIAZZDuOS5k1JM2yf1eegpelKx1cKjcDTuIsQC2R0qx
+# XY2C3rDugU2eK97oC5/bYcpkDxQLZXX40mI53ExN+ld6qi0ePHRoPqxRA29KBNB3
+# lPYZZe/K4BbUssd+tTJjlDrC4S/NKiohdZVI5v6zHOSZOpXJLpNQHjw/sVW9sZTw
+# Q5yeyB7xfDvX/8WE9nwpob5MqlJVCfiZtCQyqeDA7eMMtvT820usUJJ9XXU30G/h
+# 6YsEx4LP76UsD3rqk2cgAYONBpYKr4GdOPQ6LT5DnaNImkFG3BAHjy9BV/6u4E0Q
+# xsJUWseCDdhpFhZpBNTCNbHxWN0qNMHdR03cDx+wlY5DOHvM0ukHRTZj5lHRURoi
+# eJ+XmbPzXdC/B8VUvqxMd+NOnPhrBh9prfu1qsFBfK25Pvaq/IC9hi2DYxcp/b9Q
+# EmMhhtFVL6X7XtoD3E9kICvpdk46wZRgSLD+es9Gc7AS1xU+IPdjimnD1fTqUp7U
+# h3DPyo8YOW5msWwlBRArc/d9r3cxCwLNRbB5bp0Y+7BZCwuRy7f1OutotR75vT1j
+# lBIeagHS9yeJa9EwhnZ8esT7/FVx8crsSVeOoFVQpNwzHQ0BrDLPdWotgbFGopBr
+# mefzE6WAoU1Ke3rBxJucL6PSRzFVNePzqUVcKuXZ/StEqx1D1WjWAZBv88Tk4MYz
+# BMw=
 # SIG # End signature block

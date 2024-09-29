@@ -30,15 +30,11 @@ Last modified: 2024-06-15
 function Get-WUGDeviceTemplate {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)] [array] $DeviceID,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [Parameter()] [ValidateSet('all', 'l2', 'tempip', 'simple')] [string] $Options = 'all'
     )
 
     begin {
-        # Global variables error checking
-        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-        if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found, running Connect-WUGServer"; Connect-WUGServer; }
         $finaloutput = @()
     }
 
@@ -49,8 +45,9 @@ function Get-WUGDeviceTemplate {
                 $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
                 if ($result.data.templates) {
                     $finaloutput += $result.data.templates
-                } else {
-                    Write-Error "No templates found for DeviceID ${id}."
+                }
+                else {
+                    Write-Debug "No templates found for DeviceID ${id}."
                 }
             }
             catch {
@@ -67,8 +64,8 @@ function Get-WUGDeviceTemplate {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApXl4L/BW+0rv3
-# DWQtu0D3IeIymWiPNiHAC7vD0pTubqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCD1lmG2pH2ncqj
+# F9F2XZh//IFLkMT+T2oguwwlFroqt6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -169,17 +166,17 @@ function Get-WUGDeviceTemplate {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgEs6xwT+1f/t3x7mSL2E12BeMwFcW6IldHxqRGygLKwYw
-# DQYJKoZIhvcNAQEBBQAEggIAdDSGCkAFycmJ158w15bnEIateqB7xwMefyhyU010
-# q3kUv2d2XMZJPaZEAlmWxjTijDCxfv72HYr6h/F/E5RwLhcHYjuxpVLyH6/Sq/c7
-# Qbjm7ZYdFzj6W8R7NPTCIrIDdVnNRgpK0jJLGctHajIAztB80pto2oJ9mEMwRGUU
-# VIVuWYenpxaRRLrCRf+QWUJX3D+73zkjKdCZ9SRwYyPsJJpiycxob1Z1RY78/Y3j
-# e/IlO9V09Tg6wFZ9RHtJuBXnzvmLNnFsW3WKpoJ5usgnj4U9ata++gvc5tBtoqJ2
-# ILJsTpSt7cJKIfta6CMdQ3PYXMmWtXwNbjRIN2gVxquKr0nW1AtUmxw3OE7o4e4X
-# Al7ktlgovecsSzwSu7tVVVZxyq9PZ31OD3pdkHZH4H6CzbleXNmXozjjMCaidWVm
-# tX3GujZ3vj3Oo32wQ8yI4W3wP6+Klz9ceiFp639p6jkF1xGss0k6lO3jCwUVREPL
-# x7OkZ8WbEu1AiXBvDswCaeduf1qqbbqC/CIM62Hspp+DgWlhHWWWNzkg91D1KDau
-# oyN1907Tm2t5lASKcUHZMNGpr5IwHzQ1ngSZPdPm9z7pUGvnidqdvrnGn3wNCroa
-# 5JbD9VC28XIvmtFDXE7vRjMfcUkjFMmqtfNJZ4kUvprPaU/Fydm0wobhxWAYMmS/
-# R7k=
+# BgkqhkiG9w0BCQQxIgQgwXY9JCfF0naXaP2sb9tuXOHuCpsBfedaS3zOEgfAPKkw
+# DQYJKoZIhvcNAQEBBQAEggIAqdE08qooyCKagacY+aX0sv59JUi7Ag+TpPZs57+U
+# lLTKnB3F3UPar1yZzQW14lAB4IpPwHOdlveV8FNZJv/xUN6tfAiIdp8KoHvW8adc
+# D4SgewssB/+/Dt+1FyoaEgRBHaZ/pGXZQ5COXyYHMNBhnhRCLKBwL8JkIeNnbOih
+# 12flkt/c9tEGtbIV2rkN1z+pVy7TKZex0Vj8csFMvsm6lHbyCGlEubp4k2CvnvvI
+# VBgOEZrLzARzhfB0gZLAvZDV5X6xzGdoGfcPc6t+cC1cD7co7CY5Ty8o8GCFVBmi
+# q2WgH8shpWQam5SIaad1X6YQETZqFiATN4Ym5XQHMSPYBedSrw26ogoj72cO63OM
+# ZXZgZAnwE87z0fWUl0zDrv+7QcCAskEzD5CyPn2YH9GinJm5kvtpuj5JyV2aV1MG
+# +sVyMWOEsoxFkj8QsUl2OEE5YqG4U6VtUJhoLHt1IwnN2YMGupFBPkOzcxkdZbQ8
+# Kg/rsGWia5l90bgS0tm6JVD+6fkAFAMH7Qpv/u6yzMPo4lG0MAP2SsMhuR81/UGn
+# e/HwEekxje1IiepgNl1qcHp3VXKLwkNXR3T5IhRP9vBKMyhmkqWzgNs0UQNnjIEk
+# rgIJNwcL5r9y1m8AQq1pEMzUNhIErWG1c/ZZiGp8ak+ti2vi4l1CFdyNSyP+Hlv9
+# 85E=
 # SIG # End signature block

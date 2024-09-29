@@ -70,38 +70,67 @@ Author: Jason Alberino (jason@wug.ninja) 2024-03-24
 Modified: 2024-03-29
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2022_1/02_Guides/rest_api/#operation/DeviceReport_DeviceDiskFreeSpaceReport
 #>
+
+# Helper Function: Convert-BytesToUnit
+function Convert-BytesToUnit {
+    param (
+        [long]$Bytes
+    )
+    if ($Bytes -ge 1TB) {
+        $value = [math]::Round($Bytes / 1TB, 2)
+        $unit = 'TB'
+    }
+    elseif ($Bytes -ge 1GB) {
+        $value = [math]::Round($Bytes / 1GB, 2)
+        $unit = 'GB'
+    }
+    elseif ($Bytes -ge 1MB) {
+        $value = [math]::Round($Bytes / 1MB, 2)
+        $unit = 'MB'
+    }
+    else {
+        $value = [math]::Round($Bytes / 1KB, 2)
+        $unit = 'KB'
+    }
+    return @{Value = $value; Unit = $unit}
+}
+
+# Main Function: Get-WUGDeviceReportDiskSpaceFree
 function Get-WUGDeviceReportDiskSpaceFree {
-    [CmdletBinding()]param (
-        [Parameter(Mandatory = $true)][array]$DeviceId,
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
-        [int]$RangeN,
+        [int]$RangeN = 1,
         [ValidateSet("defaultColumn", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minFree", "maxFree", "avgFree")][string]$SortBy,
         [ValidateSet("asc", "desc")][string]$SortByDir,
         [ValidateSet("noGrouping", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minFree", "maxFree", "avgFree")][string]$GroupBy,
         [ValidateSet("asc", "desc")][string]$GroupByDir,
         [ValidateSet("true", "false")][string]$ApplyThreshold,
         [ValidateSet("true", "false")][string]$OverThreshold,
-        [double]$ThresholdValue,
-        [int]$BusinessHoursId,
+        [double]$ThresholdValue = 0.0,
+        [int]$BusinessHoursId = 0,
         [ValidateSet("true", "false")][string]$RollupByDevice,
         [string]$PageId,
         [ValidateRange(0, 250)][int]$Limit
     ) 
 
     begin {
-        #Input validation
-        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-        if ((Get-Date) -ge $global:expiry) { Write-Error "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-        #Set static variables
+        # Initialize collection for DeviceIds
+        $collectedDeviceIds = @()
+
+        # Debug message with all parameters
+        Write-Debug "Function: Get-WUGDeviceReportDiskSpaceFree -- DeviceId=${DeviceId} Range=${Range} RangeStartUtc=${RangeStartUtc} RangeEndUtc=${RangeEndUtc} RangeN=${RangeN} SortBy=${SortBy} SortByDir=${SortByDir} GroupBy=${GroupBy} GroupByDir=${GroupByDir} ApplyThreshold=${ApplyThreshold} OverThreshold=${OverThreshold} ThresholdValue=${ThresholdValue} BusinessHoursId=${BusinessHoursId} RollupByDevice=${RollupByDevice} PageId=${PageId} Limit=${Limit}"
+
+        # Set static variables
         $finaloutput = @()
         $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
         $endUri = "disk-free-space"
         $queryString = ""
         $totalDevices = $DeviceId.Count
-        $currentDeviceIndex = 0
+
         # Building the query string
         if ($Range) { $queryString += "range=$Range&" }
         if ($RangeStartUtc) { $queryString += "rangeStartUtc=$RangeStartUtc&" }
@@ -118,84 +147,242 @@ function Get-WUGDeviceReportDiskSpaceFree {
         if ($RollupByDevice) { $queryString += "rollupByDevice=$RollupByDevice&" }
         if ($PageId) { $queryString += "pageId=$PageId&" }
         if ($Limit) { $queryString += "limit=$Limit&" }
+
         # Trimming the trailing "&" if it exists
         $queryString = $queryString.TrimEnd('&')
+
+        Write-Debug "Constructed Query String: $queryString"
     }
 
     process {
+        # Collect DeviceIds from pipeline
         foreach ($id in $DeviceId) {
-            $currentDeviceIndex++
-            $percentCompleteDevices = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100, 2)
-            # Main progress for device processing with Id 1
-            Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "Processing Device $currentDeviceIndex of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
-             
+            $collectedDeviceIds += $id
+            Write-Debug "Collected DeviceID: $id"
+        }
+    }
+
+    end {
+        # Total number of devices to process
+        $totalDevices = $collectedDeviceIds.Count
+        Write-Debug "Total Devices to Process: $totalDevices"
+
+        if ($totalDevices -eq 0) {
+            Write-Warning "No valid DeviceIDs provided."
+            return
+        }
+
+        # Determine batch size (max 499)
+        $batchSize = 499
+        if ($totalDevices -le $batchSize) { 
+            $batchSize = $totalDevices 
+        }
+        Write-Debug "Batch Size: $batchSize"
+
+        $devicesProcessed = 0
+        $percentCompleteDevices = 0
+
+        foreach ($id in $collectedDeviceIds) {
+            $devicesProcessed++
+            $percentCompleteDevices = [Math]::Round(($devicesProcessed / $totalDevices) * 100, 2)
+            Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "Processing Device $devicesProcessed of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
+            Write-Debug "Processing DeviceID: $id"
+
             $currentPageId = $null
             $pageCount = 0
-            
+
             do {
                 if ($currentPageId) {
-                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
-                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                    $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId&$queryString"
+                    Write-Debug "Constructed URI with pageId: $uri"
                 } else {
-                    $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
+                    $uri = "${baseUri}/${id}/reports/${endUri}?$queryString"
+                    Write-Debug "Constructed URI: $uri"
                 }
+
                 try {
-                    $result = Get-WUGAPIResponse -uri $uri -method "GET"
-                    #Conditional data addtions/conversions
-                    foreach ($data in $result.data) {
-                        $data.minFree = [math]::Round($data.minFree / 1073741824, 2)
-                        $data.maxFree = [math]::Round($data.maxFree / 1073741824, 2)
-                        $data.avgFree = [math]::Round($data.avgFree / 1073741824, 2)
-                        $data.size = [math]::Round($data.size / 1073741824, 2)
-                        # Calculate percent free and add it as a new property
-                        $percentFree = if ($data.size -gt 0) { [math]::Round(($data.avgFree / $data.size) * 100, 2) } else { 0 }
-                        $data | Add-Member -NotePropertyName 'percentFree' -NotePropertyValue $percentFree
-                        foreach ($series in $data.series) {
-                            $series.avgFree = [math]::Round($series.avgFree / 1073741824, 2)
-                            $series.minFree = [math]::Round($series.minFree / 1073741824, 2)
-                            $series.maxFree = [math]::Round($series.maxFree / 1073741824, 2)
-                        }
+                    $result = Get-WUGAPIResponse -uri $uri -Method "GET"
+                    Write-Debug "API Call Successful for URI: $uri"
+
+                    if ($null -eq $result.data -or $result.data.Count -eq 0) {
+                        Write-Warning "No data returned for DeviceID: $id on URI: $uri"
+                        break
                     }
-                    $finaloutput += $result.data
+
+                    foreach ($data in $result.data) {
+                        # Check if 'size' property exists
+                        if ($data.PSObject.Properties.Match('size').Count -eq 0) {
+                            Write-Warning "DeviceID: $id returned a data object without 'size' property. Skipping this object."
+                            continue
+                        }
+
+                        # Ensure 'size', 'minFree', 'maxFree', 'avgFree' are numeric
+                        $isValid = $true
+                        foreach ($prop in @('size', 'minFree', 'maxFree', 'avgFree')) {
+                            if (-not ($data.$prop -is [double] -or $data.$prop -is [int] -or $data.$prop -is [long])) {
+                                Write-Warning "DeviceID: $id has non-numeric '$prop': $($data.$prop). Skipping this object."
+                                $isValid = $false
+                                break
+                            }
+                        }
+                        if (-not $isValid) { continue }
+
+                        # Calculate percent free
+                        $percentFree = if ($data.size -gt 0) { [math]::Round(($data.avgFree / $data.size) * 100, 2) } else { 0 }
+
+                        # Convert 'size' to appropriate unit
+                        $conversion = Convert-BytesToUnit -Bytes $data.size
+                        $unit = $conversion.Unit
+                        $sizeValue = $conversion.Value
+
+                        # Convert 'minFree', 'maxFree', 'avgFree' using the same unit
+                        switch ($unit) {
+                            'TB' {
+                                $minFreeDisplay = [math]::Round($data.minFree / 1TB, 2)
+                                $maxFreeDisplay = [math]::Round($data.maxFree / 1TB, 2)
+                                $avgFreeDisplay = [math]::Round($data.avgFree / 1TB, 2)
+                            }
+                            'GB' {
+                                $minFreeDisplay = [math]::Round($data.minFree / 1GB, 2)
+                                $maxFreeDisplay = [math]::Round($data.maxFree / 1GB, 2)
+                                $avgFreeDisplay = [math]::Round($data.avgFree / 1GB, 2)
+                            }
+                            'MB' {
+                                $minFreeDisplay = [math]::Round($data.minFree / 1MB, 2)
+                                $maxFreeDisplay = [math]::Round($data.maxFree / 1MB, 2)
+                                $avgFreeDisplay = [math]::Round($data.avgFree / 1MB, 2)
+                            }
+                            'KB' {
+                                $minFreeDisplay = [math]::Round($data.minFree / 1KB, 2)
+                                $maxFreeDisplay = [math]::Round($data.maxFree / 1KB, 2)
+                                $avgFreeDisplay = [math]::Round($data.avgFree / 1KB, 2)
+                            }
+                            default {
+                                # If unit is not recognized, skip conversion
+                                $minFreeDisplay = $data.minFree
+                                $maxFreeDisplay = $data.maxFree
+                                $avgFreeDisplay = $data.avgFree
+                            }
+                        }
+
+                        # Create a new PSCustomObject with existing and new properties
+                        $newData = [PSCustomObject]@{
+                            deviceName              = $data.deviceName
+                            disk                    = $data.disk
+                            diskId                  = $data.diskId
+                            pollTimeUtc             = $data.pollTimeUtc
+                            timeFromLastPollSeconds = $data.timeFromLastPollSeconds
+                            size                    = $data.size
+                            minFree                 = $data.minFree
+                            maxFree                 = $data.maxFree
+                            avgFree                 = $data.avgFree
+                            id                      = $data.id
+                            percentFree             = $percentFree
+                            sizeDisplay             = "{0:N2} {1}" -f $sizeValue, $unit
+                            minFreeDisplay          = "{0:N2} {1}" -f $minFreeDisplay, $unit
+                            maxFreeDisplay          = "{0:N2} {1}" -f $maxFreeDisplay, $unit
+                            avgFreeDisplay          = "{0:N2} {1}" -f $avgFreeDisplay, $unit
+                        }
+
+                        # Process series data if available
+                        if ($data.series) {
+                            $newSeries = @()
+                            foreach ($series in $data.series) {
+                                # Ensure 'series' properties are numeric
+                                $isSeriesValid = $true
+                                foreach ($prop in @('avgFree', 'minFree', 'maxFree')) {
+                                    if (-not ($series.$prop -is [double] -or $series.$prop -is [int] -or $series.$prop -is [long])) {
+                                        Write-Warning "DeviceID: $id series has non-numeric '$prop': $($series.$prop). Skipping this series object."
+                                        $isSeriesValid = $false
+                                        break
+                                    }
+                                }
+                                if (-not $isSeriesValid) { continue }
+
+                                # Convert series values based on determined unit
+                                $seriesAvgFree = switch ($unit) {
+                                    'TB' { [math]::Round($series.avgFree / 1TB, 2) }
+                                    'GB' { [math]::Round($series.avgFree / 1GB, 2) }
+                                    'MB' { [math]::Round($series.avgFree / 1MB, 2) }
+                                    'KB' { [math]::Round($series.avgFree / 1KB, 2) }
+                                }
+                                $seriesMinFree = switch ($unit) {
+                                    'TB' { [math]::Round($series.minFree / 1TB, 2) }
+                                    'GB' { [math]::Round($series.minFree / 1GB, 2) }
+                                    'MB' { [math]::Round($series.minFree / 1MB, 2) }
+                                    'KB' { [math]::Round($series.minFree / 1KB, 2) }
+                                }
+                                $seriesMaxFree = switch ($unit) {
+                                    'TB' { [math]::Round($series.maxFree / 1TB, 2) }
+                                    'GB' { [math]::Round($series.maxFree / 1GB, 2) }
+                                    'MB' { [math]::Round($series.maxFree / 1MB, 2) }
+                                    'KB' { [math]::Round($series.maxFree / 1KB, 2) }
+                                }
+
+                                # Create a new PSCustomObject for the series
+                                $newSeriesObj = [PSCustomObject]@{
+                                    pollTimeUtc    = $series.pollTimeUtc
+                                    avgFree        = $series.avgFree
+                                    minFree        = $series.minFree
+                                    maxFree        = $series.maxFree
+                                    avgFreeDisplay = "{0:N2} {1}" -f $seriesAvgFree, $unit
+                                    minFreeDisplay = "{0:N2} {1}" -f $seriesMinFree, $unit
+                                    maxFreeDisplay = "{0:N2} {1}" -f $seriesMaxFree, $unit
+                                }
+                                $newSeries += $newSeriesObj
+                            }
+                            $newData | Add-Member -NotePropertyName 'series' -NotePropertyValue $newSeries -Force
+                        }
+
+                        # Add the new data object to the final output
+                        $finaloutput += $newData
+                        Write-Debug "Processed DeviceID: $id with disk: $($newData.disk)"
+                    }
+
                     $currentPageId = $result.paging.nextPageId
                     $pageCount++
-    
+
                     # Page progress for the current device with Id 2
                     if ($result.paging.totalPages) {
-                        $percentCompletePages = ($pageCount / $result.paging.totalPages) * 100
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
-                    }
-                    else {
+                        $percentCompletePages = [Math]::Round(($pageCount / $result.paging.totalPages) * 100, 2)
+                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
+                        Write-Debug "Processing Page: $pageCount of $($result.paging.totalPages)"
+                    } else {
                         # Indicate ongoing progress if total pages aren't known
-                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
+                        Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
+                        Write-Debug "Processing Page: $pageCount (Total Pages Unknown)"
                     }
-    
+
                 }
                 catch {
                     Write-Error "Error fetching device report ${endUri} for DeviceID ${id}: $_"
+                    # Exit the pagination loop on error
                     $currentPageId = $null
                 }
-    
+
             } while ($currentPageId)
-    
+
             # Clear the page progress for the current device after all pages are processed
             Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Completed" -Completed
+            Write-Debug "Completed DeviceID: $id"
         }
-    
+
         # Clear the main device progress after all devices are processed
         Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "All devices processed" -Completed
-    }
-    
+        Write-Debug "All devices have been processed."
 
-    end {
+        # Return the collected data
+        Write-Debug "Total Data Collected: $($finaloutput.Count)"
         return $finaloutput
     }
 }
+
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBh14/1TxPim2Qu
-# UAHjgTZjPkzC3WThOVnoWXwqm9PX3aCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDiX8KhuC2Htodz
+# YiFBRo1msT5TyHmPXbLvjV6VspkaTaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -296,17 +483,17 @@ function Get-WUGDeviceReportDiskSpaceFree {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgO5W4HYqS1nTvu+I7M1H8ul/H0sNaLrtXhV35RtyiRWYw
-# DQYJKoZIhvcNAQEBBQAEggIAaZB8su0+nk8Cv6YLGMkSR+A0CuQZdwkwwUVQ8X7s
-# dPt5pEX6ErnUb6Uo8xUE1KVJ+JOqEO/8sg8t9ovUT8WfrjQkOry2hk/NrMiRBpZb
-# H127yCFkmY2NaRGewa+1O/lRz/3B/Z0E0ZMW/LMlxpqbKebBownhMdHr0pG8iPqt
-# tJqYKsz+el1nQzu7YHBUK7srxt3pg4U1TEAE/hW02zkwkcVPgA+8hIfl2PXtdtGs
-# KXaztrFVi1FKMMUf3HL2bTVLLMDLUIe9khFWqn7AsPkNbWxg/mo4YAjYi75M67X2
-# LMu9Zsy3Ff0NP8+5CTHyi8EiFTDwfJAJqaqUCM2uXVx3gN+EmxtHqEHmod0gpkuP
-# HLClh4/7nM5O5Qv8ximJX9Ay1H9CkIIxIUKHODUToY6Xnekt1gfIzmNgQJ4Gu/1D
-# 3MZbNU1qwcquG0pYKXTjRIyxOfhgfFEDE8Jn2l+Su3VaSoWVb5QNXihlb8BmYC8k
-# FZCHPw08kDQA/0OtultiDcXEo7VH9KAvrBl+1FbKrDJzkA14KeIwQFGkzcxHeZqw
-# GG+Edjg17sUmuB6l6NyMTAdrq6x8CLcZn0u5hU2+EMZGfIgJt4l5D2QS1fkmjZwZ
-# D+iJGKCxUqDFA8bYcKXNrLSixda2jvfXt2zVyZdK66ZSBuzw3q8y/lxohBaT20I2
-# fB8=
+# BgkqhkiG9w0BCQQxIgQgHQ4ju5mcdMvGRfGNHsX3vfmtKTekVf4LVJgQiJuntTow
+# DQYJKoZIhvcNAQEBBQAEggIAWLFvTsjLPwIx+SCLZJZJl+HiE7tqit3/uzMO4o+h
+# IFPaAyWm0QSnIfdqsYpGyDQTvPnOs8UNvtA8f7U+KhYL+hWnR2g9+kEcQidaURMZ
+# 7RUTJipG5q8CBnZiNvveS/k7bXa+MBKaqQ8fOZal9Vj/UbQdgDvMJ+U+bZULDd2M
+# g50VI/QX86b+JkOs2PzM1N8wqLLvddpSje6W6QyaeoJV9bAeHW8YAmxryqes3k9g
+# HCury5qB+fLLHar2b/G+Z8NXDndgMkMltcc7TJziLjKg0EGF1F1UdjZz4t23fq34
+# 4B8VtnlPxRqC4r3pq1rTiT3Jx+hB5dFY+tr2A/Zo9zHDfxrjmMgrzjvnE5i7eRFp
+# fILh3S9ohS6YCXGHOecy0iit5DKQmp5GviBOj5X26DPDTWlL7XZXMt0JktpVs5aq
+# oQTm6lTkf+4KNvJILMpbrXzaONavrqqjmphuxgL+Tona2Ks4pEUvtZ3LuRAcHIr0
+# XC7IHtpyROTSRgZOdnMDlj4s8Z079QFG/CSMugEWGRy57QKD6OgSsV2WV5/jrlFm
+# lE2+oq/ZqzLXlxFN9A7Ojg2a0PUSw0e/ujCB8uSgrL5jnndZreprNVp1vee1N2sC
+# 5tvx+sxdJ9mwWAl3H/RgUzC5LMwtvk2OzVkEv4IsORmYug88WKPUTXNjGPPse4HP
+# cbc=
 # SIG # End signature block

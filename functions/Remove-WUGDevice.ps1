@@ -32,10 +32,6 @@ function Remove-WUGDevice {
     )
 
     begin {
-        # Global variables error checking
-        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-        if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error -Message "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
 
         # Construct the API endpoint URI
         $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/$DeviceId"
@@ -68,8 +64,8 @@ function Remove-WUGDevice {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSKTnFcSshd4xU
-# cbHrUAlnSXhW4ev9NKApm5wUAu9TuaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdOoNZTcjY50cF
+# xJk/u9fgsYAxIA8J72iI/gimMiwayqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -170,17 +166,17 @@ function Remove-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgnuZxSNq8NmOJQVDTct0W0Tk9gLL+N+f9aGiDoth9vd4w
-# DQYJKoZIhvcNAQEBBQAEggIAdqbcrVa+byZj3Gg5hL8c5+oc9nKYeOk8yN9TK9jg
-# cbn5iOu6LAR2Kl/Ic422Ll0afgSuvafg29jxHrdr0vhlxCF14wqsl5G989PuOMEv
-# m38WpDGyNWa9ENChczFqvHt6FiFOPvtB5ZGm4UF6vi4qvJk4tlbF5kLvKUmEBt2W
-# uxy3XWLfmSi0NDqjLEFyk93sbpoKh//SFmUsfRGVBOt53vmGlXUpWzGbVphgYRnl
-# rAfC48aLItziTRCnlc9ouLmPXfBcyjncSB/iKcxo4IKfLsgt7HnBCiQsYrPxLB2I
-# 4rCKaHrxBsErCUjHoOvj+REZqXIRuzMuMmRxG4vInbRw8ROnIHowHbihX9GNyaBF
-# Ugb6IoLmhyWUyWSVMFb8mUbo8ULF8yQATPd14XOHtsSEMdwbLYGrTxWsH3kPAoC5
-# dtCHfugUSUpFFDAPGcVoLjIZiyIdxMpeUZWKfEKV2uCtWufq8tFNUvXwWOUSkBKz
-# TKoeox8g0+Lc0FkfVPjjzkFkqdH2mpulj40+mneHLI0NtoeXMwgp8UP+Ox26YKpu
-# 3cuw7RmtNW+8Er7dHvX7MBwJPddwyjg0bMnVNBnRarM7HaF5bVW9eaciEcCpp5G8
-# fCokbTQT0U+RXZwMUL95rjZTHLnhIeACg6CHBobHqeCnKP7cq8xEAyXBpdWTvpFg
-# Uo4=
+# BgkqhkiG9w0BCQQxIgQg+WdWNVhS1rwPBt9q1ej2AEBdyBlEeRi01M5tDE91m/Ew
+# DQYJKoZIhvcNAQEBBQAEggIAeKF9zJDcF/vSeX2V8V/fileAMtcqQozMwk3Iwwx+
+# 8L3m75QrrbBu1jiO0frrZUdKvA5SmsbIOcn0Htm3bOmfV9yJDnJCkgppNWeu3iMr
+# oKk/UdBvCXPB//tWRZNAiGdgPog496xjGYQHE0FyYkG9VRYrKQ8/XC/oMLenSTuB
+# JMJZJMK0g0VaydwRdbltVmbKpzYHoWw2bupeA4rPl5HDawzNVNu8/FaGXgiPSV7e
+# dStzj/T70PLZJY07YgQWre+YGiBtnlevYokYNwEO+HsxkWNz+TllVQHLAiMoLDwF
+# bC41fnYC2trrj0r/o3Q62bmVo39B4VB5Id2oGIBcQrqg4mG6yyj74Bv6ZmG/uAs6
+# AduExrLci/z3bzTtirKuyfVrzmgrfhDVFh1wFsI2WmZWLr5GRyYKX2ekrCQZKtUm
+# qW11FM6S0oWFrNQTBlvRsF0T9smSaapEnQO1XuKggRZG1K7CTA7+DTjXShPf1R4Z
+# wuafS+AdBgKZnlbAhc39oOiIHLLMYenm0mRB1Ukrhdm0saVpDJAOMT2y6BaJSFdo
+# /8R7nurep/tgaTlSliw6XpJZvZZl0Dco0NFryR4QWgTbge8QMwrsYEEbBQQKZWBC
+# Dry5mJDBQVJ4JYoSeGV9NDbDXQptJx+I/6Z0kpSs7oy3UZ3Z/nK1tD9KdD6FUyqm
+# G7c=
 # SIG # End signature block

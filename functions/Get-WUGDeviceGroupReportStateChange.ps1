@@ -73,8 +73,9 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed device gr
 #>
 
 function Get-WUGDeviceGroupReportStateChange {
+    [CmdletBinding()]
     param (
-        [array]$GroupId,
+        [int[]]$GroupId,
         [ValidateSet("true", "false")][string]$ReturnHierarchy,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
@@ -91,9 +92,6 @@ function Get-WUGDeviceGroupReportStateChange {
     )
 
     begin {
-        if (-not $global:WUGBearerHeaders) { Write-Error "Authorization header not set, running Connect-WUGServer"; return }
-        if ((Get-Date) -ge $global:expiry) { Write-Error "Token expired, running Connect-WUGServer"; return }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; return }
         #Set static variables
         $finaloutput = @()
         $reportType = "state-change"
@@ -162,8 +160,8 @@ function Get-WUGDeviceGroupReportStateChange {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAiD0O5bv6HJUbR
-# yc01gbTumeVbR4f/5tqnQ8vKuoQ3c6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGOAxGP3b2DmFj
+# yX63u1WSAbxSjWsmEDMc2I7pskyKp6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -264,17 +262,17 @@ function Get-WUGDeviceGroupReportStateChange {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg1iVXT7gVax7vrJkWoBMyHISk9HVnq01eMSGayVIlt7Aw
-# DQYJKoZIhvcNAQEBBQAEggIAK40dCCBD5nFsLKnVtKOfF3DoeA/wPqWFECQZOw2F
-# wgkiWz+O18JeeuLvHlhsdbDWcjFYZNvFSdOHwuKnzeBKUNoGJDzjk4WLhfOZh2UA
-# tcFbVvMbdDw1jyZ6vk2WmQ9QulFEbiaK4aUDuCt0/Xt1WDxsgh3RBhVe5cDidq2/
-# nfhbydlfhtPXJzv/Tvm3nJJocnvM0xhliO/p/cLTc8+CYVfiN5Z92fclloTlxr7H
-# EAWLaSUOVzSpyFRad868y4SMjJqgTR+O3sHUREOs5N8RHLM2IpZaCyNeDB3PV+78
-# nII+IcUXKXHlEZ/r6nouDtXyzxdfTvj+6GO6FvpWApE24WLheD+8ISrg7EOi+jP2
-# TG+jjFL9jmjPM+46NtsOQQBzRPM8RZ+tWpXCHQ5EiyFaQU7o4C+0k/tB2k1G0J9s
-# b3Knb8xqQLwgdUYJz5e8wQbUpn44+ao/H7N+YuBhYL4dNMPR0H6OIXEt0CC3QVcd
-# mX6FOgHsWA1Q9kbiwUZMjlPaYSpXVRu/mr0Oc/2bkweBAWGY3zRUIUIgbWbWjrzp
-# U11vMyzwJl/ym+6C3Zz32nGrhjAHw5qaeCzVEypZwK9wscgl/keTkJ4MuAfQVB8T
-# D+MHR2jrzTQWrVynBwsz+OBPTFWfPOtltfO9Jfn50jwtI+Xytz0CdrfJtokSOxs+
-# R/Y=
+# BgkqhkiG9w0BCQQxIgQgRf7Umrvfa9wUnCvywrB7eyZDBIP16rphD1nF49N5OEMw
+# DQYJKoZIhvcNAQEBBQAEggIAnri1WamfYALiZR2crKaSHQ8AKU64yF8LcNONxgfz
+# 4b+RJG/V1yDWsLZ/Th/5KCnjpPkZBQwo3hndjKgFJG63xSNjuxfsANZ862Lfzp+x
+# tABm4mRjyYxRFfQVjwf8Sg4Ojre3UcXMrfPWx7kID4omLAiFHsKVDUzz9SbVnY9E
+# N1fXTX1IEodFO8QnIKCBVt/4HWWEF2/TSHuK4yzeTYX58vj4RcBgUI/4PNee81m4
+# y/S3yH79GXyVy5Wgw5qsX+6wDDjtOPRWT31sQZgjNUZrTpXwRHxruysxIRHPD+j5
+# waaija+wJwvPzVkZd2vWVy3bgg+CInS7MFwyvM6K065hTM/j6JQsUb6W8Y30fmhT
+# 0oVTq9c6ACGJskKtq1jUuNmq71Ie7/rTZUNNykaKCyB/KKlMSTurKirdph0Z1M3a
+# BLmGYlJ1uj80iZwtI62QfDn/hwQQOXSTIa+/nMmVSedKHLSEF+/tuJh6AASm5Kl6
+# b+kJxKJ5hee0UWyJTMPZxZIEO7uZpnqNcWMBFuaDzOIf06D6009unslxLNv0fAYH
+# uSfuZ0Dh0B+oIaYRknzHVoxKyvfrVdTtJKhyJ/XtnrNoKJBjsVjDPQpyVRQe/oDJ
+# aZfP+3UJgu9PBG3rASZgVajgZy6OGzkc/4f0COjKWtkix/aPkESvEfoYRhtHY9BK
+# 3yw=
 # SIG # End signature block

@@ -33,18 +33,12 @@ Last modified: Let's see your name here 2024-06-15
 function Remove-WUGDevices {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        [array]$DeviceID,
-
-        [Parameter()]
-        [bool]$DeleteDiscoveredDevices = $false
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
+        [Parameter()][bool]$DeleteDiscoveredDevices = $false
     )
 
     begin {
-        # Global variables error checking
-        if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-        if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; }
-        if (-not $global:WhatsUpServerBaseURI) { Write-Error -Message "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
+        #nothing?
     }
 
     process {
@@ -59,8 +53,8 @@ function Remove-WUGDevices {
             $devicesProcessed += $devices.Count
 
             $body = @{
-                operation = "delete"
-                devices = $devices
+                operation                 = "delete"
+                devices                   = $devices
                 removeDiscoveredResources = $DeleteDiscoveredDevices
             }
 
@@ -71,7 +65,8 @@ function Remove-WUGDevices {
                 if ($result.data.success) {
                     $successes += $devices.Count
                 }
-            } catch {
+            }
+            catch {
                 Write-Error "Error processing devices: $_"
             }
 
@@ -83,8 +78,8 @@ function Remove-WUGDevices {
     end {
         $result = @{
             successfulOperations = $successes
-            totalDevices = $totalDevices
-            success = ($successes -eq $totalDevices)
+            totalDevices         = $totalDevices
+            success              = ($successes -eq $totalDevices)
         }
 
         return $result
@@ -94,8 +89,8 @@ function Remove-WUGDevices {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfWw+mz90kIIWa
-# zQOOdQMpep7Pl0GamPjlISIzdkFBrKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0Zf7fsxGnlBe4
+# Oh6eIJiSja5UeZXdR0Ta7QrUKkLLWaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -196,17 +191,17 @@ function Remove-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgMfmRyQV5u39zJ1WHlVxIdbRFEmJH5CgxqQATvqLIRd8w
-# DQYJKoZIhvcNAQEBBQAEggIADc2xieOh8/3udy0KBY88kxZDJ3KVz5nfnD5TmAvH
-# 8ya3hOi2aH8jXCRhqRH4y6bNM3y8B3lmvcPDbfAqoE1s8otzDPcpKHFMUhcawDyB
-# qS3wycFJcVUkErvq/aTLqJ+ht9ucKUA2MRDmT/yxoDfFHrBFHjO98uuIlReAkc20
-# 5V2K7mYQrGQjh7tL1cd6AG+/OZ9CTs6WcVDYNx197pnC6RbqApaH/PU4cTaIOYoX
-# NPlFKExSZWAxSqIYA/akgvOFOLUDA013bWS/6p6rh9Mn9uECAgaFWfuysCVdeieH
-# f0mymT9fsrF0KRdZHWZuYTQbM3B8/N4kGGRXSDtzw/HYrL5EHlSlOKU2yNaVKfgu
-# 5i8d9ra5scUha61fthZt0h+9mDQwb6UCb18O8IhRz75kBahzQuu/ip9T+8GS9H+g
-# Y0S5gLip1Lp7Xn3sfopnIIPgoXz9Y/6ML5lkpal2q7jcKZ/Aht/B8ML9Thojy8EY
-# Eqkjey6P35Og9pgYTfPXsQpADiPJXYbN7kY1B4BVBq6INjowjbIFis9XGSvSy+w+
-# mp+iU7GpEbsYR6n/f6NlTSS39kBumAmSH4dMIjXmpGXSnwTxXKnHRZe+7RFCijkr
-# Xfoa9kpI7KkRem3YgSipGuWSfiwXSky3/HIREzrqjLBWGX0SRrIpfvmEWVRbWEGe
-# +W0=
+# BgkqhkiG9w0BCQQxIgQg19MRyAoVdmd2cNQ14/x2ZIM+YXoqFTIh9OI+B2dHJVEw
+# DQYJKoZIhvcNAQEBBQAEggIAnIEyPkD5vCqiQp5a5CemjlbDvEq5R7rFl1XnS99M
+# IPI8/a1aCKvW10uXaMZyjOyxSd3p1rI5SVXr7f7TDkO0yEMrVUHMWUusNGSOlnqh
+# xgU8z+/FYb+mgmjRgltzApUdOmh+jiqfj8TnTTDvy9IIuzM8BeucUHJjhtd1b0tm
+# bLPL8WW8tgETZbbnOkysQkaAwd1WkfEU+d5hXxMLIJDlLPR405/b1NlwEtW4v1f1
+# hPXzT7BbZLSxER1VC2kJHnsL53lktuGNbleYRP1XQkU4h7DT4zo/CbySNo/t9esH
+# 8jpQ1t3ZAPpzOvtqaLq73RpQt9kEbV2bkplpXUzZf1g9LI42R62B+rexRr/YXlo8
+# ktE39+u5RYnNQ2kE1wHfIVeoS/NNnmp5iiExm4zs94oW5ENGkeFLJZwzis3VikXT
+# T67xrOhbX3oCceeFQJA0To7Fzs+syw0rlryM3SQ3VSUainr11Jwl5qcW3PC0tomb
+# 2xT0uR5cKToGxfLL9WOtVeWj9i4sZM6wCLdtJ6tKC1GnGW6/Ypylnz9TUJT3yoIL
+# q9no03YnVit+z944zIeLWt8GkzICevh7wDd6XFfdKeJdcaAMnXt0qU/KP353rHZc
+# i3jiuAjjcyRk8OkmSqkiI8GBYHLltobXTpYIwUNO+Ce+9lZ7kOdw6XFeYQhuQFrJ
+# O7g=
 # SIG # End signature block

@@ -5,8 +5,8 @@ Updates the maintenance mode settings for one or more devices in WhatsUp Gold.
 .DESCRIPTION
 The Set-WUGDeviceMaintenance function allows you to update the maintenance mode settings for one or more devices in WhatsUp Gold. You can enable or disable maintenance mode for the specified devices, and set a reason and/or an end time for the maintenance period. You can also specify a time interval for the maintenance period using the -TimeInterval parameter.
 
-.PARAMETER DeviceID
-Specifies the ID or IDs of the device or devices for which to update maintenance mode. Multiple DeviceIDs can be specified by separating them with commas.
+.PARAMETER DeviceId
+Specifies the ID or IDs of the device or devices for which to update maintenance mode. Multiple DeviceIDs can be specified by separating them with commas or by passing them through the pipeline.
 
 .PARAMETER Enabled
 Specifies whether to enable or disable maintenance mode for the specified devices.
@@ -15,146 +15,173 @@ Specifies whether to enable or disable maintenance mode for the specified device
 Specifies the reason for the maintenance period.
 
 .PARAMETER EndUTC
-Specifies the end time of the maintenance period in UTC format (e.g. "2022-02-28T18:30:00Z").
+Specifies the end time of the maintenance period in UTC format (e.g., "2024-09-21T13:57:40Z").
 
 .PARAMETER TimeInterval
 Specifies the duration of the maintenance period as a time interval. The time interval should be in the format "Xm|Xminutes|Xh|Xhours|Xd|Xdays" where X is an integer value representing the duration.
 
 .EXAMPLE
-Set-WUGDeviceMaintenance -DeviceID "12345" -Enabled $true -TimeInterval "2h"
-Enables maintenance mode for the device with ID "12345" for a period of 2 hours.
+# Enable maintenance mode for devices with IDs "2355" and "2367" for a period of 2 hours.
+"2355","2367" | Set-WUGDeviceMaintenance -Enabled $true -TimeInterval "2h" -Reason "Scheduled Maintenance"
 
 .EXAMPLE
-Set-WUGDeviceMaintenance -DeviceID "12345,54321" -Enabled $false -Reason "Upgrading firmware"
-Disables maintenance mode for the devices with IDs "12345" and "54321" and sets the reason for the maintenance period to "Upgrading firmware".
+# Disable maintenance mode for devices with IDs "2355" and "2367" with a reason.
+$deviceIds = @("2355", "2367")
+Set-WUGDeviceMaintenance -DeviceId $deviceIds -Enabled $false -Reason "Maintenance Completed"
+
+.EXAMPLE
+# Enable maintenance mode for devices via pipeline with time interval.
+$devices = Get-WUGDevices -View 'overview'
+$devices | Where-Object { $_.name -cmatch 'dish' } | Select-Object -ExpandProperty id | Set-WUGDeviceMaintenance -Enabled $true -TimeInterval "2h" -Reason "Scheduled Maintenance"
 
 .NOTES
-- The function requires a connection to a WhatsUp Gold server with valid authorization token. You can establish the connection using the Connect-WUGServer function.
-- The function processes the device updates in batches to avoid exceeding the maximum limit.
+- The function requires a connection to a WhatsUp Gold server with a valid authorization token. You can establish the connection using the Connect-WUGServer function.
+- The function processes device updates in batches to avoid exceeding the maximum limit.
 - The function returns a hashtable containing the number of successful and failed updates.
 
 Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: Let's see your name here YYYY-MM-DD
+Last modified: 2024-09-21
 #>
 
 function Set-WUGDeviceMaintenance {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][array]$DeviceID,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [Parameter(Mandatory)][bool]$Enabled,
         [Parameter()][string]$Reason,
         [Parameter()][string]$EndUTC,
-        [Parameter()][ValidatePattern("^(?<Value>\d+)\s*(?<Unit>m|minutes|h|hours|d|days|s|seconds)$")][string]$TimeInterval
+        [Parameter()][ValidatePattern("^(?<Value>\d+)\s*(?<Unit>m|minutes|h|hours|d|days)$")][string]$TimeInterval
     )
-    begin{
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
 
-    #Input validation
-    if (!$DeviceID) {
-        $DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas"
-        if ([string]::IsNullOrWhiteSpace($DeviceID)) {
-            Write-Error "You must specify the DeviceID."
-            return
-        }
-        $DeviceID = $DeviceID.Split(",")
+    begin {
+        Write-Debug "Function: Set-WUGDeviceMaintenance -- DeviceId:${DeviceId} Enabled:${Enabled} Reason:${Reason} Limit:${EndUTC} TimeInterval:${TimeInterval}"
+        # Initialize collection for DeviceIds
+        $collectedDeviceIds = @()
+        $successes = 0
+        $errors = 0
     }
 
-    if ($Enabled) {
-        if ($TimeInterval) {
-            $regex = "^(?<Value>\d+)\s*(?<Unit>m|minutes|h|hours|d|days)$|^(?<Value>\d+)(?<Unit>m|minutes|h|hours|d|days)$"
-            $match = [regex]::Match($TimeInterval, $regex)
-            if (-not $match.Success) {
-                Write-Error "Invalid value for -TimeInterval. Use format 'Xm|Xminutes|Xh|Xhours|Xd|Xdays'."
-                return
+    process {
+        # Collect DeviceIds from pipeline
+        foreach ($id in $DeviceId) { $collectedDeviceIds += $id }
+    }
+
+    end {
+        # Total number of devices to process
+        $totalDevices = $collectedDeviceIds.Count
+        if ($totalDevices -eq 0) {
+            Write-Warning "No valid DeviceIDs provided."
+            return
+        }
+
+        # Input validation and processing based on Enabled flag
+        if ($Enabled) {
+            if ($TimeInterval) {
+                # Validate and parse TimeInterval
+                $regex = "^(?<Value>\d+)\s*(?<Unit>m|minutes|h|hours|d|days)$"
+                $match = [regex]::Match($TimeInterval, $regex)
+                if (-not $match.Success) {
+                    Write-Error "Invalid value for -TimeInterval. Use format 'Xm|Xminutes|Xh|Xhours|Xd|Xdays'."
+                    throw "Invalid TimeInterval format."
+                }
+                $value = [int]$match.Groups["Value"].Value
+                $unit = $match.Groups["Unit"].Value.ToLower()
+                switch ($unit) {
+                    "m" { $timeSpan = New-TimeSpan -Minutes $value }
+                    "minutes" { $timeSpan = New-TimeSpan -Minutes $value }
+                    "h" { $timeSpan = New-TimeSpan -Hours $value }
+                    "hours" { $timeSpan = New-TimeSpan -Hours $value }
+                    "d" { $timeSpan = New-TimeSpan -Days $value }
+                    "days" { $timeSpan = New-TimeSpan -Days $value }
+                    default { Write-Error "Unsupported time unit: $unit"; throw "Unsupported Time Unit." }
+                }
+                $endTime = (Get-Date).Add($timeSpan)
+                $EndUTC = $endTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             }
-            $value = [int]$match.Groups["Value"].Value
-            $unit = $match.Groups["Unit"].Value
-            switch ($unit) {
-                "m" { $timeSpan = New-TimeSpan -Minutes $value }
-                "minutes" { $timeSpan = New-TimeSpan -Minutes $value }
-                "h" { $timeSpan = New-TimeSpan -Hours $value }
-                "hours" { $timeSpan = New-TimeSpan -Hours $value }
-                "d" { $timeSpan = New-TimeSpan -Days $value }
-                "days" { $timeSpan = New-TimeSpan -Days $value }
-            }         
-            $endTime = (Get-Date).Add($timeSpan)
-            $endUTC = $endTime.ToUniversalTime().ToString("yyyy'-'MM'-'dd'T'HH':'mm':'ss'Z'")
+            elseif ($EndUTC) {
+                # Validate EndUTC format
+                if (-not ($EndUTC -match "^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")) {
+                    Write-Error "Invalid format for -EndUTC. Use 'yyyy-MM-ddTHH:mm:ssZ'."
+                    throw "Invalid EndUTC format."
+                }
+            }
+            else {
+                # Neither TimeInterval nor EndUTC provided; endUtc is omitted
+                $EndUTC = $null
+            }
         }
         else {
-            Write-Error "You must specify the -TimeInterval parameter."
-            return
+            # When disabling, ignore TimeInterval and EndUTC
+            $EndUTC = $null
         }
-    }
-    #End input validation
-    $totalDevices = $DeviceID.Count
-    $batchSize = 499
 
-    if ($totalDevices -le $batchSize) {
-        $batchSize = $totalDevices
-    }
+        # Determine batch size (max 499)
+        $batchSize = 499
+        if ($totalDevices -le $batchSize) { $batchSize = $totalDevices }
 
-    
-    $devicesProcessed = 0
-    $successes = 0
-    $errors = 0
-    $percentComplete = 0
-}
-process{
-    while ($percentComplete -ne 100) {
-        $batch = $DeviceID[$devicesProcessed..($devicesProcessed + $batchSize - 1)]
-    
-        $Progress = Write-Progress -Activity "Updating device maintenance mode to ${Enabled} for ${totalDevices} devices." -Status "Progress: $percentComplete% ($devicesProcessed/$totalDevices)" -PercentComplete $percentComplete
-    
-        $body = @{
-            devices = $batch
-            enabled = $Enabled
-            endUtc  = $EndUTC
-            reason  = $Reason
-        } | ConvertTo-Json
-        Write-Debug -Message "${body}"
-    
-        try {
-            $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/maintenance" -method "PATCH" -body $body
-            $successes += $result.data.successfulOperations
-            $errors += $result.data.resourcesWithErros.Count + $result.data.errors.Count
+        $devicesProcessed = 0
+        $percentComplete = 0
+
+        while ($devicesProcessed -lt $totalDevices) {
+            $remainingDevices = $totalDevices - $devicesProcessed
+            $currentBatchSize = [Math]::Min($batchSize, $remainingDevices)
+            $batch = $collectedDeviceIds[$devicesProcessed..($devicesProcessed + $currentBatchSize - 1)]
+
+            # Update progress
+            $percentComplete = [Math]::Round((($devicesProcessed + $currentBatchSize) / $totalDevices) * 100)
+            if ($percentComplete -gt 100) { $percentComplete = 100 }
+
+            Write-Progress -Activity "Updating device maintenance mode to $Enabled for $totalDevices devices." -Status "Progress: $percentComplete% ($($devicesProcessed + $currentBatchSize)/$totalDevices)"  -PercentComplete $percentComplete
+
+            # Construct API request body
+            $body = @{
+                devices = $batch
+                enabled = $Enabled
+            }
+
+            if ($Reason) { $body.reason = $Reason }
+            if ($EndUTC) { $body.endUtc = $EndUTC }
+
+            $bodyJson = $body | ConvertTo-Json -Depth 5
+            Write-Debug "API Request Body: $bodyJson"
+
+            try {
+                $result = Get-WUGAPIResponse -uri "$global:WhatsUpServerBaseURI/api/v1/devices/-/config/maintenance" ` -Method "PATCH" -Body $bodyJson 
+
+                if ($result.data.successfulOperations) { $successes += $result.data.successfulOperations }
+                if ($result.data.resourcesWithErrors) { $errors += $result.data.resourcesWithErrors.Count }
+                if ($result.data.errors) { $errors += $result.data.errors.Count }
+            }
+            catch {
+                Write-Error "Error updating maintenance mode for DeviceIDs ${batch}: $($_.Exception.Message)"
+                $errors += $currentBatchSize
+            }
+
+            $devicesProcessed += $currentBatchSize
         }
-        catch {
-            $errors += $batch.Count
+
+        # Final progress update
+        Write-Progress -Activity "Updating device maintenance mode" -Status "All devices processed" -Completed
+        Write-Debug "Set-WUGDeviceMaintenance function completed."
+
+        # Construct result hashtable
+        $resultData = @{
+            successfulOperations = $successes
+            resourcesNotAllowed  = $result.data.resourcesNotAllowed
+            resourcesWithErrors  = $result.data.resourcesWithErrors
+            errors               = $errors
+            success              = ($errors -eq 0)
         }
-    
-        $devicesProcessed += $batchSize
-        $percentComplete = [Math]::Round($devicesProcessed / $totalDevices * 100)
-        If ($percentComplete -gt 100) { $percentComplete = 100 }
-    }
-        
-    $resultData = @{
-        successfulOperations = $successes
-        resourcesNotAllowed  = @()
-        resourcesWithErrors  = @()
-        errors               = @()
-        success              = $true
-    }
-    
-    if ($errors -gt 0) {
-        $resultData.success = $false
-    }
-    
 
-    
+        Write-Output $resultData
+    }
 }
 
-end {
-Write-Output $resultData
-}
-}
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVJsS+595RirZG
-# BMJ5LUTOQQXbzxUUcRoy8WMGca7dfqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRkUll2rIU2NF7
+# wbew6VfYpcrvd04px06dqqTsvbYNyKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -255,17 +282,17 @@ Write-Output $resultData
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgZXOZFnLqyHQ5uKkLuOBx6yHlFnSgZHwrGIwv+o50uTww
-# DQYJKoZIhvcNAQEBBQAEggIACtBsBf7+DL/i0Di2SB0m5Re/3Y6vtpI1vAbPRCvw
-# HoWPymCXIXNIT0SlH4oGvtKoeFyIqaO7ENdSZGIV1K5E3E2sTBgxRky5XotSfCg1
-# mILkeI4WoPL6cwkTaqA0Rap9aBsV04B4PE6MJN8OySkQKZJHIQk2MU5fExMarAxm
-# 5jQNYgbf6PVg0/xL1sPFZ4RAX09rHC2UEjXKMfSusuTr31p1hR5AvsJ2WMHI/wIW
-# AuOAi6OBvVdg2+pD/LORVNKGSyYCQQUCbFnsp5wBzk0AeTcsALgHZrbT6+Hh2K54
-# 85J9Q76FCzfVm5yhvc1HmBB8RvNOkZwp2UGkeMnvCExfSdfSue1T6LLb/3jwtr79
-# Gstu86iEbotD6ERKphiVwqKeUG/5fhIrThZgINepKCJ+ZYwGhx+9uscFtjJbNhJH
-# O7ddjjsVP4WSxoZS2tJbL3lkNQQGYec0IlHjy+D2OBTssR2enUFgH8KqS45uXJYb
-# 5zpzZTvUslivRV5Si5Z0E4IJedimPV81tHPNhQwpoxwIoJYayvECMni4Xet7N6uE
-# YYlotKTOANKq33Fs4LjZkcoTD+j+gcTBCS8MvdL+6UuyuTMTQCW0B66WcdvppkFj
-# FAX4rLyzdY2JoXH+X+s6Uyml1ausj+1XerzsdU4oP3q3W5yj1Cyw6CPvpFaZCZ89
-# pAE=
+# BgkqhkiG9w0BCQQxIgQg1sVeX9xsd5tRekgZhAvMcJq4LS2Jc5QtsVALQBywqf4w
+# DQYJKoZIhvcNAQEBBQAEggIATn/UgDgOxAS/esbPnpZS4mrvpXQig4yG9TWhtoxP
+# 49GcVwYhnl4zkfGoKqOOGJtgowdrn3gsLet95d+9rS24t6Ci9SEHwtPu94os8PB1
+# Crs4dlCdlp+eAP7oakNL/jeFKHiJANEAbY8Ii6yTAmL1+AZ1u7hPgMmktGBtoujg
+# WYAotPDfVGnkOptaqpu9I6yMrZhVTObLorTowykitDsIil/nM/CUCRCl2/uRozHv
+# wCJS5UNLgmfAXy5egVmFI1f1BFSjLCM5Spuqk+5dwCx65z4Mnm17W4qCt59eaXn2
+# LsnJimSvodOIE5zmz7Ep9sC79ynz9jIkogainauAZvtIk11ZMfYCqvdMzKAmkOrM
+# f8xA1xxzUh7FKZGPuAsVf7wu48BC4BlFrc+STMlzUIEQOpUiA/4a8Zw3jpRCKo4N
+# Kds82svDR0yc6L3B28flh+jrwJtv7VvgLt+ypctECzipZ+LddPGGfjo7roFQcvJs
+# AmmvTzYgyVWOBCcoAlMSIG/TynjoEHNFY+Gfc4/0lIjJxwBZEaoTxbtAYWvymG1A
+# MvdxIYbT28E/cSR17h+dHYOvEonK9t2D9nl+TysE2OneBk7qFvAow4833avoKbMs
+# 3tD2AJoFyieztCOMwvObKiWrxT7xOIdJja1RwkjD8TJ/PAHgIPgu6ic2ZbX0ztRg
+# woo=
 # SIG # End signature block

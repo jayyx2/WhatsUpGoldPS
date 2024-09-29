@@ -51,11 +51,8 @@ function Add-WUGDevices {
         [switch]$UpdateActiveMonitors
     )
 
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
+        # Write debug information
+        Write-Debug "Starting Add-WUGDevices function DeviceTemplates:$deviceTemplates, ApplyL2:$ApplyL2,Update:$Update,UpdateInterfaceState:$UpdateInterfaceState,UpdateInterfaceNames:$UpdateInterfaceNames,UpdateActiveMonitors:$UpdateActiveMonitors"
 
     #Unsure if these are needed or how to test them properly
     $options = @("all")
@@ -83,8 +80,8 @@ function Add-WUGDevices {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzf2MafhrAL7rC
-# jPoMWfABM9y+b2GtyOyq60PLIj4bqKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfl4QT6CdAiLbz
+# oyTDvao5l5arbASP2shYEhzWn32+4aCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -185,17 +182,17 @@ function Add-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgurSb3/DZ2LrkDwBQ/xcwpvyZPOTLLEie72KbHYj7ugAw
-# DQYJKoZIhvcNAQEBBQAEggIAX/Y1ReZuCggNNtze0nNIRzRdN+ZgzkajjiwyzWxR
-# BbSBRSTkqoT0ud01m2HqmI57D0G3iyhejypy7HgPdO8c7qUAkghrHNIKybr08oGE
-# rojfsFYUUEkyBrMqYuXakxfiUGZmkMgKbTppvCe7+uFH4PwGCTrMDyT73pH1bjcM
-# Kiml4OukvRJYZXQob/qqU0cRv9/dRFLxz4CtQMFhSIVLVVrndWZz1A6UWRxmF7aJ
-# ECasKyKmCsdmiL7MnLgSap2LwFOcv0Nmw0B3kHD08Tm/4jOZDrBhDvMwdp99yo+W
-# 3gjP97O9aaUicX3bCI6YxOrRo2+N3NnEX4WphPiVvrOc0xDrrRhWNNyLrPy88Xvc
-# KW3JTeIbcnYKnSohW90pHpI2AmWla+xpcUdL995iyESRclMpJ6J/hXtJosIH1Wbu
-# C3g5iatxzCtSHR7kIAhVHEfQsnNfCB1vJJNE/XXl1zEOpIgtcUbWRqk85dWFppC6
-# 4U1aI1jA7OwIgt0t/B/0z5cI53GULIR7K21z6rUbR8jiFQInEmqjWQOOzyyF8NJq
-# Ae8ReZ/BP0hlBZfg/HoyjOCPcVk/6PhwwJIqF7fPbMf1G6YPWv8UB+ZUcLzkKemI
-# wxjuv5ERxPjwseAZq9cFVy4sIIaijEnXPK/JAgQ93R6Tln4aAwuO5cgAtrByMm6b
-# yrw=
+# BgkqhkiG9w0BCQQxIgQgKMQVHNBwS7BHEcSnlDubgxXGBBM2QZOonLyzbmT8easw
+# DQYJKoZIhvcNAQEBBQAEggIAlZ7AHIHAntbs5jmFk4xkPFRsGYmi6Ww1LmQRiuwE
+# hOaaYp+bIUox3ih41ajafyZHnJqdj0tJJHXlnWWsqnS1ODDKaqj4QwKwplr8Lhzk
+# k5WD5aTzETK1dTmZOBG+OONo7nM5CCAfCocfb6wrNkpBIM143mrKd7maVLqcJqH+
+# OndIGattnz9o5htLd+9ex1A9n9m+Mi1zbFGUwG1Iw26KucMt+ekZlr5R0bIgmxsk
+# IcBfyul6lY2H1vSMCkgjGftYgEYVYpMl6jD8+/SCGzv01HCk2bE1HRNGAGjj9X+M
+# 00GcG/sQByOcqV6a2V/eWO6f9q3MzXGqpGCLR3mHijU2FMxrnLORfD0xO3Ls1GGF
+# U/foaVJXLAdCZLocjNH+dXGi8udJ9W1x0I59y5QpVkErW7GXU78ku3nQtvkOR4Sj
+# RVTA6DqUCvKqs47/lJnSmEwWjEE37VDYWOBnilfPEBvrT1ITbscx8ea/BMvPZFsc
+# iQcqvCaWwypbQ+jNSJJwGVeioCjRxNR7tc+RS/1/BpM5vTHOfniL0fhpGbmsGKLl
+# iLMlr2yviMipRM6DLFiTRm1E8FfoOIUZqJmQgZ5SoBzOBjPDtTGpU/YGsQszHtfw
+# 7L56+Y9VhPess1etedrUuutcByuPvRb/IrPqPmLZFimlXg1odLwl7Sjv1xrvAUKe
+# Yys=
 # SIG # End signature block

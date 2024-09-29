@@ -37,8 +37,9 @@ Author: Jason Alberino (jason@wug.ninja) 2023-03-24
 Last modified: 2024-03-15
 #>
 function Set-WUGDeviceProperties {
+    [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)] [array] $DeviceID,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [Parameter()] [string] $DisplayName,
         [Parameter()] [boolean] $isWireless,
         [Parameter()] [boolean] $collectWireless,
@@ -49,23 +50,6 @@ function Set-WUGDeviceProperties {
         [Parameter()] [string] $actionPolicyId
     )
     # TBD using call from Get-WUGDeviceTemplate or Get-WUGDeviceProperties
-    #Global variables error checking
-    if (-not $global:WUGBearerHeaders) { Write-Error -Message "Authorization header not set, running Connect-WUGServer"; Connect-WUGServer; }
-    if ((Get-Date) -ge $global:expiry) { Write-Error -Message "Token expired, running Connect-WUGServer"; Connect-WUGServer; } else { Request-WUGAuthToken }
-    if (-not $global:WhatsUpServerBaseURI) { Write-Error "Base URI not found. running Connect-WUGServer"; Connect-WUGServer; }
-    #End global variables error checking
-    #Input validation here
-    #Array validations
-    #actionPolicy
-    #DeviceID
-    if (!$DeviceID) { $DeviceID = Write-Error "You must specify the DeviceID."; $DeviceID = Read-Host "Enter a DeviceID or IDs, separated by commas"; $DeviceID = $DeviceID.Split(","); }
-    #String Validation
-    #DisplayName
-    #note
-    #snmpOid
-    #input validation to make sure this is a valid snmpOid or throw
-    #Boolean validations
-    #End input validation
     $finalresult = @()
     if ($DeviceID.Count -eq 1) {
         $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/$($DeviceID[0])/properties"
@@ -93,7 +77,8 @@ function Set-WUGDeviceProperties {
                 }
             }
             $body.actionpolicy = $actionPolicy
-        } else {
+        }
+        else {
             $actionPolicy = @{}
             $body.actionpolicy = $actionPolicy
         }
@@ -137,7 +122,8 @@ function Set-WUGDeviceProperties {
                     }
                 }
                 $body.actionpolicy = $actionPolicy
-            } else {
+            }
+            else {
                 $actionPolicy = @{}
                 $body.actionpolicy = $actionPolicy
             }
@@ -161,8 +147,8 @@ function Set-WUGDeviceProperties {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7zX6yZnA6Nqtb
-# XFDLXV0No7kpvPh2cp7fl7FDuDF3hKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSJi3vQLHwMJZ7
+# f0oaOSFVBx3WX0oDcCWRrFLbphd/ZqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -263,17 +249,17 @@ function Set-WUGDeviceProperties {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgOzGDO0Lx+DWEl/6fpCiceBGr6YO6fM5dRRdzBCqIWtQw
-# DQYJKoZIhvcNAQEBBQAEggIAa8gie1it5hcXu+tq3K5Mh3DRAiDB0QB6uOj8dDAD
-# 9JxSort9PSCkRl+C8fFKkLeII1WYqYbqNTkvBrN/sN+2VuRTN5NbS8UwG+KfpxX0
-# r8ck8Z2jIWI/UeqamKVH1sKltdZg3LLhfQMyLC/psbUniWwD8Yj93eZe0f4Pi4vH
-# 7eF6BaqheZYuVFVEtLPxofm4wr6iftN3UDXuD7WxS2zSlpIwOMquhRKKA1b2XKx3
-# Z7sVS1esUaaK3bW8QBzoqwQmGssRGZCkrRMPsR2fTKe/fO/lKc/G9bMnnWkwPxUH
-# lF9tBH0UXT5twzaEhQn/dDR5k9pYe+pEp5aILKoLgD5tTc/K077aeGxl+Ff0GHUY
-# mTvR8YMpNCxY5kvjc+hxGxdjdGZYB2bqOl2AzCEG2d4ye010LFcse3XmwgsvEUE/
-# 7+d/ClRXepbwN4SETMOEBcUPrlvMXGUGIsKOe15ab0kEWMnpjMWcGKIa97xwN+ZC
-# p3udKCb6GeG8Q8w49ScNls7DGLKzJYeQ/UrTWjRQdGMQ58Nw5e/S3KsGB3Z+Ljyq
-# f3osRVKuLCVVnvhY314InBAW31PfJJcJjEOQII+85qU468fdmjDTwHe9/2Pg6IhX
-# /XQoegjcJyzFDU1DVUtcvIM2wFxWXNbJKdPRk7DVteyy3T1xQ+RA9rk4BhfrXqnb
-# 2Ws=
+# BgkqhkiG9w0BCQQxIgQgBvy4dh9jR5301uH8YC/XJlXut7U5sWNxstz3QnWBMv4w
+# DQYJKoZIhvcNAQEBBQAEggIAQZ/UDIjusTdFUWv2vs6/wKq+r0vGHVVj+Upjpv70
+# GRHxrYExpPfeqKn+1KEk85QV+jCiwUQrtV8ZEFNI+7aSJn8+AWja9B12jY7CTCQA
+# Ba8lCxwgxpFSCVnCoIV7frOIGGlHLCs8OxR46Ytcbyd0XFk2VBWAuqC3XAyo+H1I
+# 0hemajIyNTh35+D32ISYbmMBnpQ/OBM2smbiG83t/xLYXCYmrGKNS5nBafOL2MC2
+# bD3JRc+fw7iQSMIW+6lLW3oz3wQeZrtzJeajdtaj04TldoDDf6Av7LZhYl9eMazg
+# as1P26PUjOiKb8Cnfs1rFpDJBzaKWJPt51zOLZR53VywkxTc6zesqE29XpIO7N1s
+# bnXquDPGOKX55qIcN6iVu3kfcu/ZC74sx8E1duJ1uxOKJj5cDCLzr+RaeT5yWj2p
+# XBNg/dT8qiKjQg2gFZm1UKSvwxfxVlhoEn8WfolTEhYkvjlTl8ww/CNE+nyNdTT/
+# yQLkfmX/ZWwW/1ItbhP/rCSn2d4MaoWzAQIkFnHAnHo6c8f790L2Y/t7lodPMlKO
+# WRX5OT5VvqcAaXA+nMK8S9IOZNAECDQOh37hvK3YHxDCdWgb5oDw1Ppma3YdCJYy
+# kgUVcewI+84oVlDFl5lJeVPTek2Hfd9g60zsVX3AI7sYJtb2nWC/16UjqwIp+mcn
+# MQg=
 # SIG # End signature block

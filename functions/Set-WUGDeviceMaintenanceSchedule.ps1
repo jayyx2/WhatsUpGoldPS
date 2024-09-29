@@ -124,7 +124,6 @@
           These are typically initialized by running the `Connect-WUGServer` function.
         - The `-Config` parameter expects an object with properties matching the schedule configuration. 
           Use the output from `Get-WUGDeviceMaintenanceSchedule` as a template for the configuration object.
-          
           Author: Jason Alberino (jason@wug.ninja) 2024-09-29
 
     .LINK

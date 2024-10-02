@@ -1,4 +1,8 @@
 # WhatsUpGoldPS Release History
+## 0.1.14 - 2024-10-02
+* Changed
+   * Try to fix problems with Set-WUGDeviceMaintenanceSchedule -EffectiveExpirationDate parameter
+
 ## 0.1.13 - 2024-09-28
 * Changed
    * Refactor many functions to accept value from pipeline, example: Get-WUGDevice | Get-WUGDeviceCPUReport

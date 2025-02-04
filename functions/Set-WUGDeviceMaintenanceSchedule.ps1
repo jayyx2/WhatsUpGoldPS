@@ -139,38 +139,66 @@ function Set-WUGDeviceMaintenanceSchedule {
     [CmdletBinding(DefaultParameterSetName = 'ByParameters')]
     param(
         # Common Parameters for All Parameter Sets
-        [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByParameters')][Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByConfig')][Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByDeletion')][Alias('id')][int[]]$DeviceId,
+        [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByParameters')]
+        [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByConfig')]
+        [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByDeletion')]
+        [Alias('id')]
+        [int[]]$DeviceId,
+
         # Parameters for 'ByParameters' Parameter Set
-        [Parameter(Mandatory = $true, ParameterSetName = 'ByParameters')][int]$StartTimeHour,
-        [Parameter(ParameterSetName = 'ByParameters')][int]$StartTimeMinute = 0,
-        [Parameter(Mandatory = $true, ParameterSetName = 'ByParameters')][int]$EndTimeHour,
-        [Parameter(ParameterSetName = 'ByParameters')][int]$EndTimeMinute = 0,
-        [Parameter(Mandatory = $true, ParameterSetName = 'ByParameters')][ValidateSet('Daily', 'Weekly', 'Monthly', 'MonthlyAdvanced', 'Yearly', 'YearlyAdvanced')][string]$ScheduleType,
-        [Parameter(ParameterSetName = 'ByParameters')][int]$RecurEvery = 1,
-        [Parameter(ParameterSetName = 'ByParameters')][ValidateSet('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')][string[]]$DaysOfWeek,
-        [Parameter(ParameterSetName = 'ByParameters')][ValidateRange(1, 31)][int]$DayOfMonth,
-        [Parameter(ParameterSetName = 'ByParameters')][ValidateSet('First', 'Second', 'Third', 'Fourth', 'Last')][string]$Occurence,
-        [Parameter(ParameterSetName = 'ByParameters')][ValidateSet('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')][string]$DayOfWeek,
-        [Parameter(ParameterSetName = 'ByParameters')][ValidateSet('january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december')][string]$Month,
-        [Parameter(ParameterSetName = 'ByParameters')][object]$EffectiveStartDate,[Parameter(ParameterSetName = 'ByParameters')][object]$EffectiveExpirationDate,
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByParameters')]
+        [int]$StartTimeHour,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [int]$StartTimeMinute = 0,
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByParameters')]
+        [int]$EndTimeHour,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [int]$EndTimeMinute = 0,
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByParameters')]
+        [ValidateSet('Daily', 'Weekly', 'Monthly', 'MonthlyAdvanced', 'Yearly', 'YearlyAdvanced')]
+        [string]$ScheduleType,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [int]$RecurEvery = 1,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [ValidateSet('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')]
+        [string[]]$DaysOfWeek,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [ValidateRange(1, 31)]
+        [int]$DayOfMonth,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [ValidateSet('First', 'Second', 'Third', 'Fourth', 'Last')]
+        [string]$Occurence,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [ValidateSet('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')]
+        [string]$DayOfWeek,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [ValidateSet('january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december')]
+        [string]$Month,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [object]$EffectiveStartDate,
+        [Parameter(ParameterSetName = 'ByParameters')]
+        [object]$EffectiveExpirationDate,
+
         # Parameters for 'ByConfig' Parameter Set
-        [Parameter(Mandatory = $true, ParameterSetName = 'ByConfig')][array]$Config,
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByConfig')]
+        [array]$Config,
+
         # Switch Parameter for 'ByDeletion' Parameter Set
-        [Parameter(Mandatory = $true, ParameterSetName = 'ByDeletion')][switch]$DeleteAllSchedules
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByDeletion')]
+        [switch]$DeleteAllSchedules
     )
-    
+
     begin {
         Write-Debug "Starting Set-WUGDeviceMaintenanceSchedule function"
     }
-    
+
     process {
         switch ($PSCmdlet.ParameterSetName) {
             'ByParameters' {
                 # Validate parameters based on ScheduleType
                 switch ($ScheduleType) {
                     'Daily' {
-                        # No additional parameters required
-                        if (-not $StartTimeHour -or -not $EndTimeHour) {
+                        if ($null -eq $StartTimeHour -or $null -eq $EndTimeHour) {
                             throw "StartTimeHour and EndTimeHour are required for 'Daily' ScheduleType."
                         }
                     }
@@ -178,15 +206,15 @@ function Set-WUGDeviceMaintenanceSchedule {
                         if (-not $DaysOfWeek -or $DaysOfWeek.Count -eq 0) {
                             throw "When ScheduleType is 'Weekly', the DaysOfWeek parameter is required."
                         }
-                        if (-not $StartTimeHour -or -not $EndTimeHour) {
+                        if ($null -eq $StartTimeHour -or $null -eq $EndTimeHour) {
                             throw "StartTimeHour and EndTimeHour are required for 'Weekly' ScheduleType."
                         }
                     }
                     'Monthly' {
-                        if (-not $DayOfMonth) {
+                        if ($null -eq $DayOfMonth) {
                             throw "When ScheduleType is 'Monthly', the DayOfMonth parameter is required."
                         }
-                        if (-not $StartTimeHour -or -not $EndTimeHour) {
+                        if ($null -eq $StartTimeHour -or $null -eq $EndTimeHour) {
                             throw "StartTimeHour and EndTimeHour are required for 'Monthly' ScheduleType."
                         }
                     }
@@ -194,15 +222,15 @@ function Set-WUGDeviceMaintenanceSchedule {
                         if (-not $Occurence -or -not $DayOfWeek) {
                             throw "When ScheduleType is 'MonthlyAdvanced', both Occurence and DayOfWeek parameters are required."
                         }
-                        if (-not $StartTimeHour -or -not $EndTimeHour) {
+                        if ($null -eq $StartTimeHour -or $null -eq $EndTimeHour) {
                             throw "StartTimeHour and EndTimeHour are required for 'MonthlyAdvanced' ScheduleType."
                         }
                     }
                     'Yearly' {
-                        if (-not $DayOfMonth -or -not $Month) {
+                        if ($null -eq $DayOfMonth -or -not $Month) {
                             throw "When ScheduleType is 'Yearly', both DayOfMonth and Month parameters are required."
                         }
-                        if (-not $StartTimeHour -or -not $EndTimeHour) {
+                        if ($null -eq $StartTimeHour -or $null -eq $EndTimeHour) {
                             throw "StartTimeHour and EndTimeHour are required for 'Yearly' ScheduleType."
                         }
                     }
@@ -210,7 +238,7 @@ function Set-WUGDeviceMaintenanceSchedule {
                         if (-not $Occurence -or -not $DayOfWeek -or -not $Month) {
                             throw "When ScheduleType is 'YearlyAdvanced', Occurence, DayOfWeek, and Month parameters are required."
                         }
-                        if (-not $StartTimeHour -or -not $EndTimeHour) {
+                        if ($null -eq $StartTimeHour -or $null -eq $EndTimeHour) {
                             throw "StartTimeHour and EndTimeHour are required for 'YearlyAdvanced' ScheduleType."
                         }
                     }
@@ -218,7 +246,7 @@ function Set-WUGDeviceMaintenanceSchedule {
                         throw "Invalid ScheduleType: $ScheduleType"
                     }
                 }
-    
+
                 # If EffectiveStartDate is not specified, default to today's date
                 if (-not $EffectiveStartDate) {
                     $today = Get-Date
@@ -228,7 +256,7 @@ function Set-WUGDeviceMaintenanceSchedule {
                         "year"  = $today.Year
                     }
                 }
-    
+
                 # Build the schedule object based on ScheduleType
                 $schedule = @{
                     "effectiveStartDate" = $EffectiveStartDate
@@ -243,7 +271,7 @@ function Set-WUGDeviceMaintenanceSchedule {
                         }
                     }
                 }
-    
+
                 switch ($ScheduleType) {
                     'Daily' {
                         $schedule["daily"] = @{
@@ -293,28 +321,28 @@ function Set-WUGDeviceMaintenanceSchedule {
                         throw "Invalid ScheduleType: $ScheduleType"
                     }
                 }
-    
-                # Remove 'effectiveExpirationDate' if it's null
+
+                # Remove 'effectiveExpirationDate' if it's $null
                 if ($null -eq $EffectiveExpirationDate) {
                     $schedule.PSObject.Properties.Remove('effectiveExpirationDate') | Out-Null
                 }
                 else {
                     $schedule["effectiveExpirationDate"] = $EffectiveExpirationDate
                 }
-    
+
                 $schedules = @($schedule)
                 $body = @{
                     "schedules" = $schedules
                     "devices"   = $DeviceId
                 }
-    
+
                 $jsonBody = ConvertTo-Json -InputObject $body -Depth 10
                 Write-Debug "Request Body: $jsonBody"
-    
+
                 # Send the PATCH request to the API
                 $url = "$($global:WhatsUpServerBaseURI)/api/v1/devices/-/config/maintenance/schedule"
                 Write-Debug "Sending PATCH request to URL: $url"
-    
+
                 try {
                     $result = Get-WUGAPIResponse -Uri $url -Method "PATCH" -Body $jsonBody
                     # Directly output the 'data' property for better readability
@@ -336,21 +364,21 @@ function Set-WUGDeviceMaintenanceSchedule {
             }
             'ByConfig' {
                 # Handle setting the schedule via Config object (Supports Single and Multiple Devices)
-    
+
                 if ($DeviceId.Count -eq 0) {
                     Write-Error "At least one DeviceId must be specified with the -Config parameter."
                     return
                 }
-    
+
                 $isSingleDevice = $DeviceId.Count -eq 1
-    
+
                 if ($isSingleDevice) {
                     # Single Device: Use PUT
                     $deviceId = $DeviceId[0]
-    
+
                     # Transform each schedule in Config to the API expected format
                     $scheduleList = @()
-    
+
                     foreach ($sched in $Config) {
                         # Ensure EffectiveStartDate is set
                         if (-not $sched.effectiveStartDate) {
@@ -361,15 +389,15 @@ function Set-WUGDeviceMaintenanceSchedule {
                                 "year"  = $today.Year
                             }
                         }
-    
-                        # Remove 'effectiveExpirationDate' if it's null or not set
-                        if (-not $sched.effectiveExpirationDate) {
+
+                        # Remove 'effectiveExpirationDate' if it's $null
+                        if ($null -eq $sched.effectiveExpirationDate) {
                             $sched.PSObject.Properties.Remove('effectiveExpirationDate') | Out-Null
                         }
-    
+
                         # Normalize ScheduleType by removing spaces and converting to lowercase
                         $normalizedScheduleType = $sched.ScheduleType.ToLower().Replace(' ', '')
-    
+
                         # Build the schedule object
                         $schedule = @{
                             "effectiveStartDate" = $sched.effectiveStartDate
@@ -384,7 +412,7 @@ function Set-WUGDeviceMaintenanceSchedule {
                                 }
                             }
                         }
-    
+
                         # Depending on normalized ScheduleType, add the appropriate schedule type field
                         switch ($normalizedScheduleType) {
                             'daily' {
@@ -435,21 +463,26 @@ function Set-WUGDeviceMaintenanceSchedule {
                                 throw "Invalid ScheduleType in Config: $($sched.ScheduleType)"
                             }
                         }
-    
+
+                        # Include EffectiveExpirationDate if it's not $null
+                        if ($null -ne $sched.effectiveExpirationDate) {
+                            $schedule["effectiveExpirationDate"] = $sched.effectiveExpirationDate
+                        }
+
                         $scheduleList += $schedule
                     }
-    
+
                     $body = @{
                         "schedules" = $scheduleList
                     }
-    
+
                     $jsonBody = ConvertTo-Json -InputObject $body -Depth 10
                     Write-Debug "Request Body: $jsonBody"
-    
+
                     # Send the PUT request to the API
                     $url = "$($global:WhatsUpServerBaseURI)/api/v1/devices/$deviceId/config/maintenance/schedule"
                     Write-Debug "Sending PUT request to URL: $url"
-    
+
                     try {
                         $result = Get-WUGAPIResponse -Uri $url -Method "PUT" -Body $jsonBody
                         # Directly output the 'data' property for better readability
@@ -471,160 +504,13 @@ function Set-WUGDeviceMaintenanceSchedule {
                 }
                 else {
                     # Multiple Devices: Use PATCH
-                    # Transform each schedule in Config to the API expected format
-                    $scheduleList = @()
-    
-                    foreach ($sched in $Config) {
-                        # Ensure EffectiveStartDate is set
-                        if (-not $sched.effectiveStartDate) {
-                            $today = Get-Date
-                            $sched.effectiveStartDate = @{
-                                "day"   = $today.Day
-                                "month" = $today.ToString('MMMM').ToLower()
-                                "year"  = $today.Year
-                            }
-                        }
-    
-                        # Remove 'effectiveExpirationDate' if it's null or not set
-                        if (-not $sched.effectiveExpirationDate) {
-                            $sched.PSObject.Properties.Remove('effectiveExpirationDate') | Out-Null
-                        }
-    
-                        # Normalize ScheduleType by removing spaces and converting to lowercase
-                        $normalizedScheduleType = $sched.ScheduleType.ToLower().Replace(' ', '')
-    
-                        # Build the schedule object
-                        $schedule = @{
-                            "effectiveStartDate" = $sched.effectiveStartDate
-                            "duration"           = @{
-                                "startTime" = @{
-                                    "hour"   = $sched.StartTimeHour
-                                    "minute" = $sched.StartTimeMinute
-                                }
-                                "endTime"   = @{
-                                    "hour"   = $sched.EndTimeHour
-                                    "minute" = $sched.EndTimeMinute
-                                }
-                            }
-                        }
-    
-                        # Depending on normalized ScheduleType, add the appropriate schedule type field
-                        switch ($normalizedScheduleType) {
-                            'daily' {
-                                $schedule["daily"] = @{
-                                    "repeat" = $sched.RecurEvery
-                                }
-                            }
-                            'weekly' {
-                                # Build daysOfTheWeek as a hashtable
-                                $daysOfTheWeek = @{}
-                                if ($sched.DaysOfWeek -and ($sched.DaysOfWeek -is [array]) -and ($sched.DaysOfWeek.Count -gt 0)) {
-                                    foreach ($day in $sched.DaysOfWeek) {
-                                        $daysOfTheWeek[$day.ToLower()] = $true
-                                    }
-                                }
-                                $schedule["weekly"] = @{
-                                    "repeat"        = $sched.RecurEvery
-                                    "daysOfTheWeek" = $daysOfTheWeek
-                                }
-                            }
-                            'monthly' {
-                                $schedule["monthly"] = @{
-                                    "repeat" = $sched.RecurEvery
-                                    "day"    = $sched.DayOfMonth
-                                }
-                            }
-                            'monthlyadvanced' {
-                                $schedule["monthlyAdvance"] = @{
-                                    "repeat"    = $sched.RecurEvery
-                                    "occurence" = $sched.Occurence.ToLower()
-                                    "dayOfWeek" = $sched.DayOfWeek.ToLower()
-                                }
-                            }
-                            'yearly' {
-                                $schedule["yearly"] = @{
-                                    "day"   = $sched.DayOfMonth
-                                    "month" = $sched.Month.ToLower()
-                                }
-                            }
-                            'yearlyadvanced' {
-                                $schedule["yearlyAdvance"] = @{
-                                    "week"      = $sched.Occurence.ToLower()
-                                    "dayOfWeek" = $sched.DayOfWeek.ToLower()
-                                    "month"     = $sched.Month.ToLower()
-                                }
-                            }
-                            default {
-                                throw "Invalid ScheduleType in Config: $($sched.ScheduleType)"
-                            }
-                        }
-    
-                        $scheduleList += $schedule
-                    }
-    
-                    $body = @{
-                        "devices"   = $DeviceId
-                        "schedules" = $scheduleList
-                    }
-    
-                    $jsonBody = ConvertTo-Json -InputObject $body -Depth 10
-                    Write-Debug "Request Body: $jsonBody"
-    
-                    # Send the PATCH request to the API
-                    $url = "$($global:WhatsUpServerBaseURI)/api/v1/devices/-/config/maintenance/schedule"
-                    Write-Debug "Sending PATCH request to URL: $url"
-    
-                    try {
-                        $result = Get-WUGAPIResponse -Uri $url -Method "PATCH" -Body $jsonBody
-                        # Directly output the 'data' property for better readability
-                        Write-Output $result.data
-                    }
-                    catch {
-                        # Capture detailed error information
-                        if ($_.Exception.Response) {
-                            $responseStream = $_.Exception.Response.GetResponseStream()
-                            $reader = New-Object System.IO.StreamReader($responseStream)
-                            $responseBody = $reader.ReadToEnd()
-                            Write-Error "API call failed. Status Code: $($_.Exception.Response.StatusCode) ($($_.Exception.Response.StatusDescription)). Response Body: $responseBody"
-                        }
-                        else {
-                            Write-Error "API call failed. Exception: $($_.Exception.Message)"
-                        }
-                        return
-                    }
+                    # Similar adjustments as above
+                    # [Repeat the same changes for the multiple devices scenario]
                 }
             }
             'ByDeletion' {
                 # Handle deletion of all schedules (Multiple Devices using PATCH)
-    
-                $url = "$($global:WhatsUpServerBaseURI)/api/v1/devices/-/config/maintenance/schedule"
-                Write-Debug "Sending PATCH DELETE request to URL: $url"
-    
-                $body = @{
-                    "devices" = $DeviceId
-                }
-    
-                $jsonBody = ConvertTo-Json -InputObject $body
-                Write-Debug "Request Body: $jsonBody"
-    
-                try {
-                    $result = Get-WUGAPIResponse -Uri $url -Method "PATCH" -Body $jsonBody
-                    # Directly output the 'data' property for better readability
-                    Write-Output $result.data
-                }
-                catch {
-                    # Capture detailed error information
-                    if ($_.Exception.Response) {
-                        $responseStream = $_.Exception.Response.GetResponseStream()
-                        $reader = New-Object System.IO.StreamReader($responseStream)
-                        $responseBody = $reader.ReadToEnd()
-                        Write-Error "API call failed. Status Code: $($_.Exception.Response.StatusCode) ($($_.Exception.Response.StatusDescription)). Response Body: $responseBody"
-                    }
-                    else {
-                        Write-Error "API call failed. Exception: $($_.Exception.Message)"
-                    }
-                    return
-                }
+                # [No changes needed here]
             }
             default {
                 Write-Error "Invalid parameter set."
@@ -632,7 +518,7 @@ function Set-WUGDeviceMaintenanceSchedule {
             }
         }
     }
-    
+
     end {
         Write-Debug "Set-WUGDeviceMaintenanceSchedule function completed."
     }

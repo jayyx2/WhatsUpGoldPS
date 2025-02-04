@@ -2,6 +2,11 @@
 ## 0.1.14 - 2024-10-02
 * Changed
    * Try to fix problems with Set-WUGDeviceMaintenanceSchedule -EffectiveExpirationDate parameter
+* Added
+  * Get-WUGMonitorTemplate
+  * Add-WUGActiveMonitor (WIP, use at own risk)
+  * Remove-WUGActiveMonitor
+  
 
 ## 0.1.13 - 2024-09-28
 * Changed

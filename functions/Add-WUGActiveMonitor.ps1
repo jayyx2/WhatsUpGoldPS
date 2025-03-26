@@ -6,8 +6,6 @@ Add-WUGActiveMonitor -Type TcpIp -Name TestTCPIpMon-2024-10-19 -Timeout 5 -TcpIp
 Add-WUGActiveMonitor -Type Certificate -Name Certmo  ntest-20241020 -CertOption url -CertPath https://www.google.com/ -CertExpiresDays 10 -CertCheckUsage $true
 Add-WUGActiveMonitor -Type WMIFormatted -Name "AD LDAP Bind Time RangeCheck" -WMIFormattedRelativePath "Win32_PerfFormattedData_NTDS_NTDS" -WMIFormattedPerformanceCounter "LDAP Bind Time (msec)" -WMIFormattedPerformanceInstance "NULL" -WMIFormattedCheckType "range" -WMIFormattedRangeLowValue 0 -WMIFormattedRangeHighValue 200 -WMIFormattedPropertyName "LDAPBindTime" -WMIFormattedComputerName "localhost"
 
-
-
 #>
 function Add-WUGActiveMonitor {
     [CmdletBinding(DefaultParameterSetName = 'Ping')]
@@ -39,19 +37,14 @@ function Add-WUGActiveMonitor {
         # Service Monitor Parameters
         [Parameter(ParameterSetName = 'Service')]
         [string]$ServiceDisplayName,
-
         [Parameter(ParameterSetName = 'Service')]
         [string]$ServiceInternalName,
-
         [Parameter(ParameterSetName = 'Service')]
         [bool]$ServiceUseSNMP = $false,
-
         [Parameter(ParameterSetName = 'Service')]
         [int]$ServiceSNMPRetries = 1,
-
         [Parameter(ParameterSetName = 'Service')]
         [int]$ServiceSNMPTimeout = 3,
-
         [Parameter(ParameterSetName = 'Service')]
         [int]$ServiceRestartOnFailure = 0,
 
@@ -64,23 +57,42 @@ function Add-WUGActiveMonitor {
         [Parameter(ParameterSetName = 'TcpIp')]
         [ValidateRange(1, 65535)]
         [int]$TcpIpPort,
-
         [Parameter(ParameterSetName = 'TcpIp')]
         [ValidateSet('TCP', 'UDP', 'SSL')]
         [string]$TcpIpProtocol,
-
         [Parameter(ParameterSetName = 'TcpIp')]
         [string]$TcpIpScript = "",
+
+        # Certificate Monitor Parameters
+        [Parameter(ParameterSetName = 'Certificate')]
+        [ValidateSet('url', 'file')]
+        [string]$CertOption,
+        [Parameter(ParameterSetName = 'Certificate')]
+        [string]$CertPath, # URL or File Path
+        [Parameter(ParameterSetName = 'Certificate')]
+        [int]$CertExpiresDays = 5,
+        [Parameter(ParameterSetName = 'Certificate')]
+        [bool]$CertCheckUsage = $false,
+        [Parameter(ParameterSetName = 'Certificate')]
+        [bool]$CertCheckExpires = $true, # New parameter with default value
+        [Parameter(ParameterSetName = 'Certificate')]
+        [bool]$CertUseProxySettings = $false,
+        [Parameter(ParameterSetName = 'Certificate')]
+        [string]$CertProxyServer = "",
+        [Parameter(ParameterSetName = 'Certificate')]
+        [int]$CertProxyPort = 0,
+        [Parameter(ParameterSetName = 'Certificate')]
+        [string]$CertProxyUser = "",
+        [Parameter(ParameterSetName = 'Certificate')]
+        [string]$CertProxyPwd = "",
 
         # SNMP Monitor Parameters
         [Parameter(ParameterSetName = 'ConstantOrRate')]
         [Parameter(ParameterSetName = 'Range')]
         [string]$SnmpOID,
-
         [Parameter(ParameterSetName = 'ConstantOrRate')]
         [Parameter(ParameterSetName = 'Range')]
         [string]$SnmpInstance = "",
-
         [Parameter(ParameterSetName = 'ConstantOrRate')]
         [Parameter(ParameterSetName = 'Range')]
         [ValidateSet('constant', 'range', 'rateofchange')]
@@ -90,52 +102,48 @@ function Add-WUGActiveMonitor {
         [Parameter(ParameterSetName = 'ConstantOrRate', Mandatory = $true)]
         [ValidateRange(0, [int]::MaxValue)]
         [int]$SnmpValue,
-
         # Parameters for SNMP monitor range check type
         [Parameter(ParameterSetName = 'Range', Mandatory = $true)]
         [ValidateRange(0, [int]::MaxValue)]
         [int]$SnmpLowValue,
-
         [Parameter(ParameterSetName = 'Range', Mandatory = $true)]
         [ValidateRange(0, [int]::MaxValue)]
         [int]$SnmpHighValue,
+
+        # Process Monitor Parameters
+        [Parameter(ParameterSetName = 'Process')]
+        [string]$ProcessName,        
+        [Parameter(ParameterSetName = 'Process')]
+        [ValidateSet('true', 'false')]
+        [string]$ProcessDownIfRunning = 'false',        
+        [Parameter(ParameterSetName = 'Process')]
+        [bool]$ProcessUseWMI = $false,
         
         # WMIFormatted Monitor Parameters
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [string]$WMIFormattedRelativePath,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [string]$WMIFormattedPerformanceCounter,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [string]$WMIFormattedPerformanceInstance,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [string]$WMIFormattedCheckType, # 'constant', 'range', or 'rateofchange'
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [int]$WMIFormattedConstantValue,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [bool]$WMIFormattedConstantUpIfMatch = $true,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [int]$WMIFormattedRangeLowValue,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [int]$WMIFormattedRangeHighValue,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [int]$WMIFormattedROCValue,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [bool]$WMIFormattedROCUpIfAbove = $true,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [string]$WMIFormattedPropertyName,
-
         [Parameter(ParameterSetName = 'WMIFormatted')]
-        [string]$WMIFormattedComputerName 
+        [string]$WMIFormattedComputerName
     )
 
     begin {

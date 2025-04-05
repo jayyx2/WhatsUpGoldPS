@@ -434,7 +434,7 @@ function Add-WUGDevice {
                     networkName          = "${Hostname}"
                 }
             )
-            attributes          = @()
+            attributes          = @(${Attributes})
             customLinks         = @()
             activeMonitors      = @(${ActiveMonitorObjects})
             performanceMonitors = @(${PerformanceMonitorObjects})

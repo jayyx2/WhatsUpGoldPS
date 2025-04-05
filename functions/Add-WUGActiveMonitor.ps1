@@ -247,6 +247,9 @@ function Add-WUGActiveMonitor {
         
             'Certificate' {
                 $ClassId = 'de27943b-b036-4b6d-ae4c-1093b210c233'
+                if($CertCheckUsage) {$CertCheckUsage = "true"} else {$CertCheckUsage = "false"}
+                if($CertCheckExpires) {$CertCheckExpires = "true"} else {$CertCheckExpires = "false"}
+                if($CertUseProxySettings) {$CertUseProxySettings = "true"} else {$CertUseProxySettings = "false"}
                 $PropertyBags = @(
                     @{ "name" = "MonSSLCert:CertificateOption"; "value" = "$CertOption" },
                     @{ "name" = "MonSSLCert:Path"; "value" = "$CertPath" },

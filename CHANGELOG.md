@@ -1,7 +1,8 @@
 # WhatsUpGoldPS Release History
-## 0.1.14 - 2024-10-02
+## 0.1.14 - 2025-04-05
 * Changed
-   * Try to fix problems with Set-WUGDeviceMaintenanceSchedule -EffectiveExpirationDate parameter
+  * Try to fix problems with Set-WUGDeviceMaintenanceSchedule -EffectiveExpirationDate parameter
+  * Fixed Add-WUGDevice not handling device attributes
 * Added
   * Get-WUGMonitorTemplate
   * Add-WUGActiveMonitor (WIP, use at own risk)

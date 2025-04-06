@@ -1,60 +1,77 @@
-#Import module if we have to
-if (!(Get-Module -Name WhatsUpGoldPS)) {Import-Module -Name WhatsUpGoldPS}
-#Set your credential
-if(!$Credential){$Credential = Get-Credential}
-#Enter your server name or IP
-$ServerIpOrHostName = "192.168.1.250"
-#Enter a filename
-$jsonFilePath = "C:\temp\json.json"
-#This uses WhatsUpGoldPS Connect-WUGServer function to authenticate
-if(!$global:WUGBearerHeaders){
-    Connect-WUGServer -serverUri $ServerIpOrHostName -Credential $Credential -IgnoreSSLErrors -Protocol https
-}
-#This uses WhatsUpGoldPS Get-WUGDevice function to search for monitored devices with "192.168.1." and requests the card view
-#It then uses PowerShell's Select-Object to isolate data, converts it to JSON, and outputs to a file
-# Example: build a custom object per device
-$Dashboard = Get-WUGDevice -SearchValue "192.168.1." -View card |
-    Where-Object { $_.downActiveMonitors -ne $null } |
-    ForEach-Object {
-        [pscustomobject]@{
-            '...'              = $_.id
-            id                 = $_.id
-            name               = $_.name
-            networkAddress     = $_.networkAddress
-            hostName           = $_.hostName
+function Add-WUGActiveMonitorToDevice {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeviceId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$MonitorId,
+        [ValidateSet("true", "false")][string]$Enabled = "true",
+        [string]$Comment,
+        [string]$Argument,
+        [string]$InterfaceId,
+        # Range validated per WhatsUp Gold REST API spec: minimum 10 seconds, maximum 86400 seconds (24 hours)
+        [ValidateRange(10, 86400)][int]$PollingIntervalSeconds,
+        [ValidateRange(0, 100)][int]$CriticalOrder,
+        [string]$ActionPolicyId,
+        [string]$ActionPolicyName
+    )
 
-            # Build an array of full-detail monitor objects
-            downActiveMonitors = $_.downActiveMonitors | ForEach-Object {
-                [pscustomobject]@{
-                    state           = $_.state
-                    reason          = $_.reason
-                    lastChangeUtc   = $_.lastChangeUtc
-                    monitorTypeName = $_.monitorTypeName
-                    comment         = $_.comment
-                    enabled         = $_.enabled
-                }
+    Begin {
+        Write-Debug "Begin block: Starting function Add-WUGActiveMonitorToDevice."
+        $baseUri = "$(${global:WhatsUpServerBaseURI})/api/v1/devices/${DeviceId}/monitors/-"
+    }
+
+    Process {
+        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Building activeParams hashtable."
+
+        $activeParams = @{}
+
+        if ($Comment) { $activeParams.comment = $Comment }
+        if ($Argument) { $activeParams.argument = $Argument }
+        if ($InterfaceId) { $activeParams.interfaceId = $InterfaceId }
+        if ($PollingIntervalSeconds) { $activeParams.pollingIntervalSeconds = $PollingIntervalSeconds }
+        if ($CriticalOrder) { $activeParams.criticalOrder = $CriticalOrder }
+        if ($ActionPolicyId) { $activeParams.actionPolicyId = $ActionPolicyId }
+        if ($ActionPolicyName) { $activeParams.actionPolicyName = $ActionPolicyName }
+
+        $body = @{
+            type          = "active"
+            monitorTypeId = $MonitorId
+            enabled       = $Enabled
+            isGlobal      = "true"
+            active        = $activeParams
+        } | ConvertTo-Json -Depth 5
+
+        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Sending request to URI: $baseUri"
+        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Request body: $body"
+
+        try {
+            $result = Get-WUGAPIResponse -Uri $baseUri -Method POST -Body $body
+
+            if ($result.data.successful -eq 1) {
+                Write-Output "Successfully assigned active monitor ID: $MonitorId to device ID $DeviceId"
+                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
             }
+            else {
+                Write-Warning "Failed to assign active monitor to device."
+                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
+            }
+        }
+        catch {
+            Write-Error "Error assigning active monitor: $($_.Exception.Message)"
+            Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full exception details: $($_.Exception | Format-List * | Out-String)"
         }
     }
 
-# Convert to JSON. Increase -Depth if needed for nesting
-$Dashboard | ConvertTo-Json | Out-File $jsonFilePath -Force
-Write-Information "${jsonFilePath} created."
+    End {
+        Write-Debug "End block: Completed function Add-WUGActiveMonitorToDevice."
+    }
+}
 
-#Where is your HTML template file?
-$templateFilePath = ".\examples\Bootstrap-Table-Sample.html"
-#What is the file path and name to output?
-$outputFilePath = "C:\temp\Example-Custom-Report.html"
-#What are we replacing in the file with our $Dashboard data?
-$customPlaceholder = 'replaceThisHere'
-Convert-HTMLTemplate -TemplateFilePath $templateFilePath -JsonFilePath $jsonFilePath -OutputFilePath $outputFilePath -Placeholder $customPlaceholder -ReportName "Down Active Monitor Details"
-Write-Information "${outputFilePath} created."
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5LvFj5cuqL1ji
-# Kwh05w9J3nWUL81Ui5C8s2nqSL/EHqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUjNqatWFUgK9Q
+# JZMonUuMcCgR5VaUiLervmxTaxETAaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -155,17 +172,17 @@ Write-Information "${outputFilePath} created."
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgbYbQjtWA2gtSbIe01aBm/HMUyGq3GVFTNxMgG+2SA0Mw
-# DQYJKoZIhvcNAQEBBQAEggIAehmirG6dSKzNMoNz4qxMjHPj0lUJLRhU4is1ihNp
-# qsRgIzkQ+ZeDeBH/ULCxMhPnsHvnl0MHx4P6UYd8IHriQMNdbTBlMev207ynYcJA
-# 8oCseoDeAnvwq/8OZ1fIHzukSYKnjdQGI1JlLydIJxzD0QrSAxFwM5hCqlMdx67q
-# S3bRkLku6Y9VX0wUyzcxXL5VLuedvmtbijqPGySm7N1BJ/EiO1EtHdjHXfz4QrO9
-# OErhNM1U+TeLQ/bPHzWsWlgqMpQig+WFusrsNgby4gePWzLxZMNs7eEJU7zOG5GT
-# x0haz42t6FK5M9MpNvmwY9doiRu0QWGDLtlBMLc41rI59lYKteTWKiltM2rrmhpb
-# uKhXrHWU1vjowkafnn9ZEhysBPTI1R05Y6jf1whsmS7TiJWoThcWlwmd4K8jdmc8
-# D/gBkMvz4sbD/Kyv2TMGYu8Y3ILxa14ytfqY8aCpLGb5/Ap24/ubZE1J0ld0O2Yp
-# InpY+kYcvPUZidj3/GaAsv6K2mIVwja//OaEYVBOXV0kPVPXnlRwvsXMGGmWiiv8
-# 5CFynexyewPS5IP+qzls3++vV03gXhcF+5nduZEZw7CDB14nrzYDGezjIf9rNWzy
-# qUKHiJ3IsocyCSDaLLFswXgUJODlUWAdfxnWPhtqMaLmctMp0/I7rTrZXvMYOb4F
-# 6zI=
+# BgkqhkiG9w0BCQQxIgQg0L9YER0e5ov5SndDfyAFfErNqq9FqeQzT6K3AY6bISkw
+# DQYJKoZIhvcNAQEBBQAEggIAV1GvqjoK5Zm2xEyn3/wYBbjJAT1mvPMCJStRC33y
+# DSEhBp4mG2NUXo0LJhs82LxwMxq0WCFjTy65KwIQwGPGIb3+lWM13DuqB6F0tqxp
+# AAREMQRfx641D+w3oKJyar9wW6IrLhy7tlfIKc1Y3m80djllujVg7RmGdUnCKRKi
+# yjobchXrS2+65JxA7yTG7/A2uTgtuXLPUGJHB+2ZIUhuTS+P7rjZ7tP62IbFk3no
+# L1YD2SqoIHTdF6/5GTZDL8m2KVKM4N5T5luWaE4KNKAWFLXloO6d9SejnWv/cKFs
+# M1caM1sGcMLncB7LvNx1pEMsmhepn64eLWakiwEVahgWklumKW+ySaTFLr70NmCv
+# zVExo5ALrma4zztoU8d+iKtKidYtQxX5zdXwCdpFKcK/mHTf2XJX+ZGjLaUlPlDp
+# x5+pvV6/WQi0zWN1lqHKD7FCpqB1p4Ryon1QuBB2Wisf2aTTJHfderklqYRDs5Fn
+# eEC0+anVH+an/f2APYynYatgzfvBNgXt9lji6Iaw1uDhM4/pCozHHZZBl4Tec2xS
+# egZ7Myp90dQssXM8g0NYsJJgLkDOC+bdwsbHznS4X8gIftTerYAHlf0nvUz9HlIp
+# Q1/KjlakGqokJtWt9mlJn7U0h+A8R4nWFJV/k067cPdnpLBlbTqKq0hO/WFQt8w+
+# 7Hs=
 # SIG # End signature block

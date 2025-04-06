@@ -1,12 +1,193 @@
 <#
-EXAMPLES
-Add-WUGActiveMonitor -Type SNMP -Name 20241019-snmpmonitor-test-1-new -SnmpOID 1.3.6.1 -SnmpInstance 1 -SnmpCheckType constant -SnmpValue 9
-Add-WUGActiveMonitor -Type Ping -Name "9999 ping" -PingPayloadSize 9999 -Timeout 10 -Retries 1
-Add-WUGActiveMonitor -Type TcpIp -Name TestTCPIpMon-2024-10-19 -Timeout 5 -TcpIpPort 8443 -TcpIpProtocol SSL
-Add-WUGActiveMonitor -Type Certificate -Name Certmo  ntest-20241020 -CertOption url -CertPath https://www.google.com/ -CertExpiresDays 10 -CertCheckUsage $true
-Add-WUGActiveMonitor -Type WMIFormatted -Name "AD LDAP Bind Time RangeCheck" -WMIFormattedRelativePath "Win32_PerfFormattedData_NTDS_NTDS" -WMIFormattedPerformanceCounter "LDAP Bind Time (msec)" -WMIFormattedPerformanceInstance "NULL" -WMIFormattedCheckType "range" -WMIFormattedRangeLowValue 0 -WMIFormattedRangeHighValue 200 -WMIFormattedPropertyName "LDAPBindTime" -WMIFormattedComputerName "localhost"
+.SYNOPSIS
+    Adds an active monitor to WhatsUp Gold (WUG) for various monitoring types including SNMP, Ping, TCP/IP, Certificate, WMI, and more.
 
+.DESCRIPTION
+    This function allows the user to create different types of active monitors in WhatsUp Gold (WUG) by specifying the type of monitor and its relevant parameters.
+    It supports various monitoring types such as Ping, TCP/IP, SNMP, Process, Certificate, Service, and WMIFormatted.
+    The function handles the creation of the monitor by checking if it already exists and then making the appropriate API call to create the monitor with the specified settings.
+
+.PARAMETER Type
+    The type of the monitor to be created. Valid values are 'Ping', 'TcpIp', 'SNMP', 'Process', 'Certificate', 'Service', 'WMIFormatted'.
+    This parameter is mandatory and determines the set of additional parameters required.
+    TBD: 
+
+.PARAMETER Name
+    The name of the monitor to be created. This parameter is mandatory.
+
+.PARAMETER Timeout
+    The timeout value for the monitor in seconds. Default is 5 seconds. This parameter is shared among all parameter sets.
+
+.PARAMETER Retries
+    The number of retries for the monitor. Default is 1. This parameter is shared among all parameter sets.
+
+.PARAMETER PingPayloadSize
+    The payload size for the Ping monitor. Valid values are between 1 and 65535. This parameter is specific to the 'Ping' parameter set.
+
+.PARAMETER TcpIpPort
+    The port number for the TCP/IP monitor. Valid values are between 1 and 65535. This parameter is specific to the 'TcpIp' parameter set.
+
+.PARAMETER TcpIpProtocol
+    The protocol to use for the TCP/IP monitor. Valid values are 'TCP', 'UDP', 'SSL'. This parameter is specific to the 'TcpIp' parameter set.
+
+.PARAMETER TcpIpScript
+    The script to use for the TCP/IP monitor. This parameter is specific to the 'TcpIp' parameter set.
+
+.PARAMETER CertOption
+    The option for the Certificate monitor. Valid values are 'url', 'file'. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER CertPath
+    The path for the Certificate monitor. It can be a URL or a file path. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER CertExpiresDays
+    The number of days before the certificate expires. Default is 5 days. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER CertCheckUsage
+    A switch to check the usage of the certificate. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER CertCheckExpires
+    A switch to check if the certificate expires. Default is $true. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER CertUseProxySettings
+    A switch to use proxy settings for the Certificate monitor. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER CertProxyServer
+    The proxy server for the Certificate monitor. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER CertProxyPort
+    The proxy port for the Certificate monitor. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER CertProxyUser
+    The proxy user for the Certificate monitor. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER CertProxyPwd
+    The proxy password for the Certificate monitor. This parameter is specific to the 'Certificate' parameter set.
+
+.PARAMETER SnmpOID
+    The OID for the SNMP monitor. This parameter is specific to the 'ConstantOrRate' and 'Range' parameter sets.
+
+.PARAMETER SnmpInstance
+    The instance for the SNMP monitor. Default is an empty string. This parameter is specific to the 'ConstantOrRate' and 'Range' parameter sets.
+
+.PARAMETER SnmpCheckType
+    The check type for the SNMP monitor. Valid values are 'constant', 'range', 'rateofchange'. This parameter is specific to the 'ConstantOrRate' and 'Range' parameter sets.
+
+.PARAMETER SnmpValue
+    The value for the SNMP monitor with 'constant' or 'rateofchange' check type. This parameter is mandatory for the 'ConstantOrRate' parameter set.
+
+.PARAMETER SnmpLowValue
+    The low value for the SNMP monitor with 'range' check type. This parameter is mandatory for the 'Range' parameter set.
+
+.PARAMETER SnmpHighValue
+    The high value for the SNMP monitor with 'range' check type. This parameter is mandatory for the 'Range' parameter set.
+
+.PARAMETER ProcessName
+    The name of the process for the Process monitor. This parameter is specific to the 'Process' parameter set.
+
+.PARAMETER ProcessDownIfRunning
+    A switch to mark the process as down if it is running. Valid values are 'true' or 'false'. Default is 'false'. This parameter is specific to the 'Process' parameter set.
+
+.PARAMETER ProcessUseWMI
+    A switch to use WMI for the Process monitor. Default is $false. This parameter is specific to the 'Process' parameter set.
+
+.PARAMETER ServiceDisplayName
+    The display name of the service for the Service monitor. This parameter is specific to the 'Service' parameter set.
+
+.PARAMETER ServiceInternalName
+    The internal name of the service for the Service monitor. This parameter is specific to the 'Service' parameter set.
+
+.PARAMETER ServiceUseSNMP
+    A switch to use SNMP for the Service monitor. Default is $false. This parameter is specific to the 'Service' parameter set.
+
+.PARAMETER ServiceSNMPRetries
+    The number of retries for SNMP in the Service monitor. Default is 1. This parameter is specific to the 'Service' parameter set.
+
+.PARAMETER ServiceSNMPTimeout
+    The timeout value for SNMP in the Service monitor in seconds. Default is 3 seconds. This parameter is specific to the 'Service' parameter set.
+
+.PARAMETER ServiceRestartOnFailure
+    The number of times to restart the service on failure. Default is 0. This parameter is specific to the 'Service' parameter set.
+
+.PARAMETER WMIFormattedRelativePath
+    The relative path for the WMIFormatted monitor. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedPerformanceCounter
+    The performance counter for the WMIFormatted monitor. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedPerformanceInstance
+    The performance instance for the WMIFormatted monitor. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedCheckType
+    The check type for the WMIFormatted monitor. Valid values are 'constant', 'range', 'rateofchange'. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedConstantValue
+    The constant value for the WMIFormatted monitor with 'constant' check type. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedConstantUpIfMatch
+    A switch to mark the monitor up if the constant value matches. Default is $true. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedRangeLowValue
+    The low value for the WMIFormatted monitor with 'range' check type. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedRangeHighValue
+    The high value for the WMIFormatted monitor with 'range' check type. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedROCValue
+    The rate of change value for the WMIFormatted monitor with 'rateofchange' check type. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedROCUpIfAbove
+    A switch to mark the monitor up if the rate of change value is above the specified value. Default is $true. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedPropertyName
+    The property name for the WMIFormatted monitor. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.PARAMETER WMIFormattedComputerName
+    The computer name for the WMIFormatted monitor. This parameter is specific to the 'WMIFormatted' parameter set.
+
+.NOTES
+    Author: Jason Alberino
+    Date: 2025-04-06
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type SNMP -Name 20241019-snmpmonitor-test-1-new -SnmpOID 1.3.6.1 -SnmpInstance 1 -SnmpCheckType constant -SnmpValue 9
+
+Description
+-----------
+    This command adds an SNMP active monitor named "20241019-snmpmonitor-test-1-new" with the OID "1.3.6.1", instance "1", check type "constant",
+    and value "9".
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type Ping -Name "9999 ping" -PingPayloadSize 9999 -Timeout 10 -Retries 1
+
+Description
+-----------
+    This command adds a Ping active monitor named "9999 ping" with a payload size of 9999 bytes, timeout of 10 seconds, and 1 retry.
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type TcpIp -Name TestTCPIpMon-2024-10-19 -Timeout 5 -TcpIpPort 8443 -TcpIpProtocol SSL
+
+Description
+-----------
+    This command adds a TCP/IP active monitor named "TestTCPIpMon-2024-10-19" with a timeout of 5 seconds, port 8443, and protocol SSL.
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type Certificate -Name Certmontest-byURL-test3 -CertOption url -CertCheckExpires $true -CertExpiresDays 30 -CertPath "https://192.168.1.250"
+
+Description
+-----------
+    This command adds a Certificate active monitor named "Certmontest-byURL-test3" with the URL option, check expires set to true, expiration days set 
+    to 30, and path "https://192.168.1.250".
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type WMIFormatted -Name "AD LDAP Bind Time RangeCheck" -WMIFormattedRelativePath "Win32_PerfFormattedData_NTDS_NTDS" -WMIFormattedPerformanceCounter "LDAP Bind Time (msec)" -WMIFormattedPerformanceInstance "NULL" -WMIFormattedCheckType "range" -WMIFormattedRangeLowValue 0 -WMIFormattedRangeHighValue 200 -WMIFormattedPropertyName "LDAPBindTime" -WMIFormattedComputerName "localhost"
+
+Description
+-----------
+    This command adds a WMIFormatted active monitor named "AD LDAP Bind Time RangeCheck" with the relative path "Win32_PerfFormattedData_NTDS_NTDS",
+    performance counter "LDAP Bind Time (msec)", performance instance "NULL", check type "range", low value "0", high value "200", property name 
+    "LDAPBindTime", and computer name "localhost".
 #>
+
 function Add-WUGActiveMonitor {
     [CmdletBinding(DefaultParameterSetName = 'Ping')]
     param(
@@ -40,7 +221,7 @@ function Add-WUGActiveMonitor {
         [Parameter(ParameterSetName = 'Service')]
         [string]$ServiceInternalName,
         [Parameter(ParameterSetName = 'Service')]
-        [bool]$ServiceUseSNMP = $false,
+        [ValidateSet("true", "false")][string]$ServiceUseSNMP = "false",
         [Parameter(ParameterSetName = 'Service')]
         [int]$ServiceSNMPRetries = 1,
         [Parameter(ParameterSetName = 'Service')]
@@ -72,11 +253,11 @@ function Add-WUGActiveMonitor {
         [Parameter(ParameterSetName = 'Certificate')]
         [int]$CertExpiresDays = 5,
         [Parameter(ParameterSetName = 'Certificate')]
-        [bool]$CertCheckUsage = $false,
+        [ValidateSet("true", "false")][string]$CertCheckUsage = "false",
         [Parameter(ParameterSetName = 'Certificate')]
-        [bool]$CertCheckExpires = $true, # New parameter with default value
+        [ValidateSet("true", "false")][string]$CertCheckExpires = "true",
         [Parameter(ParameterSetName = 'Certificate')]
-        [bool]$CertUseProxySettings = $false,
+        [ValidateSet("true", "false")][string]$CertUseProxySettings = "false",
         [Parameter(ParameterSetName = 'Certificate')]
         [string]$CertProxyServer = "",
         [Parameter(ParameterSetName = 'Certificate')]
@@ -114,10 +295,9 @@ function Add-WUGActiveMonitor {
         [Parameter(ParameterSetName = 'Process')]
         [string]$ProcessName,        
         [Parameter(ParameterSetName = 'Process')]
-        [ValidateSet('true', 'false')]
-        [string]$ProcessDownIfRunning = 'false',        
+        [ValidateSet('true', 'false')][string]$ProcessDownIfRunning = 'false',        
         [Parameter(ParameterSetName = 'Process')]
-        [bool]$ProcessUseWMI = $false,
+        [ValidateSet("true", "false")][string]$ProcessUseWMI = "false",
         
         # WMIFormatted Monitor Parameters
         [Parameter(ParameterSetName = 'WMIFormatted')]
@@ -131,7 +311,7 @@ function Add-WUGActiveMonitor {
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [int]$WMIFormattedConstantValue,
         [Parameter(ParameterSetName = 'WMIFormatted')]
-        [bool]$WMIFormattedConstantUpIfMatch = $true,
+        [ValidateSet("true", "false")][string]$WMIFormattedConstantUpIfMatch = "true",
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [int]$WMIFormattedRangeLowValue,
         [Parameter(ParameterSetName = 'WMIFormatted')]
@@ -139,7 +319,7 @@ function Add-WUGActiveMonitor {
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [int]$WMIFormattedROCValue,
         [Parameter(ParameterSetName = 'WMIFormatted')]
-        [bool]$WMIFormattedROCUpIfAbove = $true,
+        [ValidateSet("true", "false")][string]$WMIFormattedROCUpIfAbove = "true",
         [Parameter(ParameterSetName = 'WMIFormatted')]
         [string]$WMIFormattedPropertyName,
         [Parameter(ParameterSetName = 'WMIFormatted')]
@@ -247,19 +427,17 @@ function Add-WUGActiveMonitor {
         
             'Certificate' {
                 $ClassId = 'de27943b-b036-4b6d-ae4c-1093b210c233'
-                if($CertCheckUsage) {$CertCheckUsage = "true"} else {$CertCheckUsage = "false"}
-                if($CertCheckExpires) {$CertCheckExpires = "true"} else {$CertCheckExpires = "false"}
-                if($CertUseProxySettings) {$CertUseProxySettings = "true"} else {$CertUseProxySettings = "false"}
                 $PropertyBags = @(
                     @{ "name" = "MonSSLCert:CertificateOption"; "value" = "$CertOption" },
                     @{ "name" = "MonSSLCert:Path"; "value" = "$CertPath" },
                     @{ "name" = "MonSSLCert:ExpiresDays"; "value" = "$CertExpiresDays" },
                     @{ "name" = "MonSSLCert:CheckUsage"; "value" = "$CertCheckUsage" },
-                    @{ "name" = "MonSSLCert:UseProxySettings"; "value" = "$CertUseProxySettings" },
+                    @{ "name" = "MonSSLCert:CheckExpires"; "value" = "$CertCheckExpires" },                    
                     @{ "name" = "MonSSLCert:Timeout"; "value" = "$Timeout" }
                 )
-                if ($CertUseProxySettings) {
+                if ($CertUseProxySettings -eq "true") {
                     $PropertyBags += @(
+                        @{ "name" = "MonSSLCert:UseProxySettings"; "value" = "$CertUseProxySettings"},
                         @{ "name" = "MonSSLCert:ProxyServer"; "value" = "$CertProxyServer" },
                         @{ "name" = "MonSSLCert:ProxyPort"; "value" = "$CertProxyPort" },
                         @{ "name" = "MonSSLCert:ProxyUser"; "value" = "$CertProxyUser" },
@@ -270,7 +448,7 @@ function Add-WUGActiveMonitor {
 
             'Service' {
                 $ClassId = '20816756-7dd5-4400-adb8-63d9c2147b97'
-                $SNMPFlag = if ($ServiceUseSNMP) { 1 } else { 0 }
+                $SNMPFlag = if ($ServiceUseSNMP -eq "true") { 1 } else { 0 }
 
                 $PropertyBags = @(
                     @{ "name" = "Cred:Type"; "value" = "1,2,4,8" },
@@ -382,15 +560,24 @@ function Add-WUGActiveMonitor {
 
                 try {
                     $result = Get-WUGAPIResponse -Uri $baseUri -Method POST -Body $jsonPayload
+                
                     if ($result.data.successful -eq 1) {
-                        Write-Output "Successfully created $Type monitor: $Name"
+                        Write-Information "Successfully created $Type monitor: $Name"
+                        
+                        # Check if an ID or other helpful data was returned
+                        if ($result.data.idMap) {
+                            Write-Debug "New Monitor ID: $($result.data.idMap.resultId)"
+                            Write-Output $result.data.idMap.resultId
+                        }
                     }
                     else {
                         Write-Warning "Failed to create monitor template."
+                        Write-Debug "Full result data: $(ConvertTo-Json $result -Depth 10)"
                     }
                 }
                 catch {
                     Write-Error "Error creating monitor template: $($_.Exception.Message)"
+                    Write-Debug "Full exception: $($_.Exception | Format-List * | Out-String)"
                 }
                 
             }
@@ -403,8 +590,8 @@ function Add-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfpY5VAWFLXN/U
-# xVIsQltXIITSh8noiuOclsg2jv/JaKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzFF8hK0FiJC4T
+# re81gZMLf4oMCGg9ke5SRDFECqcirqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -505,17 +692,17 @@ function Add-WUGActiveMonitor {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg6IK99Q3I8HNVXaST2FOBOZHFtMQ4uRWNQ+Z3JKNx0zIw
-# DQYJKoZIhvcNAQEBBQAEggIAJ4+dSAudjM5ylbYfTlOtAEz+3Fe3dFC2q5vB3ujC
-# O+utK1+oaBGOGAyu2oHrcS8Q0efU74H4li5fE68c9oXbBmA6Nz3w1K5R62auOprJ
-# eUa6wtVKGbPqA95J3oxwmL08GQL6WP+8zqU0kFOoLOw/ey6FF3wTf+ijMki6Z0gF
-# ELGuLSF2+eI/u5MiYchkDbIt4bNOQK2EaNOeuERyDMQEcTJwEwjm8mQN5QQrcc+s
-# KTeiCnnRC/z5Zpw5nKoogl7SeU4b+JJWLMI37ZtYgQbgXqdLzQ3mygeRpUFhzRaf
-# CkSPi48OITwt2sCDQgWSMWtfO7bKV/qkPDPg5E4DcE0BQZkyZBNXLU28HYTW5lR7
-# iHuOqBJ4XJk+UFZrmIuC02g6hsuks57vjI0xp+vG+txGKdv/XY/xOZz4YTRi6XyW
-# C38v2AHACf0Nd/1JwyA2kmqx3R3BvZN0j3sMQpIeLr5tbmwBdwKNSOK9miv4h2Jt
-# wUMXbopWI460MpsZZqdjCEzL7PGV/KYUo35h0Edv7h8poiARwn5kWXP7TZ+3JD73
-# 0s1dZCCDArxqLXMqzccXt3ckZOWaB9uDDP8X0AZwvfxTYIyxc+Gk2SnsF3SRDmlX
-# Q2aJUnX0lhZqF/hh9wfMZHhVU5xeOJCI6KUwMNc9RD5rb53PYcsIMSSCbw+AyxyX
-# WOM=
+# BgkqhkiG9w0BCQQxIgQgWQHpOPdhZqURDW6eOKdoGT2ww3AjsGa6DLQya+NcHNkw
+# DQYJKoZIhvcNAQEBBQAEggIAC6YheLkkCB3Ghm7zfIXJf8kv5TKfJ/Q4WVAAjzPj
+# cLckaS2UyPPkylHOi/7COFOhy/14H61mGSviNihnE3t98FqHU2aWHrbur1M9k1mt
+# OaHhJPG7oF5idG7fE27CsWO9IjuPin4rB2bNtScUY+C6BbkolkS/FMJr6pK/2XaX
+# uTo11SV1JhxEzEe4t4sCn0cs1tab4vj4bvWZL3tN1gouA4GW4ceLjQLFPUQkptFc
+# NkIQDnX76SF0g3MSAUYFUkw3zYCcmUYsxbUB/2dW0Hg6QQTOIILirG1qrgYGelo5
+# 0La1T5Z3/8EmcSZzMJ20dnPeYQUCtWgRn1794N5IBqLTRO8FTmx9PSwTbCKPIGe9
+# +9vXYejl5aILf9SIwEpb/4He9KfIzQ+chVl4S1eyHxoYh2rAmNRwDIpK2PwUO6R3
+# 7alzH4jbHnHnJLAsVdOFhlJdi/5/+d5UBcL0ahrf3GAYNsvDsjUMh7yWZNEam97w
+# VW3mvgnAq1UggQmMUyO8ofAJ6QFDU04bsQl3dBhJ2/Tnulyu+kzGaByupfBZIWfN
+# rmWIx2bpBJZFbZ+0ueFy4AxKJsjS+BnEt1seKMgalMfjDrpM4TnelvwG/SgSG4bG
+# dVvo85fuDaoXjSZ/daFV2IXGLFohebvRezkdUGLjRR9SXK+YPJVWNixjC6rRsHsl
+# PXQ=
 # SIG # End signature block

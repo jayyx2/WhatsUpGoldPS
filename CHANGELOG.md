@@ -1,14 +1,16 @@
 # WhatsUpGoldPS Release History
-## 0.1.14 - 2025-04-05
+## 0.1.14 - 2025-04-06
 * Changed
   * Try to fix problems with Set-WUGDeviceMaintenanceSchedule -EffectiveExpirationDate parameter
   * Fixed Add-WUGDevice not handling device attributes
+  * Resigned everything with recovered certificate
+  * Updated example Custom_report.ps1
 * Added
   * Get-WUGMonitorTemplate
   * Add-WUGActiveMonitor (WIP, use at own risk)
   * Remove-WUGActiveMonitor
+  * Add-WUGActiveMonitorToDevice (WIP, use at own risk)
   
-
 ## 0.1.13 - 2024-09-28
 * Changed
    * Refactor many functions to accept value from pipeline, example: Get-WUGDevice | Get-WUGDeviceCPUReport

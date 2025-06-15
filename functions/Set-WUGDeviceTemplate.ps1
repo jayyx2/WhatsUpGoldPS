@@ -1,84 +1,54 @@
 <#
 .SYNOPSIS
-Creates new devices in WhatsUp Gold using device templates.
-
-.PARAMETER -templates <array>
-The device templates to use to create the new devices.
-
-.PARAMETER -ApplyL2 [<SwitchParameter>]
-Specifies whether Layer 2 data should be applied.
-
-.PARAMETER -Update [<SwitchParameter>]
-Specifies whether to update existing devices with new templates.
-
-.PARAMETER -UpdateInterfaceState [<SwitchParameter>]
-Specifies whether interface state should be updated.
-
-.PARAMETER -UpdateInterfaceNames [<SwitchParameter>]
-Specifies whether interface names should be updated.
-
-.PARAMETER -UpdateActiveMonitors [<SwitchParameter>]
-Specifies whether active monitors should be updated.
+Updates the device template for a given device in WhatsUp Gold.
 
 .DESCRIPTION
-The `Add-WUGDevices` function creates new devices in WhatsUp Gold using the specified device templates. If the `-ApplyL2`
-switch is specified, Layer 2 data will be applied to the new devices. If the `-Update` switch is specified, existing devices
-will be updated with the new templates. If the `-UpdateInterfaceState` switch is specified, the interface state of existing
-devices will be updated. If the `-UpdateInterfaceNames` switch is specified, the interface names of existing devices will be
-updated. If the `-UpdateActiveMonitors` switch is specified, the active monitors of existing devices will be updated.
+The Set-WUGDeviceTemplate function allows you to update the template of a device in WhatsUp Gold by specifying the device ID and the new template object. This is typically used to apply changes to an existing device's configuration using a template previously retrieved or modified.
 
-EXAMPLES
-Add-WUGDevices -templates "Switch 1", "Router 1"
+.PARAMETER DeviceId
+The ID of the device to update.
 
-This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates.
+.PARAMETER Template
+The template object to apply to the device. This should match the format returned by Get-WUGDeviceTemplate.
 
-Add-WUGDevices -templates "Switch 1", "Router 1" -ApplyL2 -Update -UpdateInterfaceState -UpdateInterfaceNames
+.EXAMPLE
+$template = Get-WUGDeviceTemplate -DeviceId 20
+# ...modify $template as needed...
+Set-WUGDeviceTemplate -DeviceId 20 -Template $template
 
-This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates, applies Layer 2 data, updates
-existing devices with the new templates, updates the interface state of existing devices, and updates the interface names of
-existing devices.
-Author: Jason Alberino
-Date: 2023-03-07
+.NOTES
+Author: Jason Alberino (jason@wug.ninja)
+Last modified: 2024-06-15
 #>
-
-function Add-WUGDevices {
+function Set-WUGDeviceTemplate {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] [array] $deviceTemplates,
-        [switch]$ApplyL2,
-        [switch]$Update,
-        [switch]$UpdateInterfaceState,
-        [switch]$UpdateInterfaceNames,
-        [switch]$UpdateActiveMonitors
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int]$DeviceId,
+        [Parameter(Mandatory = $true)]$Template
     )
 
-        # Write debug information
-        Write-Debug "Starting Add-WUGDevices function DeviceTemplates:$deviceTemplates, ApplyL2:$ApplyL2,Update:$Update,UpdateInterfaceState:$UpdateInterfaceState,UpdateInterfaceNames:$UpdateInterfaceNames,UpdateActiveMonitors:$UpdateActiveMonitors"
-
-    #Unsure if these are needed or how to test them properly
-    $options = @("all")
-    if ($ApplyL2) { $options += "l2" }
-    if ($Update) { $options += "update" }
-    if ($UpdateInterfaceState) { $options += "update-interface-state" }
-    if ($UpdateInterfaceNames) { $options += "update-interface-names" }
-    if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
-
-    #Convert the PowerShell object to a JSON object, up to the specified depth
-    $body = @{
-        options   = @("all")
-        templates = $deviceTemplates
-    } | ConvertTo-Json -Depth 10
-
-    #Try the request and return the response or write an error if it fails
-    try {
-        $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
-        return $result.data
+    begin {
+        Write-Debug "Starting Set-WUGDeviceTemplate for DeviceId: $DeviceId"
     }
-    catch {
-        Write-Error "Error adding devices: $($_.Exception.Message)"
-        Write-Debug "Full exception: $($_.Exception | Format-List * | Out-String)"
+
+    process {
+        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/config/template"
+        try {
+            $jsonBody = $Template | ConvertTo-Json -Depth 10
+            $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $jsonBody
+            Write-Output $result.data
+        }
+        catch {
+            $oError = $_
+            Write-Error "Error updating template for DeviceId ${DeviceId} ${oError}"
+        }
+    }
+
+    end {
+        Write-Debug "Completed Set-WUGDeviceTemplate for DeviceId: $DeviceId"
     }
 }
-# End of Add-WUGDevices function
+# End of Set-WUGDeviceTemplate function
 # End of script
 #------------------------------------------------------------------
 # This script is part of the WhatsUpGoldPS PowerShell module.
@@ -90,8 +60,8 @@ function Add-WUGDevices {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYA6QM9O7efBkS
-# UjMh/nQOAmoQ6kKgdkjuubMnqL2RuaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMctXsxRI8nEFO
+# 1rgpuCZIqw1YedpGx8PCYScuhEsEK6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -192,17 +162,17 @@ function Add-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgDhTBAoKD8aMP48q5DeqeWXWaA2pv5MDBVq3FDQfmCQYw
-# DQYJKoZIhvcNAQEBBQAEggIAbKICYbtU+BD6QjhYL8vzLO3c9bBRD0tdM/9rOI7W
-# fYEdwyZQwNhC2kI9PJisGPMikOUEY3nqj0+mC7wNxuoCk+JResT2r9fj6bPEgOS2
-# l7ksFmmD3NJptnUIfGx6f+hb476b64mjfmQIMok55b46IMRzdc7+1nIATfwRxs2e
-# EfleOZvx7XCX+q8qHgWHEyz+MYWtialL0vg3kr+WRXYBlQRCzAdAQfUZn44FJWmS
-# zLslereK7S6rBY6IVCSG68u5tIChQyB39EKvLJ+bMNMRpO/R30QmXGsHqCcQ8K5x
-# UTJYmWryWOZPr5OnDFoWyAAzIxIjvoptD1Hf1Nx+gQ6WwEIugblHOlO08X5umqTb
-# ac4xqjJ0AVVg2gQNhvCiZtQtFYJkE9nmVCZ8bPSOXlamYLWkO66O3c3QgO3zwNo7
-# p50HEoa+a2SG/3L93/GgWX/vIrRUincjHVWtq1DnQAZUuJYSW2MGCX8oMG2F9tH8
-# RsjNM1+XLq0JX3Fa8I8XDW5J2Pz5aLasBzQ2Rj2vrxBxw031uzfdONfpz4v1k8PK
-# pvYB9E0ETineESkNS5ZMtHqueSCiktit0D6rdZeGJvkaHDZ4gwdyXmy19WKVWbwN
-# wSxFP2rExOjwSjExdtRxCLSipoGzdyU5JA4MVBZcwCpA+eBZhkN74qg6tvHFkzbI
-# dQc=
+# BgkqhkiG9w0BCQQxIgQgw82UT8Abs4Z/5mNSshOurW9jw0KF2aAhxep7YWagJ/4w
+# DQYJKoZIhvcNAQEBBQAEggIAlsYxtL2NTy1aAaQsOZETgnAN+aP7w1u7FInLvSQK
+# r9pCq2hwxPgYAvpTqUV9TmEQY4yBxHFGs/tukJw3J5ctkbr+BcGZkJYiH2aE+36g
+# qDx2muyOceWefqbv8ZdMktEfq1h/IGfhJSG9zrZaHybcbGd2Tdg+NkYOVfXI8Ug3
+# s59Q2F1U6f6G6IOPXxzSnvuTwkdOxF+n/YUpOQks5KgEDXQZD4ELf9xzxGs5Gzv1
+# Ku/PAuEVJA4SkeFPjassnOhttv8NS1LjD2qZNpJyB0bfyJjSIZwjG7Gow74yx/Ky
+# pktgv82Y9ol+qP2jpJ/Nv7dDfo9hhGfbbLYF1oooEtMQjyJi2WWj6zBPqOWacqZP
+# DyPF6mFhdTtqBks5W248LbXB8t6nJq+mNCgrgt0yV5O4C6M475zD1nqZiziFuGsU
+# a3U936oXlbmoNzdzl4XRbGepB8/plhGIyfiHqYpGSB+vFI+G0NB8ZyJL5vc6CkFl
+# 2/upkhfXdQJ0WiepDXl9zAGQytvzLR9MNNZAL8gtACxyCigiI/qfml1Q080rxcmY
+# j9UZE5HH3sRaMgDMHYlo59F6afQwJsAJ3b0tcCdbUalE+8Q3dcRkbiBAaggZy3+2
+# qZzHU9PEYJQPsrKPZzNFqfHakE6r3zvOSLyDIkEJu+UI+smBIxGkNXOybNjSceWU
+# JO0=
 # SIG # End signature block

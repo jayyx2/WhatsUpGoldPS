@@ -169,30 +169,24 @@ function Get-WUGDeviceReportPingResponseTime {
                 }
 
                 try {
-                    $result = Get-WUGAPIResponse -uri $uri -Method "GET"
-
-                    #Conditional data addtions/conversions
-                    #foreach ($data in $result.data) {
-                    #    #Do Nothing
-                    #}
-
+                    $result = Get-WUGAPIResponse -uri $uri -method "GET"
                     $finaloutput += $result.data
-                    $currentPageId = $result.paging.nextPageId
-                    $pageCount++
-
-                    # Page progress for the current device with Id 2
-                    if ($result.paging.totalPages) {
-                        $percentCompletePages = [Math]::Round(($pageCount / $result.paging.totalPages) * 100, 2)
-                        Write-Progress -Id 2 -Activity "Fetching device report $endUri for DeviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
-                    } else {
-                        # Indicate ongoing progress if total pages aren't known
-                        Write-Progress -Id 2 -Activity "Fetching device report $endUri for DeviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
-                    }
-
                 } catch {
-                    Write-Error "Error fetching device report $endUri for DeviceID ${id}: $_"
+                    Write-Error "Error fetching device report $endUri for DeviceID ${id}: $($_.Exception.Message)"
                     # Exit the pagination loop on error
                     $currentPageId = $null
+                }
+
+                $currentPageId = $result.paging.nextPageId
+                $pageCount++
+
+                # Page progress for the current device with Id 2
+                if ($result.paging.totalPages) {
+                    $percentCompletePages = [Math]::Round(($pageCount / $result.paging.totalPages) * 100, 2)
+                    Write-Progress -Id 2 -Activity "Fetching device report $endUri for DeviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
+                } else {
+                    # Indicate ongoing progress if total pages aren't known
+                    Write-Progress -Id 2 -Activity "Fetching device report $endUri for DeviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
                 }
 
             } while ($currentPageId)
@@ -213,8 +207,8 @@ function Get-WUGDeviceReportPingResponseTime {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAfmaUo6H2S5rl
-# xK1wvdg42dxE2w+LFlx+1jC2ZJf+96CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBa83BBu/bz9vgf
+# IbWKiaEBtFbowQZziuu2uzm+sPComqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -315,17 +309,17 @@ function Get-WUGDeviceReportPingResponseTime {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg+iaVCh/t5we0NGer6ZN+zP43uaM2sAGXgrVXlgjSJE4w
-# DQYJKoZIhvcNAQEBBQAEggIAeIwVoz16Ly3f/voS5SX1PZb7u0wftiU3ffsrlZaM
-# FTj4/3X7UOmYbSWzRB6V9p1alDEY3sEMrLqQ/trk+6xaq/rw+vrm1VbRYTO8iPFO
-# tD6sSUmm4UQ7UKmPRpaqizjBK2IQv2rgHI5gQKp/rlsPu03XsKt7X1gRqeI5KxUa
-# 1IjbrQObc6cdBPXBSJ48n7dF4MhrBzDp7btZ7urub2nkkdtszt9gNpek8KHJ+zQU
-# pWY5GnG0wVj4PjS3JbmTTIlAqpcA403/1PO6QDGN8zUWk25bld2Gp4qxC9bwnZN+
-# R0G/tqoU/6Aq/xrytEi2qi4/n+U0DQgpUUkvA4VZcppe8Toeiv6HofqLsb3fTraS
-# hKfUZKY5aTOpwzYmZbVrGPsp3oMGVPNpKvJBWq9YOmXSG9y5IpSaZdj6dNakYclM
-# Weoo1OYILg6ZifrIdYPfDn1936KMpeIshWe0eZgLL8E1yngd1LZlalzSOoEi3V8C
-# 9HOlyuL+GBx2Tod6mKbxq4XhvGP11Z9rEQ9NLaJTEH5xw2rXsrUjn7tDI5yHwIpz
-# Rl0i2hhT5cSEjbY9TTdM8lF/oUeO3otAChBR76kCi4K0NcsyX5uL3z4tqOwSKYcR
-# qFJ8d1WkRikDks7JEY53ulJelrfz+ikz1aOsImJ0odm4bhpkBnZYJPxm8rwGXx19
-# Kwc=
+# BgkqhkiG9w0BCQQxIgQgqkVJBkZACRMZvY436HbSL4+5MPV77ABp6Khjwdmm4I8w
+# DQYJKoZIhvcNAQEBBQAEggIAiNS7E4L5qOfAZjZbDZ+RLdpXPKDMxoTRJlYQxQoV
+# UhQpeqs8APW0n2cBNOt3PyM3Wqkrrc5aJjCAAZlOlsxIS3xMFlPB/7kel+KGfsB+
+# i2JUxn1+UVZA0ov4wrA+L7iNG/tpWNA40QjBbjZuAL0H6eju2vtV7ej/b382vj+L
+# J30GKmIYvPDM1xK//NiWJiuiLt/XOn1kF4S7HcW39z8pPC/p5euOz+4vYIj7mYWt
+# F0NMjZFx31Op7gwisX+mCZwEHeDxqBdCumjr5r2zzpgcyifKVlQChoTm9IEFQfXL
+# vMWQxjjieqTESQDKeLKhmy4mYQGAz6j54AZveCRG0XQtcCrMmDBZtr3fww6OKAsy
+# fZrEWI6SMA5tQxq6NRjJoddbDekpFo3uH0Vlv+yz5lrZOJQ3RTlfiYoueDxo2M5b
+# XbyyWBJF3z2bb53jFtS3LLJdmXZ+YD4ZY3LZD1REOgy8MJGBxK8M1UQ9hsC0/2YU
+# HChZPnYw/pmd2mISi7W6ZwENBv5C66Tgdt346GNI2FoUm/FA2MJryojld6379VsX
+# xs5nGaSreLf/ZUkkJE+zsNUzmJ27IPDwsTghXeLs7yhfqcnXoc0tAuNDFiM3JJ0Q
+# g5VjdStUUMSYMlhivymrWHzkzU9HSmWz36GWKDmdU2H2DH6VoMCsqmzAv5dCCuku
+# 8eI=
 # SIG # End signature block

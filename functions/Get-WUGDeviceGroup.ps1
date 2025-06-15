@@ -234,11 +234,20 @@ function Get-WUGDeviceGroup {
         return $allGroups
     }
 }
+# End of Get-WUGDeviceGroup function
+# End of script
+#------------------------------------------------------------------
+# This script is part of the WhatsUpGoldPS PowerShell module.
+# It is designed to interact with the WhatsUp Gold API for network monitoring.
+# The script is provided as-is and is not officially supported by WhatsUp Gold.
+# Use at your own risk.
+#------------------------------------------------------------------
+
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9Vv3AWhwhrYJJ
-# zsq8AgQbvf7c8zQLu2wan/qpXJMHiqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5C1TvCimZwVMG
+# J4vI4wx8vVyVjHMVUzru/DnIKN2D0qCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -339,17 +348,17 @@ function Get-WUGDeviceGroup {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgg9ecpNOSG2ypwl8S+RuAVQY0xBht2FakxgTHf98vBWEw
-# DQYJKoZIhvcNAQEBBQAEggIAYAmg9U0FUtPp7rsFRpsWRAu4lT215AjnDZPqBaaQ
-# cU9Ng5XSdbaGTdJaMTExzveM2KbwbZu5v68nngBqQfshilfBrTsWs1xy7htAEG1j
-# OKSwCUda2vPoh199FBE72eGvkG+tDowiFeug2L9atK2/5FDDMbmoAwoX7eU3SX+h
-# 3PDfH4dVulp/DKugQXkEyrZGl4lTSGswpEXqEAGygkTcfuFOVHb13XBO92lEzoWx
-# GokaGM+7GO8ba6XI78n6FdhRZBA2isz83EUzuI9vdXCNtJNvUMNUzkY1kKJu3BkE
-# 3FIFhCqtfLLvsnPX8ZhG5jWDQMdBt9ePI9rruAYOIYENZBhegY9B5dBxb/CMT3vF
-# qAm55Z3rFQxZVZF3J9A8GzM5iyKUkP1Tl7divwnUA+nCETyfBeyI/lnT6wwiMBU+
-# aIn9fUdn5bEHujKSImJePMsOm3h3KXohpGUkKQuzFfMEih3QuxNM4C0h5JZzhbyu
-# 0jsSM/x3x4klGlB4zNPxZC1pKwuWIA9AqIjWhDRITN+VoYVsugYSs2ESkSSg3zEo
-# 8GlIuAizdHR+rvp22ZizHolTc84rdM5qxF509r1n5gl1ohm8dEmWhCg5c75z4zyf
-# t47JC1Z4l6CnHAlEwnTAaBny0X0xiLHXbikahhON/k4XGHdYNqf1VJ5qCYTJaKCg
-# AF0=
+# BgkqhkiG9w0BCQQxIgQgVD74aPDYl+ckfH3QZPZX86AizkOYoc/TLg1zVO8AAH0w
+# DQYJKoZIhvcNAQEBBQAEggIAGDlZ24HcuXJh2SUhvwSVkMhQBQfkrnrWqqcSoUkD
+# A02c4zQHlpR7qwmxFOxgGiFCC65q25qrX/xPhWk6FM8J/hsFyHkkA0lJ0iIo3k0k
+# 5JKtr8tDo1jNJU063fJdGSMsboQhrz2FVjBRwU5E8d2wcHcfvlXwbWLCA0EvItTF
+# RLIQ5ts3xkzg39LS3P2ztdLJ9Uvaa2hgv9jGFHEF0RxFJVqabn7k++ipmsS1YGim
+# uiXIwizrung1MhDCklQbV7r0UGv5ZrqpR2h25gqP5SOVVNqqDKvXy6Ggj4vS0JJ8
+# ohcM/ygyNrlXxB9KGaDDJXKDhf6IF9wZ/ZjsFCakVdo1Y4kL33m1/oX98bz/TNqD
+# vD2PCx9RRbp/t+zLPtHeJ179DnqbJEmHqafftaABNF6D1lF01C5eJRPKFEa+88Rs
+# KR8MLYPq9REdla7ja0QPvW/MKSvy30uh9gBQPmvBVCi+6NsQVxnbimZxgTOmdFyT
+# KGPHBMJJFSMqMkgO++uCL6vPgXzi+JTVMnnmNDir3rpLWYp5TRGFqqMtLcTaKe+T
+# ENho9n5MuoGLNz2KkwRPFXnSkDBvxqXr+vXMnaLmsRY7lypy/kIP02owbLEfSFw/
+# KFrtH0UM90y3672jX/7A339EOj7Bt8B8t57hUVYKrnfVzEzc+t9iNaA7g7y1HI6i
+# tTQ=
 # SIG # End signature block

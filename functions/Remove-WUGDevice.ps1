@@ -42,16 +42,14 @@ function Remove-WUGDevice {
 
     process {
         try {
-            $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
+            $result = Get-WUGAPIResponse -uri $uri -method "DELETE"
             if ($result.data.success) {
-                Write-Information "Device ${DeviceId} removed successfully."
+                Write-Output "Device $id removed successfully."
+            } else {
+                Write-Warning "Failed to remove device $id."
             }
-            else {
-                Write-Error "Failed to remove device ${DeviceId}."
-            }
-        }
-        catch {
-            Write-Error "Failed to remove device ${DeviceId}: $_"
+        } catch {
+            Write-Error "Error removing device ${id}: $($_.Exception.Message)"
         }
     }
 
@@ -60,12 +58,20 @@ function Remove-WUGDevice {
     }
 }
 
+# End of Remove-WUGDevice function
+# End of script
+#------------------------------------------------------------------
+# This script is part of the WhatsUpGoldPS PowerShell module.
+# It is designed to interact with the WhatsUp Gold API for network monitoring.
+# The script is provided as-is and is not officially supported by WhatsUp Gold.
+# Use at your own risk.
+#------------------------------------------------------------------
 
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdOoNZTcjY50cF
-# xJk/u9fgsYAxIA8J72iI/gimMiwayqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDk/CMQHO2CjDFE
+# wdYMnnuJ2NPv+uvuUPl7B6Bvjjah2KCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -166,17 +172,17 @@ function Remove-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQg+WdWNVhS1rwPBt9q1ej2AEBdyBlEeRi01M5tDE91m/Ew
-# DQYJKoZIhvcNAQEBBQAEggIAeKF9zJDcF/vSeX2V8V/fileAMtcqQozMwk3Iwwx+
-# 8L3m75QrrbBu1jiO0frrZUdKvA5SmsbIOcn0Htm3bOmfV9yJDnJCkgppNWeu3iMr
-# oKk/UdBvCXPB//tWRZNAiGdgPog496xjGYQHE0FyYkG9VRYrKQ8/XC/oMLenSTuB
-# JMJZJMK0g0VaydwRdbltVmbKpzYHoWw2bupeA4rPl5HDawzNVNu8/FaGXgiPSV7e
-# dStzj/T70PLZJY07YgQWre+YGiBtnlevYokYNwEO+HsxkWNz+TllVQHLAiMoLDwF
-# bC41fnYC2trrj0r/o3Q62bmVo39B4VB5Id2oGIBcQrqg4mG6yyj74Bv6ZmG/uAs6
-# AduExrLci/z3bzTtirKuyfVrzmgrfhDVFh1wFsI2WmZWLr5GRyYKX2ekrCQZKtUm
-# qW11FM6S0oWFrNQTBlvRsF0T9smSaapEnQO1XuKggRZG1K7CTA7+DTjXShPf1R4Z
-# wuafS+AdBgKZnlbAhc39oOiIHLLMYenm0mRB1Ukrhdm0saVpDJAOMT2y6BaJSFdo
-# /8R7nurep/tgaTlSliw6XpJZvZZl0Dco0NFryR4QWgTbge8QMwrsYEEbBQQKZWBC
-# Dry5mJDBQVJ4JYoSeGV9NDbDXQptJx+I/6Z0kpSs7oy3UZ3Z/nK1tD9KdD6FUyqm
-# G7c=
+# BgkqhkiG9w0BCQQxIgQgUBarNcKPspdzfAqgw/xC74jppRfg/WfOXhZI4OEgwDIw
+# DQYJKoZIhvcNAQEBBQAEggIAclb9KMXu9nbACUIk8SXLgiEz+parabPXlCf7N56z
+# nyTlvKLoHn3YCXoF4rbxlytKl/2ddRQRRVmtK+cAquVoTRaAsrqHszGvzoKu4zka
+# iGcKCe6ys2cfY60pEtFtZOnAlGHdhDmnW6XWPK7jv0Y3T6taXsV7zJbt7MN5IUhf
+# KzcpVSJXBmaToLwOlffehX8Cdg9PP7Ua7gxuBPHu8qpn6JtHLcvRPk2fJAJ7jMRZ
+# RbEcEyPGu8ghH5DuBAqA88pky/xRVD1rnE1/YXoDyPFpM5wKm528GS2oJWoWHVJX
+# u3sGB5SrQPBJ0CsMSe4a39RloBuujn2dqMKby1/aX62X2hW64PyMrTz7f0gDTcUT
+# SDyTf8+855FnT3t99szAuev4/v0qKw6DOJ3WZ/J3aTVTR9X3zzEjAQaOiD2JF9kN
+# 5CpdiNvgr2TZECPkohNMC9yE0M7hh6xqey5O8sTaiFZ61pEUeCKPQmOQJjIjtD2+
+# UpIl80FVj49ZJzco/g2K969ReyFqi2vsFL4e6qw1erht28M3TYYMAay30cQkRWLa
+# nKdfC2AdyD8O+gpBliu5qrnJmnEI65AynDKeBMh6a2FvoNT/YmF4SWlq7ti6vpr0
+# jQIJWXFpN7pJ7zJzFvKhuMx8qiY0AWztXW0Z5ZOClOEeBdsRdf0eWo55scbC9flx
+# ys0=
 # SIG # End signature block

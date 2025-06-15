@@ -141,14 +141,29 @@ function Set-WUGDeviceProperties {
                 Write-Error $errorMessage
             }
         }
+        try {
+            $result = Get-WUGAPIResponse -uri $uri -method "PATCH" -body $body
+            $finalresult = $result.data
+        }
+        catch {
+            Write-Error "Error setting device properties: $($_.Exception.Message)"
+        }
         return $finalresult
     }
 }
+# End of Set-WUGDeviceProperties function
+# End of script
+#------------------------------------------------------------------
+# This script is part of the WhatsUpGoldPS PowerShell module.
+# It is designed to interact with the WhatsUp Gold API for network monitoring.
+# The script is provided as-is and is not officially supported by WhatsUp Gold.
+# Use at your own risk.
+#------------------------------------------------------------------
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSJi3vQLHwMJZ7
-# f0oaOSFVBx3WX0oDcCWRrFLbphd/ZqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsQZVlrmcQp3X2
+# ynAXEf908vDlNvDDYGtsjFl+YhaLjqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -249,17 +264,17 @@ function Set-WUGDeviceProperties {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgBvy4dh9jR5301uH8YC/XJlXut7U5sWNxstz3QnWBMv4w
-# DQYJKoZIhvcNAQEBBQAEggIAQZ/UDIjusTdFUWv2vs6/wKq+r0vGHVVj+Upjpv70
-# GRHxrYExpPfeqKn+1KEk85QV+jCiwUQrtV8ZEFNI+7aSJn8+AWja9B12jY7CTCQA
-# Ba8lCxwgxpFSCVnCoIV7frOIGGlHLCs8OxR46Ytcbyd0XFk2VBWAuqC3XAyo+H1I
-# 0hemajIyNTh35+D32ISYbmMBnpQ/OBM2smbiG83t/xLYXCYmrGKNS5nBafOL2MC2
-# bD3JRc+fw7iQSMIW+6lLW3oz3wQeZrtzJeajdtaj04TldoDDf6Av7LZhYl9eMazg
-# as1P26PUjOiKb8Cnfs1rFpDJBzaKWJPt51zOLZR53VywkxTc6zesqE29XpIO7N1s
-# bnXquDPGOKX55qIcN6iVu3kfcu/ZC74sx8E1duJ1uxOKJj5cDCLzr+RaeT5yWj2p
-# XBNg/dT8qiKjQg2gFZm1UKSvwxfxVlhoEn8WfolTEhYkvjlTl8ww/CNE+nyNdTT/
-# yQLkfmX/ZWwW/1ItbhP/rCSn2d4MaoWzAQIkFnHAnHo6c8f790L2Y/t7lodPMlKO
-# WRX5OT5VvqcAaXA+nMK8S9IOZNAECDQOh37hvK3YHxDCdWgb5oDw1Ppma3YdCJYy
-# kgUVcewI+84oVlDFl5lJeVPTek2Hfd9g60zsVX3AI7sYJtb2nWC/16UjqwIp+mcn
-# MQg=
+# BgkqhkiG9w0BCQQxIgQgbIl+k0i8gVhMLcCeMzIG1em38QpfLVqrXBIUIWu5hYkw
+# DQYJKoZIhvcNAQEBBQAEggIAADCeg3OQpYQSqvCz1EKyk0bt6s8KP+3iYEc6wwd/
+# gskbDnvHXzL1z2NkMUUMoFxhGSPKB8HX+O1WU+q1rp3QQiNKP3pEcsct9pIA6l0t
+# PLWLBFwhhQ7uryCOtGC+jih0UrgEkIIBSmSe9Q6MU/yXj36UdB4gRU73ddU9200g
+# fTOWVoSTQUhEgX8WynavvtkSyWUawxcuN186eYT7ZaVsV5/tq24kFyLLJrzwgSEp
+# z2VeHQSOo43fD+XzFJQOy1zB4lu105ONNBvYBCkImYTD8mwMbXiF/pdlqs2Hytlf
+# rKT7D3X9D/gboW7Ck4Mlesx6z9ZQu8TKG4XksoXCi65Gv8Efdl9hflnY4hOZV/lT
+# XGE2TcdCl8E6IFiyg38b3Nxqja6tYrefYWLvusgOWbjxLb4N4+BVX66b60CVVrkp
+# 6ZSPJ7AZUeI1b7D8xYx8NxJAUj61PL5ci/749fz7rY2knpoDfSNZfIj7mQwB+R5m
+# WqrUMi22U7T6JN2GIa6UfT79N1+CaAezr6yn8d5teWevs69lmOLxucAz4pxGlFZl
+# CVa+xg3SExSYmLqUQBygcZ8TcM4Hnp4LPuYbM9S/m/h48rXOGHLL7YJkROmfrrYI
+# +v2C0jn2+mePJDDaLuhYKGOWvyA6bryiUAJT6TrHi5ZWHqUfEYcPibi4QBirft1n
+# Qi0=
 # SIG # End signature block

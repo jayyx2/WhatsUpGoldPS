@@ -1,84 +1,101 @@
-<#
-.SYNOPSIS
-Creates new devices in WhatsUp Gold using device templates.
+function Invoke-WUGDeviceRefresh {
+    <#
+    .SYNOPSIS
+        Refreshes one or more devices' configurations based on physical device scan.
 
-.PARAMETER -templates <array>
-The device templates to use to create the new devices.
+    .DESCRIPTION
+        Uses the bulk refresh API endpoint to initiate configuration updates for one or more devices.
+        This includes resyncing monitor settings, role assignments, and other metadata.
 
-.PARAMETER -ApplyL2 [<SwitchParameter>]
-Specifies whether Layer 2 data should be applied.
+    .PARAMETER DeviceId
+        One or more device IDs to refresh.
 
-.PARAMETER -Update [<SwitchParameter>]
-Specifies whether to update existing devices with new templates.
+    .PARAMETER UpdateNamesForTableActiveMonitor
+        Whether to update monitor names from scan data (true/false).
 
-.PARAMETER -UpdateInterfaceState [<SwitchParameter>]
-Specifies whether interface state should be updated.
+    .PARAMETER UpdateEnableSettingsForTableActiveMonitor
+        Whether to update monitor enablement state (true/false).
 
-.PARAMETER -UpdateInterfaceNames [<SwitchParameter>]
-Specifies whether interface names should be updated.
+    .PARAMETER AddUseInRescanActiveMonitor
+        Whether to enable matching monitors for use in rescan (true/false).
 
-.PARAMETER -UpdateActiveMonitors [<SwitchParameter>]
-Specifies whether active monitors should be updated.
+    .PARAMETER IncludeAssignedRoles
+        Whether to include current role, OS, brand matching info (true/false).
 
-.DESCRIPTION
-The `Add-WUGDevices` function creates new devices in WhatsUp Gold using the specified device templates. If the `-ApplyL2`
-switch is specified, Layer 2 data will be applied to the new devices. If the `-Update` switch is specified, existing devices
-will be updated with the new templates. If the `-UpdateInterfaceState` switch is specified, the interface state of existing
-devices will be updated. If the `-UpdateInterfaceNames` switch is specified, the interface names of existing devices will be
-updated. If the `-UpdateActiveMonitors` switch is specified, the active monitors of existing devices will be updated.
+    .PARAMETER ResetOptions
+        Array of reset actions such as 'inventory', 'os', 'snmp', etc.
 
-EXAMPLES
-Add-WUGDevices -templates "Switch 1", "Router 1"
+    .PARAMETER DropDataOlderThanHours
+        Drop inventory data collected before X hours. Use -1 to keep all.
 
-This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates.
+    .EXAMPLE
+        Invoke-WUGDeviceRefresh -DeviceId 101,102 -ResetOptions @("inventory", "os")
 
-Add-WUGDevices -templates "Switch 1", "Router 1" -ApplyL2 -Update -UpdateInterfaceState -UpdateInterfaceNames
-
-This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates, applies Layer 2 data, updates
-existing devices with the new templates, updates the interface state of existing devices, and updates the interface names of
-existing devices.
-Author: Jason Alberino
-Date: 2023-03-07
-#>
-
-function Add-WUGDevices {
-    param(
-        [Parameter(Mandatory)] [array] $deviceTemplates,
-        [switch]$ApplyL2,
-        [switch]$Update,
-        [switch]$UpdateInterfaceState,
-        [switch]$UpdateInterfaceNames,
-        [switch]$UpdateActiveMonitors
+    .NOTES
+        Uses internal helper function Get-WUGAPIResponse for API calls.
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)][Alias("id")][int[]]$DeviceId,
+        [Parameter()][ValidateSet("true", "false")][string]$UpdateNamesForTableActiveMonitor,
+        [Parameter()][ValidateSet("true", "false")][string]$UpdateEnableSettingsForTableActiveMonitor,
+        [Parameter()][ValidateSet("true", "false")][string]$AddUseInRescanActiveMonitor,
+        [Parameter()][ValidateSet("true", "false")][string]$IncludeAssignedRoles,
+        [Parameter()][ValidateSet(
+            "inventory", "resources", "ipam", "roles", "interfaces", "os",
+            "snmp", "displayname", "assignedroles", "notes", "def",
+            "monitors", "primaryip", "credentials", "allattributes")][string[]]$ResetOptions,
+        [Parameter()][ValidateRange(-1, [int]::MaxValue)][int]$DropDataOlderThanHours
     )
 
-        # Write debug information
-        Write-Debug "Starting Add-WUGDevices function DeviceTemplates:$deviceTemplates, ApplyL2:$ApplyL2,Update:$Update,UpdateInterfaceState:$UpdateInterfaceState,UpdateInterfaceNames:$UpdateInterfaceNames,UpdateActiveMonitors:$UpdateActiveMonitors"
-
-    #Unsure if these are needed or how to test them properly
-    $options = @("all")
-    if ($ApplyL2) { $options += "l2" }
-    if ($Update) { $options += "update" }
-    if ($UpdateInterfaceState) { $options += "update-interface-state" }
-    if ($UpdateInterfaceNames) { $options += "update-interface-names" }
-    if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
-
-    #Convert the PowerShell object to a JSON object, up to the specified depth
-    $body = @{
-        options   = @("all")
-        templates = $deviceTemplates
-    } | ConvertTo-Json -Depth 10
-
-    #Try the request and return the response or write an error if it fails
-    try {
-        $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
-        return $result.data
+    begin {
+        Write-Verbose "[Invoke-WUGDeviceRefresh] Begin block starting."
+        if (-not $global:WhatsUpServerBaseURI) {
+            Write-Error "WhatsUpServerBaseURI is not set. Please run Connect-WUGServer to establish a connection."
+            return
+        }
+        Write-Verbose "Starting device refresh request."
     }
-    catch {
-        Write-Error "Error adding devices: $($_.Exception.Message)"
-        Write-Debug "Full exception: $($_.Exception | Format-List * | Out-String)"
+
+    process {
+        Write-Verbose "[Invoke-WUGDeviceRefresh] Processing request."
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
+        $uri = "$baseUri/refresh"
+        Write-Verbose "PATCH $uri"
+
+        $body = @{ deviceIds = $DeviceId }
+
+        if ($UpdateNamesForTableActiveMonitor)      { $body.updateNamesForTableActiveMonitor = $UpdateNamesForTableActiveMonitor }
+        if ($UpdateEnableSettingsForTableActiveMonitor) { $body.updateEnableSettingsForTableActiveMonitor = $UpdateEnableSettingsForTableActiveMonitor }
+        if ($AddUseInRescanActiveMonitor)           { $body.addUseInRescanActiveMonitor = $AddUseInRescanActiveMonitor }
+        if ($IncludeAssignedRoles)                  { $body.includeAssignedRoles = $IncludeAssignedRoles }
+        if ($ResetOptions)                          { $body.resetOptions = $ResetOptions }
+        if ($DropDataOlderThanHours -ne $null)      { $body.dropDataOlderThanHours = $DropDataOlderThanHours }
+
+        $jsonBody = $body | ConvertTo-Json -Depth 4
+
+        try {
+            Write-Information -Message "Sending refresh request for DeviceIds: $($DeviceId -join ', ')"
+            $response = Get-WUGAPIResponse -Uri $uri -Method PATCH -Body $jsonBody
+
+            if ($response.data.success -eq $true) {
+                Write-Information -Message "Refresh request accepted successfully. Scan ID: $($response.data.id)"
+                Write-Output $response.data.id
+            } else {
+                Write-Warning "Refresh request returned success = false."
+                Write-Output $response.data
+            }
+        } catch {
+            Write-Error "Failed to refresh device config(s): $_"
+        }
+    }
+
+    end {
+        Write-Verbose "[Invoke-WUGDeviceRefresh] End block completed."
+        Write-Verbose "Completed bulk device refresh."
     }
 }
-# End of Add-WUGDevices function
+# End of Invoke-WUGDeviceRefresh function
 # End of script
 #------------------------------------------------------------------
 # This script is part of the WhatsUpGoldPS PowerShell module.
@@ -86,12 +103,11 @@ function Add-WUGDevices {
 # The script is provided as-is and is not officially supported by WhatsUp Gold.
 # Use at your own risk.
 #------------------------------------------------------------------
-
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYA6QM9O7efBkS
-# UjMh/nQOAmoQ6kKgdkjuubMnqL2RuaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATk2iqaKdsBqlK
+# onY0KPbnsAx2QnLrgGHTkzknaQuZK6CCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -192,17 +208,17 @@ function Add-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgDhTBAoKD8aMP48q5DeqeWXWaA2pv5MDBVq3FDQfmCQYw
-# DQYJKoZIhvcNAQEBBQAEggIAbKICYbtU+BD6QjhYL8vzLO3c9bBRD0tdM/9rOI7W
-# fYEdwyZQwNhC2kI9PJisGPMikOUEY3nqj0+mC7wNxuoCk+JResT2r9fj6bPEgOS2
-# l7ksFmmD3NJptnUIfGx6f+hb476b64mjfmQIMok55b46IMRzdc7+1nIATfwRxs2e
-# EfleOZvx7XCX+q8qHgWHEyz+MYWtialL0vg3kr+WRXYBlQRCzAdAQfUZn44FJWmS
-# zLslereK7S6rBY6IVCSG68u5tIChQyB39EKvLJ+bMNMRpO/R30QmXGsHqCcQ8K5x
-# UTJYmWryWOZPr5OnDFoWyAAzIxIjvoptD1Hf1Nx+gQ6WwEIugblHOlO08X5umqTb
-# ac4xqjJ0AVVg2gQNhvCiZtQtFYJkE9nmVCZ8bPSOXlamYLWkO66O3c3QgO3zwNo7
-# p50HEoa+a2SG/3L93/GgWX/vIrRUincjHVWtq1DnQAZUuJYSW2MGCX8oMG2F9tH8
-# RsjNM1+XLq0JX3Fa8I8XDW5J2Pz5aLasBzQ2Rj2vrxBxw031uzfdONfpz4v1k8PK
-# pvYB9E0ETineESkNS5ZMtHqueSCiktit0D6rdZeGJvkaHDZ4gwdyXmy19WKVWbwN
-# wSxFP2rExOjwSjExdtRxCLSipoGzdyU5JA4MVBZcwCpA+eBZhkN74qg6tvHFkzbI
-# dQc=
+# BgkqhkiG9w0BCQQxIgQg6Fh+wA0Ls8RcWLtyYgtdClwGOMayccICZOT06A46/uEw
+# DQYJKoZIhvcNAQEBBQAEggIAtgFBmdX5Nn8w+RG2GddBzUs09rhR9l1ChQZEQyrU
+# 4ycZ212baz/X+Gpihov9qSWKrThI9pEdhLNQRIkPv2yZgz+75mppaGry4lYkH0R0
+# YWVhAUMw7mCOSZpCh/k9bVqpO4qmtgGPlQ5KJWeHr9QHcFF284Js9F5jOBgKX9VA
+# xH8vHfxnjeYi1ckb6c5HoLPuXuRHhiHgdrkSfZ7xmallV9vTDJPTVYsiHcXkcCMy
+# fdURa/95rH7cc86x8AdwWq0CspJC1QJZi8LcqBY4xgGttjAGB1s4Zz8wl3ilVzW+
+# 1u7I51DeIuFEk9Hkc3Cctdhpom60T7e5asJALN15N2AmRTXm+RSPKUFflaugkI68
+# eqUOxYkHMVRZXHweB0cmRcv/Hn/os5PMx/N5CUuewMxk0E+dsWPmleuyjfnLrFH6
+# TzQOiYnm8fUuUVURxiqz21P+rmIJmJsJDjoix2ZlwRA/i5X4x2v8tS9i1slt65Pq
+# Ta464Txy/aM2ZwI5s7Z8cr1MAomJjYKRqajt8INm8ey7AFrSuiRTDffsAKcVbOvU
+# LJq0Dz83ZiylzxXUGua2vvrho9L2ggWhWj8ZzIeq7qzXCLsaVWc32cXq2LEin7Hm
+# wjaeCnVLlNsrnunaZBc+etLdz21nlxRKAPJwd4s3OtvwT7dttSY/T05Xw0LZWbJL
+# OV8=
 # SIG # End signature block

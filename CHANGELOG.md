@@ -1,4 +1,17 @@
 # WhatsUpGoldPS Release History
+## 0.1.15 - 2025-06-07
+## Commit WIP, not releasing to PSGallery yet 
+* Changed
+  * Copilot suggested improvements to error handling [14 files suggested]
+  
+* Added
+  * Invoke-WUGDeviceRefresh (WIP)
+  * Set-WUGActiveMontior and Get-WUGActiveMonitor (WIP)
+  * Get-WUGDeviceReport (WIP)
+* Removed
+  * Soon plan to remove Get-WUGDeviceReportXXXX and replace with -ReportType parameter on Get-WUGDeviceReport
+  * Soon plan to remove Get-WUGDeviceGroupReportXXXX and replace with -ReportType parameter on Get-WUGDeviceGroupReport
+
 ## 0.1.14 - 2025-04-06
 * Changed
   * Try to fix problems with Set-WUGDeviceMaintenanceSchedule -EffectiveExpirationDate parameter

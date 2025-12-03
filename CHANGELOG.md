@@ -3,6 +3,8 @@
 ## Commit WIP, not releasing to PSGallery yet 
 * Changed
   * Copilot suggested improvements to error handling [14 files suggested]
+  * Fixed issue with Add-WUGDevice and attribute handling
+  * Removed action policy from New_device.ps1 example so it will work when run
   
 * Added
   * Invoke-WUGDeviceRefresh (WIP)

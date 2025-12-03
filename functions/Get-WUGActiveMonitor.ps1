@@ -121,8 +121,8 @@ function Get-WUGActiveMonitor {
                     $comment = $active["comment"]
                     $argument = $active["argument"]
                 } elseif ($active -is [PSObject]) {
-                    $comment = $active.PSObject.Properties['comment']?.Value
-                    $argument = $active.PSObject.Properties['argument']?.Value
+                    $comment = if ($active.PSObject.Properties['comment']) { $active.PSObject.Properties['comment'].Value } else { $null }
+                    $argument = if ($active.PSObject.Properties['argument']) { $active.PSObject.Properties['argument'].Value } else { $null }
                 }
                 if (-not $comment -and $active.comment) { $comment = $active.comment }
                 if (-not $argument -and $active.argument) { $argument = $active.argument }
@@ -325,8 +325,8 @@ function Get-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDftkw1qba+eIWw
-# /aZB97oLbcjPz9WnE5/kuIwkhOyyGqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKw3gdvDNmXw+o
+# oWGSD91crt5RFe1wapljdmycrUFLLaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -427,17 +427,17 @@ function Get-WUGActiveMonitor {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgw+DgC+AQUuiXko3jrwbtJXQe/5T1wZq4vvp11XBJ2eUw
-# DQYJKoZIhvcNAQEBBQAEggIAXqqZ7XFOUV1sin35RuCz2Bmeck58O9au2LA0SYl8
-# T8IKp8OSvBR/gJ+wFJ8+8oPmArQ9HgMxT1kT7oXJg4USV2fVPrzKx9g3cLBjPAwE
-# mJs8cWBNaP2I+Ubxk6mg9gAuiku+KTSo0ZL5zHV3EP/aSPc2IraVQLLvCRCkXRPZ
-# Y9Tq/K/BN9RcF4JWSYSYKTmog9+HyiKG/jfsbW8HdAGeARv8GUp/NkkYUN75pklB
-# FJSY1LaywqTPti5ml68oZZLJcmsOIvk+5aZalOoXHuKfH0p0Q3CZkD+Nok9aNDL/
-# CGOwlFGZ7gyATbgGBDvCGh17lnPG9us9ADBw1acRSojwTUmo+qgRkI4JbV0w3Mrk
-# 3BOrhKMO1oeVuHtSqWsMyDn+Saqs0WFBjY/XtaeeFkivmvXX6FcoNprMIZiqQRS6
-# dWEg9ed4DpG2C8LoSkihd6LdRy1P37GzGkQHta+vOOAqq5KHw/Rwc1MhiRARoR3F
-# 1Oa8QBuyNr1b9KIcZoeNOR6qAvjXUoGKhb60clFOu7uVrUwSZq3NfcoKXyX2QzT/
-# Uld+OfZiSrdX6tdp5gQbGpTnPS5hUClD2AOCDo+32HW9uOJmXvLB0D1Zoa8p/wxG
-# zZYyHSO3R9bMOLCY8reh2QvbukKCXd16pHzOHe0nSm9Yer9fxx3kKEUjzMeS4j1H
-# qJQ=
+# BgkqhkiG9w0BCQQxIgQgQWiHM5PuHUvzHVZQEqCeaTVEeIfaK5tmcfoQS84fpaEw
+# DQYJKoZIhvcNAQEBBQAEggIAomMnaYwJmAbfa25LB2f/CI6XXbVPTHkymzOxg+8k
+# 2m1qOCLvDem9+j83ErNU9mQ6KuKfxJxjqIwxQElt2xe4G1TSSSFRLF+avfpsZmZ3
+# j34qlELU29gnRrupdII2ewJ6v5NloQ6521qgWrf8eggGXPYVJsLjWs8CAssIcPeY
+# ZhfdE7bkU28jPF76cyal0osv397hQu40AyIa/x80ONP+50+Szkd5aiIpzoYPwbBg
+# Lon1Ihxpgr5FUbMG7aGiwxhuV2IBJBOaH7wxiMbrMVkfTlEudqu8Q7Cog2XgZH0q
+# BWvz3NNdRIL7mdz8PxHq2polG6Puf6tUBvo2Go+eJbDFm7Izl0NQIUPBEFiZPH/R
+# oU2tUxk2ICDgbSX7GpQlomh7aTWV4KtC68NPVcoZnYWTsZLrIIZcKl5I7O0OX136
+# cEwHi0ZhVKQKGks3E+seuscQWsfXxpyjK+MTvWdN04z+1SkKizD79r3gBbyx+a2f
+# wTbbq5H7xyMWbV2UbrQ0ajyot1mcH61lCx+4ZzPsal8T+9D09sKh1DwZn0tN1ivh
+# o7CXyZxHUGyOoEPRinK/5DQLaL+ZdBglxgZu7v/K4Nqy38P5oby7P0eZyP98OSoY
+# T+P69Bf8ePc3RTT7ypgIH3NIzlTBATJjnwAUB14C1an38VOh/AtR4WHXiUuLUnfX
+# 1o0=
 # SIG # End signature block

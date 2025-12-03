@@ -381,6 +381,33 @@ function Add-WUGDevice {
         $CredentialObjects += $CredentialObject
     }
 
+    #Attributes
+    $now = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    $AttributesObject = @([PSCustomObject]@{ name = 'Added by WhatsUpGoldPS'; value = $now })
+    if ($Attributes) {
+        if ($Attributes -is [System.Collections.IEnumerable] -and $Attributes -notlike '*String*') {
+            foreach ($attr in $Attributes) {
+                if ($attr -is [hashtable] -or $attr -is [PSCustomObject]) {
+                    if ($attr.ContainsKey('name') -and $attr.ContainsKey('value')) {
+                        $AttributesObject += [PSCustomObject]@{ name = $attr.name; value = $attr.value }
+                    } else {
+                        # Convert all properties to name/value pairs
+                        foreach ($prop in $attr.PSObject.Properties) {
+                            $AttributesObject += [PSCustomObject]@{ name = $prop.Name; value = $prop.Value }
+                        }
+                    }
+                }
+            }
+        } elseif ($Attributes -is [hashtable] -or $Attributes -is [PSCustomObject]) {
+            foreach ($prop in $Attributes.PSObject.Properties) {
+                $AttributesObject += [PSCustomObject]@{ name = $prop.Name; value = $prop.Value }
+            }
+        }
+    }
+
+    #Set note to always include the current date and time
+    $note = "Added by WhatsUpGoldPS on ${now} ${note}"
+    
     #Groups
     $Groups = @()
     if ($GroupName) {
@@ -391,7 +418,6 @@ function Add-WUGDevice {
         $Groups += @{ id = $GroupId }
     }
     #>
-
     #End data formatting
 
     $options = @("all")
@@ -434,7 +460,7 @@ function Add-WUGDevice {
                     networkName          = "${Hostname}"
                 }
             )
-            attributes          = @(${Attributes})
+            attributes          = @(${AttributesObject})
             customLinks         = @()
             activeMonitors      = @(${ActiveMonitorObjects})
             performanceMonitors = @(${PerformanceMonitorObjects})
@@ -470,7 +496,9 @@ function Add-WUGDevice {
                 $Template | Add-Member -MemberType NoteProperty -Name 'primaryRole' -Value "${PrimaryRole}"
             }
         }
-        if ($note) { $Template.note = "${note}" } else { $Template.note = "Added by WhatsUpGoldPS PowerShell module on $((Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz UTC"))" }
+        if ($note){ 
+            $Template.note = "${note}"
+        }
         if ($ActiveMonitorObjects) {
             if ($Template.activeMonitors) {
                 $Template.activeMonitors += @(${ActiveMonitorObjects})
@@ -494,6 +522,9 @@ function Add-WUGDevice {
             else {
                 $Template.passiveMonitors = @(${PassiveMonitorObjects})
             }
+        }
+        if ($AttributesObject) {
+            $Template.attributes = @(${$AttributesObject})
         }
     }    
     #End template handling
@@ -532,8 +563,8 @@ function Add-WUGDevice {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCEaa0lANAtlsTU
-# /GghuusCQpxbyz3WtQyP2Py6i6+quKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCEqebWtxrLV+5L
+# meTwpY6oyj/3UmksBbY3ZjZXwwTkYqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -634,17 +665,17 @@ function Add-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgpw9QBqQ9+DPi6I27MxXuLEwVCyiixe2PwIcvBuJMIBgw
-# DQYJKoZIhvcNAQEBBQAEggIADgGeY0HvV/s8GVwYahhX/RQA45A72NsbZpVWoqd7
-# sUBDAelA5d/AfEdZQa+evgAG4RVYC0mvBQYvOg3IFks2TmIQf5jecvy9C6MAW985
-# BqEaA3XcrMvafdiCkZkj9t3NM9i5mbY/HEANLg8NP0siCys5SfPHQUUQ97RyHPh9
-# 3xfs+DDGyLwYXVkMWTFizhSBOVypG5c+bHpmYgZ38n203pCDKU4BGNbYoz3ujHae
-# DW3aQoGQ5EQrPjYazZt46uUedwyB8L0mNcwbpcg2yjJjbq17YuH8E3f+WfHPDMHg
-# jFjV90bVJ/yNe2yEjTtzMeWJQQDQ/InY3Pq+hfiFIzqsrYrUSkWkXtjsLHYMmQMN
-# X9Bd3iXuafYwNbDXjtQW5rb80dC3MsKZsZFHaME29kKnkzQDCACHLBdLZcHLjpXa
-# MUToLPra0Shf/ubOvaEg5uDGEwXBoGAq0iAOnvT55OCEpn9c732aoN1/tmIa7ZZ6
-# wqLcmF8esTaTMYYHv3gBEP6sngi8G1NzY9ojYBDF+G5nlMdLGKWGxYYP0O0t7WnA
-# /6o6xloSVZYGukru2Xs9JdsUyBe9uhvdkeVxGqwymbi/nKMaPDOF7tjWOz6n8vIL
-# mq7+5PnYe7/BIo6U4n4ZqYiajeB+y/ni+RgEmYKhSE+yRpVgoVnUJsKx8w2h+c5W
-# +Bw=
+# BgkqhkiG9w0BCQQxIgQgk51XKukMpoGnh1xP+e0lJ5tt22fTNmFhwH7fCCzfvTow
+# DQYJKoZIhvcNAQEBBQAEggIAc6wp6+e2WlrfAUcZEmDKbRNvh7AwzwFd+ikIrwSJ
+# rWccsGs4yrnVAN/THKymEezbdIJ8CYCdbh3OQeBxXh/UOvnmqOJ6TTFqcglIaWl9
+# /LOBI1nwzc0XEis/AZeRcqUAR7DrS++5wUITukc4Q92BvPyFNZaYwMuiGtlIgxWK
+# /iM87TgZH2TUl5228iP/BZl8nvolfHi6x8atLWkBnoFaM8avkt5nYc0j1zwWLZ+8
+# VYG0t29C+Q2dMNBP9MFPBeTwEw2swamzzzGq7JnmMX90nkJtnlHQ9sZG/ofLmJLL
+# ci6Ph/Q+373R8/ypE6+sVz+xhEdKoeuexgn4NRt2H47htVcn4VbK1pgIFDBgaUKY
+# FB8bXd8NMYfAoIRQt7KAVzADNksSb1tlXHNI+sYoGRx4NOlyRIGd0bs2wT6MvEFg
+# HasxveydV1NOpg9OTBSgfGIDGTpnHKufzzed+Mtr0raV6PPRECpTPy/RztePTKXS
+# mdxXbbodVy8AU7k+OscS8MvoiRFWm9HNsufBSI4B5MfGMv7Tj/T0GYGrKfkyjOxP
+# EJSU8uf6tI0+j7JYoi4EO/mjVbXQwgvhmHGLPRyb/BRG8bjJOroVehEMoQsCIaxP
+# dag8Ps/qwPszJcENik05VtXGAsM233xrlRV3E1Yu85Mqw2AxN+1RpbRSZVEaVsrg
+# nY4=
 # SIG # End signature block

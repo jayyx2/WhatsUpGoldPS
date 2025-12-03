@@ -44,8 +44,6 @@ function Get-WUGMonitorTemplate {
         Write-Debug "IncludeCoreMonitors: $IncludeCoreMonitors"
         Write-Debug "AllMonitors: $AllMonitors"
 
-        # Initialize the pipeline flag
-        $bpipeline = $false
         # Initialize collection for final output
         $finalOutput = @()
         $baseUri = "$($global:WhatsUpServerBaseURI)/api/v1/monitors/-"
@@ -122,14 +120,14 @@ function Get-WUGMonitorTemplate {
     end {
         Write-Debug "Get-WUGMonitorTemplate function completed."
         # Output the final data
-        return $finalOutput
+        Write-Output $finalOutput
     }
 }
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJs/dqxgFRzZWr
-# gXpYEqLIl0m6nxvWhfELVBPrZWRTZKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRrf6W+yx7JI3i
+# aOlJ3hHYahDVOci0x4rPfkPf2Cd9aKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -230,17 +228,17 @@ function Get-WUGMonitorTemplate {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgaKg0C1zSOcCUtcSo/ucBSSUKCbOYhMLJwR6BdTj0B68w
-# DQYJKoZIhvcNAQEBBQAEggIASZ4ExvSusipYSXIxTWpyDi/F6X0an7R3qg4CaqrC
-# qB3przxmq1G/KFl7uEZ/CaJcQnVElxgfJUBqjR/dL38d0fHhGK7mECnEvCK8yrIQ
-# LXzOVencGHZ6ucPaHFgdI5PP47aKkE42rA1ivmPJj4BatFVzSGclhHeB8fS7YZWZ
-# chiN8o2Tq8i+RV9dCeiIJ+uIRN5hz3OS+Y56nmvHWY9jqrhHp9iOgmSqJeVl0VYU
-# hcTk5ldsVMNGUK9CcvjAsR6TfAP9F52ZdfSeFayhHNVIyWOs9EWgm9UO5NP5b/Ca
-# GQHwu3gPSVvFfd6N3gc8RIT4ABgjyy85/AIWnEuEdviLfncpdQbHtzepP5ZYhoOz
-# Ha3ZMPak9AKgY70/DyTX3znqXj93YCzJOw7lr3QZ+JkoeiIPYo23WF4tZYHO7a0N
-# Fh75TODqyFcuKke9hxRuYBPZMG6yibOebZYX1BtlZxOKJJFOyzEgytRmNMSHW/wG
-# uxoVAJJtU1+lE8sogi+B0iFXvD78fsc+uXXeF668QR0yXr5b/5qrVtTINMKbvrlD
-# EBOXTC85ZjTcGFJrl20cUwiMPFHH6lf0IU/sZ2A8gWztyRSH4g6wepc3+Tcikazc
-# i4QScghoVW9tSw/Z1ZvI5MLe+NMo6QdY3x7X+epWhG7zs6XZE2vh+tYQbFb7whBT
-# f84=
+# BgkqhkiG9w0BCQQxIgQgZE6OaxtrN2zFTu85XowDPT2JUfFJhfjKOfSbU/0s4Vow
+# DQYJKoZIhvcNAQEBBQAEggIAFoYk9PBVHWFGSS/lfuIQEy4Rqr/GYpp3mVnW5Mhc
+# oCt08aWAcjIm800he/vDhde4xqYTO+e/uNBDL++l8J1SLspWmjeCnkguE3i+b4wq
+# bxmdRx6itETtjTUqyA56N5KPRBHJp0CygztDey4myAHgYd2guTvOTkb6cC9pelBg
+# 04ou/UqfvcVi2zJxIf4w/GKDmH6pbdRvS6vSGwRtcAPVstjbbBfHB97kEgGvZGVT
+# aaftPrypHka5RV4IE68jjpIO8YG24K3+QII8VH3g0Wbb5hzXabxR8hn3XuOiAGvq
+# X/tJp4p7FEZEj4SXwcR3YBl8edAOOY+qw/sptcFDwaY+95WY+RirURWEHEOsLNeR
+# tspA4D10sA1DnriNJd+OIOkmIcDma28bTcttRknEU7ZwRLrrNOEK+oIM3+usvDtX
+# gJQLhoco6FnmD26nf3tPwcUXzVAvGXk2FN+H4ItwPUoVhGyMenhX4syVz9BUdznt
+# aT5qtTrXqbShAqSQf28TECK4uQo1gYltkKmsDbUWrRZuNpMQpJXy8/UlXRNlBA6X
+# 41jxElsNfJOWAxWUIJ8Y/b1s9hWpQ1Iok7MVrVThC8M8YIlvnK4v1fWYpV7MCmH/
+# JCCVV47FUnDml2Ay5p/phW+d6xyvkyWL6TpMBafOCZlFjyhLIrvER76JRJFZdpJ1
+# OjQ=
 # SIG # End signature block

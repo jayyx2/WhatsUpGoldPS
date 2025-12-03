@@ -40,7 +40,7 @@ $note = "This note was changed on $((Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz
 $snmpOid = "1.3.6.4.1"
 $displayName = "Example Changed Device"
 #Use the stored $NewDeviceID to adjust Device Properties
-Set-WUGDeviceProperties -DeviceID $NewDeviceID -DisplayName $displayName -isWireless $isWireless -collectWireless $collectWireless -keepDetailsCurrent $keepDetailsCurrent -note $note -snmpOid $snmpOid -actionPolicy $actionPolicy
+Set-WUGDeviceProperties -DeviceID $NewDeviceID -DisplayName $displayName -isWireless $isWireless -collectWireless $collectWireless -keepDetailsCurrent $keepDetailsCurrent -note $note -snmpOid $snmpOid
 Write-Host "Updated the device with our new properties."
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor

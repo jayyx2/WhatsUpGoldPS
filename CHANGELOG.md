@@ -1,6 +1,5 @@
 # WhatsUpGoldPS Release History
-## 0.1.15 - 2025-06-07
-## Commit WIP, not releasing to PSGallery yet 
+## 0.1.15 - 2025-12-03
 * Changed
   * Copilot suggested improvements to error handling [14 files suggested]
   * Fixed issue with Add-WUGDevice and attribute handling

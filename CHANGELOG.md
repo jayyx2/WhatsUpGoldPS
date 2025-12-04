@@ -1,5 +1,14 @@
 # WhatsUpGoldPS Release History
-## 0.1.15 - 2025-12-03
+## 0.1.17 - 2025-1204
+* Changed
+  * Use new endpoint for Add-WUGDevice, allowing for discovery
+  * Moved Add-WUGDevices to Add-WUGDeviceTemplates
+
+* Added
+  * Add-WUGDeviceTemplate replaces old Add-WUGDevice functionality
+
+
+## 0.1.15/16 - 2025-12-03
 * Changed
   * Copilot suggested improvements to error handling [14 files suggested]
   * Fixed issue with Add-WUGDevice and attribute handling

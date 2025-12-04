@@ -1,570 +1,154 @@
 <#
 .SYNOPSIS
-Adds a device to WhatsUp Gold using the WhatsUp Gold REST API.
+    Bulk add devices to WhatsUp Gold using PATCH /api/v1/device-groups/{groupId}/newDevice.
+    Sends only required/default and user-specified parameters for clear, safe operation.
 
 .DESCRIPTION
-The Add-WUGDevice function adds a device to WhatsUp Gold using the WhatsUp Gold REST API.
-It allows configuring various aspects of the device such as display name, IP address, template,
-hostname, device type, polling interval, credentials, monitors, and other attributes.
+    Adds network devices to WUG for monitoring, sending only: 
+    - ipOrNames (required)
+    - useAllCredentials (default $true, always sent unless overridden)
+    - expandVirtualEnvironment, expandWirelessEnvironment, expandStorageEnvironment (default $true, always sent unless overridden)
+    - All other options only sent if specified.
 
-.PARAMETER displayName
-The display name of the device.
+.PARAMETER IpOrName
+    (Required) Device IP addresses or hostnames to add.
 
-.PARAMETER DeviceAddress
-The IP address of the device.
+.PARAMETER GroupId
+    (Optional) Device group ID. Default is 0 (Static group).
 
-.PARAMETER Template
-The template to use for configuring the device (optional).
+.PARAMETER UseAllCredentials
+    (Optional) Try all credentials in library. Default: $true.
 
-.PARAMETER Hostname
-The hostname of the device (optional).
+.PARAMETER ExpandVirtualEnvironment
+    (Optional) Expand virtual hosts. Default: $true.
 
-.PARAMETER deviceType
-The type of the device (optional).
+.PARAMETER ExpandWirelessEnvironment
+    (Optional) Expand wireless environment. Default: $true.
 
-.PARAMETER PollInterval
-The polling interval for monitoring the device (optional).
+.PARAMETER ExpandStorageEnvironment
+    (Optional) Expand storage environment. Default: $true.
 
-.PARAMETER PrimaryRole
-The primary role of the device (optional).
+.PARAMETER Credentials
+    (Optional) Array of credential names to try first.
 
-.PARAMETER SubRoles
-The sub-roles of the device (optional).
+.PARAMETER ForceAdd
+    (Optional) Add device without scanning.
 
-.PARAMETER snmpOid
-The SNMP OID of the device (optional).
+.PARAMETER ForceCreate
+    (Optional) With ForceAdd, if true, creates device even if matched.
 
-.PARAMETER SNMPPort
-The SNMP port of the device (optional).
+.PARAMETER ForceRole
+    (Optional) Devices are added with this explicit role if provided.
 
-.PARAMETER OS
-The operating system of the device (optional).
+.PARAMETER PreferSnmpSystemNameAsDisplayName
+    (Optional) Prefer SNMP system name as display name.
 
-.PARAMETER Brand
-The brand of the device (optional).
+.PARAMETER ResolveDNSHostNames
+    (Optional) Use DNS for reverse lookup.
 
-.PARAMETER ActionPolicy
-The action policy for the device (optional).
+.PARAMETER SnmpPortToUse
+    (Optional) SNMP port.
 
-.PARAMETER Note
-Additional notes for the device (optional).
+.PARAMETER IncludeWirelessClients
+    (Optional) Include clients on wireless APs.
 
-.PARAMETER AutoRefresh
-Whether to enable auto-refresh for the device (optional).
-
-.PARAMETER CredentialWindows
-Windows credential for the device (optional).
-
-.PARAMETER CredentialSnmpV3
-SNMPv3 credential for the device (optional).
-
-.PARAMETER CredentialSnmpV2
-SNMPv2 credential for the device (optional).
-
-.PARAMETER CredentialSnmpV1
-SNMPv1 credential for the device (optional).
-
-.PARAMETER CredentialAdo
-ADO credential for the device (optional).
-
-.PARAMETER CredentialTelnet
-Telnet credential for the device (optional).
-
-.PARAMETER CredentialSsh
-SSH credential for the device (optional).
-
-.PARAMETER CredentialVMware
-VMware credential for the device (optional).
-
-.PARAMETER CredentialAWS
-AWS credential for the device (optional).
-
-.PARAMETER CredentialAzure
-Azure credential for the device (optional).
-
-.PARAMETER CredentialMeraki
-Meraki credential for the device (optional).
-
-.PARAMETER CredentialRestApi
-REST API credential for the device (optional).
-
-.PARAMETER CredentialRedfish
-Redfish credential for the device (optional).
-
-.PARAMETER CredentialJmx
-JMX credential for the device (optional).
-
-.PARAMETER CredentialSmis
-SMIS credential for the device (optional).
-
-.PARAMETER Interfaces
-Interfaces configuration for the device (optional).
-
-.PARAMETER Attributes
-Attributes configuration for the device (optional).
-
-.PARAMETER CustomLinks
-Custom links configuration for the device (optional).
-
-.PARAMETER ActiveMonitors
-Active monitors configuration for the device (optional).
-
-.PARAMETER PerformanceMonitors
-Performance monitors configuration for the device (optional).
-
-.PARAMETER PassiveMonitors
-Passive monitors configuration for the device (optional).
-
-.PARAMETER Dependencies
-Dependencies configuration for the device (optional).
-
-.PARAMETER NCMTasks
-NCM tasks configuration for the device (optional).
-
-.PARAMETER ApplicationProfiles
-Application profiles configuration for the device (optional).
-
-.PARAMETER Layer2Data
-Layer 2 data configuration for the device (optional).
-
-.PARAMETER GroupName
-Name of the static group to add the device to. "My Network" if not set.
-
-.NOTES
-Author: Jason Alberino
-Date: 2023-03-07
+.PARAMETER SetupAsPollByName
+    (Optional) Add as poll-by-name.
 
 .EXAMPLE
-# Add a device with basic configuration
-Add-WUGDevice -displayName "Server01" -DeviceAddress "192.168.1.100" -Hostname "server01.example.com" -PollInterval 300 -CredentialWindows "Existing-WUG-Cred-Name"
+    Add-WUGDevice -IpOrName '10.2.1.8','host5'
 
-Description
------------
-This command adds a device named "Server01" with the IP address "192.168.1.100" and hostname "server01.example.com".
-It specifies to use the Windows Credential named "Existing-WUG-Cred-Name" and sets the polling interval to 300 seconds.
-The device is added with default settings for other parameters not specified in the command.
-#All devices go to the 'My Network" top-level group
+.EXAMPLE
+    Add-WUGDevice -IpOrName '192.168.0.15' -UseAllCredentials:$false -ForceAdd:$true
+
+.NOTES
+    Mostly Github Copilot with prompts from Jason Alberino tested on 2025-12-04
+    Requires connection to WhatsUp Gold via Connect-WUGServer.
+    Runs a discovery scan on the specified IP/Hostnames and adds devices to monitoring withhin the specified device group.
+    Other options available to customize device addition.
+    Use Add-WUGDeviceTemplate alongside Get-WUGDeviceTemplates for more granular control over device creation.
 #>
-
 function Add-WUGDevice {
-    param (
-        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [string] $displayName,
-        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [ValidatePattern('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')] [string] $DeviceAddress,
-        [Parameter()] $Template,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $Hostname,       
-        [Parameter()] <#[ValidateSet("Workstation", "Server")]#> [string] $deviceType,
-        [Parameter()] [ValidateRange(10, 3600)] [int] $PollInterval = 60,
-        [Parameter()] <#[ValidateSet("Device", "Router", "Switch", "Firewall")]#> [string] $PrimaryRole = "Device",
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $SubRoles,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $snmpOid,
-        [Parameter()] [ValidateRange(1, 65535)] [int] $SNMPPort,
-        [Parameter()] [ValidateNotNullOrEmpty()] <#[ValidateSet("Windows", "Linux", "Unix")]#> [string] $OS,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $Brand,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $ActionPolicy,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $Note,
-        [Parameter()] [ValidateNotNullOrEmpty()] [bool] $AutoRefresh = $true,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialWindows,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSnmpV3, 
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSnmpV2,  
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSnmpV1,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialAdo,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialTelnet,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSsh,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialVMware,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialAWS,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialAzure,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialMeraki,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialRestApi,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialRedfish,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialJmx, 
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $CredentialSmis,                               
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $Interfaces,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $Attributes,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $CustomLinks,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $ActiveMonitors,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $PerformanceMonitors,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $PassiveMonitors,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $Dependencies,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $NCMTasks,
-        [Parameter()] [ValidateNotNullOrEmpty()] [array] $ApplicationProfiles,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $Layer2Data,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $GroupName
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory,Position=0)]
+        [Alias("IpOrNames","HostNames","DeviceAddresses")]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$IpOrName,
+
+        [int]$GroupId = 0,
+
+        [bool]$UseAllCredentials = $true,
+        [bool]$ExpandVirtualEnvironment = $true,
+        [bool]$ExpandWirelessEnvironment = $true,
+        [bool]$ExpandStorageEnvironment = $true,
+
+        [string[]]$Credentials,
+        [bool]$ForceAdd,
+        [bool]$ForceCreate,
+        [string]$ForceRole,
+        [bool]$PreferSnmpSystemNameAsDisplayName,
+        [bool]$ResolveDNSHostNames,
+        [int]$SnmpPortToUse,
+        [bool]$IncludeWirelessClients,
+        [bool]$SetupAsPollByName
     )
 
-    Write-Debug "Function: Add-WUGDevice"
-    Write-Debug "Displayname:       ${displayName}"
-    Write-Debug "Device Address:    ${DeviceAddress}"
-    Write-Debug "Hostname:          ${Hostname}"
-    Write-Debug "Device Type:       ${deviceType}"
-    Write-Debug "PollInterval:      ${PollInterval}"
-    Write-Debug "PrimaryRole:       ${PrimaryRole}"
-    Write-Debug "SubRoles:          ${SubRoles}"
-    Write-Debug "snmpOid:           ${snmpOid}"
-    Write-Debug "SNMPPort:          ${SNMPPort}"
-    Write-Debug "OS:                ${OS}"
-    Write-Debug "Brand:             ${Brand}"
-    Write-Debug "ActionPolicy:      ${ActionPolicy}"
-    Write-Debug "Note:              ${Note}"
-    Write-Debug "AutoRefresh:       ${AutoRefresh}"
-    Write-Debug "WindowsCredential:${WindowsCredential}"
-    Write-Debug "SnmpV3Credential:  ${SnmpV3Credential}"
-    Write-Debug "SnmpV2Credential:  ${SnmpV2Credential}"
-    Write-Debug "SnmpV1Credential:  ${SnmpV1Credential}"
-    Write-Debug "AdoCredential:     ${AdoCredential}"
-    Write-Debug "TelnetCredential:  ${TelnetCredential}"
-    Write-Debug "SshCredential:     ${SshCredential}"
-    Write-Debug "VMwareCredential:  ${VMwareCredential}"
-    Write-Debug "JmxCredential:     ${JmxCredential}"
-    Write-Debug "SmisCredential:    ${SmisCredential}"
-    Write-Debug "AWSCredential:     ${AWSCredential}"
-    Write-Debug "AzureCredential:   ${AzureCredential}"
-    Write-Debug "MerakiCredential:  ${MerakiCredential}"
-    Write-Debug "RestApiCredential: ${RestApiCredential}"
-    Write-Debug "RedfishCredential: ${RedfishCredential}"
-    Write-Debug "Interfaces:        ${Interfaces}"
-    Write-Debug "Attributes:        ${Attributes}"
-    Write-Debug "CustomLinks:       ${CustomLinks}"
-    Write-Debug "ActiveMonitors:    ${ActiveMonitors}"
-    Write-Debug "PerforMonitors:    ${PerformanceMonitors}"
-    Write-Debug "PassiveMonitors:   ${PassiveMonitors}"
-    Write-Debug "Dependencies:      ${Dependencies}"
-    Write-Debug "NCMTasks:          ${NCMTasks}"
-    Write-Debug "AppProfiles:       ${ApplicationProfiles}"
-    Write-Debug "Layer2Data:        ${Layer2Data}"
-    Write-Debug "GroupName:         ${GroupName}"
-
-    #Begin Input validation
-    if ($SubRoles) { if ($SubRoles -is [array]) { foreach ($item in $SubRoles) { if ($item -isnot [string]) { throw "SubRoles parameter must be a one-dimensional array of strings." } } } else { throw "SubRoles parameter must be a one-dimensional array of strings." } }
-    if ($ActiveMonitors) { if ($ActiveMonitors -is [array]) { foreach ($item in $ActiveMonitors) { if ($item -isnot [string]) { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "ActiveMonitors parameter must be a one-dimensional array of strings." } }
-    if ($PerformanceMonitors) { if ($PerformanceMonitors -is [array]) { foreach ($item in $PerformanceMonitors) { if ($item -isnot [string]) { throw "PerformanceMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PerformanceMonitors parameter must be a one-dimensional array of strings." } }
-    if ($PassiveMonitors) { if ($PassiveMonitors -is [array]) { foreach ($item in $PassiveMonitors) { if ($item -isnot [string]) { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } } } else { throw "PassiveMonitors parameter must be a one-dimensional array of strings." } }
-    #End input validation
-
-    #Begin data formatting
-    ### Active Monitors
-    $ActiveMonitorObjects = @()
-    if ($ActiveMonitors) {
-        foreach ($ActiveMonitor in $ActiveMonitors) {
-            $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
-                classId = ''
-                Name    = $ActiveMonitor
-            }
-            $ActiveMonitorObjects += $ActiveMonitorObject
-        }
-    }
-    else {
-        if (!$Template) {
-            $ActiveMonitorObjects = @()
-            $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
-                classId = ''
-                Name    = 'Ping'
-            }
-            $ActiveMonitorObjects += $ActiveMonitorObject   
-        }
+    begin {
+        if (-not $global:WhatsUpServerBaseURI) { Write-Error "Connect to WhatsUp Gold first."; return }
+        if (-not $global:WUGBearerHeaders)     { Write-Error "API headers missing. Connect first."; return }
     }
 
-    ### Performance Monitors
-    $PerformanceMonitorObjects = @()
-    if ($PerformanceMonitors) {
-        foreach ($PerformanceMonitor in $PerformanceMonitors) {
-            $PerformanceMonitorObject = New-Object -TypeName PSObject -Property @{
-                classId = ''
-                Name    = $PerformanceMonitor
-            }
-            $PerformanceMonitorObjects += $PerformanceMonitorObject
-        }
-    }
-    ### Passive Monitors
-    $PassiveMonitorObjects = @()
-    if ($PassiveMonitors) {
-        foreach ($PassiveMonitor in $PassiveMonitors) {
-            $PassiveMonitorObject = New-Object -TypeName PSObject -Property @{
-                classId = ''
-                Name    = $PassiveMonitor
-                #actions = ''
-            }
-            $PassiveMonitorObjects += $PassiveMonitorObject
-        }
-    }
+    process {
+        $options = @{}
+        $options['ipOrNames'] = $IpOrName
+        $options['useAllCredentials'] = $UseAllCredentials
+        $options['expandVirtualEnvironment'] = $ExpandVirtualEnvironment
+        $options['expandWirelessEnvironment'] = $ExpandWirelessEnvironment
+        $options['expandStorageEnvironment'] = $ExpandStorageEnvironment
 
-    ### Credentials
-    $CredentialObjects = @()
-    if ($CredentialSnmpV1){
-            $CredentialObject = New-Object -TypeName PSObject -Property @{
-            credentialType = 'SNMP v1'
-            credential     = $CredentialSnmpV1
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialSnmpV2){
-            $CredentialObject = New-Object -TypeName PSObject -Property @{
-            credentialType = 'SNMP v2'
-            credential     = $CredentialSnmpV2
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialSnmpV3){
-            $CredentialObject = New-Object -TypeName PSObject -Property @{
-            credentialType = 'SNMP v3'
-            credential     = $CredentialSnmpV3
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialWindows){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'Windows'
-        credential     = $CredentialWindows
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialAdo){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'ADO'
-        credential     = $CredentialAdo
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialAws){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'AWS'
-        credential     = $CredentialAws
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialRedfish){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'Redfish'
-        credential     = $CredentialRedfish
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialRestApi){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'REST API'
-        credential     = $CredentialRestApi
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialSsh){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'SSH'
-        credential     = $CredentialSsh
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialTelnet){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'Telnet'
-        credential     = $CredentialTelnet
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialVmware){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'VMware'
-        credential     = $CredentialVmware
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialJmx){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'jmx'
-        credential     = $CredentialJmx
-        }
-        $CredentialObjects += $CredentialObject
-    }
-    if ($CredentialSmis){
-        $CredentialObject = New-Object -TypeName PSObject -Property @{
-        credentialType = 'smis'
-        credential     = $CredentialSmis
-        }
-        $CredentialObjects += $CredentialObject
-    }
-
-    #Attributes
-    $now = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    $AttributesObject = @([PSCustomObject]@{ name = 'Added by WhatsUpGoldPS'; value = $now })
-    if ($Attributes) {
-        if ($Attributes -is [System.Collections.IEnumerable] -and $Attributes -notlike '*String*') {
-            foreach ($attr in $Attributes) {
-                if ($attr -is [hashtable] -or $attr -is [PSCustomObject]) {
-                    if ($attr.ContainsKey('name') -and $attr.ContainsKey('value')) {
-                        $AttributesObject += [PSCustomObject]@{ name = $attr.name; value = $attr.value }
-                    } else {
-                        # Convert all properties to name/value pairs
-                        foreach ($prop in $attr.PSObject.Properties) {
-                            $AttributesObject += [PSCustomObject]@{ name = $prop.Name; value = $prop.Value }
-                        }
-                    }
+        # Only include additional parameters if explicitly provided
+        foreach ($key in @(
+            "Credentials","ForceAdd","ForceCreate","ForceRole",
+            "PreferSnmpSystemNameAsDisplayName","ResolveDNSHostNames",
+            "SnmpPortToUse","IncludeWirelessClients","SetupAsPollByName"
+            )) {
+            if ($PSBoundParameters.ContainsKey($key)) {
+                $apiKey = $key.Substring(0,1).ToLower() + $key.Substring(1)
+                $val = $PSBoundParameters[$key]
+                # Only omit for empty strings/arrays to avoid API clutter
+                if ($null -ne $val -and !(($val -is [string] -and $val -eq "") -or ($val -is [array] -and $val.Count -eq 0))) {
+                    $options[$apiKey] = $val
                 }
             }
-        } elseif ($Attributes -is [hashtable] -or $Attributes -is [PSCustomObject]) {
-            foreach ($prop in $Attributes.PSObject.Properties) {
-                $AttributesObject += [PSCustomObject]@{ name = $prop.Name; value = $prop.Value }
-            }
         }
-    }
 
-    #Set note to always include the current date and time
-    $note = "Added by WhatsUpGoldPS on ${now} ${note}"
-    
-    #Groups
-    $Groups = @()
-    if ($GroupName) {
-        $Groups += @{ name = $GroupName }
-    }
-    <# I can't seem to get GroupId to work from Swagger
-    if ($GroupId) {
-        $Groups += @{ id = $GroupId }
-    }
-    #>
-    #End data formatting
+        $body = $options | ConvertTo-Json -Depth 10
+        $uri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups/$GroupId/newDevice"
+        Write-Debug "Add-WUGDevice: URI: $uri"
+        Write-Debug "Add-WUGDevice: Request body:`n$body"
 
-    $options = @("all")
-    if ($ApplyL2) { $options += "l2" }
-    if ($Update) { $options += "update" }
-    if ($UpdateInterfaceState) { $options += "update-interface-state" }
-    if ($UpdateInterfaceNames) { $options += "update-interface-names" }
-    if ($UpdateActiveMonitors) { $options += "update-active-monitors" }
-    if (!$hostname) { $hostname = $DeviceAddress }
-    if (!$Brand) { $Brand = "Not Set" }
-    if (!$OS) { $OS = "Not Set" }
-    if (!$SNMPPort) { $SNMPPort = 161 }
-    if(!$SubRoles){ $SubRoles = @("Resource Attributes", "Resource Monitors")}
-    if(!$Groups){ $Groups= @(@{name = 'My Network'})}
-    
-    #Handle null objects
-
-    #Begin template handling
-    if (!$Template) {
-        $Template = @{
-            templateId          = "WhatsUpGoldPS"
-            displayName         = "${displayName}"
-            deviceType          = "${deviceType}"
-            snmpOid             = "${snmpOid}"
-            snmpPort            = "${SNMPPort}"
-            pollInterval        = "${PollInterval}"
-            primaryRole         = "${PrimaryRole}"
-            subRoles            = @(${SubRoles})
-            os                  = "${OS}"
-            brand               = "${Brand}"
-            actionPolicy        = "${ActionPolicy}"
-            note                = "${note}"
-            autoRefresh         = "$true"
-            credentials         = @(${CredentialObjects})
-            interfaces          = @(
-                @{
-                    defaultInterface     = "true"
-                    pollUsingNetworkName = "false"
-                    networkAddress       = "${DeviceAddress}"
-                    networkName          = "${Hostname}"
-                }
-            )
-            attributes          = @(${AttributesObject})
-            customLinks         = @()
-            activeMonitors      = @(${ActiveMonitorObjects})
-            performanceMonitors = @(${PerformanceMonitorObjects})
-            passiveMonitors     = @(${PassiveMonitorObjects})
-            dependencies        = @()
-            ncmTasks            = @()
-            applicationProfiles = @()
-            layer2Data          = ""
-            groups              = @(${Groups})
-        }
-    }
-    else {
-        if ($DeviceAddress -and $Hostname) {
-            $Template.interfaces = @(
-                @{
-                    defaultInterface     = "true"
-                    pollUsingNetworkName = "false"
-                    networkAddress       = "${DeviceAddress}"
-                    networkName          = "${Hostname}"
-                }
-            )
-        }
-        $TempId = $Template.templateId
-        $Template.templateId = "WhatsUpGoldPS(${TempId})"
-        if ($displayName) { $Template.displayName = "${displayName}" }
-        if ($deviceType) { $Template.deviceType = "${deviceType}" }
-        if ($PollInterval) { $Template.pollInterval = "${PollInterval}" }
-        if ($PrimaryRole) {
-            if ($Template.PSObject.Properties['primaryRole']) {
-                $Template.primaryRole = "${PrimaryRole}"
+        try {
+            $response = Get-WUGAPIResponse -Method PATCH -Uri $uri -Body $body
+            if ($response -and $response.data) {
+                Write-Verbose "Devices added."
+                Write-Output $response.data
+            } else {
+                Write-Warning "Add-WUGDevice: API call succeeded, but returned no data."
             }
-            else {
-                $Template | Add-Member -MemberType NoteProperty -Name 'primaryRole' -Value "${PrimaryRole}"
+        } catch {
+            Write-Error "Add-WUGDevice failed: $($_.Exception.Message)"
+            if ($_.Exception.Response) {
+                try { Write-Error ("API error: " + ($_.Exception.Response | ConvertFrom-Json | Out-String)) } catch {}
             }
         }
-        if ($note){ 
-            $Template.note = "${note}"
-        }
-        if ($ActiveMonitorObjects) {
-            if ($Template.activeMonitors) {
-                $Template.activeMonitors += @(${ActiveMonitorObjects})
-            }
-            else {
-                $Template.activeMonitors = @(${ActiveMonitorObjects})
-            }
-        }
-        if ($PerformanceMonitorObjects) {
-            if ($Template.performanceMonitors) {
-                $Template.performanceMonitors += @(${PerformanceMonitorObjects})
-            }
-            else {
-                $Template.performanceMonitors = @(${PerformanceMonitorObjects})
-            }
-        }
-        if ($PassiveMonitorObjects) {
-            if ($Template.passiveMonitors) {
-                $Template.passiveMonitors += @(${PassiveMonitorObjects})
-            }
-            else {
-                $Template.passiveMonitors = @(${PassiveMonitorObjects})
-            }
-        }
-        if ($AttributesObject) {
-            $Template.attributes = @(${$AttributesObject})
-        }
-    }    
-    #End template handling
-
-    $jsonBody = $Template | ConvertTo-Json -Depth 5 -Compress
-
-    $body = "{
-        `"options`":[`"all`"],
-        `"templates`":[${jsonBody}]
-    }"
-
-    try {
-        $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
-        if ($result.data.errors) {
-            return $result.data.errors
-        }
-        else {
-            return $result.data
-        }
-    }
-    catch {
-        Write-Error "Error adding device: $($_.Exception.Message)"
-        Write-Debug "Full exception: $($_.Exception | Format-List * | Out-String)"
     }
 }
-# End of Add-WUGDevice function
-# End of script
-#------------------------------------------------------------------
-# This script is part of the WhatsUpGoldPS PowerShell module.
-# It is designed to interact with the WhatsUp Gold API for network monitoring.
-# The script is provided as-is and is not officially supported by WhatsUp Gold.
-# Use at your own risk.
-#------------------------------------------------------------------
-
-
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCEqebWtxrLV+5L
-# meTwpY6oyj/3UmksBbY3ZjZXwwTkYqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDB9mglMvlbjYu1
+# 527+tDgMY8evg9pCJk+ADzW3a/wPmKCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -665,17 +249,17 @@ function Add-WUGDevice {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgk51XKukMpoGnh1xP+e0lJ5tt22fTNmFhwH7fCCzfvTow
-# DQYJKoZIhvcNAQEBBQAEggIAc6wp6+e2WlrfAUcZEmDKbRNvh7AwzwFd+ikIrwSJ
-# rWccsGs4yrnVAN/THKymEezbdIJ8CYCdbh3OQeBxXh/UOvnmqOJ6TTFqcglIaWl9
-# /LOBI1nwzc0XEis/AZeRcqUAR7DrS++5wUITukc4Q92BvPyFNZaYwMuiGtlIgxWK
-# /iM87TgZH2TUl5228iP/BZl8nvolfHi6x8atLWkBnoFaM8avkt5nYc0j1zwWLZ+8
-# VYG0t29C+Q2dMNBP9MFPBeTwEw2swamzzzGq7JnmMX90nkJtnlHQ9sZG/ofLmJLL
-# ci6Ph/Q+373R8/ypE6+sVz+xhEdKoeuexgn4NRt2H47htVcn4VbK1pgIFDBgaUKY
-# FB8bXd8NMYfAoIRQt7KAVzADNksSb1tlXHNI+sYoGRx4NOlyRIGd0bs2wT6MvEFg
-# HasxveydV1NOpg9OTBSgfGIDGTpnHKufzzed+Mtr0raV6PPRECpTPy/RztePTKXS
-# mdxXbbodVy8AU7k+OscS8MvoiRFWm9HNsufBSI4B5MfGMv7Tj/T0GYGrKfkyjOxP
-# EJSU8uf6tI0+j7JYoi4EO/mjVbXQwgvhmHGLPRyb/BRG8bjJOroVehEMoQsCIaxP
-# dag8Ps/qwPszJcENik05VtXGAsM233xrlRV3E1Yu85Mqw2AxN+1RpbRSZVEaVsrg
-# nY4=
+# BgkqhkiG9w0BCQQxIgQgF6dYnHU8TabqrIGsH6rotI40kmi+CZsiwR9LY23FH9Iw
+# DQYJKoZIhvcNAQEBBQAEggIAfPQcdp3Sa3ANE4mF86iCoYx0oZpBMuHwCpQlIZQ3
+# FDtX9iQfOHdrUqW2sKeWQ1ygs7Pm1mr2dHmWYjM369MptZFwIFK5394ZfkWG0Mrq
+# s5NW7nTqcf2TqGx8V5GGrT6iirrQkvUwLdKb/pC+X7WGhtAD79q8BgAF24NLaN82
+# 2C2PpKnJUS0onOtHh/fz5rE/vGbemosslgRg9iwPuo7M8SbMiLcTnv2rd1v7uFcD
+# wJalQwE/BSzFED7nn+nF2PsNDvuVAJ4ZavycNVsbNVzthb0ukbq7fFOI6RrI6G2G
+# obPdJtzOZwOQ2cPo2dG/1kr1BxHUtweTsKqRUQuW4uqDu0KQsNFy2elYV7TdLZq0
+# aknXVVsXKRTXcDk3Fw1IiObGTop0oI5lJO2pN9NW5LkMk3NCQ9d4wY3FXUdN9tWV
+# vWocbtcmawM9rbUBLMwbsJKR3K2xaCCfVFNwnghdI9Gvn76iGyxMdoy60FptjDoe
+# fxX3WxBHlmmtYHHoIgBGy9gTc2kFDzdGwTwBSQpM60FZ2oXKKGW8XKE6X+TZ/w84
+# CZgvGDnEyar6cmVw2AN+gxCYZUUQ/QWVz/Z60rmpWrdYkts5PTMCitlH1m78CiwM
+# EI/gsR7FG44z6rrtj1t0i2sIdlIF/75kMrXdra+W5KYcAx2NurmPM1RLhDA5D9fN
+# M7k=
 # SIG # End signature block

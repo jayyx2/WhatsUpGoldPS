@@ -41,7 +41,7 @@ Author: Jason Alberino
 Date: 2023-03-07
 #>
 
-function Add-WUGDevices {
+function Add-WUGDeviceTemplates {
     param(
         [Parameter(Mandatory)] [array] $deviceTemplates,
         [switch]$ApplyL2,
@@ -52,7 +52,7 @@ function Add-WUGDevices {
     )
 
         # Write debug information
-        Write-Debug "Starting Add-WUGDevices function DeviceTemplates:$deviceTemplates, ApplyL2:$ApplyL2,Update:$Update,UpdateInterfaceState:$UpdateInterfaceState,UpdateInterfaceNames:$UpdateInterfaceNames,UpdateActiveMonitors:$UpdateActiveMonitors"
+        Write-Debug "Starting Add-WUGDevicesTemplates function DeviceTemplates:$deviceTemplates, ApplyL2:$ApplyL2,Update:$Update,UpdateInterfaceState:$UpdateInterfaceState,UpdateInterfaceNames:$UpdateInterfaceNames,UpdateActiveMonitors:$UpdateActiveMonitors"
 
     #Unsure if these are needed or how to test them properly
     $options = @("all")
@@ -78,7 +78,7 @@ function Add-WUGDevices {
         Write-Debug "Full exception: $($_.Exception | Format-List * | Out-String)"
     }
 }
-# End of Add-WUGDevices function
+# End of Add-WUGDeviceTemplates function
 # End of script
 #------------------------------------------------------------------
 # This script is part of the WhatsUpGoldPS PowerShell module.
@@ -90,8 +90,8 @@ function Add-WUGDevices {
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYA6QM9O7efBkS
-# UjMh/nQOAmoQ6kKgdkjuubMnqL2RuaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwcvpJ5YLWtS5H
+# /1G9fuJif1+EK91Xw63iojHiEnn0sqCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -192,17 +192,17 @@ function Add-WUGDevices {
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgDhTBAoKD8aMP48q5DeqeWXWaA2pv5MDBVq3FDQfmCQYw
-# DQYJKoZIhvcNAQEBBQAEggIAbKICYbtU+BD6QjhYL8vzLO3c9bBRD0tdM/9rOI7W
-# fYEdwyZQwNhC2kI9PJisGPMikOUEY3nqj0+mC7wNxuoCk+JResT2r9fj6bPEgOS2
-# l7ksFmmD3NJptnUIfGx6f+hb476b64mjfmQIMok55b46IMRzdc7+1nIATfwRxs2e
-# EfleOZvx7XCX+q8qHgWHEyz+MYWtialL0vg3kr+WRXYBlQRCzAdAQfUZn44FJWmS
-# zLslereK7S6rBY6IVCSG68u5tIChQyB39EKvLJ+bMNMRpO/R30QmXGsHqCcQ8K5x
-# UTJYmWryWOZPr5OnDFoWyAAzIxIjvoptD1Hf1Nx+gQ6WwEIugblHOlO08X5umqTb
-# ac4xqjJ0AVVg2gQNhvCiZtQtFYJkE9nmVCZ8bPSOXlamYLWkO66O3c3QgO3zwNo7
-# p50HEoa+a2SG/3L93/GgWX/vIrRUincjHVWtq1DnQAZUuJYSW2MGCX8oMG2F9tH8
-# RsjNM1+XLq0JX3Fa8I8XDW5J2Pz5aLasBzQ2Rj2vrxBxw031uzfdONfpz4v1k8PK
-# pvYB9E0ETineESkNS5ZMtHqueSCiktit0D6rdZeGJvkaHDZ4gwdyXmy19WKVWbwN
-# wSxFP2rExOjwSjExdtRxCLSipoGzdyU5JA4MVBZcwCpA+eBZhkN74qg6tvHFkzbI
-# dQc=
+# BgkqhkiG9w0BCQQxIgQgHGBryeF3HYaGU1f6h/UH2I7JTisTHobpNxLiQq50jmAw
+# DQYJKoZIhvcNAQEBBQAEggIALEY3WPSTkZbfB0jsn5yufSlMbG44437seJUzxF4D
+# +O7v2ubUjHqahv7n5g/xG4uNAEQxqvqfMQNTcef3s2E7ay/zbVVq9Wq7BevuliUw
+# ic9y2KgVp8N8DZe2vGewc3aPl25hX+jElJPUP1CYMeW6fL9k6UsjvGYWx8+qUw0n
+# DUeMTD4hjYW4TkQTk9QKeA258AIiCMir3+CMF+rfDDXHE2rfqMRSaMRN51mx+Qfi
+# jhzokd7GqxtOMwr/6B4ixP9Et1IcizcBiI3O9bdDdl+E8Loc2lpEEto8J4ucR3NC
+# 9JJkKW+CUYa3cQcnkHFpP7oFNOMA7Fx6oeFTSisXvRBygEW63E0X33YHmXhcLMy5
+# GWOeYpgpr5lsXP7cOZ4xYqT2FbFnXYOU12DxmraIKZygHr149Bl7A2fTcTnUZJR7
+# BFE0y0J2FmvpE2awa08V9YWkMngYNvu2/dlRHAAqjxsqWT3rzjvVMuohy+hg8c1b
+# Dplg0vaDb9YcBfooT7kceB5ob9+mc/1fcXXUIRElbkUqMUOb2fEV+LEaSNjC+TIc
+# vMDBz8EVRuxwreUL/5RytPf1qAdre7SkKmHDwkD4z6HvkU3YaK22xhS3dZfppxZi
+# 8CsEyC0uZe/w6YfA0V5Z+o0Eh3u/aSl0OtG6HqGKX4IMXzhDXes/ZxPZcU57eC0Z
+# Ihg=
 # SIG # End signature block

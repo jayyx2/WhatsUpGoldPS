@@ -37,7 +37,7 @@
 ## 0.1.13 - 2024-09-28
 * Changed
    * Refactor many functions to accept value from pipeline, example: Get-WUGDevice | Get-WUGDeviceCPUReport
-   * Moved  global variable checking into Get-WUGAPIRequest, which attempts to auto refreshes existing tokens
+   * Moved  global variable checking into Get-WUGAPIRequest, which attempts to auto refresh existing tokens
    * Learning parameter sets
 
 * Added

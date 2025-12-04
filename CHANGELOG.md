@@ -1,5 +1,5 @@
 # WhatsUpGoldPS Release History
-## 0.1.17 - 2025-1204
+## 0.1.17 - 2025-12-04
 * Changed
   * Use new endpoint for Add-WUGDevice, allowing for discovery
   * Moved Add-WUGDevices to Add-WUGDeviceTemplates

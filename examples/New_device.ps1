@@ -26,7 +26,7 @@ $params = @{
 }
 
 # Add the new device using the specified parameters and store the id
-$NewDeviceID = (Add-WUGDevice @params).idMap.resultId
+$NewDeviceID = (Add-WUGDeviceTemplate @params).idMap.resultId
 Write-Host "New device created, device ID is ${NewDeviceID}"
 Write-Host "Sleeping for 3 seconds..."
 Start-Sleep -Seconds 3
@@ -45,8 +45,8 @@ Write-Host "Updated the device with our new properties."
 # SIG # Begin signature block
 # MIIVvgYJKoZIhvcNAQcCoIIVrzCCFasCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSjZ/Wa+qjWx5Y
-# xjx/mqlEG74wWcqM5hBLF1wQiYdM1aCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjCq/FR5x1cDJ/
+# fyATlzhQ1JIntiiUDApGQr0xHzFZVaCCEfkwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -147,17 +147,17 @@ Write-Host "Updated the device with our new properties."
 # aWMgQ29kZSBTaWduaW5nIENBIFIzNgIRAOiFGyv/M0cNjSrz4OIyh7EwDQYJYIZI
 # AWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
 # CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAv
-# BgkqhkiG9w0BCQQxIgQgZphkL8BCsfHCW+F2dA2FUf6nMzagoyd/C6hjv7N3p08w
-# DQYJKoZIhvcNAQEBBQAEggIARLt7qTHrqOEzppdChZtElo6Ys2Zykcg29eN5xgrO
-# aNFmIk9H7oRnirkFB7WqbLZJpvdwqoYfDbnkqGa2w4y67M+hk/PMw2BC9mTgHYCr
-# L9KzN9YoMmu2uxVTyhjsSjQV2zczlGmVQIIIh4F+orU+WihocH49nH0nOAgXVAvv
-# Q7c0O8SoQmGe/4f+iWSYJoddAQ5fUUsPPrng4kByUOhLzC3wX2Q2qamcNhYw0Q8v
-# 3JlgyLwsWbxvwPntSDJCBIaDl8p4BS5EMElmLb0l3XKSg7t3so234z6XgfPp1JWJ
-# q/nAJSgNDlekQfrjB6+M0AjneJ7Jw4flW5B69/1LOScc1BYWqTi0S/EmYKUw4WAs
-# qFV4CRQsTyB+o53tIqFGZ1uLkQ+KJdZ50N1d5E2UGW5PFu6rsH+QZBmHY/1hNTlg
-# W9tRdkDweOL7cVikjyfK9CihBgW12F1Pv0rDLGgWuHVVXP5huYNPgYpZlxTT8+xi
-# ifvkWigM0B0V8crRGaC3Ufvh8Rtjgn9rQAsivGwscLFDvANo+/wFMVOihEFf3045
-# 5jpc3/8XEUa2uHqnVaHkm2LFfTor8Z7rWr0huZjcu+/CnV0/8mNma7/d+3L4eWbP
-# 4sPiJopcsfyFPRBeMEvGgZT/iu6LuMwYxtMXxw6K2E5P5wYPsuVyf4n3atQjozPs
-# KpM=
+# BgkqhkiG9w0BCQQxIgQg2T5856qwZWMjszUX5rQlo15yw9+Pgnxeo2Nd9+q5iDsw
+# DQYJKoZIhvcNAQEBBQAEggIAgIzFPfBmuPTRcZRGBy3suE0f52JuqKJE9aSoIPdd
+# G3wOkP2tJXjjZyvsvyjgfKRBJhbHaXGiQS0hHgR8tN9OHmGPHhbfmgGaRSe/CytJ
+# lm08M+HryyrblNQnVW6cojgEXmvvZGAfpT1Jq+ty0uC6sXd6Kyj3SeXV/oviC6+Z
+# 1No7TR/o64ebZsbmOmWz+if2anp6vR7GE2PoEGrwY3lYEaxhIKbWXhtbVJhk7mnV
+# FFlKsh2KEsYCAjQPIJDkifdcWPxXlLHY6OqBpPTAcxd5nV/V3f48cL9kPSuLv25u
+# SeSuWn1xSw/IjbrbPOJd9slFaVY8nXSsv02Vj/WWyR5a9vH5SYQxerSWH3iVXhGQ
+# BEG/CIzaV1MXM3plQi6ls77u/ogukDhSlPJQFjk5+Kewg982Uycxob4O4oo52H73
+# CPW238YQmD9amVv2098tC4L4P4IlO71EGJE4WuOYegL3x+qdYzjla7APJ+CWGlxE
+# dLbsNRK7bj59WL1bKalLuimpAcyGSZQhVFgii4Fz5QmHthoEnUn/sG6TDlTHYGYt
+# dSg4B8n8xS3TnqXq5MlchdrdXeDg1GasDEeoONP19RTTErzA4h0st6LEqPZlBbol
+# OCQ1fKmg1guTInraaqXbl5qSj0vgSgkmVTPcR82nEJgQcYiBzGNXu2hHEZb6+dw8
+# QW4=
 # SIG # End signature block

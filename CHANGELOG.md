@@ -1,5 +1,5 @@
 # WhatsUpGoldPS Release History
-## 0.1.17/18 - 2025-12-04
+## 0.1.17/18 - 2025-12-08
 * Changed
   * Use new endpoint for Add-WUGDevice, allowing for discovery
   * Moved Add-WUGDevices to Add-WUGDeviceTemplates and added them to the psd1
@@ -37,7 +37,7 @@
 ## 0.1.13 - 2024-09-28
 * Changed
    * Refactor many functions to accept value from pipeline, example: Get-WUGDevice | Get-WUGDeviceCPUReport
-   * Moved  global variable checking into Get-WUGAPIRequest, which attempts to auto refreshes existing tokens
+   * Moved  global variable checking into Get-WUGAPIRequest, which attempts to auto refresh existing tokens
    * Learning parameter sets
 
 * Added

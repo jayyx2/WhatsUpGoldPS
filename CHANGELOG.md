@@ -1,4 +1,12 @@
 # WhatsUpGoldPS Release History
+## 0.1.19 - 2026-03-05 [not going to PSGallery release yet]
+* Changed
+  * Added SNMP Table property bags to Add-WUGActiveMonitor
+  * Updated all signatures with cool, new certificate
+  
+* Added
+  * Get-WUGProduct for /api/v1/product endpoints
+
 ## 0.1.17/18 - 2025-12-08
 * Changed
   * Use new endpoint for Add-WUGDevice, allowing for discovery

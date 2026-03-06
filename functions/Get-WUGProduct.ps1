@@ -1,65 +1,174 @@
 <#
 .SYNOPSIS
-Retrieves properties of one or more devices in WhatsUp Gold.
+Retrieves product/system metadata from WhatsUp Gold.
 
 .DESCRIPTION
-The Get-WUGDeviceProperties function allows you to retrieve properties for one or more devices in WhatsUp Gold. You can specify the device ID(s) using the -DeviceID parameter. If you do not specify this parameter, you will be prompted to enter the device ID(s).
+Get-WUGProduct queries multiple WhatsUp Gold REST API product endpoints and returns a single object
+containing installationId, timezone, version, and whoAmI details.
 
-.PARAMETER DeviceID <array>
-Specifies the device ID(s) of the device(s) for which you want to retrieve properties.
+Covered endpoints:
+  - /api/v1/product/installationId  [GET]
+  - /api/v1/product/timezone        [GET]
+  - /api/v1/product/version         [GET]
+  - /api/v1/product/whoAmI          [GET]
+
+.OUTPUTS
+PSCustomObject
 
 .EXAMPLE
-Get-WUGDeviceProperties [-DeviceID] <array>
-Get-WugDeviceProperties -DeviceID 1
-$devices = Get-WUGDevices;Get-WUGDevice Properties -DeviceID $devices
-
+Get-WUGProduct
 
 .NOTES
-Author: Jason Alberino (jason@wug.ninja) 2023-04-02
-Last modified: 2024-03-15
+Author: Jason Alberino (jason@wug.ninja)
+Updated: 2026-03-06
 #>
-function Get-WUGDeviceProperties {
+function Get-WUGProduct {
     [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId
-    )
+    param()
 
     begin {
-        $properties = @()
-    }
+        Write-Debug "Function: Get-WUGProduct -- Starting"
 
-    process {
-        foreach ($id in $DeviceID) {
-            $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/$id/properties"
-            try {
-                $result = Get-WUGAPIResponse -uri $uri -method "GET"
-                $properties += $result.data
-            }
-            catch {
-                Write-Error "Error getting device properties for device ID ${id}: $($_.Exception.Message)"
-            }
+        if (-not $global:WhatsUpServerBaseURI) {
+            Write-Error "WhatsUpServerBaseURI is not set. Please run Connect-WUGServer to establish a connection."
+            return
+        }
+
+        if (-not $global:WUGBearerHeaders) {
+            Write-Error -Message "Authorization header not set. Please run Connect-WUGServer first."
+            try { Connect-WUGServer } catch { }
+        }
+
+        if (-not (Get-Command -Name Get-WUGAPIResponse -ErrorAction SilentlyContinue)) {
+            Write-Error "Get-WUGAPIResponse was not found. Ensure the module is imported and/or functions are loaded."
+            return
+        }
+
+        $baseUri = "$($global:WhatsUpServerBaseURI)/api/v1/product"
+        Write-Debug "Base URI: $baseUri"
+
+        $endpoints = [ordered]@{
+            installationId = "$baseUri/installationId"
+            timezone       = "$baseUri/timezone"
+            version        = "$baseUri/version"
+            whoAmI         = "$baseUri/whoAmI"
         }
     }
 
+    process { }
+
     end {
-        Write-Debug "Completed Get-WUGDeviceProperties function"
-        return $properties
+        Write-Debug "Function: Get-WUGProduct -- Executing endpoint calls"
+
+        $result = [ordered]@{}
+        $errors = @()
+
+        foreach ($key in $endpoints.Keys) {
+            $uri = $endpoints[$key]
+            Write-Debug "Calling endpoint '$key' => $uri"
+
+            try {
+                $resp = Get-WUGAPIResponse -Uri $uri -Method "GET"
+                $result[$key] = $resp.data
+                Write-Debug "Success '$key'"
+            }
+            catch {
+                $msg = $_.Exception.Message
+                Write-Debug "Failure '$key': $msg"
+
+                $errors += [pscustomobject]@{
+                    endpoint = $key
+                    uri      = $uri
+                    error    = $msg
+                }
+
+                $result[$key] = $null
+            }
+        }
+
+        # ---- timezone: output only a friendly display name + ID ----
+        $tzRaw = $result.timezone
+        $tzId = $null
+        $tzDisplayName = $null
+
+        if ($tzRaw -is [string] -and $tzRaw.Contains(';')) {
+            # <Id>;<BaseOffsetMinutes>;<DisplayName>;...
+            $parts = $tzRaw.Split(';')
+            if ($parts.Count -ge 3) {
+                $tzId = $parts[0]
+                $tzDisplayName = $parts[2]
+            }
+        }
+        elseif ($tzRaw -is [string]) {
+            $tzId = $tzRaw
+        }
+
+        # ---- version: flatten to a single string ----
+        $versionRaw = $result.version
+        $versionText = $null
+
+        if ($null -eq $versionRaw) {
+            $versionText = $null
+        }
+        elseif ($versionRaw -is [string]) {
+            $versionText = $versionRaw
+        }
+        elseif ($versionRaw.PSObject.Properties.Name -contains 'values') {
+            $vals = $versionRaw.values
+
+            if ($vals -is [System.Collections.IEnumerable] -and -not ($vals -is [string])) {
+                $lines = foreach ($v in $vals) {
+                    if ($null -eq $v) { continue }
+
+                    if ($v -is [string]) { $v; continue }
+
+                    if ($v.PSObject.Properties.Name -contains 'name' -and $v.PSObject.Properties.Name -contains 'value') {
+                        "{0}: {1}" -f $v.name, $v.value
+                        continue
+                    }
+
+                    if ($v.PSObject.Properties.Name -contains 'key' -and $v.PSObject.Properties.Name -contains 'value') {
+                        "{0}: {1}" -f $v.key, $v.value
+                        continue
+                    }
+
+                    ($v | ConvertTo-Json -Depth 10 -Compress)
+                }
+
+                $lines = @($lines) | Where-Object { $_ -and $_.ToString().Trim() -ne "" }
+                if ($lines.Count -gt 0) {
+                    $versionText = ($lines -join "`n")
+                }
+            }
+            else {
+                $versionText = ($vals | Out-String).Trim()
+            }
+        }
+        else {
+            $versionText = ($versionRaw | ConvertTo-Json -Depth 10 -Compress)
+        }
+
+        $outObj = [pscustomobject]@{
+            installationId = $result.installationId
+
+            timezone       = $tzDisplayName
+            timezoneId     = $tzId
+
+            version        = $versionText
+
+            whoAmI         = $result.whoAmI
+            errors         = $errors
+        }
+
+        Write-Debug ("Function: Get-WUGProduct -- Completed. ErrorCount={0}" -f $errors.Count)
+        Write-Output $outObj
     }
 }
-# End of Get-WUGDeviceProperties function
-# End of script
-#------------------------------------------------------------------
-# This script is part of the WhatsUpGoldPS PowerShell module.
-# It is designed to interact with the WhatsUp Gold API for network monitoring.
-# The script is provided as-is and is not officially supported by WhatsUp Gold.
-# Use at your own risk.
-#------------------------------------------------------------------
-
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCiNZO2/KObqMGW
-# 7CMDItet+Ldw2lDjVmxlap6krybw56CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeQXM+R+duZhfl
+# 1UilPbJYKYq1UpPdc8WMgAq/eOtSdaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -159,17 +268,17 @@ function Get-WUGDeviceProperties {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgrCQjx+Ht055arGa3mvi3NxbT1Rfv9q3u
-# nRUFtaeyBSAwDQYJKoZIhvcNAQEBBQAEggIACLA35YjO85UwHph8Ocur3XggvHZs
-# hZ9c7scZRiPtaBGhXU9d6H3kv3M4ulTAWhMzWYPNAf92gGxwIaXU8oXSBogWkk7s
-# 5k3IeYbQJThhLyI9QSvOTxFO1a4avhhR7o7MXBwvExp1fLauJ7jnsDnWdd8YthAE
-# AxQdwYVsPEgq/JRs6yERgyEePrnMyeZAbWkf/ErEIErWb3hjFxzdJ30m254lTMRj
-# e0nyL6fjQVAUq/UebxOsE+gfbG55iWWlvHUQs17y2V6ghghcnN8oWV3kEsTRQBOU
-# B++lyyBi6Mvf9deYvzCQ/l7z67dZlwn8gX2ypSIJ3LkrStwhvC0Ox3VUiXj+Qz9n
-# 5mNbIJF/afhbpUYffI8bbY/xTRb7tB4bFsJA7TE6kWu+cSQYQSAhH/NLbNoA/Vga
-# aouk2HykX5dDw/TmTBKebfZDAyTM+MPBu1OfZTEe9VOTp3jpxxh09TQpmVLvddts
-# MQvCrWutsV7PEtrvAD6WzWjuLlyyZ/j2iqQcBeTckfj0HJBp62bFKR7aemem4Ah/
-# LkbZ/Q31Bm1O49Z9JgYWXzh9o15jxDlx3u94rWX4NFJnqvFoz31/SFYWge9cBrkQ
-# cFO5IEdw2yjqEXnxM0Nbi+o6nmYCY45vYyeCh/CDwd2qa7G7eVAZI1IpuJ2h0b56
-# eJJQgMH2o/VAS9Y=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQghOuv4tyuzs1ox+nkiqIrxLrfTgnh4w7P
+# 7ubHM/bikkAwDQYJKoZIhvcNAQEBBQAEggIAcixzkaHmYh6WIeoZy7RAIdblwCs2
+# MAD9F9GQSZsnm112ZYKv7eGa9lM7Sg5IsT8MmhOCR06LBYL275EZZEnSFUM/sjQr
+# YWrOrO63c75tBFe94NTeB50YsgVpggY+f3pNdKuMA/oPyO7+oX9zsV6x4iFCHSq0
+# zkj76ZrmwynUpl1CmNb08SGYKfs828Nq+wo9uPKgvQUwsKjOD59HhdKFMgW2nHpb
+# jl8N2AY9I9u/u7CkyofoFhC/T3CVTdoOB7Fojz9b9KYP+X10olI9c8oQZ14TjENu
+# IBMQ12b4lHnEpcFiIlWnyxDa7mxB1fTwLroAJuQOR37qhIYSNDrfQfmnharnEprh
+# F5KyyMpMImSC2ZPBdZYCnZnsrjt4aZ7EXj31ebsBD88ONBBI10HDmPPhwPTuUqZa
+# zSHG4bb5jS+v1bBKI7QAic17JJOspoSmgc0QyOQY2wTqMAd7JPSw4rkmi48hz8WI
+# AWSPY2cnfKSi8UZ3gVmLbzbItQDEampkTk/gut/xYZUb3dcxfNVP42STxju9bn7s
+# W9g9C1oiuXqF/0HBN9oYXqJFXmYxC5E9/74Q19OXOvQz3uFHYbLPhlYR7N2TyzIs
+# OsIKynqOyjxsdFWfP0r5UHGHc2k1Mc0eAHOD1LxIswYSJEGn6CfezGcx9LX+XmFW
+# zMnkRpuLQBO6vdk=
 # SIG # End signature block

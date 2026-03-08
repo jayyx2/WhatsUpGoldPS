@@ -225,6 +225,10 @@ The `helpers/` directory contains ready-to-use automation scripts:
 | `helpers/proxmox/` | Proxmox VE discovery — immediate add w/ attributes, discover-then-add, rename/update |
 | `helpers/hyperv/` | Hyper-V discovery — immediate add w/ attributes, discover-then-add (CIM/WinRM) |
 | `helpers/nutanix/` | Nutanix Prism discovery — immediate add w/ attributes, discover-then-add (REST v2 API) |
+| `helpers/azure/` | Azure resource discovery — immediate add w/ attributes, discover-then-add (Az PowerShell modules) |
+| `helpers/aws/` | AWS resource discovery — EC2, RDS, ELB immediate add w/ attributes, discover-then-add (AWS.Tools modules) |
+| `helpers/gcp/` | GCP resource discovery — Compute Engine, Cloud SQL, LB immediate add w/ attributes, discover-then-add (GoogleCloud module + gcloud CLI) |
+| `helpers/oci/` | Oracle Cloud discovery — Compute, DB Systems, Autonomous DB, LB immediate add w/ attributes, discover-then-add (OCI.PSModules + OCI CLI) |
 | `helpers/reports/` | Bootstrap-based HTML report templates |
 
 ---

@@ -69,7 +69,7 @@
     Use Add-WUGDeviceTemplate alongside Get-WUGDeviceTemplates for more granular control over device creation.
 #>
 function Add-WUGDevice {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory,Position=0)]
         [Alias("IpOrNames","HostNames","DeviceAddresses")]
@@ -100,6 +100,7 @@ function Add-WUGDevice {
     }
 
     process {
+        if (-not $PSCmdlet.ShouldProcess("$($IpOrName -join ', ')", 'Add device(s) to WhatsUp Gold')) { return }
         $options = @{}
         $options['ipOrNames'] = $IpOrName
         $options['useAllCredentials'] = $UseAllCredentials
@@ -147,8 +148,8 @@ function Add-WUGDevice {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDB9mglMvlbjYu1
-# 527+tDgMY8evg9pCJk+ADzW3a/wPmKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVFGCZxCAL5Lp5
+# MbLIR+prgJrB/0M58/vxtLeaYKjdUKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -248,17 +249,17 @@ function Add-WUGDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgF6dYnHU8TabqrIGsH6rotI40kmi+CZsi
-# wR9LY23FH9IwDQYJKoZIhvcNAQEBBQAEggIAu1xv/VMkUZ31DRN/+E+XuGCYk6eV
-# Sb8la9M7Mpe0DttJ4eXSaLNuAVtF12t0cqmxuBhkLxiX2hqHd9ZHClKoGkWxPYfF
-# ABKJ8Wc9VOOrqZ2Fb5MhaRd6PvlGKcHgh3AhwQaGu6E9OnBEYG1DldbM5SLqFjSi
-# xUBQQIfQryjdtOlHFajTfH14Vt37mZXRz4czTi1LMpgnyX4XhZ9LJ7njjMw7sRPC
-# eEVqXiZ55YzYTi0FUkV0GHWT6nm5BvWNZg8S8ncG3DtkfFYrfy8nnj6HNqBDgSgA
-# 6MdhThROBqKaZUIceUK6tfR/o0xOAWUKcfrvlPLIYZa9c3PflhILBzV68uEChlFS
-# dqMieCT++E2IO3y9mU4MvhCY+Nb48i13T1BQYPd+UUyEVDOrE1+qljzKaaDvG6DQ
-# 8f/lh3loPaOPHI/jgaGXFTSV8jHWLGJD8lE1g+5yYz+LgPD5Gl42gkSRd3MyEdKK
-# gaXaMNF8vXatchruOFXdmowe7UjTqIQZXUREcSo1UIorN3uQA+Q1CVSItyY9Wx8/
-# U3ogKYu0MLSPqqTfNKKKPfTJyArqeC9MerBdjPkHeEzjhKXcxYYHi7wzi+pYMqdd
-# KKg1WFMxzSXyjtAGorm9Tb0TshQKU94bUweLDBEtmn6GCQJ3lT46k10qxZAke+qH
-# HQUiwG3SWGZjO6E=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIcJdK9VgESD4norjrtixWMAH3Wr5T+gb
+# tRWKIFu24c8wDQYJKoZIhvcNAQEBBQAEggIAEaCSfLwl82KapWAwWb9Q5MGxGceW
+# eIi90FTvBUF59s5uZ2BKA3toTTYn/BRzQMa70st4dHAGlYMOgwbkAvudj9sGAj2x
+# qxgzfosWYEJ2Mh+abkjecdCi1nQCpfnCJqJyJo9MH2r4XjgFbJ+fslgQQG40scJR
+# E/TZFco/i+oWYQ/gQn5nCB79gEPS94sfsVtCgtd5+MRlBZixh2IJ2tmhEFVLDjzz
+# lvfCiF8upIoehJ/Qz70eNott2BZcMHk6SyeG0TAPKDBoJ3y9VAIwcGXu5o/zEKA3
+# w0jhqyGzVSlSNz2SrMnmzhSSpO1Qskmh4rhAnZ8yJVYoc14/RFxx6GG80khX4hV0
+# KOsT40ALibsCrOn+geEkLOIcZPnAh0WRhDWoTvEpme6caq7EV8hhTcFe3v6KEYSm
+# RJ+QO386r2RKeuLPdf1aBr7pUgiUoQs5E/tLDx9QZ1zNrK0TgwSQoiqi8sDGH10q
+# urduAYqmyvYwjoKUMTdw6L6B0kZ5/LxrJubFwKMVwnrBugsIenoOgL9VGq2RtDPz
+# lR0IC+QkSE/p7kqxeVBCEISQJrGjB3BN13OATiXMwY1t0zdNdWtQnZWrq925Vs5J
+# CQF00VxChphbZcTWZnRQZBGXo7mivvmsQ+KAerF7I5xVnbAbFYDym+Ymb9xgs+pJ
+# l7u+Eym/oT/xp1c=
 # SIG # End signature block

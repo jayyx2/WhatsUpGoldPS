@@ -1,138 +1,155 @@
 <#
 .SYNOPSIS
-    Assigns an active monitor to a device in WhatsUp Gold.
+Updates the polling configuration for a device in WhatsUp Gold.
 
 .DESCRIPTION
-    Add-WUGActiveMonitorToDevice assigns a specified active monitor template to a device
-    via the WhatsUp Gold REST API (POST /api/v1/devices/{deviceId}/monitors/-). Optional
-    parameters control polling interval, comment, argument, interface binding, critical
-    order, and action policy.
+The Set-WUGDevicePollingConfig function updates the general polling configuration
+using PUT /api/v1/devices/{deviceId}/config/polling.
+It also supports batch polling configuration across all devices using
+PATCH /api/v1/devices/-/config/polling.
 
 .PARAMETER DeviceId
-    The ID of the device to assign the monitor to. Required.
+The ID of the device to update polling configuration for. Not required for Batch operations.
 
-.PARAMETER MonitorId
-    The monitor template ID (monitorTypeId) to assign. Required.
+.PARAMETER Batch
+Switch to perform batch polling configuration across all devices.
+Endpoint: PATCH /api/v1/devices/-/config/polling
 
-.PARAMETER Enabled
-    Whether the monitor should be enabled. Valid values: true, false. Default: true.
+.PARAMETER BatchBody
+JSON body for batch polling configuration operations.
 
-.PARAMETER Comment
-    An optional comment for the monitor assignment.
+.PARAMETER Body
+A JSON string containing the full polling configuration object.
 
-.PARAMETER Argument
-    An optional argument string passed to the monitor.
+.PARAMETER PollInterval
+The polling interval in seconds.
 
-.PARAMETER InterfaceId
-    The interface ID to bind the monitor to, if applicable.
+.PARAMETER FailedPollRetries
+Number of retries after a failed poll.
 
-.PARAMETER PollingIntervalSeconds
-    The polling interval in seconds (10-86400).
-
-.PARAMETER CriticalOrder
-    The critical order ranking (0-100).
-
-.PARAMETER ActionPolicyId
-    The ID of the action policy to associate with this monitor.
-
-.PARAMETER ActionPolicyName
-    The name of the action policy to associate with this monitor.
+.PARAMETER FailedPollInterval
+Interval between failed poll retries in seconds.
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5
-
-    Assigns active monitor template 5 to device 42 with default settings.
-
-.EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5 -PollingIntervalSeconds 60 -Comment "HTTP check"
-
-    Assigns active monitor 5 to device 42 with a 60-second polling interval and a comment.
+# Update polling interval using parameters
+Set-WUGDevicePollingConfig -DeviceId "123" -PollInterval 300
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 100 -MonitorId 12 -Enabled false -ActionPolicyName "Email Admins"
+# Update polling config using a raw JSON body
+$config = @{ pollInterval = 300; failedPollRetries = 3; failedPollInterval = 30 } | ConvertTo-Json
+Set-WUGDevicePollingConfig -DeviceId "123" -Body $config
 
-    Assigns monitor 12 to device 100 in a disabled state with the "Email Admins" action policy.
+.EXAMPLE
+# Pipe from Get and modify
+$config = Get-WUGDevicePollingConfig -DeviceId "123"
+# modify $config as needed, then:
+Set-WUGDevicePollingConfig -DeviceId "123" -Body ($config | ConvertTo-Json -Depth 5)
+
+.EXAMPLE
+# Batch polling configuration across devices
+$body = @{ items = @(@{ deviceId = "123"; pollInterval = 300 }, @{ deviceId = "456"; pollInterval = 600 }) } | ConvertTo-Json -Depth 5
+Set-WUGDevicePollingConfig -Batch -BatchBody $body
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja)
-    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Monitors
+Author: Jason Alberino (jason@wug.ninja)
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/Device
 #>
-function Add-WUGActiveMonitorToDevice {
-    [CmdletBinding(SupportsShouldProcess = $true)]
+function Set-WUGDevicePollingConfig {
+    [CmdletBinding(DefaultParameterSetName = 'ByProperties', SupportsShouldProcess = $true)]
     param(
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeviceId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$MonitorId,
-        [ValidateSet("true", "false")][string]$Enabled = "true",
-        [string]$Comment,
-        [string]$Argument,
-        [string]$InterfaceId,
-        # Range validated per WhatsUp Gold REST API spec: minimum 10 seconds, maximum 86400 seconds (24 hours)
-        [ValidateRange(10, 86400)][int]$PollingIntervalSeconds,
-        [ValidateRange(0, 100)][int]$CriticalOrder,
-        [string]$ActionPolicyId,
-        [string]$ActionPolicyName
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, ParameterSetName = 'ByProperties')]
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, ParameterSetName = 'ByBody')]
+        [Alias('id')]
+        [string]$DeviceId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByBody')]
+        [string]$Body,
+
+        [Parameter(ParameterSetName = 'ByProperties')]
+        [int]$PollInterval,
+
+        [Parameter(ParameterSetName = 'ByProperties')]
+        [int]$FailedPollRetries,
+
+        [Parameter(ParameterSetName = 'ByProperties')]
+        [int]$FailedPollInterval,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Batch')]
+        [switch]$Batch,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Batch')]
+        [string]$BatchBody
     )
 
-    Begin {
-        Write-Debug "Begin block: Starting function Add-WUGActiveMonitorToDevice."
-        $baseUri = "$(${global:WhatsUpServerBaseURI})/api/v1/devices/${DeviceId}/monitors/-"
+    begin {
+        Write-Debug "Starting Set-WUGDevicePollingConfig function. ParameterSet: $($PSCmdlet.ParameterSetName)"
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
     }
 
-    Process {
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Building activeParams hashtable."
+    process {
+        if ($PSCmdlet.ParameterSetName -eq 'Batch') {
+            $uri = "${baseUri}/-/config/polling"
+            Write-Debug "Batch polling configuration. URI: $uri"
 
-        $activeParams = @{}
+            if (-not $PSCmdlet.ShouldProcess('All devices polling config', 'Batch update')) { return }
 
-        if ($Comment) { $activeParams.comment = $Comment }
-        if ($Argument) { $activeParams.argument = $Argument }
-        if ($InterfaceId) { $activeParams.interfaceId = $InterfaceId }
-        if ($PollingIntervalSeconds) { $activeParams.pollingIntervalSeconds = $PollingIntervalSeconds }
-        if ($CriticalOrder) { $activeParams.criticalOrder = $CriticalOrder }
-        if ($ActionPolicyId) { $activeParams.actionPolicyId = $ActionPolicyId }
-        if ($ActionPolicyName) { $activeParams.actionPolicyName = $ActionPolicyName }
+            try {
+                $result = Get-WUGAPIResponse -Uri $uri -Method 'PATCH' -Body $BatchBody
+                if ($result.data) { return $result.data }
+                return $result
+            }
+            catch {
+                Write-Error "Error performing batch polling configuration: $_"
+            }
+            return
+        }
 
-        $body = @{
-            type          = "active"
-            monitorTypeId = $MonitorId
-            enabled       = $Enabled
-            isGlobal      = "true"
-            active        = $activeParams
-        } | ConvertTo-Json -Depth 5
+        $uri = "${baseUri}/${DeviceId}/config/polling"
 
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Sending request to URI: $baseUri"
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Request body: $body"
+        if ($PSCmdlet.ParameterSetName -eq 'ByBody') {
+            $requestBody = $Body
+        }
+        else {
+            $bodyHash = @{}
+            if ($PSBoundParameters.ContainsKey('PollInterval')) { $bodyHash.pollInterval = $PollInterval }
+            if ($PSBoundParameters.ContainsKey('FailedPollRetries')) { $bodyHash.failedPollRetries = $FailedPollRetries }
+            if ($PSBoundParameters.ContainsKey('FailedPollInterval')) { $bodyHash.failedPollInterval = $FailedPollInterval }
 
-        if (-not $PSCmdlet.ShouldProcess("Monitor $MonitorId on device $DeviceId", 'Assign active monitor')) { return }
+            if ($bodyHash.Count -eq 0) {
+                Write-Warning "No properties specified to update."
+                return
+            }
+
+            $requestBody = $bodyHash | ConvertTo-Json -Depth 5
+        }
+
+        Write-Debug "Updating polling config at URI: $uri"
+        Write-Debug "Request body: $requestBody"
+
+        if (-not $PSCmdlet.ShouldProcess("Device $DeviceId polling config", "Update")) {
+            return
+        }
 
         try {
-            $result = Get-WUGAPIResponse -Uri $baseUri -Method POST -Body $body
-
-            if ($result.data.successful -eq 1) {
-                Write-Output "Successfully assigned active monitor ID: $MonitorId to device ID $DeviceId"
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
-            }
-            else {
-                Write-Warning "Failed to assign active monitor to device."
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
-            }
+            $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $requestBody
+            if ($result.data) { return $result.data }
+            return $result
         }
         catch {
-            Write-Error "Error assigning active monitor: $($_.Exception.Message)"
-            Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full exception details: $($_.Exception | Format-List * | Out-String)"
+            Write-Error "Error updating polling config for device ${DeviceId}: $_"
         }
     }
 
-    End {
-        Write-Debug "End block: Completed function Add-WUGActiveMonitorToDevice."
+    end {
+        Write-Debug "Completed Set-WUGDevicePollingConfig function."
     }
 }
-
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBabXWf8b2SuRHK
-# E2838mQASune+DIy25J9BLLf8pBPAaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBaCVhzY9+ij50v
+# 9Rqgv8ot43R8zah98jqW72fZxctWc6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -232,17 +249,17 @@ function Add-WUGActiveMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg9ZKcvFj/sl7GZvvY7lUq38VedO/iFzwk
-# bDIPMKI3gCQwDQYJKoZIhvcNAQEBBQAEggIADr+kSOom5l0TjgtjXDtzfp9HKB4B
-# h3BVZpWu3srF6R7AjpuEIgZVH7jvJ2hpVa+7L6nWjF7neyxaMySrYj7YVCMAlGFS
-# OuUfaaDQjinI4T/xnL6JigO/s3Zsuw6mCRI9D7uqQGcE2AzbTMnlBcIgWL61/r01
-# W622OhV5jdbImtyc0zaWxyKXOvASgF9YXj/Ueq+5PIKtSQDGPgnDISsO6HLZNKaR
-# NrLBbLGlQ8EFCiYwRLxLSDDfmFgD2p4d5/PX1GN9tcb6AlmGZLD6ydzhomHlWaGg
-# 19vjnsUZhQsRZHKox7cNC5l218Oklibh/QzZObXN4Nh2hT4mZHmbMo+VqhrcAqjH
-# wFrKIYwuRNr1gxBMqy5Il7E/K0pLWzRufeLXpRTYK0rynyL45ozYPQY597upActT
-# K8JAu2qoTtZjCRo93CF4aQWODU+PTUPzCkeYrg7vwy866eQ6W3Ksxniby7ARVE6h
-# C8glNtKzTuMVlJTfKgTD6UCg2rrePUFtIjADQMABKXbJoJjbnDQy33RhnfXxz6zd
-# 4LA7yDmL4ivxnveSmE0xnZfXBIMpX5+YKNRxxS47Q39q80N6dDgHOLAlR2KuiaTs
-# TnHuhJWirQilYruV1u+qd2J8V86gNffQ1E8Vbz4FTsioqerxbD2JnYvU75Xi5N3z
-# GYcJfbDPKgraSLY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgVUt6qkJCZ/qmYhuP0ByjXUWlldVJYJF9
+# 3r1lI+N1sLswDQYJKoZIhvcNAQEBBQAEggIAwF95P6xlFxJcMlajViIByIewZ3OZ
+# xn6ME5u/UBMR2NgD69ll+Ajy/rQ/Fxlz7Et630W6Wlldm536kFaUNFjNo+0vk8N+
+# xiK/JOkdJHPAEBFt75I7+cj5Erp1wxeGKrzh9FLoX+qk4DmBMprqCf6k4O/o4SNd
+# DoAU5G8lxKRqKLEvIarIEPuJe6niYiNzk1aCMU8hKRpycUQ7Rbp++FR4kkrKCK9i
+# MBiHQEx8fx4++2uZVHVUMKkGA05VQwr1RebPVm9EtY7nKcMe8xL4W/3LqVtRvePg
+# 0sBNZuU3DNOnE3yd6YsCBsuD4U3L1IN2WrPDmArFp7pli26AmLgOjR3+fanPcLrZ
+# UD6dxv4j+fIvZVBm1WPciInBoeo5B9NV/43XIii4SEDj3VVpNKqZRIgu1tpkeXzy
+# KEpcuPZNleI+7zAWEzsQQAAyqjEbqSBZQatS3PnO9HCEy0mgLxjg1injV+aYgv1b
+# dl7Sv7RT1/cwa6fDG4Q0a8vODVA8szfjOyJIbN1njCFZdcRD9aqRCuWiLgxw7iWU
+# eyyNCCgkhYghLd1fQ9K9opaFC1SxiBP96XR6IY6QOidAxJI/RAsCxeHkWpJEjqVE
+# TVNuOKcHjRBbFh5NXTGC3avHtMCYMBPZxeo+C0e1C11PPaDHSYjy/7MetuBzynVH
+# 08y27dXQtDRJx7M=
 # SIG # End signature block

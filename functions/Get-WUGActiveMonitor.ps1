@@ -110,7 +110,13 @@ function Get-WUGActiveMonitor {
         [ValidateSet("true", "false")]
         [string]$EnabledOnly = "true",
 
-        [ValidateRange(0, 250)][int]$Limit
+        [ValidateRange(0, 250)][int]$Limit,
+
+        # Get a specific monitor template by ID (GET /monitors/{monitorId})
+        [string]$MonitorId,
+
+        # Get device assignments for a specific monitor (GET /monitors/{monitorId}/assignments/-)
+        [Parameter()][switch]$MonitorAssignments
     )
 
     begin {
@@ -145,6 +151,45 @@ function Get-WUGActiveMonitor {
                 if (-not $argument -and $active.argument) { $argument = $active.argument }
             }
             return @($comment, $argument)
+        }
+
+        # --- MonitorId mode: get a specific monitor template or its assignments ---
+        if ($MonitorId) {
+            if ($MonitorAssignments) {
+                # GET /monitors/{monitorId}/assignments/-
+                $qs = "type=active&"
+                if ($AssignmentView) { $qs += "view=$AssignmentView&" }
+                if ($DeviceView)     { $qs += "deviceView=$DeviceView&" }
+                if ($Search)         { $qs += "search=$Search&" }
+                if ($PageId)         { $qs += "pageId=$PageId&" }
+                if ($Limit)          { $qs += "limit=$Limit&" }
+                $qs = $qs.TrimEnd('&')
+                $uri = "${global:WhatsUpServerBaseURI}/api/v1/monitors/${MonitorId}/assignments/-"
+                if ($qs) { $uri += "?$qs" }
+                Write-Debug "Fetching assignments for monitor ${MonitorId}: $uri"
+                try {
+                    $response = Get-WUGAPIResponse -Uri $uri -Method GET
+                    if ($response.data) { return $response.data }
+                }
+                catch {
+                    Write-Error "Failed to retrieve assignments for monitor ${MonitorId}: $_"
+                }
+            }
+            else {
+                # GET /monitors/{monitorId}
+                $qs = ""
+                if ($View) { $qs = "?view=$View" }
+                $uri = "${global:WhatsUpServerBaseURI}/api/v1/monitors/${MonitorId}${qs}"
+                Write-Debug "Fetching monitor ${MonitorId}: $uri"
+                try {
+                    $response = Get-WUGAPIResponse -Uri $uri -Method GET
+                    if ($response.data) { return $response.data }
+                }
+                catch {
+                    Write-Error "Failed to retrieve monitor ${MonitorId}: $_"
+                }
+            }
+            return
         }
 
         # Templates for merging with assignments (always fetched if IncludeAssignments or no DeviceId)
@@ -345,8 +390,8 @@ function Get-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpze5si5Sv6Flz
-# OyyFi+9KdgeNMubMCFa5JUvQBBgrh6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1xneqwfd7+1qv
+# c1ACGOjnOHShyitx+KbkPmhANllsgqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -446,17 +491,17 @@ function Get-WUGActiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg79zhb/3Wfkcmx7LoJb4oIk7f1yl2CMPQ
-# Am7PuyVvBT0wDQYJKoZIhvcNAQEBBQAEggIAOxff+lImc3I+GLT/uTSj70XbajTj
-# V+vbqftyTxJzGNi4ZWJCjXt+NVZr3zJDTD4C/e6eQ95gMKuNJRPig17ux1tYnFLu
-# QXZOi8AkHzyBoZ5tnAWkt1cR2ffT3cXqIu9PgSrLKvAsWKuvx1FyllWOKyHrK7jH
-# DMWQOIUIvacpLbA/8/p9TCJs0AVjsTlthqxr5g3jMnr8b95wJeTtTX0OUu8SQMq9
-# wMczhBVpd8A/aVElcCW2OvalXSm/fhRaEKfkah0Eq7BhuVwxLxbMlpt0pUgH6lcY
-# c1GlEIrk1YsqyaSVG40AaDPhcrgM23hVLEVt3Y1IKIAOzq5nKkiMHP/1MABur1a/
-# 1fu05AtivyWsKc0wuYNxWq7B8Jt/FdeBZxXxdd7kl+QumEYmB1TLT0lrX7uShPYm
-# Vx0rpFlZO3s+thwf9QocdcZljUMsDelZQ3kzOcEBEYUDaiJqNPTTWh/NKnw5Pp19
-# 5x3xnvZ6N8DGrw/bTCt1QJrj/9JIFnh/iFMQEj+xkWSaZUQnj3VhehnWu0sIaYDH
-# 1xZpd396cGvcvH/GiZ1skkmqNR8Q3O0uquJaKEbJGiS8KIvDPP8H/cGH687/YlxO
-# JZhPmnBZyjTVJqZVoWyyYwBrTbM9ffLYwiGr0AwcyvJD+5sgdaxebvKR3oI9vnFg
-# X/jkztnZRfLbCo4=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgXg86XC2XmhYgC5Pgj6yvZVpMkWw3tC17
+# naTJ5qI3y/AwDQYJKoZIhvcNAQEBBQAEggIAGEuZrGhUlNOictbFu9y1mPr8aO3A
+# oUz5bTSR0tltTgKU2+qjotZXLp23CCnSra91/Zcb2QSsEsc213BY/VfYzhs1T42Z
+# 8UW8Vvn13JaxrnE3w1uuW24f2X2ri4EzCD+oY5nchhy+WhJBRhIEt5BSPjoxMsUZ
+# du/vq4nrUDn0t/L98YBqu+0ipQMTI+yFHqCsVykTAxu/XhaXCkW8blB+Jepegzzv
+# di2ydDeGUf6R7bdpI7fyUeEzjT577c/IDQb7FwFD1SJqca3CspY8EKiWe3yR4lVs
+# wvxy1FBMz72EyG4cSYnpVOPyJlYHdERfTBr0fwkUaVSTySzNnmjYXnSYsDpZy5VL
+# 7+tat5NHF6iW2SwAl7bi+c2Ksv+6Vc2q6YFInhcR07xyGTMTZsaoQXH/Wp8ytqO7
+# qNpj1Tbpe5NkM7PBilAZI9AdQIQ+iLEwDsMTTp/qNNZ2O4cB/j6hVq+aoKxGpoCo
+# IdXFm/03o5EtIB+9OBn4rB79kfztWAldNCGJbWjCoSujHbsC7JGpQ1bD0t45MAfZ
+# uVccTH3vmbLAgjBwW25zaCmoBA7fnO49XrQUWTZvU8CrvEkxp7Y17+yaCR4FErnj
+# /0UgF0gzWCnDETQ0c+d3/KMEyHB7NSNuDV4T3+4HO1OlgP6l1PamgsWnCwgbYDLu
+# yXsxTNqNRA9U93Y=
 # SIG # End signature block

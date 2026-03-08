@@ -1,11 +1,25 @@
 <#
 .SYNOPSIS
-    Retrieves monitor templates from WhatsUp Gold.
+    Retrieves monitor templates or supported monitor types from WhatsUp Gold.
 
 .DESCRIPTION
-    Get-WUGMonitorTemplate queries the WhatsUp Gold REST API (GET /api/v1/monitors/-)
-    to list active, passive, and performance monitor templates. Supports filtering by type,
-    search string, and various inclusion switches.
+    Get-WUGMonitorTemplate queries the WhatsUp Gold REST API:
+    - GET /api/v1/monitors/- to list active, passive, and performance monitor templates.
+    - GET /api/v1/monitors/-/config/supported-types to list supported monitor types.
+    - GET /api/v1/monitors/{monitorId}/config/template to export a single monitor template.
+    - GET /api/v1/monitors/-/config/template to export all monitor templates.
+    Supports filtering by type, search string, and various inclusion switches.
+
+.PARAMETER MonitorId
+    The ID of a specific monitor to retrieve the template for.
+
+.PARAMETER MonitorTemplate
+    Switch to retrieve the template for a specific monitor by MonitorId.
+    Endpoint: GET /api/v1/monitors/{monitorId}/config/template
+
+.PARAMETER AllMonitorTemplates
+    Switch to retrieve all monitor templates for export.
+    Endpoint: GET /api/v1/monitors/-/config/template
 
 .PARAMETER Type
     Filter by monitor type. Valid values: all, active, performance, passive.
@@ -34,6 +48,10 @@
 .PARAMETER AllMonitors
     Include all monitors regardless of assignment.
 
+.PARAMETER SupportedTypes
+    Switch to retrieve the list of supported monitor types instead of templates.
+    Endpoint: GET /api/v1/monitors/-/config/supported-types
+
 .EXAMPLE
     Get-WUGMonitorTemplate
 
@@ -45,14 +63,19 @@
     Returns active monitor templates matching "HTTP".
 
 .EXAMPLE
-    Get-WUGMonitorTemplate -Type performance -View details -AllMonitors
+    Get-WUGMonitorTemplate -SupportedTypes
 
-    Returns all performance monitor templates with full details.
+    Returns all supported monitor types (active, passive, performance).
 
 .EXAMPLE
-    Get-WUGMonitorTemplate -IncludeDeviceMonitors -IncludeSystemMonitors
+    Get-WUGMonitorTemplate -MonitorTemplate -MonitorId "abc-123"
 
-    Returns monitor templates including device-assigned and system monitors.
+    Returns the template for the specified monitor.
+
+.EXAMPLE
+    Get-WUGMonitorTemplate -AllMonitorTemplates
+
+    Returns all monitor templates for export.
 
 .NOTES
     Author: Jason Alberino (jason@wug.ninja)
@@ -61,34 +84,52 @@
 function Get-WUGMonitorTemplate {
     [CmdletBinding(DefaultParameterSetName = 'Default')]
     param(
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Default')]
         [ValidateSet('all', 'active', 'performance', 'passive')]
         [string]$Type,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Default')]
         [string]$Search,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Default')]
         [ValidateSet('id', 'basic', 'info', 'summary', 'details')]
         [string]$View = 'info',
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Default')]
         [string]$PageId,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Default')]
         [int]$Limit = 250,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Default')]
         [switch]$IncludeDeviceMonitors,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Default')]
         [switch]$IncludeSystemMonitors,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Default')]
         [switch]$IncludeCoreMonitors,
 
-        [Parameter()]
-        [switch]$AllMonitors
+        [Parameter(ParameterSetName = 'Default')]
+        [switch]$AllMonitors,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'SupportedTypes')]
+        [switch]$SupportedTypes,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'MonitorTemplate')]
+        [switch]$MonitorTemplate,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'MonitorTemplate', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('id')]
+        [string[]]$MonitorId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'AllMonitorTemplates')]
+        [switch]$AllMonitorTemplates,
+
+        [Parameter(ParameterSetName = 'MonitorTemplate')]
+        [Parameter(ParameterSetName = 'AllMonitorTemplates')]
+        [ValidateSet('all', 'clone', 'transfer', 'update')]
+        [string]$TemplateOptions
     )
 
     begin {
@@ -110,6 +151,56 @@ function Get-WUGMonitorTemplate {
     }
 
     process {
+        # Handle SupportedTypes parameter set
+        if ($PSCmdlet.ParameterSetName -eq 'SupportedTypes') {
+            $supportedUri = "$($global:WhatsUpServerBaseURI)/api/v1/monitors/-/config/supported-types"
+            Write-Verbose "Requesting supported types from URI: $supportedUri"
+            try {
+                $result = Get-WUGAPIResponse -Uri $supportedUri -Method GET
+                if ($result.data) { $finalOutput += $result.data }
+            }
+            catch {
+                Write-Error "Error fetching supported monitor types: $($_.Exception.Message)"
+            }
+            return
+        }
+
+        # Handle MonitorTemplate parameter set
+        if ($PSCmdlet.ParameterSetName -eq 'MonitorTemplate') {
+            foreach ($mid in $MonitorId) {
+                $queryParams = @()
+                if ($TemplateOptions) { $queryParams += "options=$TemplateOptions" }
+                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                $templateUri = "$($global:WhatsUpServerBaseURI)/api/v1/monitors/${mid}/config/template${query}"
+                Write-Verbose "Requesting monitor template from URI: $templateUri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $templateUri -Method GET
+                    if ($result.data) { $finalOutput += $result.data }
+                }
+                catch {
+                    Write-Error "Error fetching template for monitor ${mid}: $($_.Exception.Message)"
+                }
+            }
+            return
+        }
+
+        # Handle AllMonitorTemplates parameter set
+        if ($PSCmdlet.ParameterSetName -eq 'AllMonitorTemplates') {
+            $queryParams = @()
+            if ($TemplateOptions) { $queryParams += "options=$TemplateOptions" }
+            $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+            $allTemplatesUri = "$($global:WhatsUpServerBaseURI)/api/v1/monitors/-/config/template${query}"
+            Write-Verbose "Requesting all monitor templates from URI: $allTemplatesUri"
+            try {
+                $result = Get-WUGAPIResponse -Uri $allTemplatesUri -Method GET
+                if ($result.data) { $finalOutput += $result.data }
+            }
+            catch {
+                Write-Error "Error fetching all monitor templates: $($_.Exception.Message)"
+            }
+            return
+        }
+
         # Build the query string based on provided parameters
         $queryString = ""
         if ($PSBoundParameters.ContainsKey('Type') -and ![string]::IsNullOrWhiteSpace($Type)) {
@@ -186,8 +277,8 @@ function Get-WUGMonitorTemplate {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEM6oJPV8xurJk
-# JO2t/z5Vg2S6hj7rNyn0cWzEeNcVhqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFV41xBgkyLrdq
+# DZ6IQVaR2DALuHtO9USLtOAIb7pPKaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -287,17 +378,17 @@ function Get-WUGMonitorTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgFaqxn2M2lRsR+sx7U+Uv9J7tVldt/8te
-# gml0gEP+I+gwDQYJKoZIhvcNAQEBBQAEggIAn/KwcDWwXfUK8MXJQyjjHu5+nFpG
-# VByYNzcsYA0PZDajyowPYJlfpamjGKvik8gBQVmjL7Mrmqtpr3lZEbAHBhEf0SkB
-# btD63m3wL8a8FfNjH2zGXRoHYwz+SP/wyo6YNXAewa8SeKM02te5keO39iMgk+cc
-# IKmc2NVqDjBZ9Rdkgngo2hWAHU2TF/mZYYjLHQ1KYLKFXB7EAZNlAHFmr+5Rrdgq
-# fu4FdiH5rlMa/G3Mi7bOtqUpTM4ghoZ6m2464SH4tnic/ThgjtGT0n5iB6zm24O1
-# 4jl2HjZWFarhw9B3mttkcfhV52zRH06ngNNz/DaBPgWVRYtkdwFz6lTOhkImT+jx
-# 7V1meiu0l5wUbh4qmhApMyepHmXOf2L6MSSxzMATn4HWP0qy62IFk0VMPlK1g0nY
-# 8REZ8QQ5vvxC/S0cWwc67TaJ9UiIc5K787Yx1N+sAYcGSwaR7qAY/VqihiV6nerS
-# ehu4fldSzcmh4nUF5K9Mss6Fip2SNJPDga7GJZWGIoaQfhOomld9ywn/I7b8JxuT
-# CnN51OiRONuhg+zBnMqU4fV3u1uyV24GTRd61nU5XjGYRrCVz6b2eJ3e5vCglGHk
-# Y1fRd6WlvVGZwaiVjwpz9Lcndq117Go8NcKKtlesMm95rxxKNOil39YDxlZPfOcr
-# iLr78ZyurNjHQiI=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgpInKDJYfzFdV8YKNbb/GDVTQjuTh0lpH
+# LsiVDA5I6ZEwDQYJKoZIhvcNAQEBBQAEggIAnFqZRQyqgCMbadDahNU9loHVHBQY
+# BGIc/kCdFgtTXyiDfVYYz7qIVrqNTSCXnGthVbzVeJCE2mgWttGkTB5b8Kig8nU0
+# wkHSqQexLlNUQrcbJLrocb8DvnKMYugu170QFDm5v/bldNzB2MufuOkwlL+ZQLmj
+# eGpSGsPkoWoG2/NtCLTyJDEmF/hAYrcQOGrT95cnjj/2WY/JYg0OgK14PJTNOpbc
+# IKdOLfxQTHJtB9X59jECbc8ygITywNklgxa+wYJ7DtvaHRjmres5p2ZdqRVd9xQ4
+# VVlrrZPvrHX68DqSgg5bW/Pqm9XjtxnA8+HA7Y0BykgLJWC7pIruHmWonP/06fqP
+# dnc8pxm0gI/EP9fgkWpa60aPrwfWkgRi3EanV38ZqppW/ZkOBd7bq3sVXfGfFI2r
+# AC84AVkeaVib7lSvUTZtkuCudDRo/4Dm5Rwkku+fGd/w27MXfm+ZGXz1jB+V78Uf
+# A++cRtbvcIXbkMcp/Yic29T8cf5VWnjet/b7S2YCRO0n/wYvh5MAkIbmrDXC9H6Y
+# G2BvJX/J05xW6ZFmOU6/aeFc0KKlNfXt1T/BlCWl89mmjKDYZT+U6prPg4iESe7m
+# D2pCaM8/JKPjep9ZzhnWaludG0WVXwh70Eu8GmuAZSYmwXDrQrzeSCQhakRebeim
+# /cR2dq0McupVpYU=
 # SIG # End signature block

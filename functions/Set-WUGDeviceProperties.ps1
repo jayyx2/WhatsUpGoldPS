@@ -56,7 +56,7 @@ Specifies the action policy ID to assign to the device. Default is null.
     Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Properties
 #>
 function Set-WUGDeviceProperties {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [Parameter()] [string] $DisplayName,
@@ -70,6 +70,7 @@ function Set-WUGDeviceProperties {
     )
     # TBD using call from Get-WUGDeviceTemplate or Get-WUGDeviceProperties
     $finalresult = @()
+    if (-not $PSCmdlet.ShouldProcess("Device(s) $($DeviceID -join ', ')", 'Set device properties')) { return }
     if ($DeviceID.Count -eq 1) {
         $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/$($DeviceID[0])/properties"
         $method = "PUT"
@@ -174,8 +175,8 @@ function Set-WUGDeviceProperties {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+iSsNrT7BZZ2z
-# blyjmMlHXIliekYQtaYGU7is9/wHeKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQCyQCh0Zt05Zk
+# BxtNNEXQDwcL4l5cCwXWc+gjAyuX5aCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -275,17 +276,17 @@ function Set-WUGDeviceProperties {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgamfv0nPkGBtbvXEjjX/fJ3Yzj96PQt3j
-# ximDTa8+R5swDQYJKoZIhvcNAQEBBQAEggIALd12Rw50P7EqpGklSRCEb7xzr1gb
-# jd+UmSSNdEOKkfj3/IhVZlGneXU2fI/nlP3x3aOMMfNTiQg6mA7XztsQHnyE22yP
-# 1Is67xhUsqSbxo+o7qFNy2CDMVKSJWi0yACG23lxH0GO0/kDiF5Kx27ZYj2moOOT
-# jY2TUb54vXsKrFfVNHo3ZyIkuRrp5R57+U7hQuo7xE+jw2XzAypIYbJrN9dW0O5Z
-# 9+vUUxSoL/yo84nrtrXpwCGCXC7aCQh3+tlUXzNjaO5BTWjRoxmCw5EjwIoKRTcQ
-# OWOCH6biM2YhQZV87mApFdHsIudnNS1H/1+aUsgumVUklxb2ADB+ElCgos8dyhO4
-# z/yUSN3l7SeJBJfMb+/w4a3q6OG/pJzWmKvJlnIkebAIHBKdCWt5G3/gJ60bX+xs
-# 5cPqGh1pUbWNsWqRRPZs4mGH/rsj+OxwvtASG8HF6r1b0A2K+CpLGtxMozuRAdhU
-# K0lkDqVD08j9S4NhuwI4iCNU4R5mRNE9aQF4oxBaIbESZsDWdt6fTjgL9QhAmZil
-# 14LemJaHC1JJ84lcbKnF/0x+FA+ym/msqgqg426g+KLQg8Xs8SAeV/9WjEyIRwBs
-# iFPpiiCpJX0J3iLh2bo/0CsZ++pSMvbsb0SU7fNJNBH0P+yQX1OtmaZN8OnjSoy+
-# smvqqBNz0fB3oKc=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgcvu0NQ0HnavpxLVsAdj7oE4dZfPXPI0a
+# wVFpMrHRSU0wDQYJKoZIhvcNAQEBBQAEggIAb/Q6tZESTeC1pqYVH1ulbyMQEVXN
+# aGluwAaD4a2MrOY/lFYwvRlvqccSYbi7HEsdRUE43DYNhjpbLYsdpfQvYIPpriMJ
+# xs5ZqlUEERQikMUIj88LbtySLQzlAFginCluSvzSS9c4sOv90CJVlAvz9HATjYb8
+# PQQesI8ACGA6XZ5rKe1lTYXvJc9RkJMb3slUZaMFZpG3ATQJwfaLadyg+OPNwCvk
+# ZiEi+b3S5ZU8gNgLhDd8r+75vjJJUIgDeLeKUPj8a7AiKzq3cS0VC8A2n+HI81KE
+# 1GJvrGOY+xQ/bA8izINzLhBTMc6oQHbyWT3Yx+pHN4nWGGiXjJT31yNI9DeqFs8B
+# HP44SYl+81XHbYDq6/Ztjv3Q2GI27VYIs9WPGYMZ460jHcQr76jWdvSlKo4LMH/4
+# E6uG9kmd8Yf8fSxltlvhJ+P2VJwYyCcUg7QLlVp0F/RDZ88LMlOqYTOxyaNpVGEg
+# q7stqSJRfRP8FcZgsyoSjezozXWjyQ/54XoIAwpcRpN0OGx/1oMG4XUeTc+80TJl
+# K23RpR7JzxdDLLSeJL00kOPbWa04mbD0kt7FJFYnwq0oWWSwuI9M54ae7EAlV3Ca
+# b1HE86NuKJzbdCydTIHXJr3FI6PcHNaVRrxlXP77B6b/+9+abS5O8G9ISBzCrwSQ
+# SbcbmGECbBjHnoY=
 # SIG # End signature block

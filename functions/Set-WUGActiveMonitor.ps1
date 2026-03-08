@@ -10,7 +10,11 @@ Manage monitors in WhatsUp Gold at both the library and device levels, including
 - Handles paging for bulk device assignment updates if required.
 
 .PARAMETER Mode
-"Library" (update template), "Device" (assign new or update assignment).
+"Library" (update template), "Device" (assign new or update assignment), "BatchDeviceMonitors" (batch monitor operations on a device).
+
+.PARAMETER BatchBody
+JSON body for batch device monitor operations (Mode = BatchDeviceMonitors).
+Endpoint: PATCH /api/v1/devices/{deviceId}/monitors/-
 
 .PARAMETER MonitorId
 Monitor's unique ID (required for library-level operations).
@@ -76,9 +80,9 @@ Reference: WhatsUp Gold REST API documentation
 #>
 
 function Set-WUGActiveMonitor {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param (
-        [Parameter(Mandatory=$true)][ValidateSet("Library", "Device")][string]$Mode,
+        [Parameter(Mandatory=$true)][ValidateSet("Library", "Device", "BatchDeviceMonitors")][string]$Mode,
         [Parameter()][string]$MonitorId,
         [Parameter()][Alias("id")][int[]]$DeviceId,
         [Parameter()][int[]]$AssignmentId,
@@ -92,7 +96,8 @@ function Set-WUGActiveMonitor {
         [Parameter()][ValidateRange(10, 86400)][int]$PollingIntervalSeconds,
         [Parameter()][ValidateRange(1, 32)][int]$CriticalOrder,
         [Parameter()][string]$ActionPolicyId,
-        [Parameter()][string]$ActionPolicyName
+        [Parameter()][string]$ActionPolicyName,
+        [Parameter()][string]$BatchBody
     )
 
     begin {
@@ -122,6 +127,8 @@ function Set-WUGActiveMonitor {
             $uri = "${global:WhatsUpServerBaseURI}/api/v1/monitor/${MonitorId}"
             $jsonBody = $body | ConvertTo-Json -Depth 10
 
+            if (-not $PSCmdlet.ShouldProcess("Monitor ${MonitorId}", 'Update library configuration')) { return }
+
             try {
                 $response = Get-WUGAPIResponse -Uri $uri -Method PUT -Body $jsonBody
                 Write-Verbose "Library-level configuration updated successfully for monitor ID: ${MonitorId}."
@@ -149,6 +156,8 @@ function Set-WUGActiveMonitor {
 
                         $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${deviceId}/monitors/${assignmentId}"
                         $jsonBody = $body | ConvertTo-Json -Depth 10
+
+                        if (-not $PSCmdlet.ShouldProcess("Device ${deviceId}, Assignment ${assignmentId}", 'Update monitor assignment')) { continue }
 
                         try {
                             $response = Get-WUGAPIResponse -Uri $uri -Method PUT -Body $jsonBody
@@ -180,6 +189,8 @@ function Set-WUGActiveMonitor {
                     $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${deviceId}/monitors"
                     $jsonBody = $body | ConvertTo-Json -Depth 10
 
+                    if (-not $PSCmdlet.ShouldProcess("Device ${deviceId}", 'Assign monitor to device')) { continue }
+
                     try {
                         $response = Get-WUGAPIResponse -Uri $uri -Method POST -Body $jsonBody
                         Write-Verbose "Monitor assigned/updated successfully for device ID: ${deviceId}."
@@ -193,16 +204,39 @@ function Set-WUGActiveMonitor {
                 Write-Error "For device-level operations, you must provide -DeviceId. To update/disable a specific assignment, provide both -DeviceId and -AssignmentId."
             }
         }
+        elseif ($Mode -eq "BatchDeviceMonitors") {
+            if (-not $DeviceId) {
+                Write-Error "For BatchDeviceMonitors mode, you must provide -DeviceId."
+                return
+            }
+            if (-not $BatchBody) {
+                Write-Error "For BatchDeviceMonitors mode, you must provide -BatchBody with the JSON payload."
+                return
+            }
+            foreach ($deviceId in $DeviceId) {
+                $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${deviceId}/monitors/-"
+
+                if (-not $PSCmdlet.ShouldProcess("Device ${deviceId}", 'Batch monitor operations')) { continue }
+
+                try {
+                    $response = Get-WUGAPIResponse -Uri $uri -Method PATCH -Body $BatchBody
+                    Write-Verbose "Batch monitor operations completed for device ID: ${deviceId}."
+                }
+                catch {
+                    Write-Error "Failed batch monitor operations for device ID: ${deviceId}: $_"
+                }
+            }
+        }
         else {
-            Write-Error "Invalid -Mode. Use 'Library' or 'Device'."
+            Write-Error "Invalid -Mode. Use 'Library', 'Device', or 'BatchDeviceMonitors'."
         }
     }
 }
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA0Va7lLB4UXlpB
-# YWTg266HWEIMBluwweqRZHOdWl9/UKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC62VTZJsk/y3eE
+# lIGPSpC7h2KuZ3CMRNTvaWWLBGvDm6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -302,17 +336,17 @@ function Set-WUGActiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgNutyaexFgCX07sg6aunoT7yhsEH0dZfW
-# n/Y0LzOMqWUwDQYJKoZIhvcNAQEBBQAEggIANZmqi9N5C91iXKMciT2aARBBTy+e
-# a2Dr4oy6EXBCDiTYYZAgzJheLj2RcblQA2j1002X+PcENrYribSmk+tnJdz57EOn
-# FSQl/VxiJPSmfhaRR+O9MLeTLjm9YcpGFGtS7pbWRWOe/ol6+pQPUacLlYCuUJBQ
-# ni5nRuaTs7xn11Y8Bj1u3MyQFAQngxU5hvSbZHFX7l0AkcTqJfFjqUZmUbIUFf9l
-# /O/Y0d67qotWaiBlsK1GeluCeMv2kcJCMy3IOtF058cO5ynZTKL/Od6RluJi3D3N
-# J2bFrA5k5mZTl5OtOyfSAGMo10T03Y67DEWfEGZdOVXKPAxMdQ5NinjXv+PpgM5V
-# 4Cy6ydSszJ5yMlgzyBMP31IY75v0q1ykfILR8XBWmpuVfxlMz8LSdgGwZe4nB6UE
-# VaTXavwBBu0z3YJxyAzKLOEQE7xUTMyvfh05VYtIs/PQAG0mkT0h9FZ2Oy5++h2Z
-# O+16kf1MPWmX9BCMvCQreAc7h7rVNlO+RGf/R5w/mqYLi+UHyoIxr2AN2if8BwHk
-# BEgiK/rFW3K8qfPFjtx8xeU4jpji0G4q4KQNGcrhvggKpPTI6PsrdPKcmnpWF9CA
-# ktMRwrhKsxFJrMDnofABhAZihpkQCERgHZyPNkdoWuvrxRILQCpSOHYqQfUdPcD3
-# 9qCj8Ob2gfwoOSM=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgtr9XdwR68WsdvEz25x9iwavTISAeIOcU
+# zf6LSY2E8z0wDQYJKoZIhvcNAQEBBQAEggIA6ZpATW3fsRmvOYlaqnjIT4QTUGYz
+# UnxzyK6frNU+ho8DOpgJK90r78mXKndg0ZrboyTZZVH5ItpOfccTzZOAUFk1K2kP
+# VlFSZSrPRzjZjTAmwjXDe//SHkpW6DFEdftAlXoT6TePcv/Ah0/XnwFYoPGHl5Ic
+# kTOQn6P5WnHEHjfoXtUibQoAB/mxjhoQ7hrLuffLjjbhx3IWh2ISKI4h870o6KKq
+# QyYOnvIzD6lOY9/KPiyBV3LyzM6oSeBWbWm5L1PF5qPaWiYnL4YcDtZkf53DEH/K
+# pIHCDXUSRkNEb52UzKzxQt+VXGU2g95EoYBI3GDB8QcxzsXn8U/b51ey820Aige4
+# 6S6a71kg9jY9C44VC+al3cTUVcg6VQSNNBjcdlzQ7rj2dcOHh4VJxjZIefB768we
+# mpmzpeZBH6fP6n/qTq2/XONiPPrv6WuW48r7jonRK0gZBfOpZkZGGH6AcpGGyVOi
+# Fb2pjvGzvw6jsjz/+g9ETMTXRPPte5CZTPMo/bXH1oFgxNqN57Yyvvnp1qlDgDb+
+# kIFZU7crrMBVW2dzb5mm+CzV4vN93m413M6PwDu+hxw/nxZghUbGo3fpOXsurJK1
+# a11MJoRo9ZHGWW1KI1czhr5v1z5lYNVBir44BNc7s82B0rMb4suneZ6oYxqhx25H
+# /Qufgj2lCtGg7xw=
 # SIG # End signature block

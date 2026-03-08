@@ -147,6 +147,7 @@ The device is added with default settings for other parameters not specified in 
 #>
 
 function Add-WUGDeviceTemplate {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [string] $displayName,
         [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [ValidatePattern('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')] [string] $DeviceAddress,
@@ -536,6 +537,8 @@ function Add-WUGDeviceTemplate {
         `"templates`":[${jsonBody}]
     }"
 
+    if (-not $PSCmdlet.ShouldProcess("Device '${displayName}' (${DeviceAddress})", 'Add device from template')) { return }
+
     try {
         $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
         if ($result.data.errors) {
@@ -563,8 +566,8 @@ function Add-WUGDeviceTemplate {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHR5RQjNC21W/P
-# fHtK+ZJCTSKi3QHRLYtuUm1xJfMmlKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIk/hiGj1BSMmm
+# g3isPsxqHzcyHnsmzycuwIIoMEQFqKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -664,17 +667,17 @@ function Add-WUGDeviceTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgJYCX+3T1BCgpxp83FeTVshitDZBmvu72
-# mB90ccXSU48wDQYJKoZIhvcNAQEBBQAEggIAzibO3EHf7eUbLV8+home3Oy2f3Sm
-# zHONkH7B1eJ887KsUw0op0WihDkLHSWREsx9rJYxQ83iclSinPcBcX67bl7tIpiH
-# SnqqCJDoJd3+VMi/c0eE1unmCqU25WZfam8FZbdHv2keA1PhWUTt2pBi9cvDUi8Z
-# UWM2ce8TzIBhshe61OdBJJPeejWHsnkDIKpFwrX4jhYiM7RK1pkkYdfOiH+3rt9H
-# fHEF8q5NTwCiwULuZGH06Jx244WCugtZYFz371s7MoEcACNb08hGXTjQmE+uhVlO
-# phgX5jq+tWyxF7env2T+9TITHDzcwisvHkzNYMWbt49AMhhCtXfb2fxAAXsPz1ta
-# h6Nzbk6c6DmSne7Pb36fno/uZRIW/tiBY3QvC5rHjJmYcArVWlCxTBxS7vmHuNC5
-# SS3Boh0y8zNdujuz8xGfZxIPZS3dqJMe4s5XmDqqcsG4vG1C6CtFahaszZHbQV7n
-# BUeWDt1kkZtj88ok+wIk/MPT+FIUznjaUfCtJT6hnvGJo+IR34JiTEG8Ncu9tqy7
-# gc/nbAhbQQNcgwM0zjf5bYr/MEUCW7IbuatB1gg+OUeLx+bCI5hLqZyadwGPZpFx
-# 3ktC6xyZCm4Y5FzmmgGiDjgYmJgM/ndnZBAGuuN7eJpjOij3hJTatv8IxfwoL2xn
-# kqWjug80uRNV/08=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgDN6e+G1ZhPuEoUmnVKTQJYo/Z/pOtpmA
+# 0CrpVVPfavcwDQYJKoZIhvcNAQEBBQAEggIAUyx0gdKHH9YXGS9qnGaNta7zqDwZ
+# Bv8bC90BTiYyLKjj4y6rLWy54ocv/xnTn85rByAP6LrscXwuv/l6Rs1vF2qXHhkq
+# YxE0HyoGpnGzrE1fvsuyIQE8w3lj7joFXl3bUs+IJpNmc+Y/IctxYECTEdHqLdqw
+# 66nDZM+G5ntzBEmpkbTbvSEgvtBzJcb3tk1Y+tzgPC2aDxR4SVHmYP+68bAm36wf
+# I9g0wdAG5v+FvjWfBc3ntyxTsg0SluRakRHx4jfmTxY9ER+cSC0RFkA+VyG2ZT6T
+# pnlSbO2wuxGfh6Y0zI9OlSiPhCOfTT1Xi/BDb6c/o+GAgtEjVeTW796qz8RK+Hhl
+# 39JSy2is9l+4eAM+2lfrfZ0D8O/l4pAkn9uOgimUBjG/sWjCZW5tB84fwB+Ioq0v
+# gojQzwif9dBHDJRptjcZgLcwfnFzaBXU4I5lzJvCilzZtXoEkTiV3XAXqtgSDIhq
+# uZlKlJE6KQhveVaGNRAHKH6yCnTnSkP9db3IR0pbGeU8ko7mtgWBnvjosRjiJivK
+# sf39SQsZjahG/HynQ/J6jdCKKDBXZN/fcTwUX6qbO8j4ddf6lrnpMhtsPiy1DAWz
+# bkqaTOY6VWdM3mv1l7iI2OkYRbcozQekb9znhblC0hfBEHASkhDFR5EnA0KF1FGw
+# SYMbphbJK3kuLbs=
 # SIG # End signature block

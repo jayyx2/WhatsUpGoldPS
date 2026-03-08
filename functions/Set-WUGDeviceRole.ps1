@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Performs POST and PATCH operations on device roles in WhatsUp Gold.
+Performs write operations on device roles in WhatsUp Gold.
 
 .DESCRIPTION
 The Set-WUGDeviceRole function handles write operations for device roles including:
@@ -9,6 +9,13 @@ The Set-WUGDeviceRole function handles write operations for device roles includi
 - Import/apply a device role package
 - Verify a device role package before import
 - Apply multiple device role templates
+- Delete a device role
+- Enable or disable a device role
+- Restore a system device role to defaults
+- Assign roles to a specific device (by kind or generic)
+- Remove role assignments from a device
+- Batch-assign roles across all devices
+- Assign roles to a device group
 
 .PARAMETER ExportPackage
 Switch to generate a package for delivery to another WhatsUp Gold system.
@@ -30,11 +37,66 @@ Endpoint: POST /api/v1/device-role/-/config/import/verify
 Switch to apply multiple device role templates.
 Endpoint: PATCH /api/v1/device-role/-/config/template
 
+.PARAMETER RemoveRole
+Switch to delete a device role by RoleId.
+Endpoint: DELETE /api/v1/device-role/{roleId}
+
+.PARAMETER EnableRole
+Switch to enable a device role by RoleId.
+Endpoint: PUT /api/v1/device-role/{roleId}/enable
+
+.PARAMETER DisableRole
+Switch to disable a device role by RoleId.
+Endpoint: PUT /api/v1/device-role/{roleId}/disable
+
+.PARAMETER RestoreRole
+Switch to restore a system device role to its default state.
+Endpoint: PUT /api/v1/device-role/{roleId}/restore
+
+.PARAMETER SetDeviceRoleKind
+Switch to assign a role of the specified kind to a device.
+Endpoint: PUT /api/v1/devices/{deviceId}/roles/{kind}
+
+.PARAMETER AssignDeviceRole
+Switch to assign a role to a device via the generic roles endpoint.
+Endpoint: PUT /api/v1/devices/{deviceId}/roles/-
+
+.PARAMETER RemoveDeviceRoles
+Switch to remove role assignments from a device, filtered by kind.
+Endpoint: DELETE /api/v1/devices/{deviceId}/roles/-
+
+.PARAMETER BatchDeviceRole
+Switch to batch-assign roles of the specified kind across all devices.
+Endpoint: PATCH /api/v1/devices/-/roles/{kind}
+
+.PARAMETER GroupRole
+Switch to assign a role of the specified kind to a device group.
+Endpoint: PUT /api/v1/device-groups/{groupId}/roles/{kind}
+
+.PARAMETER RoleId
+The ID of the device role. Required for RemoveRole, EnableRole, DisableRole, and RestoreRole operations.
+Accepts pipeline input.
+
+.PARAMETER DeviceId
+The device ID. Required for SetDeviceRoleKind, AssignDeviceRole, and RemoveDeviceRoles operations.
+
+.PARAMETER GroupId
+The device group ID. Required for GroupRole operations.
+
+.PARAMETER RoleKind
+The kind of role for path-based operations. Valid values: brand, os, primary, sub-role.
+Required for SetDeviceRoleKind, BatchDeviceRole, and GroupRole.
+
+.PARAMETER DeleteKind
+The kind of role to remove when using RemoveDeviceRoles. Valid values: all, role, brand, os, subRole.
+Default: all.
+
 .PARAMETER Body
-The JSON body to send with the request. Required for all operations.
+The JSON body to send with the request.
 - For ExportPackage and ExportContent: PackageRequest object
 - For ImportPackage and ImportVerify: PackageApply object
 - For ApplyTemplates: DeviceRoleTemplateBatch object
+- For SetDeviceRoleKind, AssignDeviceRole, BatchDeviceRole, GroupRole: role assignment body
 
 .EXAMPLE
 # Export a device role package
@@ -42,31 +104,51 @@ $packageRequest = @{ key = @{ kid = "mykey"; k = "secretvalue" }; roles = @(@{ n
 Set-WUGDeviceRole -ExportPackage -Body $packageRequest
 
 .EXAMPLE
-# Get export content inventory
-$packageRequest = @{ key = @{ kid = "mykey"; k = "secretvalue" }; roles = @(@{ name = "Router" }) } | ConvertTo-Json -Depth 10
-Set-WUGDeviceRole -ExportContent -Body $packageRequest
-
-.EXAMPLE
-# Verify a package before import
-$packageApply = @{ package = $signedPackage } | ConvertTo-Json -Depth 10
-Set-WUGDeviceRole -ImportVerify -Body $packageApply
-
-.EXAMPLE
-# Import/apply a package
-$packageApply = @{ package = $signedPackage } | ConvertTo-Json -Depth 10
-Set-WUGDeviceRole -ImportPackage -Body $packageApply
-
-.EXAMPLE
 # Apply device role templates
 $templateBatch = @{ options = @("all"); templates = @($template1, $template2) } | ConvertTo-Json -Depth 10
 Set-WUGDeviceRole -ApplyTemplates -Body $templateBatch
+
+.EXAMPLE
+# Delete a device role
+Set-WUGDeviceRole -RemoveRole -RoleId "abc-123"
+
+.EXAMPLE
+# Enable a device role
+Set-WUGDeviceRole -EnableRole -RoleId "abc-123"
+
+.EXAMPLE
+# Disable a device role
+Set-WUGDeviceRole -DisableRole -RoleId "abc-123"
+
+.EXAMPLE
+# Restore a system device role
+Set-WUGDeviceRole -RestoreRole -RoleId "abc-123"
+
+.EXAMPLE
+# Assign a brand role to a device
+$body = @{ roleId = "brand-role-id" } | ConvertTo-Json
+Set-WUGDeviceRole -SetDeviceRoleKind -DeviceId "123" -RoleKind brand -Body $body
+
+.EXAMPLE
+# Remove all role assignments from a device
+Set-WUGDeviceRole -RemoveDeviceRoles -DeviceId "123" -DeleteKind all
+
+.EXAMPLE
+# Batch-assign OS roles across all devices
+$body = @{ items = @(@{ deviceId = "1"; roleId = "os-role-id" }) } | ConvertTo-Json -Depth 5
+Set-WUGDeviceRole -BatchDeviceRole -RoleKind os -Body $body
+
+.EXAMPLE
+# Assign a brand role to a device group
+$body = @{ roleId = "brand-role-id" } | ConvertTo-Json
+Set-WUGDeviceRole -GroupRole -GroupId "5" -RoleKind brand -Body $body
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/DeviceRole
 #>
 function Set-WUGDeviceRole {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true, ParameterSetName = 'ExportPackage')]
         [switch]$ExportPackage,
@@ -83,7 +165,67 @@ function Set-WUGDeviceRole {
         [Parameter(Mandatory = $true, ParameterSetName = 'ApplyTemplates')]
         [switch]$ApplyTemplates,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveRole')]
+        [switch]$RemoveRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'EnableRole')]
+        [switch]$EnableRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'DisableRole')]
+        [switch]$DisableRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'RestoreRole')]
+        [switch]$RestoreRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'SetDeviceRoleKind')]
+        [switch]$SetDeviceRoleKind,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'AssignDeviceRole')]
+        [switch]$AssignDeviceRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveDeviceRoles')]
+        [switch]$RemoveDeviceRoles,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'BatchDeviceRole')]
+        [switch]$BatchDeviceRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupRole')]
+        [switch]$GroupRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveRole', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'EnableRole', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'DisableRole', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'RestoreRole', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('id')]
+        [string]$RoleId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'SetDeviceRoleKind')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'AssignDeviceRole')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveDeviceRoles')]
+        [string]$DeviceId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupRole')]
+        [string]$GroupId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'SetDeviceRoleKind')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'BatchDeviceRole')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupRole')]
+        [ValidateSet('brand', 'os', 'primary', 'sub-role')]
+        [string]$RoleKind,
+
+        [Parameter(ParameterSetName = 'RemoveDeviceRoles')]
+        [ValidateSet('all', 'role', 'brand', 'os', 'subRole')]
+        [string]$DeleteKind = 'all',
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ExportPackage')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ExportContent')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ImportPackage')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ImportVerify')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ApplyTemplates')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'SetDeviceRoleKind')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'AssignDeviceRole')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'BatchDeviceRole')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupRole')]
         [string]$Body
     )
 
@@ -124,19 +266,143 @@ function Set-WUGDeviceRole {
                 $method = 'PATCH'
                 Write-Debug "Applying device role templates. URI: $uri"
             }
+
+            'RemoveRole' {
+                $uri = "${baseUri}/${RoleId}"
+                $method = 'DELETE'
+                Write-Debug "Deleting device role ${RoleId}. URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess("Role $RoleId", "Delete")) { return }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error deleting device role ${RoleId}: $_"
+                    return
+                }
+            }
+
+            'EnableRole' {
+                $uri = "${baseUri}/${RoleId}/enable"
+                $method = 'PUT'
+                Write-Debug "Enabling device role ${RoleId}. URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess("Role $RoleId", "Enable")) { return }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error enabling device role ${RoleId}: $_"
+                    return
+                }
+            }
+
+            'DisableRole' {
+                $uri = "${baseUri}/${RoleId}/disable"
+                $method = 'PUT'
+                Write-Debug "Disabling device role ${RoleId}. URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess("Role $RoleId", "Disable")) { return }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error disabling device role ${RoleId}: $_"
+                    return
+                }
+            }
+
+            'RestoreRole' {
+                $uri = "${baseUri}/${RoleId}/restore"
+                $method = 'PUT'
+                Write-Debug "Restoring device role ${RoleId}. URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess("Role $RoleId", "Restore")) { return }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error restoring device role ${RoleId}: $_"
+                    return
+                }
+            }
+
+            'SetDeviceRoleKind' {
+                $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/roles/${RoleKind}"
+                $method = 'PUT'
+                Write-Debug "Setting ${RoleKind} role on device ${DeviceId}. URI: $uri"
+                if (-not $PSCmdlet.ShouldProcess("Device $DeviceId role ${RoleKind}", "Set")) { return }
+            }
+
+            'AssignDeviceRole' {
+                $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/roles/-"
+                $method = 'PUT'
+                Write-Debug "Assigning role to device ${DeviceId}. URI: $uri"
+                if (-not $PSCmdlet.ShouldProcess("Device $DeviceId", "Assign role")) { return }
+            }
+
+            'RemoveDeviceRoles' {
+                $queryParams = @()
+                if ($DeleteKind) { $queryParams += "kind=$DeleteKind" }
+                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/roles/-${query}"
+                $method = 'DELETE'
+                Write-Debug "Removing roles from device ${DeviceId} (kind=$DeleteKind). URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess("Device $DeviceId roles (kind=$DeleteKind)", "Remove")) { return }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error removing roles from device ${DeviceId}: $_"
+                    return
+                }
+            }
+
+            'BatchDeviceRole' {
+                $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/-/roles/${RoleKind}"
+                $method = 'PATCH'
+                Write-Debug "Batch assigning ${RoleKind} role. URI: $uri"
+                if (-not $PSCmdlet.ShouldProcess("All devices role ${RoleKind}", "Batch assign")) { return }
+            }
+
+            'GroupRole' {
+                $uri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups/${GroupId}/roles/${RoleKind}"
+                $method = 'PUT'
+                Write-Debug "Setting ${RoleKind} role on group ${GroupId}. URI: $uri"
+                if (-not $PSCmdlet.ShouldProcess("Group $GroupId role ${RoleKind}", "Set")) { return }
+            }
         }
 
-        try {
-            $result = Get-WUGAPIResponse -Uri $uri -Method $method -Body $Body
-            if ($result.data) {
-                return $result.data
+        # Handle Body-based operations (export, import, apply)
+        if ($Body) {
+            try {
+                $result = Get-WUGAPIResponse -Uri $uri -Method $method -Body $Body
+                if ($result.data) {
+                    return $result.data
+                }
+                else {
+                    return $result
+                }
             }
-            else {
-                return $result
+            catch {
+                Write-Error "Error in Set-WUGDeviceRole ($($PSCmdlet.ParameterSetName)): $_"
             }
-        }
-        catch {
-            Write-Error "Error in Set-WUGDeviceRole ($($PSCmdlet.ParameterSetName)): $_"
         }
     }
 
@@ -148,8 +414,8 @@ function Set-WUGDeviceRole {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAsGkUcThzVaH3v
-# bs4wzS9fMWaaaWMciSAExrlbWfD31KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2/VWxGbePRy0r
+# x3JdWSy3DMofelGKFD0BJcpXoIVSTqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -249,17 +515,17 @@ function Set-WUGDeviceRole {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgpn8gQkSnCMiPgLmyTcu0bMQeCCB3J55/
-# ELu7FBtb81EwDQYJKoZIhvcNAQEBBQAEggIA13oub9fGo+8aGpdKgMab5wuGLkS0
-# iz/9XkZC+mFbGRmFyOp/Nl2RRMyXBtmR4AODqmZLGM71/CMwnuwfvCqn8eeTCuwI
-# KbaCODuaN7uJf1raZ2/Q+YEyC7q/SDr7tvveD8dR/QtQB7fnC7PVgZLNKJBCWzbT
-# Ki5nSwchjiWj7i1IljAaXa4AQm0JHDMD3ZrV+8mJnZo2KPrZ9QDRnMsJEkJgbjEd
-# /1n25IDOeupfJJo9W45UOdf01P1iJQaRgqd45OosFIWVL6TX5yJbMWuUxNX4UV4G
-# wO6aNSj8G9YLyB5EPg/e+spzsBGQainqYIFkiWhX/+pLXhaKo8wvrk4AZbEyuGG/
-# q1riNQCY2goU/u5T7TNDxJoOXbiKFbEoOOy4+cZGzOdw94dfndjRdRsAlakv4R/b
-# 15h/MHFNDh17E0jbGlJkvd8YallmfXVjHzwrgYfSdCOZU8q8ZZNaLGK/WgNJffMr
-# dPDetWVnsoqUhWoNBmeTNRPbMIWQinF1A7ezMATuahNJYf73zZlXO/31LuCW4C0O
-# J5Tn+nMMs/W60L7kLMY8K9ggFLfKmh8uffRp537CLsoCVwgQp6nSSC/wDWSqaLE5
-# doz9PX2+o4ayH0Vp4CF1gwiJDecIWs8odzUA7GAyGbiSz1t35mdi5xmkbmXzHYDt
-# 7+WpSbpWu5QjyBE=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgSZtQLRVipD6aXwabHRAKkaN9VemTmNeD
+# HLXa4rwlio0wDQYJKoZIhvcNAQEBBQAEggIA5hC8MDolE6LFjTA7Ry95ftRSkDEL
+# ozMEGOSHgfj5OuR2GKFR6E6doWQJuikdxIE83X8+2J/eAgknihf+C983043NUZhW
+# CPkWWUaVNwK+1VT00UgacVJshXSEygXg9BL6QRwcMw5FoIZJa3M6eN/R6hqM7y+I
+# Zet4d59MjLNpKPigyftPTLoSA2A32QbF9A4KEyeOr6sgZ2QYYNAuC0R8CFRqnxsH
+# WAi730IjToQV2xUQVYLWMANfjmKijunA5hVktZO6uZxjR2aopbQfri0Ic/2WxgSv
+# kZOlrvavsm/Z8oKhujhlSkXD7bZhpxmg4rz86Gt0gY5ro2XRwKwVnIMCs6Ulzce0
+# VAx4BG4w4i4H56zc+ogtL5+2FXYzXo5AUJu3+aYTJpMrVRpgEMphabkiPTeaO8+m
+# 32vawO2ee4sNacbfBiG61B1Efnpoh9FmEFM8HLvFJrXf1MZML2PyA7gGvmiOE1cl
+# PenQvaKKCiZSCydHFauQoa+sYwdf7XEE4er6Oy8poq+pFpEKnZYnaXwOJlgnBABs
+# dUH9rE2CywZk/wfdLcJPrsDGMFFwJRx4XfMVy1woDTzMqwhnuUs67wRaLTplTxm5
+# CaJaveuO8auKdD4tPd+iZJ0XrKuZpGHyZvY8NkilfVOxcvU4WpotOa39RtrsI74y
+# MEbmBGSXZOvaLwY=
 # SIG # End signature block

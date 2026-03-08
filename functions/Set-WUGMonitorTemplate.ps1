@@ -1,138 +1,140 @@
 <#
 .SYNOPSIS
-    Assigns an active monitor to a device in WhatsUp Gold.
+Performs write operations on monitor templates in the WhatsUp Gold monitor library.
 
 .DESCRIPTION
-    Add-WUGActiveMonitorToDevice assigns a specified active monitor template to a device
-    via the WhatsUp Gold REST API (POST /api/v1/devices/{deviceId}/monitors/-). Optional
-    parameters control polling interval, comment, argument, interface binding, critical
-    order, and action policy.
+The Set-WUGMonitorTemplate function handles write operations for monitor templates:
+- Apply/import monitor templates:  PATCH  /api/v1/monitors/-/config/template
+- Batch monitor library operations: PATCH  /api/v1/monitors/-
+- Remove all monitor assignments:   DELETE /api/v1/monitors/-/assignments/-
 
-.PARAMETER DeviceId
-    The ID of the device to assign the monitor to. Required.
+.PARAMETER ApplyTemplates
+Switch to apply or import monitor templates.
+Endpoint: PATCH /api/v1/monitors/-/config/template
 
-.PARAMETER MonitorId
-    The monitor template ID (monitorTypeId) to assign. Required.
+.PARAMETER BatchMonitors
+Switch to perform batch operations on monitors in the library.
+Endpoint: PATCH /api/v1/monitors/-
 
-.PARAMETER Enabled
-    Whether the monitor should be enabled. Valid values: true, false. Default: true.
+.PARAMETER UnassignAll
+Switch to remove all monitor assignments that match a query.
+Endpoint: DELETE /api/v1/monitors/-/assignments/-
 
-.PARAMETER Comment
-    An optional comment for the monitor assignment.
+.PARAMETER Body
+JSON body for ApplyTemplates and BatchMonitors operations.
 
-.PARAMETER Argument
-    An optional argument string passed to the monitor.
-
-.PARAMETER InterfaceId
-    The interface ID to bind the monitor to, if applicable.
-
-.PARAMETER PollingIntervalSeconds
-    The polling interval in seconds (10-86400).
-
-.PARAMETER CriticalOrder
-    The critical order ranking (0-100).
-
-.PARAMETER ActionPolicyId
-    The ID of the action policy to associate with this monitor.
-
-.PARAMETER ActionPolicyName
-    The name of the action policy to associate with this monitor.
+.PARAMETER Search
+Optional search filter for UnassignAll to limit which assignments are removed.
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5
-
-    Assigns active monitor template 5 to device 42 with default settings.
-
-.EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5 -PollingIntervalSeconds 60 -Comment "HTTP check"
-
-    Assigns active monitor 5 to device 42 with a 60-second polling interval and a comment.
+# Apply monitor templates
+$body = @{ templates = @(@{ name = "HTTP"; type = "active" }) } | ConvertTo-Json -Depth 5
+Set-WUGMonitorTemplate -ApplyTemplates -Body $body
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 100 -MonitorId 12 -Enabled false -ActionPolicyName "Email Admins"
+# Batch update monitors in the library
+$body = @{ items = @(@{ monitorId = "123"; enabled = $true }) } | ConvertTo-Json -Depth 5
+Set-WUGMonitorTemplate -BatchMonitors -Body $body
 
-    Assigns monitor 12 to device 100 in a disabled state with the "Email Admins" action policy.
+.EXAMPLE
+# Remove all monitor assignments
+Set-WUGMonitorTemplate -UnassignAll
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja)
-    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Monitors
+Author: Jason Alberino (jason@wug.ninja)
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/Monitor-Templates
 #>
-function Add-WUGActiveMonitorToDevice {
+function Set-WUGMonitorTemplate {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeviceId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$MonitorId,
-        [ValidateSet("true", "false")][string]$Enabled = "true",
-        [string]$Comment,
-        [string]$Argument,
-        [string]$InterfaceId,
-        # Range validated per WhatsUp Gold REST API spec: minimum 10 seconds, maximum 86400 seconds (24 hours)
-        [ValidateRange(10, 86400)][int]$PollingIntervalSeconds,
-        [ValidateRange(0, 100)][int]$CriticalOrder,
-        [string]$ActionPolicyId,
-        [string]$ActionPolicyName
+        [Parameter(Mandatory = $true, ParameterSetName = 'ApplyTemplates')]
+        [switch]$ApplyTemplates,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'BatchMonitors')]
+        [switch]$BatchMonitors,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'UnassignAll')]
+        [switch]$UnassignAll,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ApplyTemplates')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'BatchMonitors')]
+        [string]$Body,
+
+        [Parameter(ParameterSetName = 'UnassignAll')]
+        [string]$Search
     )
 
-    Begin {
-        Write-Debug "Begin block: Starting function Add-WUGActiveMonitorToDevice."
-        $baseUri = "$(${global:WhatsUpServerBaseURI})/api/v1/devices/${DeviceId}/monitors/-"
+    begin {
+        Write-Debug "Starting Set-WUGMonitorTemplate function. ParameterSet: $($PSCmdlet.ParameterSetName)"
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/monitors"
     }
 
-    Process {
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Building activeParams hashtable."
+    process {
+        switch ($PSCmdlet.ParameterSetName) {
 
-        $activeParams = @{}
+            'ApplyTemplates' {
+                $uri = "${baseUri}/-/config/template"
+                Write-Debug "Applying monitor templates. URI: $uri"
 
-        if ($Comment) { $activeParams.comment = $Comment }
-        if ($Argument) { $activeParams.argument = $Argument }
-        if ($InterfaceId) { $activeParams.interfaceId = $InterfaceId }
-        if ($PollingIntervalSeconds) { $activeParams.pollingIntervalSeconds = $PollingIntervalSeconds }
-        if ($CriticalOrder) { $activeParams.criticalOrder = $CriticalOrder }
-        if ($ActionPolicyId) { $activeParams.actionPolicyId = $ActionPolicyId }
-        if ($ActionPolicyName) { $activeParams.actionPolicyName = $ActionPolicyName }
+                if (-not $PSCmdlet.ShouldProcess('Monitor templates', 'Apply')) { return }
 
-        $body = @{
-            type          = "active"
-            monitorTypeId = $MonitorId
-            enabled       = $Enabled
-            isGlobal      = "true"
-            active        = $activeParams
-        } | ConvertTo-Json -Depth 5
-
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Sending request to URI: $baseUri"
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Request body: $body"
-
-        if (-not $PSCmdlet.ShouldProcess("Monitor $MonitorId on device $DeviceId", 'Assign active monitor')) { return }
-
-        try {
-            $result = Get-WUGAPIResponse -Uri $baseUri -Method POST -Body $body
-
-            if ($result.data.successful -eq 1) {
-                Write-Output "Successfully assigned active monitor ID: $MonitorId to device ID $DeviceId"
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'PATCH' -Body $Body
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error applying monitor templates: $_"
+                }
             }
-            else {
-                Write-Warning "Failed to assign active monitor to device."
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
+
+            'BatchMonitors' {
+                $uri = "${baseUri}/-"
+                Write-Debug "Batch monitor operations. URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess('Monitor library', 'Batch update')) { return }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'PATCH' -Body $Body
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error performing batch monitor operations: $_"
+                }
             }
-        }
-        catch {
-            Write-Error "Error assigning active monitor: $($_.Exception.Message)"
-            Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full exception details: $($_.Exception | Format-List * | Out-String)"
+
+            'UnassignAll' {
+                $queryParams = @()
+                if ($Search) { $queryParams += "search=$([uri]::EscapeDataString($Search))" }
+                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                $uri = "${baseUri}/-/assignments/-${query}"
+                Write-Debug "Removing all monitor assignments. URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess('All monitor assignments', 'Remove')) { return }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error removing monitor assignments: $_"
+                }
+            }
         }
     }
 
-    End {
-        Write-Debug "End block: Completed function Add-WUGActiveMonitorToDevice."
+    end {
+        Write-Debug "Completed Set-WUGMonitorTemplate function."
     }
 }
-
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBabXWf8b2SuRHK
-# E2838mQASune+DIy25J9BLLf8pBPAaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSLgYRziPXF66F
+# 8KbP6Dnu4KN9We647ryU96Wy1Ecq/KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -232,17 +234,17 @@ function Add-WUGActiveMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg9ZKcvFj/sl7GZvvY7lUq38VedO/iFzwk
-# bDIPMKI3gCQwDQYJKoZIhvcNAQEBBQAEggIADr+kSOom5l0TjgtjXDtzfp9HKB4B
-# h3BVZpWu3srF6R7AjpuEIgZVH7jvJ2hpVa+7L6nWjF7neyxaMySrYj7YVCMAlGFS
-# OuUfaaDQjinI4T/xnL6JigO/s3Zsuw6mCRI9D7uqQGcE2AzbTMnlBcIgWL61/r01
-# W622OhV5jdbImtyc0zaWxyKXOvASgF9YXj/Ueq+5PIKtSQDGPgnDISsO6HLZNKaR
-# NrLBbLGlQ8EFCiYwRLxLSDDfmFgD2p4d5/PX1GN9tcb6AlmGZLD6ydzhomHlWaGg
-# 19vjnsUZhQsRZHKox7cNC5l218Oklibh/QzZObXN4Nh2hT4mZHmbMo+VqhrcAqjH
-# wFrKIYwuRNr1gxBMqy5Il7E/K0pLWzRufeLXpRTYK0rynyL45ozYPQY597upActT
-# K8JAu2qoTtZjCRo93CF4aQWODU+PTUPzCkeYrg7vwy866eQ6W3Ksxniby7ARVE6h
-# C8glNtKzTuMVlJTfKgTD6UCg2rrePUFtIjADQMABKXbJoJjbnDQy33RhnfXxz6zd
-# 4LA7yDmL4ivxnveSmE0xnZfXBIMpX5+YKNRxxS47Q39q80N6dDgHOLAlR2KuiaTs
-# TnHuhJWirQilYruV1u+qd2J8V86gNffQ1E8Vbz4FTsioqerxbD2JnYvU75Xi5N3z
-# GYcJfbDPKgraSLY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg1o3vdoylATepc2JQD6NXPBTFbZSqx5li
+# DBr+aj+yzxkwDQYJKoZIhvcNAQEBBQAEggIARavTjpe6fzAhNEH+9ZG7Ez1WICaO
+# AsMWKYlTgRpdfiFDhsbFLwhOWPr1JCG4F085IwmRzY3+js9uLwmlyguew+/8VAOw
+# JpB0ps8gPKRxLaCumTnhXBMTfpOgju3qdhxom0glrrYKMD1nHZWhxWjpHTgUPEzX
+# xxBM+r28XcJfLD48Ya+JpcEtFLfAvQMNUqEsUto7NiI4CRs0W2FT0saUu9w/jElc
+# bpXBjp/EHYwj7MGp2CACrjGydgYwEV7Oh2fZT63VL9++rSiJtCxeEBqKg5KyDNWN
+# LAXQZIO1ZZGtsnFTi/jtpoStOs49TjhhZXy82h9SnvmRo8P2a/bgR40G+pkAvY1S
+# 06FDsOGxlll5MIRlMgMRLZPILhAvE56sH+8ecAizsWndEaAGs6uuTLdDPCR63L/J
+# jHqbiVu41MrjEN7v59D0aFYhGjaVAxrIRIZVtFLZXBdg+NutX4uTwir6R6NOAsHr
+# Y3zpehJcvRMm5flKDTEQkBQXYjyJbum5z/2cZ8BnvGPXsZAsldL+xBEqUTLIqThR
+# R3CTwwQFzKi5ophGjOzHG4w67Ox0AK7s0NZkIX6r+L3meDEIICnDTA8gt3fUkmBj
+# j8elUuR5MXM/og6DTovAhRc8vFYQwIZe7sWO/hPc9mcB5RlZmIfWVq/GJc5ZBU13
+# M+mVfhXKvzkq3IE=
 # SIG # End signature block

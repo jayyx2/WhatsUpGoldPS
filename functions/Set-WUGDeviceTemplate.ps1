@@ -21,7 +21,7 @@ Author: Jason Alberino (jason@wug.ninja)
 Last modified: 2024-06-15
 #>
 function Set-WUGDeviceTemplate {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int]$DeviceId,
         [Parameter(Mandatory = $true)]$Template
@@ -32,6 +32,7 @@ function Set-WUGDeviceTemplate {
     }
 
     process {
+        if (-not $PSCmdlet.ShouldProcess("Device ${DeviceId}", 'Set device template')) { return }
         $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/config/template"
         try {
             $jsonBody = $Template | ConvertTo-Json -Depth 10
@@ -60,8 +61,8 @@ function Set-WUGDeviceTemplate {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMctXsxRI8nEFO
-# 1rgpuCZIqw1YedpGx8PCYScuhEsEK6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrUtyUUymrwgLj
+# rotKurOZQ/kEM2rB4vhGu2FJzGfj6qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -161,17 +162,17 @@ function Set-WUGDeviceTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgw82UT8Abs4Z/5mNSshOurW9jw0KF2aAh
-# xep7YWagJ/4wDQYJKoZIhvcNAQEBBQAEggIAxCa94q5MZD/zIGFHTZaA9j3tvF/6
-# E/9IQK1HSKXeHSzXCE/InbMv5H9GGYW4C38zTgxQB+2wWDSqG4mLWyzHn8n8FNOu
-# hwudEy03GBwXqkdtN0jlb+EBWOo46e4wLNmotrkinlddsezTd1PPKCrCYstf8mUZ
-# xNcSA3N+BQ7am1B3oLdKjZ8vlpJcHuLnanX5FipXWvK9nDznFD8xrjYO5oeOjECQ
-# lWXkAIEIuUdxeG1SDbH1rHTsety3mMRKsai+mLyrZ+KJmoFNmNfMorDlGfoF6NKr
-# tFtD81wCyzQdGGvftZCM1FWKeqQHGU/6WoWYEDhyMHavAmp8MFTq/CcMImJBV7AU
-# /e3CFZxUJQeruyxREAfQxu4T+8rqW+bSYU71XLZ0Vw1bNio/4kDJMnD72v9PQKBQ
-# QitkemVHLzSBUFNlkaBxprgHABIZDWh47BPvkmzjs3f2DkENZZdAe48Onun3a/cB
-# ixZsZt83eqHXObJhmuuBJNwOHztCODxZNRkl6PmvjTZVEpQMmjbtha2GdtlxuZvx
-# ipNqkW1OL5iWKU5wbyoz0CKu7wVf2k4HaaXb1sqsNeShn1lj1FSwRL5nSu71Bkjl
-# x3wz/rGQpgXFplRCXVnhrWmwiY/6WZYqVm+lkJL9mDpRGkMAEKDSziTmvvQpqZw5
-# U5971ylVUnKwDtA=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgQF7GviipbOpcIfs+3sGgjsoB0OrphQ21
+# 1K8UPafuEIQwDQYJKoZIhvcNAQEBBQAEggIAGpnjVTYZdB7QXEGqwWBZhltx9QiS
+# GIQxjbNl8h2zfm8ThsBjhg1w6WS6AkD9oYtJkQxFKczX+5wGPVJn+mM3RMR2Wual
+# CLvF8PyZRrTfmr+GUF583sn9i5v6XyKusDqky5mFG2Kj/D/3uYy4otSWq+UEjrCE
+# Q3JGMdXlpGUDIVLENGQfrz1WRJYktWWfGIft8w6VxeBzd+rbQVODfe/bg2WYG+78
+# Khqs0Htv9r5FzdjQNRdlnJMT2uW/DSqtRW1U8IMRGvDSaoBNrFTFHySfqDdduc5Y
+# 4eobFGq3nMGrq//RRq4+g3qiw/bbtNOAnNY1osOxRzi2XpRIUWobAu1dmoZ7WTAT
+# w09OR1ZVYvLfAdaMSofpl1NEqyE8kddQZkfjlYt3hAVPoXT3+yvcs7Sur/HpBylG
+# UQuBTMie4+cCTOyRU99LqcGSOlWZQcWcS+KKKWdlwZZZuP6yH7LsKr6v38wpFR3z
+# nARvGEOd3WRQocE4KBNGTiX281yfdIYaQtYP60e2lcLCsJciwGY61YkBCjwEoQhg
+# GYvKQHcbBMK6PeuSdnHZ8pS1S1r8HDPTnFUUcvsEcjUwGN/As/DksCID/MQq1lgv
+# NmBI3sTGmrDQ1GAZtDcANggKam7qGELIW5xlUiOpIG/fM2yS2Sc+IJp5J1q756GW
+# LzSqDpYnHUQxjJE=
 # SIG # End signature block

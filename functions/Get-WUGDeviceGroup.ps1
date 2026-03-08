@@ -1,17 +1,24 @@
 <#
 .SYNOPSIS
-Retrieves device groups from WhatsUp Gold by GroupId or based on specified search criteria.
+Retrieves device groups, group credentials, or group role configuration from WhatsUp Gold.
 
 .DESCRIPTION
-The `Get-WUGDeviceGroup` function retrieves device groups from WhatsUp Gold using the REST API. It allows you to:
+The `Get-WUGDeviceGroup` function retrieves device groups and their configuration from WhatsUp Gold using the REST API. It allows you to:
 
 - Retrieve specific device groups by their `GroupId` using the `/api/v1/device-groups/{groupId}` endpoint.
 - Search for device groups based on criteria such as name (`SearchValue`), group type (`GroupType`), and view level (`View`) using the `/api/v1/device-groups/-` endpoint.
+- Retrieve credential configuration for a device group using the `/api/v1/device-groups/{groupId}/config/credentials` endpoint.
+- Retrieve role configuration for a device group using the `/api/v1/device-groups/{groupId}/config/role` endpoint.
+- Retrieve child groups using the `/api/v1/device-groups/{groupId}/children` endpoint.
+- Retrieve group status using the `/api/v1/device-groups/{groupId}/status` endpoint.
+- Retrieve devices in a group using the `/api/v1/device-groups/{groupId}/devices/-` endpoint.
+- Retrieve device template config using the `/api/v1/device-groups/{groupId}/devices/-/config/template` endpoint.
+- Retrieve device credentials using the `/api/v1/device-groups/{groupId}/devices/-/credentials` endpoint.
 
 The function supports pagination and handles large result sets efficiently.
 
 .PARAMETER GroupId
-Specifies one or more GroupId(s) of the device groups to retrieve. When this parameter is used, the function retrieves the specified device groups using the `/api/v1/device-groups/{groupId}` endpoint. This parameter belongs to the 'ByGroupId' parameter set.
+Specifies one or more GroupId(s) of the device groups to retrieve. When this parameter is used, the function retrieves the specified device groups using the `/api/v1/device-groups/{groupId}` endpoint. This parameter belongs to the 'ByGroupId' parameter set. Also required for GroupCredentials and GroupRole parameter sets.
 
 .PARAMETER SearchValue
 Specifies a search value to filter device groups by name. The function uses the `/api/v1/device-groups/-` endpoint to search for device groups whose names contain the specified value. This parameter belongs to the 'BySearch' parameter set.
@@ -37,25 +44,59 @@ Default value is `all`. This parameter belongs to the 'BySearch' parameter set.
 .PARAMETER Limit
 Specifies the maximum number of device groups to return per page. Valid range is 1 to 250. Default is 250. This parameter belongs to the 'BySearch' parameter set.
 
+.PARAMETER Credentials
+Switch to retrieve credential configuration for the specified device group(s).
+
+.PARAMETER GroupRole
+Switch to retrieve role configuration for the specified device group(s).
+
+.PARAMETER Children
+Switch to retrieve child groups for the specified device group(s).
+
+.PARAMETER GroupStatus
+Switch to retrieve status information for the specified device group(s).
+
+.PARAMETER GroupDevices
+Switch to retrieve devices belonging to the specified device group(s).
+
+.PARAMETER GroupDeviceTemplates
+Switch to retrieve device template configuration for devices in the specified device group(s).
+
+.PARAMETER GroupDeviceCredentials
+Switch to retrieve device credentials for devices in the specified device group(s).
+
 .EXAMPLE
 # Example 1: Retrieve specific device groups by GroupId
-$groupIds = @(101, 102, 103)
-$groups = Get-WUGDeviceGroup -GroupId $groupIds -View 'detail'
-
-# Output the groups
-$groups | Format-Table
+$groups = Get-WUGDeviceGroup -GroupId 101, 102, 103 -View 'detail'
 
 .EXAMPLE
 # Example 2: Search for device groups with "Server" in the name
 $groups = Get-WUGDeviceGroup -SearchValue "Server" -GroupType "static_group" -Limit 100
 
-# Output the groups
-$groups | Format-Table
+.EXAMPLE
+# Example 3: Get credential config for a device group
+Get-WUGDeviceGroup -GroupId 101 -Credentials
+
+.EXAMPLE
+# Example 4: Get role config for a device group
+Get-WUGDeviceGroup -ConfigGroupId 101 -GroupRole
+
+.EXAMPLE
+# Example 5: Get child groups
+Get-WUGDeviceGroup -ConfigGroupId 0 -Children
+
+.EXAMPLE
+# Example 6: Get group status
+Get-WUGDeviceGroup -ConfigGroupId 101 -GroupStatus
+
+.EXAMPLE
+# Example 7: Get devices in a group
+Get-WUGDeviceGroup -ConfigGroupId 101 -GroupDevices
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
 Created: 2023-04-15
-Last Modified: 2024-09-28
+Last Modified: 2026-03-08
 Reference: 
 - [WhatsUp Gold REST API - Get Device Group by ID](https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#operation/DeviceGroup_GetDeviceGroup)
 - [WhatsUp Gold REST API - List Device Groups](https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#operation/DeviceGroup_ListGroups)
@@ -64,16 +105,26 @@ This function uses parameter sets to distinguish between retrieving device group
 
 - **ByGroupId Parameter Set**: Uses the `/api/v1/device-groups/{groupId}` endpoint to retrieve specific device groups.
 - **BySearch Parameter Set**: Uses the `/api/v1/device-groups/-` endpoint to search for device groups based on criteria.
+- **GroupCredentials Parameter Set**: Uses the `/api/v1/device-groups/{groupId}/config/credentials` endpoint.
+- **GroupRole Parameter Set**: Uses the `/api/v1/device-groups/{groupId}/config/role` endpoint.
 
 #>
 function Get-WUGDeviceGroup {
     [CmdletBinding(DefaultParameterSetName = 'BySearch')]
     param (
         [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByGroupId')][int[]]$GroupId,
+        [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'GroupCredentials')][Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'GroupRole')][Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'Children')][Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'GroupStatus')][Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'GroupDevices')][Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'GroupDeviceTemplates')][Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'GroupDeviceCredentials')][int[]]$ConfigGroupId,
         [Parameter(ParameterSetName = 'BySearch')][string]$SearchValue,
         [Parameter(ParameterSetName = 'ByGroupId')][Parameter(ParameterSetName = 'BySearch')][ValidateSet("summary", "detail")][string]$View = 'detail',
         [Parameter(ParameterSetName = 'BySearch')][ValidateSet("all", "static_group", "dynamic_group", "layer2")][string]$GroupType = 'all',
-        [Parameter(ParameterSetName = 'BySearch')][ValidateRange(1, 250)][int]$Limit = 250
+        [Parameter(ParameterSetName = 'BySearch')][ValidateRange(1, 250)][int]$Limit = 250,
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupCredentials')][switch]$Credentials,
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupRole')][switch]$GroupRole,
+        [Parameter(Mandatory = $true, ParameterSetName = 'Children')][switch]$Children,
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupStatus')][switch]$GroupStatus,
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupDevices')][switch]$GroupDevices,
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupDeviceTemplates')][switch]$GroupDeviceTemplates,
+        [Parameter(Mandatory = $true, ParameterSetName = 'GroupDeviceCredentials')][switch]$GroupDeviceCredentials
     )
 
     begin {
@@ -224,6 +275,113 @@ function Get-WUGDeviceGroup {
             # Clear progress
             Write-Progress -Activity "Retrieving device groups" -Completed
         }
+        elseif ($PSCmdlet.ParameterSetName -eq 'GroupCredentials') {
+            Write-Debug "ParameterSet: GroupCredentials"
+            foreach ($gid in $ConfigGroupId) {
+                $uri = "${baseUri}/${gid}/config/credentials"
+                Write-Debug "Fetching group credentials from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    if ($result.data) {
+                        $result.data | Add-Member -NotePropertyName 'groupId' -NotePropertyValue $gid -Force
+                        $allGroups += $result.data
+                    }
+                }
+                catch {
+                    Write-Error "Error fetching credentials for group ${gid}: $_"
+                }
+            }
+        }
+        elseif ($PSCmdlet.ParameterSetName -eq 'GroupRole') {
+            Write-Debug "ParameterSet: GroupRole"
+            foreach ($gid in $ConfigGroupId) {
+                $uri = "${baseUri}/${gid}/config/role"
+                Write-Debug "Fetching group role from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    if ($result.data) {
+                        $result.data | Add-Member -NotePropertyName 'groupId' -NotePropertyValue $gid -Force
+                        $allGroups += $result.data
+                    }
+                }
+                catch {
+                    Write-Error "Error fetching role for group ${gid}: $_"
+                }
+            }
+        }
+        elseif ($PSCmdlet.ParameterSetName -eq 'Children') {
+            Write-Debug "ParameterSet: Children"
+            foreach ($gid in $ConfigGroupId) {
+                $uri = "${baseUri}/${gid}/children"
+                Write-Debug "Fetching children from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    if ($result.data) { $allGroups += $result.data }
+                }
+                catch {
+                    Write-Error "Error fetching children for group ${gid}: $_"
+                }
+            }
+        }
+        elseif ($PSCmdlet.ParameterSetName -eq 'GroupStatus') {
+            Write-Debug "ParameterSet: GroupStatus"
+            foreach ($gid in $ConfigGroupId) {
+                $uri = "${baseUri}/${gid}/status"
+                Write-Debug "Fetching status from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    if ($result.data) {
+                        $result.data | Add-Member -NotePropertyName 'groupId' -NotePropertyValue $gid -Force
+                        $allGroups += $result.data
+                    }
+                }
+                catch {
+                    Write-Error "Error fetching status for group ${gid}: $_"
+                }
+            }
+        }
+        elseif ($PSCmdlet.ParameterSetName -eq 'GroupDevices') {
+            Write-Debug "ParameterSet: GroupDevices"
+            foreach ($gid in $ConfigGroupId) {
+                $uri = "${baseUri}/${gid}/devices/-"
+                Write-Debug "Fetching devices from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    if ($result.data) { $allGroups += $result.data }
+                }
+                catch {
+                    Write-Error "Error fetching devices for group ${gid}: $_"
+                }
+            }
+        }
+        elseif ($PSCmdlet.ParameterSetName -eq 'GroupDeviceTemplates') {
+            Write-Debug "ParameterSet: GroupDeviceTemplates"
+            foreach ($gid in $ConfigGroupId) {
+                $uri = "${baseUri}/${gid}/devices/-/config/template"
+                Write-Debug "Fetching device templates from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    if ($result.data) { $allGroups += $result.data }
+                }
+                catch {
+                    Write-Error "Error fetching device templates for group ${gid}: $_"
+                }
+            }
+        }
+        elseif ($PSCmdlet.ParameterSetName -eq 'GroupDeviceCredentials') {
+            Write-Debug "ParameterSet: GroupDeviceCredentials"
+            foreach ($gid in $ConfigGroupId) {
+                $uri = "${baseUri}/${gid}/devices/-/credentials"
+                Write-Debug "Fetching device credentials from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    if ($result.data) { $allGroups += $result.data }
+                }
+                catch {
+                    Write-Error "Error fetching device credentials for group ${gid}: $_"
+                }
+            }
+        }
         else {
             Write-Error "Invalid parameter set."
         }
@@ -246,8 +404,8 @@ function Get-WUGDeviceGroup {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5C1TvCimZwVMG
-# J4vI4wx8vVyVjHMVUzru/DnIKN2D0qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDcZBMizoKP/9cn
+# alIkM24m1+ljCVd9auoGGuedlakmbKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -347,17 +505,17 @@ function Get-WUGDeviceGroup {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgVD74aPDYl+ckfH3QZPZX86AizkOYoc/T
-# Lg1zVO8AAH0wDQYJKoZIhvcNAQEBBQAEggIAb+a2X/K+zL3EbB04Qf/JfbzfCywk
-# FYCY+N0BHi4j3K8Oab225tf0gPG1VhDD0oY+ngCEy+WVUzoEp8+NgXD+2hgRrduy
-# sBxM+RmwEkiLeis6HjiiReXLF1tJBtyuFAE1MCecLa9vxDsYLZexeujNUbW1Vq59
-# G3G+mehN9gdN82U8l5wF4RFlNuWfiMDcLWGwckknTIyq0k57u8pSDtyQDU1FwVPR
-# uxAFqVRrAg7NGtSC3H5Zk0QBs597teaS3VeSX0AlYG2MFlXnjqBPqqIfhxMAat1W
-# vCUZPjgLLeIwRIZ1+2Jy/Jl+GKNeYmsg39x+Ofx6hoOIVLr8iR8So2eJqh05i1t9
-# FffZjJGXWa9MWiSdRgnu50llIleFyO1BLT2/ijhbNYEyHZ2QbtrEZktXmwV7HG3Y
-# jAfAz1/rQoufPxa6dCvdcqbZShzkoREXFVckwCNuPm984aZ9fcgAuZZdc10jAGEn
-# Gj/XF/kqS67gGQlGuS5RWd549Km5TNw7nLHfPKUebgqWwzfuCpr7NN52ReS6YpBB
-# /f+aXSNQOvNVR3JByROpBZcl/KQMCpIpvmE7zIZa9iDBuro18MCdNurNrreWTkci
-# ifmMA1vtyVHVjCE8o1mZtYVuSEecREZRlB8czaMsYpdzawIGjUQw/QJFrxsw8Qpx
-# mlNGt56ok8aA1Nc=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg7zQpBEgAKbP9wrSvOR3ke7/yXPAOOagl
+# mCpuXUzisnwwDQYJKoZIhvcNAQEBBQAEggIAIbQfYa6gbQyNUTBJg52IGUgt00cU
+# VYeZQSUeT1fYvrv4yBZa2e6dGUMktetXq+c7nuM3J3L1SYRtzQ9UxR2a14ql69RP
+# RUUPSNPzOf+9t9zdnxKRunjro2ZlH62GpSxCK4A+kaJE1y+WcchH2TfL4Eu7I5hE
+# ox2iX6ZSuBATgbL1sKRm6BJ/Ju6sHIPxp94pHoG0PnwvD3LLVYReYntUVfiSgJnP
+# RbjvW0nYU5HsMBOHjKAK7hUs8uhVD0bx3lYbqYnAw8bkmQt88Q16dlPpMa5eT+Gd
+# rVRQHC3zemh8cDMgVAc7Fr4wrHUPS3xi4J9/0rDR3xtaSrzvfEjKy6fnTeLgq6Sf
+# RyuBw0kvPvRDTcuEzOqsoQvuNbFcc19erglvLJXccSqDOnNO2GxN65LnCdMZSfCt
+# ekynifVtUXeBvR9wu97YQrefSS5n8QSFTyZHFgLdB7KtUquM25K+yA+cmYap4iKi
+# YqTI73bTQiRlrlJfqj6/7rAGAl2sBFfjoUzQP/F188+Ckl4+KFXhaltbLQxZOngZ
+# 93WQ8k8b/g0Rvd3P28NqTOaSBnio8MRcezxtGqaeXPkjI4jTatdDCtGHtdxUCAxD
+# I+3w3ysUJp8VmSeG0GfcAi5uSsu1+FBsUC2v23NNJLQqJA3ksdlSJJXD5Wljk1D6
+# 1vQOIV5f35WJQ9c=
 # SIG # End signature block

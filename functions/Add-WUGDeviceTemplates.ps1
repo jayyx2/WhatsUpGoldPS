@@ -49,6 +49,7 @@ updated. If the `-UpdateActiveMonitors` switch is specified, the active monitors
 #>
 
 function Add-WUGDeviceTemplates {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory)] [array] $deviceTemplates,
         [switch]$ApplyL2,
@@ -76,6 +77,7 @@ function Add-WUGDeviceTemplates {
     } | ConvertTo-Json -Depth 10
 
     #Try the request and return the response or write an error if it fails
+    if (-not $PSCmdlet.ShouldProcess("$($deviceTemplates.Count) device template(s)", 'Add devices from templates')) { return }
     try {
         $result = Get-WUGAPIResponse -uri "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template" -method "PATCH" -body $body
         return $result.data
@@ -97,8 +99,8 @@ function Add-WUGDeviceTemplates {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVrDw+ZxlW4O04
-# 2iLEbZTIfaW2g2ZzF/ZvJCULIyK/laCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCG+e7rghVgo11U
+# Sh00JnrgxXljVefqZ3Z7irxN54EBkqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -198,17 +200,17 @@ function Add-WUGDeviceTemplates {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgPYzOzYBdD8Y7Aqq9tx/1Lo0g06TzwSxU
-# AqCCv+pl3IgwDQYJKoZIhvcNAQEBBQAEggIAS3XWO8FgWTX+3UY8T8xJHYh06FD0
-# 6sWncV0mgbvI7CqTLPL/wzAoKmVJ58cRuLOgUoCUtzRTo5sMs50uAEx45oXWsORP
-# Io3raBI2u38luAmJ0KBNm1TxmRCbEtPLjMVx0FFyjpNeMxHrXKBMWuQFvyFe0KeM
-# 26Y8rm6hesl+Hvffd3X6HlNFKod10+XyCEvhnrhDZRWaHGVca1dbUso2c8hSM0uo
-# ruxkiDPhhiWYsr7DNk4xo+i/L74mvzbOOYpcSAgobpa0Gl9VrCKL2d31wGxO5ov5
-# jnPMo7ZWlRM1mBtLZsPV4QjTy/fgtOnX+ZEKRa3a+ENJOxRJEA40aiaTmQrimB8b
-# FZrkn34Eag2N6ZpgYkYWQmxBgkKJ1DiIcUZ+pPnmzoTskr++cZxVdUc2JvPt7PS9
-# WhQY+oiUQnXSQlRzewkzZIExBeaApZmJkAL6ytvUbrEaSJ5j4bPhs1jgEZVvvntp
-# IbKCMEGQ0L9FqcDJFKQykKqYvmxpJjPNfONOBeoU8hGaPT3IHQ2xkpTauCXa/zIz
-# GSfvRka2FsXFJo10uTb+ejba3vmsQ634GEfSTIycYRa41eP/sLU0DTJbn6T7lR4q
-# tHq6PE8+xQTp5tA420/aF+ehKefXvUbbCG2SPWiRlnNeK0uA8z6YZASCiSGq6DVl
-# c5sJ6t0yMvPAZH8=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgyUT3UtqtChGjMkmd7zjCf2fkhmEg3rH9
+# 16YdXtQLXNMwDQYJKoZIhvcNAQEBBQAEggIASP2BiM86JjWHXldBbu9XYAnplade
+# 2b/4qVBrl8xl5rPv11l6k0JiQCNa0cIJQywyWbxpQWMFjGxoBPdLdG9rMxDztn2l
+# G+s4Y6BCb0gyQ+0LOccLwUgMvf8pCOwzS+pFxIQdKojWbb3Sz1pN4h/9ImEJDjHc
+# A3s0AP4ImNn6aAP4PPd14FmvY4Xe7fUCoAP6PucQI+TtAiYjMvwSuPHC9CMqwDF6
+# tCfvzod6/9BjPpnTlWrAsaUs8kxRIxU/WQF4U0GbmSsJWFawezg5uT4HAlffFt7T
+# Ao8kmgCwtAlmGfKHgGjbHWlfzJL2MbQa7N2crFyO1SL8hjK3sTIQxcEUigAQNmYa
+# C7zPqbY62t5ns1fdpolrSgGumaIfimQbYrslm7edkVkG6/vMEIScDujVXEeCWzbB
+# fetChMDZreEHv6FfDtw/YcMDj1MrwoDNo9WzxiF01yPdGKCTo4EuhPqJBM+MbZFc
+# 93/lLBKiJPqxMn3G6aGUcaWaHQ87NFizzUxDYjLMYxn64mUxejZhuBLoeNuFZgRC
+# i5Siqd9ubJLRxX892enTwn+MM9N/5OZRZMRqcVBHAuchl0e6Pad3jfPTfQ6yucyl
+# IdR0fK1pDWhHGoBcHUNx1Vi5a3n9yspMsnx6zCfS2ja2SMex93Mwc+Fz37svaGhx
+# wYhagrfkoMkkRVY=
 # SIG # End signature block

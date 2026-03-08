@@ -4,6 +4,7 @@ Adds or updates an attribute for one or more devices in WhatsUp.
 
 .DESCRIPTION
 The Set-WUGDeviceAttribute function allows users to add a new attribute or update an existing attribute for specified devices in WhatsUp. If an attribute with the given name exists (case-insensitive), it will be updated with the new value. If it does not exist, a new attribute will be created.
+It also supports batch attribute operations via PATCH /api/v1/devices/{deviceId}/attributes/-.
 
 .PARAMETER DeviceId
 The ID(s) of the device(s) to which the attribute will be added or updated.
@@ -14,6 +15,13 @@ The name of the attribute to add or update.
 .PARAMETER Value
 The value to set for the specified attribute.
 
+.PARAMETER Batch
+Switch to perform batch attribute operations using a JSON body.
+Endpoint: PATCH /api/v1/devices/{deviceId}/attributes/-
+
+.PARAMETER BatchBody
+JSON body for batch attribute operations.
+
 .EXAMPLE
 # Add/update attribute named 'Location' with value 'Data Center 1' to device with ID 12345
 Set-WUGDeviceAttribute -DeviceId 12345 -Name "Location" -Value "Data Center 1"
@@ -21,6 +29,11 @@ Set-WUGDeviceAttribute -DeviceId 12345 -Name "Location" -Value "Data Center 1"
 .EXAMPLE
 # Update the attribute 'Owner' with value 'John Doe' for multiple devices
 Set-WUGDeviceAttribute -DeviceId 12345, 67890, 54321 -Name "Owner" -Value "John Doe"
+
+.EXAMPLE
+# Batch attribute operations
+$body = @{ items = @(@{ op = "add"; name = "Env"; value = "Prod" }) } | ConvertTo-Json -Depth 5
+Set-WUGDeviceAttribute -DeviceId 12345 -Batch -BatchBody $body
 
 .NOTES
 # Author: Jason Alberino (jason@wug.ninja) 2024-09-26
@@ -34,11 +47,13 @@ https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#opera
 #>
 
 function Set-WUGDeviceAttribute {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'ByNameValue', SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
-        [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$Value
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByNameValue')][string]$Name,
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByNameValue')][string]$Value,
+        [Parameter(Mandatory = $true, ParameterSetName = 'Batch')][switch]$Batch,
+        [Parameter(Mandatory = $true, ParameterSetName = 'Batch')][string]$BatchBody
     )
     
     begin {
@@ -70,6 +85,27 @@ function Set-WUGDeviceAttribute {
             Write-Warning "No valid DeviceIDs provided."
             return
         }
+
+        # Handle Batch parameter set
+        if ($PSCmdlet.ParameterSetName -eq 'Batch') {
+            foreach ($id in $collectedDeviceIds) {
+                $batchUri = "${baseUri}/${id}/attributes/-"
+                Write-Debug "Batch attribute operations for DeviceID: $id. URI: $batchUri"
+
+                if (-not $PSCmdlet.ShouldProcess("Device ${id} attributes", 'Batch update')) { continue }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $batchUri -Method 'PATCH' -Body $BatchBody
+                    if ($result.data) { $finaloutput += $result.data }
+                }
+                catch {
+                    Write-Error "Error performing batch attribute operations for DeviceID ${id}: $_"
+                }
+            }
+
+            Write-Debug "Total Data Collected: $($finaloutput.Count)"
+            return $finaloutput
+        }
     
         $devicesProcessed = 0
         $percentCompleteDevices = 0
@@ -80,6 +116,8 @@ function Set-WUGDeviceAttribute {
             Write-Progress -Id 1 -Activity "Setting device attributes" -Status "Processing Device $devicesProcessed of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
             Write-Debug "Processing DeviceID: $id"
     
+            if (-not $PSCmdlet.ShouldProcess("Device ${id}, Attribute '${Name}'", 'Set attribute')) { continue }
+
             try {
                 # Step 1: Get all existing attributes for the device
                 $getUri = "${baseUri}/$id/attributes/-"
@@ -198,8 +236,8 @@ function Set-WUGDeviceAttribute {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjjyv2E6OPhXuh
-# xQEB28djOGzPHH0/gnFPvlNCtYdceKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMDuF0JXP8rv5+
+# OClmdR3etxOkYfynGh92BJGxzLrbqaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -299,17 +337,17 @@ function Set-WUGDeviceAttribute {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQge1IAUPlFe8LOPlX22WfSAAC3bQxTALQM
-# aJNSj6v92QMwDQYJKoZIhvcNAQEBBQAEggIAqUbJQRcVuEsW2n9pT+mOOGNE8mDD
-# BlYTmmZbpTfF4ev2XbOMLxEUI5mbCQGFWVYGBXP725lZPOmbnakIFuVCtxbdV8Ym
-# KmKVCTTew6qqWocniJNrtj1zQFwe9a22rnaKTrvTDYa145sO20ywDsVaqNdwue3p
-# oSZo1zEZCf55DasTorhL/t4nVWMTjYOXtrhx62uY/oq8K0sOTYCJZpptbI1E0kGK
-# 9Kr0E2bm4g5mkpWyTeGlkDfyamMm9jSAxi098KUhPPXMuqf3qqI7q/NbWmbsxpHm
-# QhICqdKOr6I6YrgGfyq3Uod2PNmrlXalV+xg25RVIAL9rwv7EUy0l1KsWMo2wawd
-# lOI4Ek6vfcA7zrGNcQPskvcRsXo0EczyZH6mHEycAGWQJmy5DkAKImHwEE78y4hR
-# Bvf1p64C3LEsXTD67kh/97hflTxwXPkT9hvIMyaMp2iEXDoQ/oJvih1u2jNMHZoT
-# veydQlC/yYYQPazR2pXjKjmY0svsY8WZtWbMJFgXl4HX5zFJ1D0mPedW5wJRb91Q
-# aMOBV1hPhGXttF5oQGnkntFsVwxtKbz6GP/bxqWsI2Z9rdQIIa0cHX0iE+HTV2kr
-# CRTN1BvTyqMozZev5REwr81GAteeDmVLf4yEY6UCsZQzMrBWSckq8HqVoURzn3KI
-# Cs5pCLTW8RDNoQI=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCCMFXCOTZhsaTM49tTDLNi3yIv0A5dHH
+# QXgwvUz6e3cwDQYJKoZIhvcNAQEBBQAEggIAJutNPoTxi89TWGGK85WHEtqutEOE
+# N2a33w01uezj/vwg2DA+PKSfp2CwakrGedH+Kz+aUmcSAJBtfZ6SXnXRNjblex6J
+# wbIoltKaN1MAF/8+y+RKoJVV0zOSryp3uJ5829nKHwW4QLhfxS7V6kqUKWQ53IHL
+# 9S70AmPiL+3HiAVZsyVikLXozXHEIE+uOxGBpai4DlVfMRAXu0yZrijzDguz+PKw
+# y3cZVFUPlZ7haIrCXSB4mv6EpjMmLhZMUVWz8DiKfdVszgpsm2M8T3NaLylYpDWg
+# +q/+zgdestIvF8WciXmRxrsooLhVQGgYQy2d3OhfBhXvpkqJVOHWX40bjhSRmMUj
+# HM12RjEkc+nGjmSNGm2NAod9IU5cq2l1ZZ/yj4jvJAuAQSGHFe6Vj2JkOqveZutG
+# u1cbNKB3d8JMOfQOy6KMI7MXiwKmYqVPC2dFaek319iqbj+nXlzTSnrdz0OeEe0C
+# hlnyCoymBf5RNYhebxJPAwSjxvHAd8MO2yXHDszzzJY18wQBBsmpuCf7jsZie4L9
+# L5aR5bSVlwl9fOCIOqRntlHdgaFGPXAso4/sBXILvgcw8K3451An1Jgj2gyMU5/e
+# kfwUbZxq6uZa/EkjES/Uz+bQvuPtsqWDnSHoTU1N1LaMwTxFAbwP803OzFEe4saM
+# lIPTTp7dz+R8wmA=
 # SIG # End signature block

@@ -1,138 +1,148 @@
 <#
 .SYNOPSIS
-    Assigns an active monitor to a device in WhatsUp Gold.
+Retrieves network interface information for a device from WhatsUp Gold.
 
 .DESCRIPTION
-    Add-WUGActiveMonitorToDevice assigns a specified active monitor template to a device
-    via the WhatsUp Gold REST API (POST /api/v1/devices/{deviceId}/monitors/-). Optional
-    parameters control polling interval, comment, argument, interface binding, critical
-    order, and action policy.
+The Get-WUGDeviceInterface function retrieves network interface data using the REST API:
+- Get all interfaces: GET /api/v1/devices/{deviceId}/interfaces/-
+- Get default interface: GET /api/v1/devices/{deviceId}/interfaces/default
+- Get specific interface: GET /api/v1/devices/{deviceId}/interfaces/{interfaceId}
 
 .PARAMETER DeviceId
-    The ID of the device to assign the monitor to. Required.
-
-.PARAMETER MonitorId
-    The monitor template ID (monitorTypeId) to assign. Required.
-
-.PARAMETER Enabled
-    Whether the monitor should be enabled. Valid values: true, false. Default: true.
-
-.PARAMETER Comment
-    An optional comment for the monitor assignment.
-
-.PARAMETER Argument
-    An optional argument string passed to the monitor.
+The ID of the device to retrieve interfaces for. Required.
 
 .PARAMETER InterfaceId
-    The interface ID to bind the monitor to, if applicable.
+The ID of a specific interface to retrieve. Used with the ByInterfaceId parameter set.
 
-.PARAMETER PollingIntervalSeconds
-    The polling interval in seconds (10-86400).
+.PARAMETER Default
+Switch to retrieve only the default network interface.
 
-.PARAMETER CriticalOrder
-    The critical order ranking (0-100).
+.PARAMETER Search
+Optional search text to filter interfaces by address or hostname. Case-insensitive.
 
-.PARAMETER ActionPolicyId
-    The ID of the action policy to associate with this monitor.
-
-.PARAMETER ActionPolicyName
-    The name of the action policy to associate with this monitor.
+.PARAMETER Limit
+Maximum number of interfaces per page. Valid range: 1-250. Default: 250.
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5
-
-    Assigns active monitor template 5 to device 42 with default settings.
-
-.EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5 -PollingIntervalSeconds 60 -Comment "HTTP check"
-
-    Assigns active monitor 5 to device 42 with a 60-second polling interval and a comment.
+# Get all interfaces for a device
+Get-WUGDeviceInterface -DeviceId "123"
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 100 -MonitorId 12 -Enabled false -ActionPolicyName "Email Admins"
+# Get the default interface
+Get-WUGDeviceInterface -DeviceId "123" -Default
 
-    Assigns monitor 12 to device 100 in a disabled state with the "Email Admins" action policy.
+.EXAMPLE
+# Get a specific interface by ID
+Get-WUGDeviceInterface -DeviceId "123" -InterfaceId "456"
+
+.EXAMPLE
+# Search for interfaces
+Get-WUGDeviceInterface -DeviceId "123" -Search "192.168"
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja)
-    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Monitors
+Author: Jason Alberino (jason@wug.ninja)
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/Device
 #>
-function Add-WUGActiveMonitorToDevice {
-    [CmdletBinding(SupportsShouldProcess = $true)]
+function Get-WUGDeviceInterface {
+    [CmdletBinding(DefaultParameterSetName = 'ListInterfaces')]
     param(
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeviceId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$MonitorId,
-        [ValidateSet("true", "false")][string]$Enabled = "true",
-        [string]$Comment,
-        [string]$Argument,
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('id')]
+        [string]$DeviceId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByInterfaceId')]
         [string]$InterfaceId,
-        # Range validated per WhatsUp Gold REST API spec: minimum 10 seconds, maximum 86400 seconds (24 hours)
-        [ValidateRange(10, 86400)][int]$PollingIntervalSeconds,
-        [ValidateRange(0, 100)][int]$CriticalOrder,
-        [string]$ActionPolicyId,
-        [string]$ActionPolicyName
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'DefaultInterface')]
+        [switch]$Default,
+
+        [Parameter(ParameterSetName = 'ListInterfaces')]
+        [string]$Search,
+
+        [Parameter(ParameterSetName = 'ListInterfaces')]
+        [ValidateRange(1, 250)]
+        [int]$Limit = 250
     )
 
-    Begin {
-        Write-Debug "Begin block: Starting function Add-WUGActiveMonitorToDevice."
-        $baseUri = "$(${global:WhatsUpServerBaseURI})/api/v1/devices/${DeviceId}/monitors/-"
+    begin {
+        Write-Debug "Starting Get-WUGDeviceInterface function. ParameterSet: $($PSCmdlet.ParameterSetName)"
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
+        $finalOutput = @()
     }
 
-    Process {
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Building activeParams hashtable."
+    process {
+        switch ($PSCmdlet.ParameterSetName) {
 
-        $activeParams = @{}
-
-        if ($Comment) { $activeParams.comment = $Comment }
-        if ($Argument) { $activeParams.argument = $Argument }
-        if ($InterfaceId) { $activeParams.interfaceId = $InterfaceId }
-        if ($PollingIntervalSeconds) { $activeParams.pollingIntervalSeconds = $PollingIntervalSeconds }
-        if ($CriticalOrder) { $activeParams.criticalOrder = $CriticalOrder }
-        if ($ActionPolicyId) { $activeParams.actionPolicyId = $ActionPolicyId }
-        if ($ActionPolicyName) { $activeParams.actionPolicyName = $ActionPolicyName }
-
-        $body = @{
-            type          = "active"
-            monitorTypeId = $MonitorId
-            enabled       = $Enabled
-            isGlobal      = "true"
-            active        = $activeParams
-        } | ConvertTo-Json -Depth 5
-
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Sending request to URI: $baseUri"
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Request body: $body"
-
-        if (-not $PSCmdlet.ShouldProcess("Monitor $MonitorId on device $DeviceId", 'Assign active monitor')) { return }
-
-        try {
-            $result = Get-WUGAPIResponse -Uri $baseUri -Method POST -Body $body
-
-            if ($result.data.successful -eq 1) {
-                Write-Output "Successfully assigned active monitor ID: $MonitorId to device ID $DeviceId"
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
+            'ByInterfaceId' {
+                $uri = "${baseUri}/${DeviceId}/interfaces/${InterfaceId}"
+                Write-Debug "Fetching interface from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    if ($result.data) { $finalOutput += $result.data }
+                }
+                catch {
+                    Write-Error "Error fetching interface ${InterfaceId} for device ${DeviceId}: $_"
+                }
             }
-            else {
-                Write-Warning "Failed to assign active monitor to device."
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
+
+            'DefaultInterface' {
+                $uri = "${baseUri}/${DeviceId}/interfaces/default"
+                Write-Debug "Fetching default interface from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    if ($result.data) { $finalOutput += $result.data }
+                }
+                catch {
+                    Write-Error "Error fetching default interface for device ${DeviceId}: $_"
+                }
             }
-        }
-        catch {
-            Write-Error "Error assigning active monitor: $($_.Exception.Message)"
-            Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full exception details: $($_.Exception | Format-List * | Out-String)"
+
+            'ListInterfaces' {
+                $allData = @()
+                $currentPageId = $null
+                $pageCount = 0
+
+                do {
+                    $queryParams = @()
+                    if ($Search) { $queryParams += "search=$([uri]::EscapeDataString($Search))" }
+                    $queryParams += "limit=$Limit"
+                    if ($currentPageId) { $queryParams += "pageId=$([uri]::EscapeDataString($currentPageId))" }
+
+                    $query = "?" + ($queryParams -join "&")
+                    $uri = "${baseUri}/${DeviceId}/interfaces/-${query}"
+
+                    Write-Debug "Listing interfaces from URI: $uri"
+                    $pageCount++
+                    Write-Progress -Activity "Retrieving interfaces for device $DeviceId" -Status "Page $pageCount" -PercentComplete -1
+
+                    try {
+                        $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                        if ($result.data) { $allData += $result.data }
+                        $currentPageId = $result.paging.nextPageId
+                    }
+                    catch {
+                        Write-Error "Error listing interfaces for device ${DeviceId}: $_"
+                        break
+                    }
+                } while ($currentPageId)
+
+                Write-Progress -Activity "Retrieving interfaces for device $DeviceId" -Completed
+                $finalOutput = $allData
+            }
         }
     }
 
-    End {
-        Write-Debug "End block: Completed function Add-WUGActiveMonitorToDevice."
+    end {
+        Write-Debug "Completed Get-WUGDeviceInterface function. Total results: $($finalOutput.Count)"
+        return $finalOutput
     }
 }
-
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBabXWf8b2SuRHK
-# E2838mQASune+DIy25J9BLLf8pBPAaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDYrWbHJGfo36i3
+# cEDxRL9ss4gvX+Z3If7z+pV6ByYJpKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -232,17 +242,17 @@ function Add-WUGActiveMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg9ZKcvFj/sl7GZvvY7lUq38VedO/iFzwk
-# bDIPMKI3gCQwDQYJKoZIhvcNAQEBBQAEggIADr+kSOom5l0TjgtjXDtzfp9HKB4B
-# h3BVZpWu3srF6R7AjpuEIgZVH7jvJ2hpVa+7L6nWjF7neyxaMySrYj7YVCMAlGFS
-# OuUfaaDQjinI4T/xnL6JigO/s3Zsuw6mCRI9D7uqQGcE2AzbTMnlBcIgWL61/r01
-# W622OhV5jdbImtyc0zaWxyKXOvASgF9YXj/Ueq+5PIKtSQDGPgnDISsO6HLZNKaR
-# NrLBbLGlQ8EFCiYwRLxLSDDfmFgD2p4d5/PX1GN9tcb6AlmGZLD6ydzhomHlWaGg
-# 19vjnsUZhQsRZHKox7cNC5l218Oklibh/QzZObXN4Nh2hT4mZHmbMo+VqhrcAqjH
-# wFrKIYwuRNr1gxBMqy5Il7E/K0pLWzRufeLXpRTYK0rynyL45ozYPQY597upActT
-# K8JAu2qoTtZjCRo93CF4aQWODU+PTUPzCkeYrg7vwy866eQ6W3Ksxniby7ARVE6h
-# C8glNtKzTuMVlJTfKgTD6UCg2rrePUFtIjADQMABKXbJoJjbnDQy33RhnfXxz6zd
-# 4LA7yDmL4ivxnveSmE0xnZfXBIMpX5+YKNRxxS47Q39q80N6dDgHOLAlR2KuiaTs
-# TnHuhJWirQilYruV1u+qd2J8V86gNffQ1E8Vbz4FTsioqerxbD2JnYvU75Xi5N3z
-# GYcJfbDPKgraSLY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgR7UJ1d4nHV/T35XLYbdGPu83YF6YRvMm
+# XHTAoTwryVYwDQYJKoZIhvcNAQEBBQAEggIA6Ijwf3sGdcwRyiufbEzCLDLR4SI4
+# vEPbeQRAJgcMqdc3GkJfG/YASm2ccCBnvMPPWBkr7/ZmeFvmpaZmJaP/B/2Vfv04
+# Ga/Dl/LgVZCEGpzulUZPRquy1ZcVCFGJsnpu96OlmuBET3+fe5KA9cNF5WFHBc5I
+# ekieRZXbm7R9xcYX51Uts+Y6PbDDUflkJQy++ogwMNl6ZZDSB6lP5DYLgIblISzX
+# 1zAdU6+NguFw+j6LjGZfaA9WYL3xGWP680X5z6Fbg5OzJZD85dvsRa0MHvhGjeSc
+# x30gC/qR4QBXvR/5SK8jUU/8VYx7MIqaBP9qXo4wr1eXuyNdYNmnW6rNyoprRrpp
+# Z/mBkk42j9Wy7r8Ee/XLYXhV+vcSxAYmUBrTnXPoWGZVTVhsnwa2e5nSMuJQTMdH
+# CsJ/vgw5RNEpP8u+//qPAnmjRTPwAYMCvUCtY564N+8mGku5zxv8cme0SvD8sQtQ
+# KKmMWlk1uMTq+PubqQexcpO5KDiHR3WVyi4ANgiETAUcg1nJjRG3rJ08q51tAwHC
+# ql60+XkNBUJ7MvS1xRCqL2eBqUM32jlDwER5+NxcYJe/Cm5roq7XC5gRxltmCSD2
+# xTcJ/+vZhEt8Rpj5jkCwobWH2ebDWNvCu4Kt6TT1vB6YiP3MVk/4gRy+gwlDVjsz
+# AzFfn0kzd04F64A=
 # SIG # End signature block

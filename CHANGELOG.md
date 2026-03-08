@@ -18,6 +18,8 @@
   * Usability: All 12 Get-WUGDeviceGroupReportXXXX variants now default GroupId to -2 (All Devices) when not specified
   * Usability: All 11 Get-WUGDeviceReportXXXX variants DeviceId no longer mandatory; auto-fetches all device IDs when omitted
   * Restructured Get-WUGDeviceReportMemory from process-block iteration to collect-then-iterate pattern (consistent with other report variants)
+  * Added `SupportsShouldProcess` and `ShouldProcess` gates to all state-modifying functions for `-WhatIf` and `-Confirm` support
+  * Module now exports 77 functions
 
 * Bugfixes
   * Fixed Remove-WUGDevice using undefined `$id` variable instead of `$DeviceId` in output/warning/error messages
@@ -60,6 +62,50 @@
   * helpers/aws/ - New AWS discovery and sync scripts (AWSHelpers.ps1, discover-aws-immediate-add-with-attributes.ps1, discover-aws-resources-discover-then-add.ps1) — enumerates EC2 instances, RDS databases, and ELBv2 load balancers across regions via AWS.Tools modules; stores instance IDs, ARNs, and CloudWatch metrics as device attributes
   * helpers/gcp/ - New GCP discovery and sync scripts (GCPHelpers.ps1, discover-gcp-immediate-add-with-attributes.ps1, discover-gcp-resources-discover-then-add.ps1) — enumerates Compute Engine VMs, Cloud SQL instances, and forwarding rules across projects via GoogleCloud module + gcloud CLI; stores instance IDs and Cloud Monitoring metrics as device attributes
   * helpers/oci/ - New Oracle Cloud Infrastructure discovery and sync scripts (OCIHelpers.ps1, discover-oci-immediate-add-with-attributes.ps1, discover-oci-resources-discover-then-add.ps1) — enumerates Compute instances, DB Systems, Autonomous Databases, and Load Balancers across compartments and regions via OCI.PSModules + OCI CLI; stores OCIDs and OCI Monitoring metrics as device attributes
+  * New Functions:
+    * `Get-WUGCredential` — Retrieve credential definitions (GET /credentials)
+    * `Add-WUGCredential` — Create new credentials (POST /credentials)
+    * `Set-WUGCredential` — Update credentials and bulk unassign device assignments (PUT /credentials, DELETE /credentials/{id}/assignments/-)
+    * `Get-WUGDeviceInterface` — Retrieve device network interfaces (GET /devices/{id}/interfaces)
+    * `Set-WUGDeviceInterface` — Update device network interfaces (PUT /devices/{id}/interfaces)
+    * `Add-WUGDeviceInterface` — Add a network interface to a device (POST /devices/{id}/interfaces/-)
+    * `Remove-WUGDeviceInterface` — Remove one or all interfaces from a device (DELETE /devices/{id}/interfaces)
+    * `Get-WUGDeviceStatus` — Retrieve device status (GET /devices/{id}/status)
+    * `Get-WUGDeviceCredential` — Retrieve device credential assignments (GET /devices/{id}/credentials)
+    * `Set-WUGDeviceCredential` — Update device credential assignments (PUT /devices/{id}/credentials)
+    * `Get-WUGDevicePollingConfig` — Retrieve device polling configuration (GET /devices/{id}/config/polling)
+    * `Set-WUGDevicePollingConfig` — Update device polling configuration (PUT /devices/{id}/config/polling)
+    * `Invoke-WUGDevicePollNow` — Trigger immediate device poll; supports single, batch, and device group poll-now (POST/PATCH /devices/.../poll-now, PUT /device-groups/{id}/poll-now)
+    * `Get-WUGDeviceGroupMembership` — Retrieve device group membership (GET /devices/{id}/group-membership)
+    * `Set-WUGDeviceGroup` — Update device group properties (PUT /device-groups/{id})
+    * `Add-WUGDeviceGroup` — Create a child device group (POST /device-groups/{id}/child)
+    * `Remove-WUGDeviceGroup` — Delete a device group (DELETE /device-groups/{id})
+    * `Add-WUGDeviceGroupMember` — Add devices to a device group (POST /device-groups/{id}/devices/-)
+    * `Remove-WUGDeviceGroupMember` — Remove one or all devices from a device group (DELETE /device-groups/{id}/devices)
+    * `Remove-WUGDeviceAttribute` — Remove one or all custom attributes from a device (DELETE /devices/{id}/attributes)
+    * `Remove-WUGDeviceMonitor` — Remove a monitor assignment from a device (DELETE /devices/{id}/monitors/{assignmentId})
+    * `Set-WUGMonitorTemplate` — Apply/import monitor templates (PATCH /monitors/-/config/template), batch monitor library operations (PATCH /monitors/-), and remove all monitor assignments (DELETE /monitors/-/assignments/-)
+    * `Set-WUGDeviceGroupMembership` — Assign group membership to a device (PUT /devices/{id}/group-membership) and batch group membership operations (PATCH /devices/{id}/group-membership)
+
+* Extended
+  * `Get-WUGActiveMonitor` — Added `-MonitorId` parameter to retrieve a single monitor definition (GET /monitors/{id}) and `-MonitorAssignments` switch to retrieve monitor assignments (GET /monitors/{id}/assignments/-)
+  * `Remove-WUGActiveMonitor` — Added `ById` parameter set to delete a single monitor by ID (DELETE /monitors/{id}) and `RemoveAssignments` parameter set to remove all assignments (DELETE /monitors/{id}/assignments/-)
+  * `Get-WUGDeviceGroup` — Added parameter sets: `-Children` (GET /device-groups/{id}/children), `-GroupStatus` (GET /device-groups/{id}/status), `-GroupDevices` (GET /device-groups/{id}/devices/-), `-GroupDeviceTemplates` (GET /device-groups/{id}/devices/-/config/template), `-GroupDeviceCredentials` (GET /device-groups/{id}/devices/-/credentials)
+  * `Invoke-WUGDevicePollNow` — Added `-GroupId` parameter for device group poll-now (PUT /device-groups/{id}/poll-now)
+  * `Invoke-WUGDeviceRefresh` — Added `-GroupId` parameter for device group refresh (PUT /device-groups/{id}/refresh)
+  * `Set-WUGDeviceRole` — Added `-RemoveRole` (DELETE /device-role/{roleId}), `-EnableRole` (PUT /device-role/{roleId}/enable), and `-DisableRole` (PUT /device-role/{roleId}/disable) parameter sets with pipeline-enabled `-RoleId` parameter
+  * `Get-WUGMonitorTemplate` — Added `-SupportedTypes` parameter set to retrieve supported monitor types (GET /monitors/-/config/supported-types)
+  * `Get-WUGMonitorTemplate` — Added `-MonitorTemplate` parameter set to export a single monitor template (GET /monitors/{monitorId}/config/template) and `-AllMonitorTemplates` to export all (GET /monitors/-/config/template)
+  * `Get-WUGProduct` — Added `/api/v1/product/api` endpoint to the composite product object (`apiVersion` property)
+  * `Get-WUGDeviceRole` — Added `-DeviceRoles` parameter set to retrieve roles assigned to a specific device (GET /devices/{deviceId}/roles/-) with `-DeviceRoleKind` filter
+  * `Set-WUGDeviceRole` — Added `-RestoreRole` (PUT /device-role/{roleId}/restore), `-SetDeviceRoleKind` (PUT /devices/{deviceId}/roles/{kind}), `-AssignDeviceRole` (PUT /devices/{deviceId}/roles/-), `-RemoveDeviceRoles` (DELETE /devices/{deviceId}/roles/-), `-BatchDeviceRole` (PATCH /devices/-/roles/{kind}), `-GroupRole` (PUT /device-groups/{groupId}/roles/{kind}) parameter sets
+  * `Get-WUGCredential` — Added `-CredentialTemplate` (GET /credentials/{credentialId}/config/template), `-AllCredentialTemplates` (GET /credentials/-/config/template), `-Helpers` (GET /credentials/-/helpers), `-AllAssignments` (GET /credentials/-/assignments/-) parameter sets
+  * `Set-WUGCredential` — Added `-ApplyTemplates` parameter set to apply credential templates (PATCH /credentials/-/config/template)
+  * `Set-WUGDeviceAttribute` — Added `-Batch` parameter set for batch attribute operations (PATCH /devices/{deviceId}/attributes/-)
+  * `Set-WUGDeviceInterface` — Added `-Batch` parameter set for batch interface operations (PATCH /devices/{deviceId}/interfaces/-)
+  * `Remove-WUGDeviceMonitor` — Added `-All` switch to remove all monitor assignments from a device (DELETE /devices/{deviceId}/monitors/-)
+  * `Set-WUGActiveMonitor` — Added `BatchDeviceMonitors` mode for batch monitor operations on a device (PATCH /devices/{deviceId}/monitors/-)
+  * `Set-WUGDevicePollingConfig` — Added `-Batch` parameter set for batch polling configuration across devices (PATCH /devices/-/config/polling)
 
 * Documentation
   * Added full comment-based help (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE, .NOTES) to Add-WUGActiveMonitorToDevice, Get-WUGMonitorTemplate, Remove-WUGActiveMonitor, Get-WUGDeviceGroupReport

@@ -1,138 +1,77 @@
 <#
 .SYNOPSIS
-    Assigns an active monitor to a device in WhatsUp Gold.
+Adds one or more devices to a WhatsUp Gold device group.
 
 .DESCRIPTION
-    Add-WUGActiveMonitorToDevice assigns a specified active monitor template to a device
-    via the WhatsUp Gold REST API (POST /api/v1/devices/{deviceId}/monitors/-). Optional
-    parameters control polling interval, comment, argument, interface binding, critical
-    order, and action policy.
+The Add-WUGDeviceGroupMember function adds devices to a device group using
+POST /api/v1/device-groups/{groupId}/devices/-.
+
+.PARAMETER GroupId
+The ID of the device group to add devices to.
 
 .PARAMETER DeviceId
-    The ID of the device to assign the monitor to. Required.
-
-.PARAMETER MonitorId
-    The monitor template ID (monitorTypeId) to assign. Required.
-
-.PARAMETER Enabled
-    Whether the monitor should be enabled. Valid values: true, false. Default: true.
-
-.PARAMETER Comment
-    An optional comment for the monitor assignment.
-
-.PARAMETER Argument
-    An optional argument string passed to the monitor.
-
-.PARAMETER InterfaceId
-    The interface ID to bind the monitor to, if applicable.
-
-.PARAMETER PollingIntervalSeconds
-    The polling interval in seconds (10-86400).
-
-.PARAMETER CriticalOrder
-    The critical order ranking (0-100).
-
-.PARAMETER ActionPolicyId
-    The ID of the action policy to associate with this monitor.
-
-.PARAMETER ActionPolicyName
-    The name of the action policy to associate with this monitor.
+One or more device IDs to add to the group.
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5
-
-    Assigns active monitor template 5 to device 42 with default settings.
+Add-WUGDeviceGroupMember -GroupId 101 -DeviceId 1, 2, 3
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5 -PollingIntervalSeconds 60 -Comment "HTTP check"
-
-    Assigns active monitor 5 to device 42 with a 60-second polling interval and a comment.
-
-.EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 100 -MonitorId 12 -Enabled false -ActionPolicyName "Email Admins"
-
-    Assigns monitor 12 to device 100 in a disabled state with the "Email Admins" action policy.
+$deviceIds = (Get-WUGDevice -DeviceGroupID 0 -SearchValue "Server").id
+Add-WUGDeviceGroupMember -GroupId 200 -DeviceId $deviceIds
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja)
-    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Monitors
+Author: Jason Alberino (jason@wug.ninja)
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/DeviceGroup
 #>
-function Add-WUGActiveMonitorToDevice {
+function Add-WUGDeviceGroupMember {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeviceId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$MonitorId,
-        [ValidateSet("true", "false")][string]$Enabled = "true",
-        [string]$Comment,
-        [string]$Argument,
-        [string]$InterfaceId,
-        # Range validated per WhatsUp Gold REST API spec: minimum 10 seconds, maximum 86400 seconds (24 hours)
-        [ValidateRange(10, 86400)][int]$PollingIntervalSeconds,
-        [ValidateRange(0, 100)][int]$CriticalOrder,
-        [string]$ActionPolicyId,
-        [string]$ActionPolicyName
+        [Parameter(Mandatory = $true, Position = 0)]
+        [int]$GroupId,
+
+        [Parameter(Mandatory = $true, Position = 1, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('id')]
+        [string[]]$DeviceId
     )
 
-    Begin {
-        Write-Debug "Begin block: Starting function Add-WUGActiveMonitorToDevice."
-        $baseUri = "$(${global:WhatsUpServerBaseURI})/api/v1/devices/${DeviceId}/monitors/-"
+    begin {
+        Write-Debug "Starting Add-WUGDeviceGroupMember function."
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups"
+        $allDeviceIds = @()
     }
 
-    Process {
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Building activeParams hashtable."
+    process {
+        $allDeviceIds += $DeviceId
+    }
 
-        $activeParams = @{}
+    end {
+        $uri = "${baseUri}/${GroupId}/devices/-"
+        $body = @{ deviceIds = @($allDeviceIds | ForEach-Object { "$_" }) } | ConvertTo-Json -Depth 4
+        Write-Debug "POST URI: $uri, Body: $body"
 
-        if ($Comment) { $activeParams.comment = $Comment }
-        if ($Argument) { $activeParams.argument = $Argument }
-        if ($InterfaceId) { $activeParams.interfaceId = $InterfaceId }
-        if ($PollingIntervalSeconds) { $activeParams.pollingIntervalSeconds = $PollingIntervalSeconds }
-        if ($CriticalOrder) { $activeParams.criticalOrder = $CriticalOrder }
-        if ($ActionPolicyId) { $activeParams.actionPolicyId = $ActionPolicyId }
-        if ($ActionPolicyName) { $activeParams.actionPolicyName = $ActionPolicyName }
-
-        $body = @{
-            type          = "active"
-            monitorTypeId = $MonitorId
-            enabled       = $Enabled
-            isGlobal      = "true"
-            active        = $activeParams
-        } | ConvertTo-Json -Depth 5
-
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Sending request to URI: $baseUri"
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Request body: $body"
-
-        if (-not $PSCmdlet.ShouldProcess("Monitor $MonitorId on device $DeviceId", 'Assign active monitor')) { return }
+        if (-not $PSCmdlet.ShouldProcess("Group ${GroupId}", "Add $($allDeviceIds.Count) device(s)")) { return }
 
         try {
-            $result = Get-WUGAPIResponse -Uri $baseUri -Method POST -Body $body
-
-            if ($result.data.successful -eq 1) {
-                Write-Output "Successfully assigned active monitor ID: $MonitorId to device ID $DeviceId"
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
+            $result = Get-WUGAPIResponse -Uri $uri -Method 'POST' -Body $body
+            if ($result.data) {
+                Write-Host "Successfully added $($allDeviceIds.Count) device(s) to group ${GroupId}." -ForegroundColor Green
+                return $result.data
             }
-            else {
-                Write-Warning "Failed to assign active monitor to device."
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
-            }
+            return $result
         }
         catch {
-            Write-Error "Error assigning active monitor: $($_.Exception.Message)"
-            Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full exception details: $($_.Exception | Format-List * | Out-String)"
+            Write-Error "Error adding devices to group ${GroupId}: $_"
         }
-    }
 
-    End {
-        Write-Debug "End block: Completed function Add-WUGActiveMonitorToDevice."
+        Write-Debug "Completed Add-WUGDeviceGroupMember function."
     }
 }
-
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBabXWf8b2SuRHK
-# E2838mQASune+DIy25J9BLLf8pBPAaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIzNdohMCifxzs
+# k/B4bkt7FFENTMgCIF7MN180tovOPqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -232,17 +171,17 @@ function Add-WUGActiveMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg9ZKcvFj/sl7GZvvY7lUq38VedO/iFzwk
-# bDIPMKI3gCQwDQYJKoZIhvcNAQEBBQAEggIADr+kSOom5l0TjgtjXDtzfp9HKB4B
-# h3BVZpWu3srF6R7AjpuEIgZVH7jvJ2hpVa+7L6nWjF7neyxaMySrYj7YVCMAlGFS
-# OuUfaaDQjinI4T/xnL6JigO/s3Zsuw6mCRI9D7uqQGcE2AzbTMnlBcIgWL61/r01
-# W622OhV5jdbImtyc0zaWxyKXOvASgF9YXj/Ueq+5PIKtSQDGPgnDISsO6HLZNKaR
-# NrLBbLGlQ8EFCiYwRLxLSDDfmFgD2p4d5/PX1GN9tcb6AlmGZLD6ydzhomHlWaGg
-# 19vjnsUZhQsRZHKox7cNC5l218Oklibh/QzZObXN4Nh2hT4mZHmbMo+VqhrcAqjH
-# wFrKIYwuRNr1gxBMqy5Il7E/K0pLWzRufeLXpRTYK0rynyL45ozYPQY597upActT
-# K8JAu2qoTtZjCRo93CF4aQWODU+PTUPzCkeYrg7vwy866eQ6W3Ksxniby7ARVE6h
-# C8glNtKzTuMVlJTfKgTD6UCg2rrePUFtIjADQMABKXbJoJjbnDQy33RhnfXxz6zd
-# 4LA7yDmL4ivxnveSmE0xnZfXBIMpX5+YKNRxxS47Q39q80N6dDgHOLAlR2KuiaTs
-# TnHuhJWirQilYruV1u+qd2J8V86gNffQ1E8Vbz4FTsioqerxbD2JnYvU75Xi5N3z
-# GYcJfbDPKgraSLY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgz94lC09fyOodXRct+6kL6zZIe3unqDI+
+# hhiOJbt8F5IwDQYJKoZIhvcNAQEBBQAEggIAqqlE3m33TEef8MBwgYVZ6wxXWIwi
+# +HizzsrjgXMPq9hIhVy4SzxhW9W2PAghfyXAMVptitbivVfI2X80Cg+kAoZChiFZ
+# SXemHgQfEcAhTx4IKngMC5brpnlsPinipTEhO530TgVkYFfXC4R91hCqkG94gzKs
+# LluEiSaLW8/g/CK+QYCtGiS0l3KfOCexYWDofRw23ejEoZBqjFYYGQW5LFOHpbW1
+# Po7xENegFRLLYpjEd6hdG6nHGST/h9wq4HBAwGunA3I/HPhXlt7SoSZqwJoyYQTS
+# eblq5/TqikGZvhIhjhJodR8pPV4MVzAPMYSaEft2LTUWAkJ+GmELPnVHLr0y0fgK
+# heu0wdbiKuAHj/fNw83fjjRXGttydQDPwTJCTQ6I0WvyDPwSt6mLMQ5bCMMQ4NlO
+# RjDv/RXmMAhlJNSRNnHNaesj2cHr0A6gNXPO0FFpDIh+KR/tIJBBtWAgKWwJVopf
+# jNcXgM105+U9C2KWnA97UeKpdwf2OKnrE1BxlpZBwm9zJeTvKWtHESgPtNRskkLy
+# aIDqpbezg3qUPjNUvyfSflHr0Cb3qWJ7zjM5whftfGFwtmTwUg02OAHkU/WxWVU7
+# UaQi+0D22G5wmwE7OM43SEcFnoOjlrOdOfB34w1LWkh1X4uSmxuHa1Bz0Z7QZl1d
+# Qu+xpY+VrAgevZE=
 # SIG # End signature block

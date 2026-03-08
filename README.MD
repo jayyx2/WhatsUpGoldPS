@@ -77,8 +77,10 @@ Get-Help Connect-WUGServer -Full
 | `Add-WUGDevice` | Add a new device via discovery scan |
 | `Remove-WUGDevice` | Remove one or more devices by ID |
 | `Remove-WUGDevices` | Bulk-remove devices |
-| `Invoke-WUGDeviceRefresh` | Trigger an immediate poll/refresh on a device |
+| `Get-WUGDeviceStatus` | Get current device status |
 | `Get-WUGDeviceScan` | Trigger a device scan and return results |
+| `Invoke-WUGDeviceRefresh` | Trigger a configuration refresh (device or group) |
+| `Invoke-WUGDevicePollNow` | Trigger an immediate poll (device, batch, or group) |
 
 ### Device Properties & Attributes
 
@@ -87,7 +89,31 @@ Get-Help Connect-WUGServer -Full
 | `Get-WUGDeviceProperties` | Get device properties (name, type, wireless, etc.) |
 | `Set-WUGDeviceProperties` | Set device properties |
 | `Get-WUGDeviceAttribute` | Get custom device attributes |
-| `Set-WUGDeviceAttribute` | Set custom device attributes |
+| `Set-WUGDeviceAttribute` | Set custom device attributes (single or batch) |
+| `Remove-WUGDeviceAttribute` | Remove one or all custom attributes from a device |
+
+### Device Interfaces
+
+| Function | Description |
+|---|---|
+| `Get-WUGDeviceInterface` | Get device network interfaces |
+| `Set-WUGDeviceInterface` | Update device network interfaces (single or batch) |
+| `Add-WUGDeviceInterface` | Add a network interface to a device |
+| `Remove-WUGDeviceInterface` | Remove one or all interfaces from a device |
+
+### Device Credentials
+
+| Function | Description |
+|---|---|
+| `Get-WUGDeviceCredential` | Get device credential assignments |
+| `Set-WUGDeviceCredential` | Update device credential assignments |
+
+### Polling Configuration
+
+| Function | Description |
+|---|---|
+| `Get-WUGDevicePollingConfig` | Get device polling configuration |
+| `Set-WUGDevicePollingConfig` | Update device polling configuration (single or batch) |
 
 ### Device Templates
 
@@ -102,14 +128,29 @@ Get-Help Connect-WUGServer -Full
 
 | Function | Description |
 |---|---|
-| `Get-WUGDeviceRole` | Get device roles, brand, OS, assignments, and templates |
-| `Set-WUGDeviceRole` | Assign roles or sub-roles to devices |
+| `Get-WUGDeviceRole` | Get device roles, brand, OS, assignments, templates, and device-level role assignments |
+| `Set-WUGDeviceRole` | Assign, export, import, delete, enable, disable, restore device roles; assign roles to devices and groups |
+
+### Credentials
+
+| Function | Description |
+|---|---|
+| `Get-WUGCredential` | Retrieve credential definitions, templates, helpers, and assignments |
+| `Add-WUGCredential` | Create a new credential |
+| `Set-WUGCredential` | Update a credential, unassign all device assignments, or apply credential templates |
 
 ### Device Groups
 
 | Function | Description |
 |---|---|
-| `Get-WUGDeviceGroup` | Retrieve device groups and child groups |
+| `Get-WUGDeviceGroup` | Retrieve device groups (by ID, search, children, status, devices, credentials, templates, role) |
+| `Set-WUGDeviceGroup` | Update device group properties |
+| `Add-WUGDeviceGroup` | Create a child device group |
+| `Remove-WUGDeviceGroup` | Delete a device group |
+| `Get-WUGDeviceGroupMembership` | Get device group membership for a device |
+| `Set-WUGDeviceGroupMembership` | Assign or batch-update group membership from the device side |
+| `Add-WUGDeviceGroupMember` | Add devices to a device group |
+| `Remove-WUGDeviceGroupMember` | Remove one or all devices from a device group |
 
 ### Monitors
 
@@ -118,9 +159,11 @@ Get-Help Connect-WUGServer -Full
 | `Get-WUGActiveMonitor` | Get active monitor definitions and assignments |
 | `Add-WUGActiveMonitor` | Create a new active monitor |
 | `Add-WUGActiveMonitorToDevice` | Assign an active monitor to a device |
-| `Set-WUGActiveMonitor` | Update active monitor properties |
-| `Remove-WUGActiveMonitor` | Remove an active monitor |
-| `Get-WUGMonitorTemplate` | List available monitor templates |
+| `Set-WUGActiveMonitor` | Update active monitor properties (library, device, or batch device monitors) |
+| `Remove-WUGActiveMonitor` | Remove an active monitor (by search, by ID, or remove all assignments) |
+| `Remove-WUGDeviceMonitor` | Remove a monitor assignment (or all) from a device |
+| `Get-WUGMonitorTemplate` | List monitor templates, supported types, or export templates |
+| `Set-WUGMonitorTemplate` | Apply/import monitor templates, batch library ops, or remove all assignments |
 
 ### Maintenance
 
@@ -173,7 +216,7 @@ Same parameters as device reports, scoped to a device group.
 
 | Function | Description |
 |---|---|
-| `Get-WUGProduct` | Get WUG product and version information |
+| `Get-WUGProduct` | Get WUG product info: API version, installation ID, timezone, version, and whoAmI |
 
 ---
 

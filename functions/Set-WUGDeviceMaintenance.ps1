@@ -44,7 +44,7 @@ Last modified: 2024-09-21
 #>
 
 function Set-WUGDeviceMaintenance {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [Parameter(Mandatory)][bool]$Enabled,
@@ -145,6 +145,8 @@ function Set-WUGDeviceMaintenance {
             $bodyJson = $body | ConvertTo-Json -Depth 5
             Write-Debug "API Request Body: $bodyJson"
 
+            if (-not $PSCmdlet.ShouldProcess("$($batch.Count) devices", "Set maintenance mode to $Enabled")) { continue }
+
             try {
                 $result = Get-WUGAPIResponse -uri "$global:WhatsUpServerBaseURI/api/v1/devices/-/config/maintenance" -Method "PATCH" -Body $bodyJson
 
@@ -188,8 +190,8 @@ function Set-WUGDeviceMaintenance {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAk1lbPmI7pEQML
-# ASjY3spD107ViNMVr2dRaVwhmHb/xKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6y8RxvZt0XQwt
+# SsVcFIMM8+b+rFxeo2etP29rYpn7J6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -289,17 +291,17 @@ function Set-WUGDeviceMaintenance {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIxC5lzNKE7FuHkJgKUfY0ZzwSd2fad6/
-# 3WSjvYf42ZgwDQYJKoZIhvcNAQEBBQAEggIAWHdgGjFf3UYLxKgpfqjx0g5Ltumz
-# c1WxpyJ4oENLhcHqX0+X4cmqcp4SqMNDgR64vejVOZl2CmY3nWFKUgJQjZPc2HQn
-# /6R91yMZKi0USl/Hznx+Lrh8jHdKy7bfD+Ky/015lmyCP/MwIM5RTgFIFwc7J8q4
-# wz2oJaSHPsakLRqd4+ebWAdaYtmTQeeVOIfpTpvf9RIdUUR0f6hpWGTY3ufYrpET
-# rdk0EA+sofLi7vbMOsj/8wJ7Te2TyxdmDpsUrWiPzbM8SOImbR+8tmRsaNq7eD0U
-# zgVDHmIh4fxTKgoYq/0b/+KAPVzYK+25ZrEY68sNb0DZMIrtHga1oZZVOr4sY2FU
-# gHMFJ89XBsEs8mQtJsDXsCD3/VkGdbaKLzXS2u3W407Gd/h76isD74UgoZ4LMFD2
-# mUokXfucdsXk0+ccqpU0kxOwTuv4VAwdriLiYsscBDfdJjTorH39ZsRot6hOK48C
-# hyiAnhCuEkCdrU/7Vr+WONCQvYF84aYHRztRQzFrVPCdP5Cu9vx/Rz9COkvnNfxs
-# yne/mx555+rxl21/2O1pBOa9xcS4ZuyyCYM+x6ECs0PV5ZUld9nfKghdKGqOgjEv
-# wxTtEVyWMew7/hJJFTsoWiSHEetW4Wkff2Cm4QFpkk5ZWn3hb+uXZ3mk3/+qy4iy
-# WyJq2RgbkURmzuU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQghECqBp4fUfb+cVX3yFnIMZ20BuMlruDQ
+# MRolZu1t6RswDQYJKoZIhvcNAQEBBQAEggIAZ0sOEk8ZzR6iMkTeP5q/MQHO4v9b
+# ysLv7DEqQUWoGl3fQqT8CyUSr00B1JFzJvx6ERBATa1kHzaP4D8qu8PDbAqYhLYN
+# RR3K6jupOEzt18kgdRrAajO+sUNhI8bntuLVUZVbK9nGXD7Nvbd2WCtxbVYHoHZr
+# 5YM6IqFkoygvn3H5XyiSyis2qt6rmkfO8Pui/QJEGeh5LCRuNuFG9Be8/ze2prP4
+# HEC1cq8ndYflczzfzCScvjiQEQsOKfnXkjZSqUC9yyUU6/AvqcjtG1bJhuKQS5uu
+# mb6HgV7Fo8az8YSSHXj+QzRhlAaKLzvAZRAqKZ2dxCBnetFsfGQC+X4U75g8dAUs
+# CV5ZCJAG5b1N8oVU9Pr5Jefe4onC7AhcuYjTWN2s4j21ryVXwYoNnSqEQI5oGqQY
+# O1OunkdNNS1WvtBWK2rNDCoitGltcHDQFmHURVK5An92zEWG9PEG5POcdvl+6GDP
+# f5xC1wBfHnFhgyf0vKn3JbUCoUPBr+PXclUGNaPmiOn0s7ePFHNBqhSH30raYlT4
+# lEOk0DKCJnhUPximJZKphDIq+YSf66YCEQdQnuPs4UXoru/aT3VhdfgoZZ7VPD+U
+# N3H5T0NHACjGDhQS74VkRbYevJDHAArsGmAWX4qFLRLMdqPYIl/2r3z7z/wE16u4
+# iZ4+MSNhvqH9x3I=
 # SIG # End signature block

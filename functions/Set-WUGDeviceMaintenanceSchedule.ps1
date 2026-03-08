@@ -136,7 +136,7 @@ https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#opera
 
 #>
 function Set-WUGDeviceMaintenanceSchedule {
-    [CmdletBinding(DefaultParameterSetName = 'ByParameters')]
+    [CmdletBinding(DefaultParameterSetName = 'ByParameters', SupportsShouldProcess = $true)]
     param(
         # Common Parameters for All Parameter Sets
         [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByParameters')]
@@ -193,6 +193,8 @@ function Set-WUGDeviceMaintenanceSchedule {
     }
 
     process {
+        if (-not $PSCmdlet.ShouldProcess("Device(s) $($DeviceId -join ', ')", "$($PSCmdlet.ParameterSetName) maintenance schedule")) { return }
+
         switch ($PSCmdlet.ParameterSetName) {
             'ByParameters' {
                 # Validate parameters based on ScheduleType
@@ -534,8 +536,8 @@ function Set-WUGDeviceMaintenanceSchedule {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA0krE4dMl535lV
-# WY2C2ZC0SlPc5Q0TZQTlRzxhEN7oc6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0Yh04sraI2NKH
+# LS5M96d0RZkIMS+fEg40vkEwgitG46CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -635,17 +637,17 @@ function Set-WUGDeviceMaintenanceSchedule {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgRXCXJk7kLybTFhfJxQe0rhLNSZvALqF4
-# AyKAMrkw0vIwDQYJKoZIhvcNAQEBBQAEggIA1Rd0BgGKnAJnO0abN744cP5QfRAi
-# UO6LYvV7t23xHWH48nH/Gq+x4cLDZm63yogmrKSkhEw3Ku2gmcnwEVfG5pjB7Hds
-# Q2Fr9Mhwx/pOfwakm53azQZXWCUmIhKrT9la6ISkQe3v56APDqP69jt5GJ2f203e
-# UJ8dNHkSL8cbCuricpd2sGltkIMYI+xuZzvU56NczNbrnLie/uYrjya4H69W9k+G
-# jbo+0VdxMwDH60Te4pgW/UHTHV3TqXuodGENDmImV3iqAsoYTxW1jYMGIKyVxQvl
-# xwlKCbxiqXCAIhjbl4Comp7I62hopuaMsjK44lTDH3jIdz108mlpTnvjv6WhAfJ6
-# VwEAuwVJMMurBgLhgslAeOj9ARLuEKgf6CAprsyxks/rX55dlAR6xTK5lTcrYPLi
-# gtP0XRGkIrUzil+0yCxb/4qbSMbatSv6E5mXKqr4hkKzrFR58QQCv1XFCLXylMcU
-# czEBzkcA9GSXPSY5OrYfh9A/loXZo9vk+DLWYRR7Rq2TCOzh+Zq8ysCR/uPGWBzX
-# 4YiNpMWRMhPkjElfvNR7IfI1f9ZAqcheDgv5oR03zM7rKI2xLVVyu7xd1QUWUwvT
-# osXFA8IK/BR8XmQpVDNe7Jv8FYgwJmYAJuGBAno9AfjMmSkisRspAQ6z/F9OPGu3
-# LFcALI9hiL8898c=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIJr3gkGTylS93ChRtGZprEULEKWimGHj
+# /5GWgnwHZU8wDQYJKoZIhvcNAQEBBQAEggIANruY2WaKrOS8OOwRu1pYktM6MVMq
+# qKdDi9AryJWQ+axz+eR/Xnv6154nzEqjKgQ78cWA1t33j68SCCQcGhTIkT4yU1li
+# Gp43H+iLJakpoiNs43Ah7mG5HwIm6Yrywy1T8T30UYuKE52+r9t2ORVnKS1Obcew
+# 6n0Opte9nKbtkW0nP4ZhPNH8XPk1bSS87ZCmp+u4d8bNhngKeFOrF+6tHleov9qb
+# 4nYZ5mW6RT/YUbWc7qTw4bZ91ezLpKAjlxN6Uk82C712ofO0Sgl+I9y5foasomSg
+# T4BYag8nwiAktov9L5YGncxXOM/3jVO0GIK9vlDeFaS2ULm3ILEiQjKrXTEn0Vcw
+# fipmLrncYNqJDAqUFw/+kGMG3KdJC40iMr1kkQMKutT4AwppKLozrtEbS2v7EZuP
+# O/S+xClLIEibkWNeMGZNxFR21i2RMNn8oWC5VryK8IrJ7/rOGx1JqTNijGMeAjuz
+# uxZhPrr5wgo6JQfx5/dG73fCiuOFihjtLnb9f1rUJxEdODf7WSziTDZFXA+vW2Zy
+# hAjhB/5ETRiyHyw46PSz6FVw7E6N44GStWwA9FW2G414ZFcM1wmEUXX8yiuVJgyJ
+# EOrkw/wwS8NsVzIN2voTDv6li35kePtoO1DMxDPq42qAUFgAOSq++embgOmHy5mJ
+# CUYssgq+ct44fhA=
 # SIG # End signature block

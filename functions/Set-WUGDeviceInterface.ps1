@@ -1,138 +1,156 @@
 <#
 .SYNOPSIS
-    Assigns an active monitor to a device in WhatsUp Gold.
+Updates a network interface on a device in WhatsUp Gold.
 
 .DESCRIPTION
-    Add-WUGActiveMonitorToDevice assigns a specified active monitor template to a device
-    via the WhatsUp Gold REST API (POST /api/v1/devices/{deviceId}/monitors/-). Optional
-    parameters control polling interval, comment, argument, interface binding, critical
-    order, and action policy.
+The Set-WUGDeviceInterface function updates a specific network interface using
+PUT /api/v1/devices/{deviceId}/interfaces/{interfaceId}.
+It also supports batch interface operations using
+PATCH /api/v1/devices/{deviceId}/interfaces/-.
 
 .PARAMETER DeviceId
-    The ID of the device to assign the monitor to. Required.
-
-.PARAMETER MonitorId
-    The monitor template ID (monitorTypeId) to assign. Required.
-
-.PARAMETER Enabled
-    Whether the monitor should be enabled. Valid values: true, false. Default: true.
-
-.PARAMETER Comment
-    An optional comment for the monitor assignment.
-
-.PARAMETER Argument
-    An optional argument string passed to the monitor.
+The ID of the device that owns the interface.
 
 .PARAMETER InterfaceId
-    The interface ID to bind the monitor to, if applicable.
+The ID of the interface to update. Not required for Batch operations.
 
-.PARAMETER PollingIntervalSeconds
-    The polling interval in seconds (10-86400).
+.PARAMETER Batch
+Switch to perform batch interface operations.
+Endpoint: PATCH /api/v1/devices/{deviceId}/interfaces/-
 
-.PARAMETER CriticalOrder
-    The critical order ranking (0-100).
+.PARAMETER BatchBody
+JSON body for batch interface operations.
 
-.PARAMETER ActionPolicyId
-    The ID of the action policy to associate with this monitor.
+.PARAMETER Body
+A JSON string containing the interface update properties. Use this for full control
+over the request body.
 
-.PARAMETER ActionPolicyName
-    The name of the action policy to associate with this monitor.
+.PARAMETER NetworkAddress
+The network address to set on the interface.
 
-.EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5
+.PARAMETER NetworkName
+The network/host name to set on the interface.
 
-    Assigns active monitor template 5 to device 42 with default settings.
-
-.EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5 -PollingIntervalSeconds 60 -Comment "HTTP check"
-
-    Assigns active monitor 5 to device 42 with a 60-second polling interval and a comment.
+.PARAMETER IsDefault
+Whether this interface should be set as the default interface for the device.
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 100 -MonitorId 12 -Enabled false -ActionPolicyName "Email Admins"
+# Update an interface using individual parameters
+Set-WUGDeviceInterface -DeviceId "123" -InterfaceId "456" -NetworkAddress "192.168.1.100" -IsDefault $true
 
-    Assigns monitor 12 to device 100 in a disabled state with the "Email Admins" action policy.
+.EXAMPLE
+# Update an interface using a raw JSON body
+$body = @{ networkAddress = "10.0.0.5"; isDefault = $true } | ConvertTo-Json
+Set-WUGDeviceInterface -DeviceId "123" -InterfaceId "456" -Body $body
+
+.EXAMPLE
+# Batch interface operations
+$body = @{ items = @(@{ op = "update"; interfaceId = "456"; networkAddress = "10.0.0.5" }) } | ConvertTo-Json -Depth 5
+Set-WUGDeviceInterface -DeviceId "123" -Batch -BatchBody $body
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja)
-    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Monitors
+Author: Jason Alberino (jason@wug.ninja)
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/Device
 #>
-function Add-WUGActiveMonitorToDevice {
-    [CmdletBinding(SupportsShouldProcess = $true)]
+function Set-WUGDeviceInterface {
+    [CmdletBinding(DefaultParameterSetName = 'ByProperties', SupportsShouldProcess = $true)]
     param(
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeviceId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$MonitorId,
-        [ValidateSet("true", "false")][string]$Enabled = "true",
-        [string]$Comment,
-        [string]$Argument,
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipelineByPropertyName = $true)]
+        [Alias('id')]
+        [string]$DeviceId,
+
+        [Parameter(Mandatory = $true, Position = 1, ParameterSetName = 'ByProperties')]
+        [Parameter(Mandatory = $true, Position = 1, ParameterSetName = 'ByBody')]
         [string]$InterfaceId,
-        # Range validated per WhatsUp Gold REST API spec: minimum 10 seconds, maximum 86400 seconds (24 hours)
-        [ValidateRange(10, 86400)][int]$PollingIntervalSeconds,
-        [ValidateRange(0, 100)][int]$CriticalOrder,
-        [string]$ActionPolicyId,
-        [string]$ActionPolicyName
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByBody')]
+        [string]$Body,
+
+        [Parameter(ParameterSetName = 'ByProperties')]
+        [string]$NetworkAddress,
+
+        [Parameter(ParameterSetName = 'ByProperties')]
+        [string]$NetworkName,
+
+        [Parameter(ParameterSetName = 'ByProperties')]
+        [bool]$IsDefault,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Batch')]
+        [switch]$Batch,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Batch')]
+        [string]$BatchBody
     )
 
-    Begin {
-        Write-Debug "Begin block: Starting function Add-WUGActiveMonitorToDevice."
-        $baseUri = "$(${global:WhatsUpServerBaseURI})/api/v1/devices/${DeviceId}/monitors/-"
+    begin {
+        Write-Debug "Starting Set-WUGDeviceInterface function. ParameterSet: $($PSCmdlet.ParameterSetName)"
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
     }
 
-    Process {
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Building activeParams hashtable."
+    process {
+        if ($PSCmdlet.ParameterSetName -eq 'Batch') {
+            $uri = "${baseUri}/${DeviceId}/interfaces/-"
+            Write-Debug "Batch interface operations at URI: $uri"
 
-        $activeParams = @{}
+            if (-not $PSCmdlet.ShouldProcess("Device $DeviceId interfaces", "Batch update")) { return }
 
-        if ($Comment) { $activeParams.comment = $Comment }
-        if ($Argument) { $activeParams.argument = $Argument }
-        if ($InterfaceId) { $activeParams.interfaceId = $InterfaceId }
-        if ($PollingIntervalSeconds) { $activeParams.pollingIntervalSeconds = $PollingIntervalSeconds }
-        if ($CriticalOrder) { $activeParams.criticalOrder = $CriticalOrder }
-        if ($ActionPolicyId) { $activeParams.actionPolicyId = $ActionPolicyId }
-        if ($ActionPolicyName) { $activeParams.actionPolicyName = $ActionPolicyName }
+            try {
+                $result = Get-WUGAPIResponse -Uri $uri -Method 'PATCH' -Body $BatchBody
+                if ($result.data) { return $result.data }
+                return $result
+            }
+            catch {
+                Write-Error "Error performing batch interface operations on device ${DeviceId}: $_"
+            }
+            return
+        }
 
-        $body = @{
-            type          = "active"
-            monitorTypeId = $MonitorId
-            enabled       = $Enabled
-            isGlobal      = "true"
-            active        = $activeParams
-        } | ConvertTo-Json -Depth 5
+        $uri = "${baseUri}/${DeviceId}/interfaces/${InterfaceId}"
 
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Sending request to URI: $baseUri"
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Request body: $body"
+        if ($PSCmdlet.ParameterSetName -eq 'ByBody') {
+            $requestBody = $Body
+        }
+        else {
+            $bodyHash = @{}
+            if ($PSBoundParameters.ContainsKey('NetworkAddress')) { $bodyHash.networkAddress = $NetworkAddress }
+            if ($PSBoundParameters.ContainsKey('NetworkName')) { $bodyHash.networkName = $NetworkName }
+            if ($PSBoundParameters.ContainsKey('IsDefault')) { $bodyHash.isDefault = $IsDefault }
 
-        if (-not $PSCmdlet.ShouldProcess("Monitor $MonitorId on device $DeviceId", 'Assign active monitor')) { return }
+            if ($bodyHash.Count -eq 0) {
+                Write-Warning "No properties specified to update."
+                return
+            }
+
+            $requestBody = $bodyHash | ConvertTo-Json -Depth 5
+        }
+
+        Write-Debug "Updating interface at URI: $uri"
+        Write-Debug "Request body: $requestBody"
+
+        if (-not $PSCmdlet.ShouldProcess("Device $DeviceId Interface $InterfaceId", "Update")) {
+            return
+        }
 
         try {
-            $result = Get-WUGAPIResponse -Uri $baseUri -Method POST -Body $body
-
-            if ($result.data.successful -eq 1) {
-                Write-Output "Successfully assigned active monitor ID: $MonitorId to device ID $DeviceId"
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
-            }
-            else {
-                Write-Warning "Failed to assign active monitor to device."
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
-            }
+            $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $requestBody
+            if ($result.data) { return $result.data }
+            return $result
         }
         catch {
-            Write-Error "Error assigning active monitor: $($_.Exception.Message)"
-            Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full exception details: $($_.Exception | Format-List * | Out-String)"
+            Write-Error "Error updating interface ${InterfaceId} on device ${DeviceId}: $_"
         }
     }
 
-    End {
-        Write-Debug "End block: Completed function Add-WUGActiveMonitorToDevice."
+    end {
+        Write-Debug "Completed Set-WUGDeviceInterface function."
     }
 }
-
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBabXWf8b2SuRHK
-# E2838mQASune+DIy25J9BLLf8pBPAaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgwHPPPh1AO8NH
+# W2f/IRnf2yasv/yThRQ7953+5h0OJ6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -232,17 +250,17 @@ function Add-WUGActiveMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg9ZKcvFj/sl7GZvvY7lUq38VedO/iFzwk
-# bDIPMKI3gCQwDQYJKoZIhvcNAQEBBQAEggIADr+kSOom5l0TjgtjXDtzfp9HKB4B
-# h3BVZpWu3srF6R7AjpuEIgZVH7jvJ2hpVa+7L6nWjF7neyxaMySrYj7YVCMAlGFS
-# OuUfaaDQjinI4T/xnL6JigO/s3Zsuw6mCRI9D7uqQGcE2AzbTMnlBcIgWL61/r01
-# W622OhV5jdbImtyc0zaWxyKXOvASgF9YXj/Ueq+5PIKtSQDGPgnDISsO6HLZNKaR
-# NrLBbLGlQ8EFCiYwRLxLSDDfmFgD2p4d5/PX1GN9tcb6AlmGZLD6ydzhomHlWaGg
-# 19vjnsUZhQsRZHKox7cNC5l218Oklibh/QzZObXN4Nh2hT4mZHmbMo+VqhrcAqjH
-# wFrKIYwuRNr1gxBMqy5Il7E/K0pLWzRufeLXpRTYK0rynyL45ozYPQY597upActT
-# K8JAu2qoTtZjCRo93CF4aQWODU+PTUPzCkeYrg7vwy866eQ6W3Ksxniby7ARVE6h
-# C8glNtKzTuMVlJTfKgTD6UCg2rrePUFtIjADQMABKXbJoJjbnDQy33RhnfXxz6zd
-# 4LA7yDmL4ivxnveSmE0xnZfXBIMpX5+YKNRxxS47Q39q80N6dDgHOLAlR2KuiaTs
-# TnHuhJWirQilYruV1u+qd2J8V86gNffQ1E8Vbz4FTsioqerxbD2JnYvU75Xi5N3z
-# GYcJfbDPKgraSLY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgnFiF8ExwSbmLZUJhXMjPNV5Dd6YaWd3x
+# d+hbam0AR64wDQYJKoZIhvcNAQEBBQAEggIAhOLB3lW31Qv+XTyJ1CrKPWgwYYXt
+# KTzfWv2Vee8R8sQbcnE+WvjCkaTkRiY7fs69Uz6Trd8zF0i37w/dQ7fKbCjJ7nV/
+# fM3/xymYOXWHF/wcD+I5Vd1OK8VPY/UgsLJsnwjDrPlu0Z/WlDQUtuREi45h0MiU
+# qOHQGMTfvi3R8N5q7WoyYnwy/9OikpnC9omrNGH2cvOSO+BG0pKU7m1MTjRsq3ad
+# r/d2osLunnFRiB+1XJhlL0T+GjCf0Ho3PgASQ2pWa3DSs/nHdvoMIGgZdG9g8NeF
+# eMzsRrmzmW1wwmF7LLupvY82sp6EcsZy+Auk/myt5n+Zb0+dWVcGhcljHPEmVNSy
+# ugR/U5sBy0R9UFzLDaMk1sDAYxmm1M+K85OjGpiIUGAJ+Kt2vSgh1SL7lFS25tg4
+# 6Lm+tNY4Vr75SWrFKi5tsHdHUOw1H4mlVTLbDzXMU27pvBFCZRoGy3gQAjL7TEsY
+# C5Spz5eL0Ktb89XLyabjax93th4l1SispA2aLikttE9xFTVo9ZCpmnQxZwbqznRb
+# DRYEE0wnGo0mSCFJJTjc8UIYXvzMjjmJRmyiToCQWGnENOvZ9AGBe/emcLwZwPwd
+# vu2Is2lswKixxH6pONO+VIXl4hutq2q8VkwjSoM3YmrrT91wvabVe3ysOuvLU0bq
+# dMe8O3Q7Yf8VQ4U=
 # SIG # End signature block

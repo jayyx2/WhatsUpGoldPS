@@ -31,7 +31,7 @@ Last modified: Let's see your name here 2024-06-15
 #>
 
 function Remove-WUGDevices {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [Parameter()][switch]$DeleteDiscoveredDevices
@@ -51,6 +51,8 @@ function Remove-WUGDevices {
             $batchEnd = [math]::Min($devicesProcessed + $batchSize, $totalDevices)
             $devices = $DeviceID[$devicesProcessed..($batchEnd - 1)]
             $devicesProcessed += $devices.Count
+
+            if (-not $PSCmdlet.ShouldProcess("$($devices.Count) devices", 'Remove devices')) { continue }
 
             $body = @{
                 operation                 = "delete"
@@ -89,8 +91,8 @@ function Remove-WUGDevices {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAOM2McnERLJjYz
-# k1ijUweS+ydPI05imHq675GDruoT4KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjxeOlwMAuIEIu
+# yDhqsZavc0zH/nznJPI/aKXIOtHY56CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -190,17 +192,17 @@ function Remove-WUGDevices {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgw08swycc4KZtGsnQCMU476DtESBjJ5Ix
-# dEJjG2X/hiowDQYJKoZIhvcNAQEBBQAEggIAObE3tkB0IrAnFghMWZ74l1yeBEZm
-# cPvFYUzysj4q37E/QK0EjSTTJLj7oXoTIXXFDhqJC0U38puNIT5l2s7MGFV5kI+H
-# tQkynTMHQ1754oENt+Ax+Sm3OfQGODRnN9hNIzg9qqB7k/+qSiBFFo5g5m3us9Yj
-# veXBcE91P5IQHisWZ1cu3G2xmuvfuNTjr4yZB3YFEhx+qkUWGSIBXim7cNUsUrcB
-# UdyGC1bypkmsNb8KI9w96FElKR1V99y+7yDTH6kB8LShaAgPkIyQZ4SZM7SE4uDF
-# G1v8C2EzWCNKqEYwaxeYR2nHCvRdFdkaHinU627UCVTML357hs9fF2TGpamo4TpW
-# C5DP/Bakij7ue7PjSsYttKG6zLIy5mxBVu9sU8KVy2gx5UjH/QJvWCon6TXyC41P
-# UYYX7dNpgJIxWrdeObxqV0pSk+4vH2537TOwXkU23Xpe8Ca25+QCOY6qUVkvBXgF
-# F/6i2DP3/q/S1ivapccu7Hv8ToBXTEJvV6ambCBKrODp6+niNS82UFgh1kAxx6wH
-# DBK+DaJsKUNIa5jxD9pEPUB0K+KULCULZVIAw7UYVDmBWuddjXk/YuLu0uNJR8Pj
-# szUpOts+2BtxoXL4kVjT40gADPbxWuE1k0+tTpGr5Y+/fOs3Du17+Hn8UKvh1A9A
-# w9TpLtpfx8bKbXk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgyAj0QrzqpnSymARhQnGjIdM3is8ZoAdE
+# Z/rGUjM+/scwDQYJKoZIhvcNAQEBBQAEggIARisDgJqHV3juE+PbkYRrC6pTtiFr
+# Lfol7hW86eVlkYssWVbKr6kMUXn91BXoS3uh6kolds08zY1t3LOgio3m+XNboIQi
+# nTSNFcRSj0pSkwJY63hl/VV4tq0pqJ6OXTAKP8VPbVNhgnFpKYUeof9NneULPjas
+# VYSS7oww/5avVq+nHI9ZuEp0sNldi8vUXr2W8XEGoaFclno9+oXhsQZe7hNDxxa2
+# OkOLDDbWyEc1PzclJPXW/Ou7W6oeZeFnD1hI0AmmM/vYVnkZ58rbNwbPEGaZGPuN
+# xWgFHNEIfxh7V0q66/BNfuFOHkE0LOFlmdyX4dR4HF+PkzsyStEHy7bLR5rmKO3o
+# Sa5LH/DAy94WLeXW1Y3FMkZZsyde5qNO2Eef/sOMnAmnCN9aGBNPy/+tzWu/uzXN
+# kn9VhRU9G/1d5ZsFkScSxyJSgz13oF5v1TzdNbta/S6/pcoOR7UyhEDIKaBFUBHH
+# FSbGAESgGtKa35NyYB28ga1TKqNbxnvlw/7hrViMsXdWNFK+W4HycwvSlasYzIVZ
+# ivRt+tCGvPyEfR4FnAEBgue/+9NptvhQq11B6zYd1dHPDLQYEKWESDE60xeKgB5l
+# cspnU9hkpocBBhWMo1Kg7CrXycIberYS6IdAMdU570VLhWOXinNcpXr/nd/qewT6
+# gFMg28IkZHu/qpw=
 # SIG # End signature block

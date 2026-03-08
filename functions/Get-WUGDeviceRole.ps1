@@ -10,6 +10,17 @@ It supports multiple operations via parameter sets:
 - Get role assignments for a specific role or all roles
 - Get role templates
 - Get percent variables
+- Get roles assigned to a specific device
+
+.PARAMETER DeviceId
+The ID of the device to retrieve role assignments for. Used with the DeviceRoles parameter set.
+Queries GET /api/v1/devices/{deviceId}/roles/-.
+
+.PARAMETER DeviceRoles
+Switch to retrieve roles assigned to a specific device.
+
+.PARAMETER DeviceRoleKind
+Filter device role assignments by kind. Valid values: all, role, brand, os, subRole.
 
 .PARAMETER RoleId
 The ID of the device role. Used with ByRoleId, Assignments, and Template parameter sets.
@@ -92,6 +103,12 @@ Get-WUGDeviceRole -AllTemplates -Kind role -Options all
 .EXAMPLE
 Get-WUGDeviceRole -PercentVariables -Choice monitoredDevice
 
+.EXAMPLE
+Get-WUGDeviceRole -DeviceRoles -DeviceId "123"
+
+.EXAMPLE
+Get-WUGDeviceRole -DeviceRoles -DeviceId "123" -DeviceRoleKind brand
+
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/DeviceRole
@@ -158,6 +175,16 @@ function Get-WUGDeviceRole {
         [Parameter(Mandatory = $true, ParameterSetName = 'PercentVariables')]
         [switch]$PercentVariables,
 
+        [Parameter(Mandatory = $true, ParameterSetName = 'DeviceRoles')]
+        [switch]$DeviceRoles,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'DeviceRoles', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [string[]]$DeviceId,
+
+        [Parameter(ParameterSetName = 'DeviceRoles')]
+        [ValidateSet('all', 'role', 'brand', 'os', 'subRole')]
+        [string]$DeviceRoleKind,
+
         # DeviceView for Assignments and AllAssignments
         [Parameter(ParameterSetName = 'Assignments')]
         [Parameter(ParameterSetName = 'AllAssignments')]
@@ -189,12 +216,14 @@ function Get-WUGDeviceRole {
         [Parameter(ParameterSetName = 'Assignments')]
         [Parameter(ParameterSetName = 'AllAssignments')]
         [Parameter(ParameterSetName = 'AllTemplates')]
+        [Parameter(ParameterSetName = 'DeviceRoles')]
         [string]$PageId,
 
         [Parameter(ParameterSetName = 'ListRoles')]
         [Parameter(ParameterSetName = 'Assignments')]
         [Parameter(ParameterSetName = 'AllAssignments')]
         [Parameter(ParameterSetName = 'AllTemplates')]
+        [Parameter(ParameterSetName = 'DeviceRoles')]
         [int]$Limit
     )
 
@@ -352,6 +381,27 @@ function Get-WUGDeviceRole {
                     Write-Error "Error fetching percent variables: $_"
                 }
             }
+
+            'DeviceRoles' {
+                foreach ($did in $DeviceId) {
+                    $queryParams = @()
+                    if ($DeviceRoleKind) { $queryParams += "kind=$DeviceRoleKind" }
+                    if ($PSBoundParameters.ContainsKey('Limit')) { $queryParams += "limit=$Limit" }
+                    if ($PageId) { $queryParams += "pageId=$([uri]::EscapeDataString($PageId))" }
+
+                    $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                    $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${did}/roles/-${query}"
+
+                    Write-Debug "Fetching device roles from URI: $uri"
+                    try {
+                        $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                        if ($result.data) { $finalOutput += $result.data }
+                    }
+                    catch {
+                        Write-Error "Error fetching roles for device ${did}: $_"
+                    }
+                }
+            }
         }
     }
 
@@ -364,8 +414,8 @@ function Get-WUGDeviceRole {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAhK6kJud3Q7/Ay
-# TXr8MelwLyf2zPWx2FTTxucsQ0gEaKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC65cfSl8y2nkI1
+# oYAB3MQdpDsgzrLsvB5FjamQW3rhtKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -465,17 +515,17 @@ function Get-WUGDeviceRole {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgTmhhncyCPUqn8XolVA43pOpVA6sahbCX
-# yGJoi7eOGokwDQYJKoZIhvcNAQEBBQAEggIAmVFzkH3k7gC4i+Ll5+iW/anuo7LJ
-# yNcL4jSTM9TipOjCRCqbggLT3Pv0iX4KRGq3RLNkdmKcYlSyH3MnOijy4JrCIDwp
-# oFpmjsI55lPFzfBYp8g0KHV+/K6PWiXRGWJWeD07HPWunCABnjz9pUfKYhvr09YL
-# oTluRvzV7I67WOcqD/GG0XFEEyPY+7HFZQFjEJh1zTIvqTTsuBPYPS97HhiLmg66
-# 79LovJ0NafE0/fPFsAY5ZnCCOc70igaLvIrLI7VP9CQQlradkLF4szLLkOmnFao6
-# tF9Kbls+9hKNo5lEvIrOsG563eVVt4p5/xUmpDhMopc535xwnG/i1R+CsoHTMI/z
-# 6Zf1OJjtO3XLII808RR2TNslh5Eddb0sihbOF7Bmiu165WI4TWiTosrCFDOlj9ym
-# NJtwmvcjtrD0eILI65GjK1qZDNjKKkOY1HLXg1DkBwuBnI2sVBVfLeNswckBDizv
-# dsdSHaihWnU5v8dxgFQuGjqKfj8TCsvPo/IbHHwZp7sDUvJC+wDqtWXNQLUfCnNN
-# uuv25tM4filhv2x95MR45gJ/na5bTiudV0uFtQlzU7iE79pYJ54r6VPO21BoY0/v
-# 7hS3gdZFsZozylCJdBH30LoLJ9VwRs7BY6W1DYL4N46O0DZ1ieBwz60VJo19eDlJ
-# vuaeCVFDLwnO7jk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQguMg6PEUpi5gPg4zBKkM/7APSHw9alWQ+
+# l7jyhxzKUvQwDQYJKoZIhvcNAQEBBQAEggIAKQ50exgq31aMl4M0mxpZvB1eaQ/5
+# OgsiL+6CjJaP/8o2+/SDb97rQM4whgaEu16VnlaMi84mjyIusHUpOtt9VKwxGCg6
+# U6OKpr0/ny8HoKlJ3lRpGkdJ6sbNaVzrMY903jLaLGQUtwwj45bpCIFoQFY+6w7B
+# dTLL3FsBl6x9PhGAYko4AxN0LUVx9+yCforASeVDgXfp9nlGLlTXRSmmv2xH4Nup
+# PzzsALajG4xJN0TWPqa7dp01GE6IXhh1279N7Y7fpL3VE+OLPAPN5P6sT8LuTSLC
+# TDRzFWJhsSQcvD/dU25WvC7Ua1WtqW1gzeOUrrPqP3+F3yXdxMtJ7Ec3TA3i+DaH
+# PMzWixc6Rln+1qwu7bxTKBnK09SKtv0NAqdOZ26JDlIrZmLUFOA96t7TWqs2nIWB
+# iiiy5xjdt/M6BD6MJhcLAi9WGs2pnjQ/dr0cg4pm/X2prIdQDWPWFrwaHTrJ7KYR
+# shuvr3liW8iYe3TKLbxsyhiLZOykhwZnCCgSlVdL25Ivdccw/SFNB6c5bYTUIJVA
+# RLBk3u6g3ow/dFVxN5wcHF0ixGNjLuYoAnpc9qyn76TyNksB6Vdfh8O/zUIIyvdI
+# LFl063lcxGFLClnOJJHYljt2KuK3ZUNTbmPXmdY2BKrfgfVNbLQB554B5XOXoArm
+# 8aQjOoj6xdRWBjI=
 # SIG # End signature block

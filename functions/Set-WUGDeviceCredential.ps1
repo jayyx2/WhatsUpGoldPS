@@ -1,138 +1,156 @@
 <#
 .SYNOPSIS
-    Assigns an active monitor to a device in WhatsUp Gold.
+Manages credential assignments on a device in WhatsUp Gold.
 
 .DESCRIPTION
-    Add-WUGActiveMonitorToDevice assigns a specified active monitor template to a device
-    via the WhatsUp Gold REST API (POST /api/v1/devices/{deviceId}/monitors/-). Optional
-    parameters control polling interval, comment, argument, interface binding, critical
-    order, and action policy.
+The Set-WUGDeviceCredential function assigns, unassigns, or removes credentials from a device:
+- Assign credential: POST /api/v1/devices/{deviceId}/credentials/-
+- Unassign specific credential: DELETE /api/v1/devices/{deviceId}/credentials/{credentialId}
+- Remove all credentials by type: DELETE /api/v1/devices/{deviceId}/credentials/-
 
 .PARAMETER DeviceId
-    The ID of the device to assign the monitor to. Required.
+The ID of the device to manage credentials for. Required.
 
-.PARAMETER MonitorId
-    The monitor template ID (monitorTypeId) to assign. Required.
+.PARAMETER CredentialId
+The ID of the credential to assign or unassign. Required for Assign and Unassign parameter sets.
 
-.PARAMETER Enabled
-    Whether the monitor should be enabled. Valid values: true, false. Default: true.
+.PARAMETER Assign
+Switch to assign a credential to the device.
 
-.PARAMETER Comment
-    An optional comment for the monitor assignment.
+.PARAMETER Unassign
+Switch to unassign a specific credential from the device.
 
-.PARAMETER Argument
-    An optional argument string passed to the monitor.
+.PARAMETER RemoveByType
+Switch to remove all credentials of a specific type from the device.
 
-.PARAMETER InterfaceId
-    The interface ID to bind the monitor to, if applicable.
+.PARAMETER Type
+The type of credentials to remove when using RemoveByType. Valid values: all, snmp, windows, ado, telnet, ssh, vmware, jmx, smis, aws, azure, meraki, restapi, ubiquiti, redfish. Default: all.
 
-.PARAMETER PollingIntervalSeconds
-    The polling interval in seconds (10-86400).
-
-.PARAMETER CriticalOrder
-    The critical order ranking (0-100).
-
-.PARAMETER ActionPolicyId
-    The ID of the action policy to associate with this monitor.
-
-.PARAMETER ActionPolicyName
-    The name of the action policy to associate with this monitor.
+.PARAMETER PreventOrphanActiveMonitors
+Prevent the operation if an active monitor would be orphaned. Default: true.
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5
-
-    Assigns active monitor template 5 to device 42 with default settings.
-
-.EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5 -PollingIntervalSeconds 60 -Comment "HTTP check"
-
-    Assigns active monitor 5 to device 42 with a 60-second polling interval and a comment.
+# Assign a credential to a device
+Set-WUGDeviceCredential -DeviceId "123" -CredentialId "abc-456" -Assign
 
 .EXAMPLE
-    Add-WUGActiveMonitorToDevice -DeviceId 100 -MonitorId 12 -Enabled false -ActionPolicyName "Email Admins"
+# Unassign a credential from a device
+Set-WUGDeviceCredential -DeviceId "123" -CredentialId "abc-456" -Unassign
 
-    Assigns monitor 12 to device 100 in a disabled state with the "Email Admins" action policy.
+.EXAMPLE
+# Remove all SNMP credentials from a device
+Set-WUGDeviceCredential -DeviceId "123" -RemoveByType -Type snmp
 
 .NOTES
-    Author: Jason Alberino (jason@wug.ninja)
-    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Monitors
+Author: Jason Alberino (jason@wug.ninja)
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/Device
 #>
-function Add-WUGActiveMonitorToDevice {
+function Set-WUGDeviceCredential {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeviceId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$MonitorId,
-        [ValidateSet("true", "false")][string]$Enabled = "true",
-        [string]$Comment,
-        [string]$Argument,
-        [string]$InterfaceId,
-        # Range validated per WhatsUp Gold REST API spec: minimum 10 seconds, maximum 86400 seconds (24 hours)
-        [ValidateRange(10, 86400)][int]$PollingIntervalSeconds,
-        [ValidateRange(0, 100)][int]$CriticalOrder,
-        [string]$ActionPolicyId,
-        [string]$ActionPolicyName
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('id')]
+        [string]$DeviceId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Assign')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Unassign')]
+        [string]$CredentialId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Assign')]
+        [switch]$Assign,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Unassign')]
+        [switch]$Unassign,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveByType')]
+        [switch]$RemoveByType,
+
+        [Parameter(ParameterSetName = 'RemoveByType')]
+        [ValidateSet('all', 'snmp', 'windows', 'ado', 'telnet', 'ssh', 'vmware', 'jmx', 'smis', 'aws', 'azure', 'meraki', 'restapi', 'ubiquiti', 'redfish')]
+        [string]$Type = 'all',
+
+        [Parameter(ParameterSetName = 'Unassign')]
+        [Parameter(ParameterSetName = 'RemoveByType')]
+        [bool]$PreventOrphanActiveMonitors = $true
     )
 
-    Begin {
-        Write-Debug "Begin block: Starting function Add-WUGActiveMonitorToDevice."
-        $baseUri = "$(${global:WhatsUpServerBaseURI})/api/v1/devices/${DeviceId}/monitors/-"
+    begin {
+        Write-Debug "Starting Set-WUGDeviceCredential function. ParameterSet: $($PSCmdlet.ParameterSetName)"
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
     }
 
-    Process {
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Building activeParams hashtable."
+    process {
+        switch ($PSCmdlet.ParameterSetName) {
 
-        $activeParams = @{}
-
-        if ($Comment) { $activeParams.comment = $Comment }
-        if ($Argument) { $activeParams.argument = $Argument }
-        if ($InterfaceId) { $activeParams.interfaceId = $InterfaceId }
-        if ($PollingIntervalSeconds) { $activeParams.pollingIntervalSeconds = $PollingIntervalSeconds }
-        if ($CriticalOrder) { $activeParams.criticalOrder = $CriticalOrder }
-        if ($ActionPolicyId) { $activeParams.actionPolicyId = $ActionPolicyId }
-        if ($ActionPolicyName) { $activeParams.actionPolicyName = $ActionPolicyName }
-
-        $body = @{
-            type          = "active"
-            monitorTypeId = $MonitorId
-            enabled       = $Enabled
-            isGlobal      = "true"
-            active        = $activeParams
-        } | ConvertTo-Json -Depth 5
-
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Sending request to URI: $baseUri"
-        Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Request body: $body"
-
-        if (-not $PSCmdlet.ShouldProcess("Monitor $MonitorId on device $DeviceId", 'Assign active monitor')) { return }
-
-        try {
-            $result = Get-WUGAPIResponse -Uri $baseUri -Method POST -Body $body
-
-            if ($result.data.successful -eq 1) {
-                Write-Output "Successfully assigned active monitor ID: $MonitorId to device ID $DeviceId"
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
+            'Assign' {
+                $uri = "${baseUri}/${DeviceId}/credentials/-"
+                $body = "`"${CredentialId}`""
+                Write-Debug "POST URI: $uri, Body: $body"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'POST' -Body $body
+                    if ($result.success) {
+                        Write-Host "Successfully assigned credential ${CredentialId} to device ${DeviceId}." -ForegroundColor Green
+                    }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error assigning credential to device ${DeviceId}: $_"
+                }
             }
-            else {
-                Write-Warning "Failed to assign active monitor to device."
-                Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full result data: $(ConvertTo-Json $result -Depth 10)"
+
+            'Unassign' {
+                if (-not $PSCmdlet.ShouldProcess("Credential ${CredentialId} on device ${DeviceId}", 'Unassign credential')) { return }
+                $queryParams = @()
+                if (-not $PreventOrphanActiveMonitors) { $queryParams += "preventOrphanActiveMonitors=false" }
+                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                $uri = "${baseUri}/${DeviceId}/credentials/${CredentialId}${query}"
+
+                Write-Debug "DELETE URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
+                    if ($result.success) {
+                        Write-Host "Successfully unassigned credential ${CredentialId} from device ${DeviceId}." -ForegroundColor Green
+                    }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error unassigning credential from device ${DeviceId}: $_"
+                }
             }
-        }
-        catch {
-            Write-Error "Error assigning active monitor: $($_.Exception.Message)"
-            Write-Debug "Process block: [Add-WUGActiveMonitorToDevice] Full exception details: $($_.Exception | Format-List * | Out-String)"
+
+            'RemoveByType' {
+                if (-not $PSCmdlet.ShouldProcess("${Type} credentials on device ${DeviceId}", 'Remove credentials by type')) { return }
+                $queryParams = @()
+                if ($Type) { $queryParams += "type=$Type" }
+                if (-not $PreventOrphanActiveMonitors) { $queryParams += "preventOrphanActiveMonitors=false" }
+                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                $uri = "${baseUri}/${DeviceId}/credentials/-${query}"
+
+                Write-Debug "DELETE URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
+                    if ($result.success) {
+                        Write-Host "Successfully removed ${Type} credentials from device ${DeviceId}." -ForegroundColor Green
+                    }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error removing credentials from device ${DeviceId}: $_"
+                }
+            }
         }
     }
 
-    End {
-        Write-Debug "End block: Completed function Add-WUGActiveMonitorToDevice."
+    end {
+        Write-Debug "Completed Set-WUGDeviceCredential function."
     }
 }
-
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBabXWf8b2SuRHK
-# E2838mQASune+DIy25J9BLLf8pBPAaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApZMlOfHZ0MNU7
+# GS/5EmhhpQlbzhWf9IPfMlxqFUY/waCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -232,17 +250,17 @@ function Add-WUGActiveMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg9ZKcvFj/sl7GZvvY7lUq38VedO/iFzwk
-# bDIPMKI3gCQwDQYJKoZIhvcNAQEBBQAEggIADr+kSOom5l0TjgtjXDtzfp9HKB4B
-# h3BVZpWu3srF6R7AjpuEIgZVH7jvJ2hpVa+7L6nWjF7neyxaMySrYj7YVCMAlGFS
-# OuUfaaDQjinI4T/xnL6JigO/s3Zsuw6mCRI9D7uqQGcE2AzbTMnlBcIgWL61/r01
-# W622OhV5jdbImtyc0zaWxyKXOvASgF9YXj/Ueq+5PIKtSQDGPgnDISsO6HLZNKaR
-# NrLBbLGlQ8EFCiYwRLxLSDDfmFgD2p4d5/PX1GN9tcb6AlmGZLD6ydzhomHlWaGg
-# 19vjnsUZhQsRZHKox7cNC5l218Oklibh/QzZObXN4Nh2hT4mZHmbMo+VqhrcAqjH
-# wFrKIYwuRNr1gxBMqy5Il7E/K0pLWzRufeLXpRTYK0rynyL45ozYPQY597upActT
-# K8JAu2qoTtZjCRo93CF4aQWODU+PTUPzCkeYrg7vwy866eQ6W3Ksxniby7ARVE6h
-# C8glNtKzTuMVlJTfKgTD6UCg2rrePUFtIjADQMABKXbJoJjbnDQy33RhnfXxz6zd
-# 4LA7yDmL4ivxnveSmE0xnZfXBIMpX5+YKNRxxS47Q39q80N6dDgHOLAlR2KuiaTs
-# TnHuhJWirQilYruV1u+qd2J8V86gNffQ1E8Vbz4FTsioqerxbD2JnYvU75Xi5N3z
-# GYcJfbDPKgraSLY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgiHLqZbdFiazNvnffl/mqO1QjVtldSWRc
+# wKtt1mfuXs8wDQYJKoZIhvcNAQEBBQAEggIANoC1/Bc5pxW1ZBnvR7muzoUFWiWk
+# ad4oZ6CTdm/Mrqw0o0pQ+gHzgARBIwKlautjt+Sq+p2ouBOsl8/44BtH4OtJerOx
+# dYDL5VukiXaN/DdfDnHh35Tg0eVuJfGkr84Np3xFc9o8fMl0ePro7dYtwZGEdfrW
+# U/j94Ew/igg3zQ7SKOC+0JTCvfAVNLWfUMiSOAGzZ/7mI2unbdxmMxBtcZ8Sa1ip
+# ffHT7EVuJHS+xSRmpDZmuaqi/OFO7OtMLjDj/Clb0T8YCyNNsIngpekhI/sxCBlw
+# BYdyMgX6JWqc83p5+EXBCOL3Hk19NTH5UrxIUNQFH0ZrPIxO4xEFkpoMbQ7ul7ky
+# 3/Kh2Kj11ySLhQHABp9hUce8SRrN6168gTtN+MyQO5Ex3PT2gV8aYh1nuhSM94FU
+# yN+4781sBmD7Dd+b97C6pg4qlU82YIMXo98/g0usRUfDJMi4p1UFlA0UCdXQMNoI
+# 2Av3tQqyEt7y9UCDSKD3YGaJwiNxRA68T/x81GTpR+IBbWxmGyISn0vEQjIix/yn
+# fxk/YTBT1KgWK81c6SJPQW8W/5CqG1E44bQHaTFMay8SJ2c5en3GKdRGb3mq87GA
+# zW+eorSEThDQS1LWqKk63yutYbTTlXG+uknfuVzqzHoTmz/4WXEfKXl5l6W94lMO
+# 7PctJBoQaXveqfw=
 # SIG # End signature block

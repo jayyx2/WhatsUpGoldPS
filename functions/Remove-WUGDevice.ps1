@@ -36,7 +36,7 @@ Last modified: Jason Alberino 2024-06-15
 
 #>
 function Remove-WUGDevice {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [Alias('id')]
@@ -62,6 +62,7 @@ function Remove-WUGDevice {
 
         $devicesProcessed = 0
         foreach ($id in $collectedDeviceIds) {
+            if (-not $PSCmdlet.ShouldProcess("Device $id", 'Remove device')) { continue }
             $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/$id"
             if ($DeleteDiscoveredDevices) {
                 $uri += "?deleteDiscoveredDevices=true"
@@ -106,8 +107,8 @@ function Remove-WUGDevice {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAN/VE89YPoESLY
-# ptRqigzX6/267cpKCXZAj8NQ5zRzdqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3T4xw9jYIwL93
+# soG1LmiD14UMF2jUTsK3JKugzujk+qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -207,17 +208,17 @@ function Remove-WUGDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgA3CtKGa86RdA1Y88KezEeqGjAooIEUpR
-# wN79SmVkD6YwDQYJKoZIhvcNAQEBBQAEggIA4BU8qcB/XXcJ2mKPZPM3XpBFgmff
-# Vv+D9/cTLygsrP9nmz3Rnc/5NBFS7NQFoZ4htMqUAjM4aGH2oSBXAsCcgdXAlOz2
-# eY6s5E2fzw0jTjXP4kQB2+wck1ehw9Y5OqSwmcy+sKEcgY8R5zcAHzyPzHT8LXFz
-# BSTkUM5uK/I3ug5P3yO9KJMja1ozOUNN668SCe+n9uZLeAntXQ8beEoxI72PExpq
-# MxFOhUCIdHKCX/GJsN3eWLFb8ugwCf7/JBn5TqK8o/1QWbNjfIXQNhFaZRp8JwNa
-# IPXbsTL+j0pKV3GpgVbeOysbX7/B6CctdwSVbS24GlfsDpPvakDWX6El1yqpjzaK
-# 9BZcW95ss7o0YnJ4bazKqX6+enS3XvX1DU+f+p8GC99DpD7GRkNY9QRgv/jm0b20
-# YZ30wAAXebD129J5R9KSyz5DkDSRrZURNRp6eokoDRQj6uYOZEOfp9l7wJxGtd86
-# Jnnc6/VkhCX2aekrEwUQmENi/s0dVEf2nX6frPYcx7Tjx2LxcVSGPok5do4ogtBe
-# ez6n/FWIB6SqQqt17+N/qtaqQU1xxtYtKmKJjgGmvUMpq/c+4aLkigop6gb20Ipg
-# CkyjFDB1Y+huomfqjjfrFRUax3pgZjedAP5Jed+gb4u6g0z4zGawslqT5JSySqpV
-# oOUBIqxosymBCsw=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg0N6TM0Smet/Khel4AaRRb9QSm3Qb9o7i
+# eoHBZOB1WP8wDQYJKoZIhvcNAQEBBQAEggIAY3zmAi42/y7lQjD2I4P+T/ln2tDw
+# z4oX9ues2hyzCFwB9sx9u0rKIPWSpT3BWXD4ocqHMUErkkmET+HVE5+cH/oBVXpP
+# qmmPsFJfk5h9KK6zXAWbj/NgkzWqYnuNn2JaCAgTeu7e/pDKroFmqqLjjxfY4E0N
+# pfhaMTiXea9XmId+nXcaLASEXbXQvKB4CklkJlzXc/sFxAxh0SGaBGlOq+huBzs5
+# /5lpW3o5YHRB9FKjm18gTpOUIiL19OBA3s2Z/jLhI1a7/fb0i2W0P4GFDRL12wH+
+# TJKtpbyfAWOMc+qQJUw65La4k4RdrXjB9d/3r57QAWpQ8ZOPDUDK+fh+ncSY1YL5
+# 3rXxZm51n0JMY8OqIZJZMxcazfUFHL052a91ip4iQoNXiVuZPpUPvBIYyo4fQxqY
+# ju2Oyl1zRe4hn8Wmq6X1PWGA/0nc1D6Ul+EOPMIac5jh+71BoW52nDdOSDynLWs9
+# M6gUZr/6j4siN+M4NPe/3zX0/+3vNDEcG0ueDmg2kGws1HCt64RbWHCLjbidfAHz
+# PR0TH9gz6n9nrSUzSZSatU0NO03OXBTbuJgZlorjxPmGQ4RSHpTs30g9f3/U3JBm
+# ZbztIJmvk2II6+aK/HETjpt/YTYPe1Xo5XL0TesqhHcM0VmoKzjiFXMSj3mo2Y2F
+# bVuD6CNoq0sZf7E=
 # SIG # End signature block

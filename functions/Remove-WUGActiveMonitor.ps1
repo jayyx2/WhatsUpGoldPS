@@ -1,21 +1,34 @@
 <#
 .SYNOPSIS
-    Deletes active monitor templates from WhatsUp Gold by search term.
+    Deletes monitor templates from WhatsUp Gold by search term, by monitor ID,
+    or removes all assignments for a specific monitor.
 
 .DESCRIPTION
-    Remove-WUGActiveMonitor deletes active monitor templates matching a search string
-    via the WhatsUp Gold REST API (DELETE /api/v1/monitors/-). Optionally includes
-    device-assigned and system monitors in the deletion scope, and controls whether
-    the operation should fail if a monitor is currently in use.
+    Remove-WUGActiveMonitor deletes monitor templates from the WhatsUp Gold library:
+    - BySearch: DELETE /api/v1/monitors/- (bulk delete by search string)
+    - ById:     DELETE /api/v1/monitors/{monitorId} (delete a single monitor)
+    - RemoveAssignments: DELETE /api/v1/monitors/{monitorId}/assignments/- (remove all device assignments)
 
 .PARAMETER Search
-    A search string to identify the active monitors to delete. Required.
+    A search string to identify the monitors to delete (BySearch parameter set).
+
+.PARAMETER MonitorId
+    The ID of a specific monitor to delete or manage (ById / RemoveAssignments parameter sets).
+
+.PARAMETER RemoveAssignments
+    Switch to remove all device assignments for the specified MonitorId instead of deleting the monitor itself.
+
+.PARAMETER Type
+    The type of monitor to delete. Valid values: all, active, performance, passive. Default: active.
 
 .PARAMETER IncludeDeviceMonitors
     Include device-assigned monitors in the deletion scope. Default: false.
 
 .PARAMETER IncludeSystemMonitors
     Include system-level monitors in the deletion scope. Default: false.
+
+.PARAMETER IncludeCoreMonitors
+    Include core monitors in the deletion scope. Default: false.
 
 .PARAMETER FailIfInUse
     Whether the operation should fail if a matching monitor is currently in use. Default: true.
@@ -26,97 +39,149 @@
     Deletes active monitor templates matching "ROC-Mon".
 
 .EXAMPLE
-    Remove-WUGActiveMonitor -Search "HTTP" -IncludeDeviceMonitors $true -FailIfInUse $false
+    Remove-WUGActiveMonitor -MonitorId "abc-123"
 
-    Deletes active monitors matching "HTTP", including device-assigned monitors,
-    even if they are currently in use.
+    Deletes the specific monitor template with ID abc-123.
 
 .EXAMPLE
-    Remove-WUGActiveMonitor -Search "Old Monitor" -IncludeDeviceMonitors $true -IncludeSystemMonitors $true
+    Remove-WUGActiveMonitor -MonitorId "abc-123" -RemoveAssignments
 
-    Deletes all active monitors matching "Old Monitor" from both device and system scopes.
+    Removes all device assignments for monitor abc-123 without deleting the template.
+
+.EXAMPLE
+    Remove-WUGActiveMonitor -Search "HTTP" -Type performance -IncludeDeviceMonitors $true -FailIfInUse $false
+
+    Deletes performance monitors matching "HTTP", including device-assigned monitors,
+    even if they are currently in use.
 
 .NOTES
     Author: Jason Alberino (jason@wug.ninja)
     Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Monitor-Templates
 #>
-# Broken API?
-# Example: Delete all active monitors containing 'ROC-Mon' in their name
-#Remove-WUGActiveMonitor -Search "ROC-Mon" -IncludeDeviceMonitors $true -IncludeSystemMonitors $false -FailIfInUse $false
 function Remove-WUGActiveMonitor {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'BySearch', SupportsShouldProcess = $true)]
     param(
-        # Mandatory search parameter to delete specific monitors
-        [Parameter(Mandatory = $true)]
+        # Search string to identify monitors to delete
+        [Parameter(Mandatory = $true, ParameterSetName = 'BySearch')]
         [string]$Search,
 
-        # Optional parameters for monitor deletion behavior
-        [Parameter()]
+        # ID of a specific monitor to delete or manage assignments for
+        [Parameter(Mandatory = $true, ParameterSetName = 'ById')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveAssignments')]
+        [string]$MonitorId,
+
+        # Remove all device assignments for the specified monitor
+        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveAssignments')]
+        [switch]$RemoveAssignments,
+
+        # Type of monitor to delete
+        [Parameter(ParameterSetName = 'BySearch')]
+        [ValidateSet('all', 'active', 'performance', 'passive')]
+        [string]$Type = 'active',
+
+        # Include device-assigned monitors in the deletion scope
+        [Parameter(ParameterSetName = 'BySearch')]
         [bool]$IncludeDeviceMonitors = $false,
 
-        [Parameter()]
+        # Include system-level monitors in the deletion scope
+        [Parameter(ParameterSetName = 'BySearch')]
         [bool]$IncludeSystemMonitors = $false,
 
-        [Parameter()]
+        # Include core monitors in the deletion scope
+        [Parameter(ParameterSetName = 'BySearch')]
+        [bool]$IncludeCoreMonitors = $false,
+
+        # Whether the operation should fail if a matching monitor is in use
+        [Parameter(ParameterSetName = 'BySearch')]
         [bool]$FailIfInUse = $true
     )
 
     begin {
-        Write-Debug "Initializing Remove-WUGActiveMonitors function with search term: '$Search'"
-
-        # Ensure the base URI is correctly set from the global configuration
-        $baseUri = "$($global:WhatsUpServerBaseURI)/api/v1/monitors/-"
-
-        # Build the query string using the provided parameters
-        $queryString = "type=active&"  # Always set to 'active' monitor type
-        $queryString += "search=$([uri]::EscapeDataString($Search))&"
-
-        if ($IncludeDeviceMonitors) { 
-            $queryString += "includeDeviceMonitors=true&" 
-        }
-        if ($IncludeSystemMonitors) { 
-            $queryString += "includeSystemMonitors=true&" 
-        }
-        if (-not $FailIfInUse) { 
-            $queryString += "failIfInUse=false&" 
-        }
-
-        # Trim the trailing '&' from the query string
-        $queryString = $queryString.TrimEnd('&')
-
-        # Construct the final URI with the base and query string
-        $uri = "${baseUri}?${queryString}"
-        Write-Verbose "Constructed URI: $uri"
+        Write-Debug "Initializing Remove-WUGActiveMonitor function. ParameterSet: $($PSCmdlet.ParameterSetName)"
+        $monitorsBaseUri = "$($global:WhatsUpServerBaseURI)/api/v1/monitors"
     }
 
     process {
-        Write-Host "Deleting monitors matching the search query: '$Search'" -ForegroundColor Cyan
+        switch ($PSCmdlet.ParameterSetName) {
 
-        try {
-            # Perform the DELETE request to the WUG API
-            $result = Get-WUGAPIResponse -Uri $uri -Method DELETE
+            'BySearch' {
+                # Build the query string using the provided parameters
+                $queryParams = @()
+                $queryParams += "type=$Type"
+                $queryParams += "search=$([uri]::EscapeDataString($Search))"
 
-            # Handle the response
-            if ($result.data.successful -gt 0) {
-                Write-Host "Successfully deleted $($result.data.successful) monitor(s)." -ForegroundColor Green
-            }
-            elseif ($result.data.errors) {
-                Write-Warning "Errors occurred while deleting monitors:"
-                foreach ($error in $result.data.errors) {
-                    Write-Warning "TemplateId: $($error.templateId) - Messages: $($error.messages -join ', ')"
+                if ($IncludeDeviceMonitors) { $queryParams += "includeDeviceMonitors=true" }
+                if ($IncludeSystemMonitors) { $queryParams += "includeSystemMonitors=true" }
+                if ($IncludeCoreMonitors) { $queryParams += "includeCoreMonitors=true" }
+                if (-not $FailIfInUse) { $queryParams += "failIfInUse=false" }
+
+                $uri = "${monitorsBaseUri}/-?" + ($queryParams -join "&")
+                Write-Verbose "Constructed URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess("Monitors matching '${Search}'", "Delete")) { return }
+
+                Write-Host "Deleting monitors matching the search query: ${Search}" -ForegroundColor Cyan
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method DELETE
+                    if ($result.data.successful -gt 0) {
+                        Write-Host "Successfully deleted $($result.data.successful) monitor(s)." -ForegroundColor Green
+                    }
+                    elseif ($result.data.errors) {
+                        Write-Warning "Errors occurred while deleting monitors:"
+                        foreach ($errItem in $result.data.errors) {
+                            Write-Warning "TemplateId: $($errItem.templateId) - Messages: $($errItem.messages -join ', ')"
+                        }
+                    }
+                    else {
+                        Write-Host "No monitors were deleted." -ForegroundColor Yellow
+                    }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error deleting monitors: $($_.Exception.Message)"
                 }
             }
-            else {
-                Write-Host "No monitors were deleted." -ForegroundColor Yellow
+
+            'ById' {
+                $uri = "${monitorsBaseUri}/${MonitorId}"
+                if (-not $PSCmdlet.ShouldProcess("Monitor ${MonitorId}", "Delete")) { return }
+
+                Write-Debug "DELETE URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method DELETE
+                    if ($result.data) {
+                        Write-Host "Successfully deleted monitor ${MonitorId}." -ForegroundColor Green
+                        return $result.data
+                    }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error deleting monitor ${MonitorId}: $($_.Exception.Message)"
+                }
             }
-        }
-        catch {
-            Write-Error "Error deleting monitors: $($_.Exception.Message)"
+
+            'RemoveAssignments' {
+                $uri = "${monitorsBaseUri}/${MonitorId}/assignments/-"
+                if (-not $PSCmdlet.ShouldProcess("All assignments for monitor ${MonitorId}", "Delete")) { return }
+
+                Write-Debug "DELETE URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method DELETE
+                    if ($result.data) {
+                        Write-Host "Successfully removed all assignments for monitor ${MonitorId}." -ForegroundColor Green
+                        return $result.data
+                    }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error removing assignments for monitor ${MonitorId}: $($_.Exception.Message)"
+                }
+            }
         }
     }
 
     end {
-        Write-Debug "Remove-WUGActiveMonitors function completed."
+        Write-Debug "Remove-WUGActiveMonitor function completed."
     }
 }
 
@@ -125,8 +190,8 @@ function Remove-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAfwUwjKKB6Tq3j
-# E5G/jaLJOhDFv43LAM31N083bh5wT6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqEFBw40pfYbsT
+# ysdVeNpKUi21bgrTpFiKmiNkMEHEy6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -226,17 +291,17 @@ function Remove-WUGActiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgrva1AZZ+D1xY0pm+GKZP0m1AaY1WU9zz
-# vneuqIrx2agwDQYJKoZIhvcNAQEBBQAEggIAWsRhPJNjh+CJULPJY3WJn27d1BfG
-# YWSD6bPep5n6NezVX9OlFrAX2UPeFlnOTszfgcYd/pRcTb8/5vINiZN2tUguHl1B
-# RGzzLwRcf77HLcEjNExsw7zyMNLDlCo2aIecp9+X18Ba+cCGs+PjuJWs4odo7lP6
-# okm0iiy/YVkFu6dP2R8wZf5b11/EKDFyfb8BMmHg4rZA4hVOhBC5SVBsDCyeYu02
-# tF8n9hq2EoroPZVZNA/RV03rgFFy46uUGweh5RHmOW1h9iyUN9er9lNHYoBEsHMk
-# YE7zNhsPm1LH6YT9HVUjNhSwBiRlTUJsOtd8pEdGa3gvfB7kI7HY7dPuL9Mrs3Qj
-# W7dp6gxQtQy8X2iDw2gtTfaMC9tyLUgt3VzAG50f6rz5Xivpj2KVEn4ZOucN3BnC
-# b0qnDjMxffB4oex1Rprr2rEmhO7h5x7OilunZAzk4A2vXvzmbGqdysC8RW8J2S+2
-# vmrFCzoIb0xKTr5jevErGLb9sITEWbRn9o36mmsgKlvENvQCvl/U/Dg5R2gZxyh4
-# pGWvEjO7Mp+piL/KmiJQa8hgW2c74A+VGxXL0ZW2wOdZdOHm6kejLF0CZj2uWVNz
-# V8Nb76zvX2rXDhtdbNIsXQoo/MjaDXlP/fkTGPfx+P4YwEAmR6zvZ7FS0sZjhKxM
-# 5fkHtWGudQrXFNs=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCJZsXHKPBUKlcX3HOjM9NAsZoc40l0m6
+# MUlgPAYPtPswDQYJKoZIhvcNAQEBBQAEggIAVmwGUpcQE1yzPEBRp+gNotZXS5f4
+# 0ymNQT4nVSWwH2C7aN1AFD3h6Xoj0Pxs0OWrqHaB37Z9YB6uesoguo8ycqBvMW5L
+# RFC8WgQyc6IArHldB67QjnKi2yH3q6PzEPA9Vlysbj9ZietyE+ChvwVeaMCnhWqF
+# ssvILrWQYdSpr8EF4UVBwl6yrTUCmn/RtzyrVfmm4F5zBWazh04yxJDkGXs9zZU+
+# pVpw2s2univF796fUSR0giw28gkzYSXMtoMmn+ph8WH4ipQlVhvWwzLQKs7olvkz
+# BX29st+Gkn2SlMfIaBBTn5X58UMGvVU8GVcWflLc7WERJwWHzy9xWhCmY3eKDbwB
+# oIqGUQ9kez2s7/iAgBfsv2zaQOs0un7swDnw40J80njEO+mehkRGH6apATKpV8nq
+# B1BhOUMYPxe/7BdDcsuUg3fLuYwYu9O0IN+c/VtyjpaxzLSD1WshLLqtEfXdAdqH
+# BL4Z+vIZS1k23oQJjQC4PpDXjetGnccXwa1zzApV8qlvozBNghfZwxY2pd2KMJoK
+# f6Y1FLVhJP/O5izvG14ezsouWCmD64s1dQ/ntaY2uknufX7+kLyvg2JXPFfkGsPd
+# 5+/wMG1nobYoiWdGG1YSt55RXw8tUSUYacKnfFJQmiM0It6nka5M/wsvVJq/3aww
+# cA3HBJx7hzEEgEg=
 # SIG # End signature block

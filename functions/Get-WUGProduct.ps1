@@ -7,6 +7,7 @@ Get-WUGProduct queries multiple WhatsUp Gold REST API product endpoints and retu
 containing installationId, timezone, version, and whoAmI details.
 
 Covered endpoints:
+  - /api/v1/product/api              [GET]
   - /api/v1/product/installationId  [GET]
   - /api/v1/product/timezone        [GET]
   - /api/v1/product/version         [GET]
@@ -48,6 +49,7 @@ function Get-WUGProduct {
         Write-Debug "Base URI: $baseUri"
 
         $endpoints = [ordered]@{
+            api            = "$baseUri/api"
             installationId = "$baseUri/installationId"
             timezone       = "$baseUri/timezone"
             version        = "$baseUri/version"
@@ -149,6 +151,8 @@ function Get-WUGProduct {
         }
 
         $outObj = [pscustomobject]@{
+            apiVersion     = $result.api
+
             installationId = $result.installationId
 
             timezone       = $tzDisplayName
@@ -167,8 +171,8 @@ function Get-WUGProduct {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeQXM+R+duZhfl
-# 1UilPbJYKYq1UpPdc8WMgAq/eOtSdaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjfnNUBRO+kwaZ
+# wK2S5cwJ4xUqnRynEFyXz+fvAJeaiKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -268,17 +272,17 @@ function Get-WUGProduct {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQghOuv4tyuzs1ox+nkiqIrxLrfTgnh4w7P
-# 7ubHM/bikkAwDQYJKoZIhvcNAQEBBQAEggIAcixzkaHmYh6WIeoZy7RAIdblwCs2
-# MAD9F9GQSZsnm112ZYKv7eGa9lM7Sg5IsT8MmhOCR06LBYL275EZZEnSFUM/sjQr
-# YWrOrO63c75tBFe94NTeB50YsgVpggY+f3pNdKuMA/oPyO7+oX9zsV6x4iFCHSq0
-# zkj76ZrmwynUpl1CmNb08SGYKfs828Nq+wo9uPKgvQUwsKjOD59HhdKFMgW2nHpb
-# jl8N2AY9I9u/u7CkyofoFhC/T3CVTdoOB7Fojz9b9KYP+X10olI9c8oQZ14TjENu
-# IBMQ12b4lHnEpcFiIlWnyxDa7mxB1fTwLroAJuQOR37qhIYSNDrfQfmnharnEprh
-# F5KyyMpMImSC2ZPBdZYCnZnsrjt4aZ7EXj31ebsBD88ONBBI10HDmPPhwPTuUqZa
-# zSHG4bb5jS+v1bBKI7QAic17JJOspoSmgc0QyOQY2wTqMAd7JPSw4rkmi48hz8WI
-# AWSPY2cnfKSi8UZ3gVmLbzbItQDEampkTk/gut/xYZUb3dcxfNVP42STxju9bn7s
-# W9g9C1oiuXqF/0HBN9oYXqJFXmYxC5E9/74Q19OXOvQz3uFHYbLPhlYR7N2TyzIs
-# OsIKynqOyjxsdFWfP0r5UHGHc2k1Mc0eAHOD1LxIswYSJEGn6CfezGcx9LX+XmFW
-# zMnkRpuLQBO6vdk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgjeneQa3pPmZw4rg20j11G/21Mvc2bsIK
+# tbw7bpQEbpUwDQYJKoZIhvcNAQEBBQAEggIAa1eYTPC/0aK5e03LOZ8H5x8H2woo
+# 2K0B19KiR3+0UfgiZGqSXBQFbItU5xQI1JFfxAXnRZknrYOw1Qf8ytEM023L2k2k
+# l8NcFX42NlM2tHqkdYD/1A+wqJVpa49G5IjRbpf6ZCybb6TISZ1CFF6z2pkW15SQ
+# rYttgmv2x5znK+sCh+iszkVKWo79KmIja26hU0baXBIvqBYUO4oW1tAQ0DipQjVu
+# hb1BrkoQOQT1KD4Kt+wz8CRjtokUKHeohgfFlEgwXMOBzMwk+oeYegh9sH5s+kZM
+# R8P0rEMYCvLrzojDLCtuyskKG72cx9Z1tliohldW1hDt4HZ1N0EsweRh1Atctr+E
+# BUkh2dcthcy7cwFs2czfDaNxuNYIr+04SpTmUdjKQmBapCBueNDoDFIoVeThzXKo
+# 1oEQlTFJw/S663aze0Qs55JVwjO54GVLEfebb1XJEADaIodfk4+yldLHuqnfawNZ
+# 7R+D0TQwGZq6kZm1v5/ZYyY+CcVt62Dec4fZwMiJ0iPvOujhyRTXh1I6W5IWuRTM
+# hp/8XLRXAw8V9dJXuM4zMfXthDsV+jHw+ilKmDjwed8hFUic7/7a0lgM6iEfP5gP
+# xDiT2a8EbONUUljdm/WROU7Tyu98Bes7q3Eup4ZntfRiKLHqCNLLGAMvMYk09k34
+# wWfVpfxsZwv8yhA=
 # SIG # End signature block

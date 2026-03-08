@@ -273,6 +273,23 @@ The `helpers/` directory contains ready-to-use automation scripts:
 | `helpers/gcp/` | GCP resource discovery — Compute Engine, Cloud SQL, LB immediate add w/ attributes, discover-then-add (GoogleCloud module + gcloud CLI) |
 | `helpers/oci/` | Oracle Cloud discovery — Compute, DB Systems, Autonomous DB, LB immediate add w/ attributes, discover-then-add (OCI.PSModules + OCI CLI) |
 | `helpers/reports/` | Bootstrap-based HTML report templates |
+| `helpers/test/` | End-to-end integration test harness (`Invoke-WUGModuleTest.ps1`) |
+
+---
+
+## Testing
+
+The module includes an end-to-end integration test harness that exercises every exported cmdlet against a live WhatsUp Gold server:
+
+```powershell
+# Run the full test suite (prompts for server and credentials)
+.\helpers\test\Invoke-WUGModuleTest.ps1
+
+# Or pass parameters directly
+.\helpers\test\Invoke-WUGModuleTest.ps1 -ServerUri "wug.example.com" -Credential (Get-Credential) -IgnoreSSLErrors
+```
+
+The test creates a temporary device, device group, and monitor, runs all CRUD, report, and role endpoints, cleans up all artefacts, and prints a pass/fail summary. All write operations use `-Confirm:$false` for non-interactive execution.
 
 ---
 

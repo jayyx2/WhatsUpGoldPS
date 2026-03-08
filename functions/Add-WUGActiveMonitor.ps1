@@ -144,6 +144,51 @@
 .PARAMETER WMIFormattedComputerName
     The computer name for the WMIFormatted monitor. This parameter is specific to the 'WMIFormatted' parameter set.
 
+.PARAMETER UseInDiscovery
+    Whether the monitor should be used during device discovery. Valid values: 'true', 'false'. Default is 'false'.
+
+.PARAMETER SnmpTableDiscOID
+    The SNMP OID used for table discovery. Specific to the 'SNMPTable' parameter set.
+
+.PARAMETER SnmpTableDiscOperator
+    The operator for SNMP table discovery matching. Valid values: 'equals', 'range', 'rateofchange', 'gt', 'lt', 'oneof', 'contains'. Default is 'equals'.
+
+.PARAMETER SnmpTableDiscValue
+    The value to match for SNMP table discovery.
+
+.PARAMETER SnmpTableDiscRangeLow
+    The low range value for SNMP table discovery. Default is 0.
+
+.PARAMETER SnmpTableDiscRangeHigh
+    The high range value for SNMP table discovery. Default is 0.
+
+.PARAMETER SnmpTableDiscCommentOID
+    The SNMP OID used for table discovery comment. Default is empty.
+
+.PARAMETER SnmpTableDiscIndexOID
+    The SNMP OID used as the index for table discovery. Default is empty.
+
+.PARAMETER SnmpTableDiscCreates
+    Whether SNMP table discovery creates instances. Valid values: 'true', 'false'. Default is 'true'.
+
+.PARAMETER SnmpTableMonitoredOID
+    The SNMP OID to monitor in the table.
+
+.PARAMETER SnmpTableMonitorOperator
+    The operator for SNMP table monitoring. Valid values: 'constant', 'range', 'rateofchange', 'gt', 'lt', 'oneof', 'contains'. Default is 'constant'.
+
+.PARAMETER SnmpTableMonitoredValue
+    The value to compare against for SNMP table monitoring.
+
+.PARAMETER SnmpTableMonitorRangeLow
+    The low range value for SNMP table monitoring. Default is 0.
+
+.PARAMETER SnmpTableMonitorRangeHigh
+    The high range value for SNMP table monitoring. Default is 0.
+
+.PARAMETER SnmpTableMonitorUpIfMatch
+    Determines the monitor state when the value matches. Valid values: 'upifmatch', 'downifmatch'. Default is 'upifmatch'.
+
 .NOTES
     Author: Jason Alberino
     Date: 2025-04-06

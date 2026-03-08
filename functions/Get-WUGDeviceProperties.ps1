@@ -21,15 +21,36 @@ Last modified: 2024-03-15
 function Get-WUGDeviceProperties {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId
+        [Parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId
     )
 
     begin {
         $properties = @()
+        $collectedDeviceIds = @()
     }
 
     process {
         foreach ($id in $DeviceID) {
+            $collectedDeviceIds += $id
+        }
+    }
+
+    end {
+        # If no DeviceId was specified, fetch all device IDs
+        if ($collectedDeviceIds.Count -eq 0) {
+            Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+            $allDevices = Get-WUGDevice -View id
+            if ($allDevices) {
+                $collectedDeviceIds = @($allDevices.id)
+            }
+            if ($collectedDeviceIds.Count -eq 0) {
+                Write-Warning "No devices found."
+                return
+            }
+            Write-Verbose "Found $($collectedDeviceIds.Count) devices."
+        }
+
+        foreach ($id in $collectedDeviceIds) {
             $uri = $global:WhatsUpServerBaseURI + "/api/v1/devices/$id/properties"
             try {
                 $result = Get-WUGAPIResponse -uri $uri -method "GET"
@@ -39,9 +60,7 @@ function Get-WUGDeviceProperties {
                 Write-Error "Error getting device properties for device ID ${id}: $($_.Exception.Message)"
             }
         }
-    }
 
-    end {
         Write-Debug "Completed Get-WUGDeviceProperties function"
         return $properties
     }

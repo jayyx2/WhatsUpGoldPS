@@ -81,7 +81,7 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed interface
 function Get-WUGDeviceReportInterfaceErrors {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
+        [Parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
@@ -90,12 +90,12 @@ function Get-WUGDeviceReportInterfaceErrors {
         [ValidateSet("asc", "desc")][string]$SortByDir,
         [ValidateSet("noGrouping","id","deviceName","interfaceName","interfaceId","pollTimeUtc","timeFromLastPollSeconds","rxMin","rxMax","rxAvg","rxTotal","txMin","txMax","txAvg","txTotal","totalAvg")][string]$GroupBy,
         [ValidateSet("asc", "desc")][string]$GroupByDir,
-        [bool]$ApplyThreshold,
-        [bool]$OverThreshold,
+        [ValidateSet("true", "false")][string]$ApplyThreshold,
+        [ValidateSet("true", "false")][string]$OverThreshold,
         [string]$ThresholdValue,
         [int]$BusinessHoursId,
-        [bool]$RollupByDevice,
-        [int]$PageId,
+        [ValidateSet("true", "false")][string]$RollupByDevice,
+        [string]$PageId,
         [ValidateRange(0, 250)][int]$Limit
     )
 
@@ -144,14 +144,18 @@ function Get-WUGDeviceReportInterfaceErrors {
     }
 
     end {
+        # If no DeviceId was specified, fetch all device IDs
+        if ($collectedDeviceIds.Count -eq 0) {
+            Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+            $allDevices = Get-WUGDevice -View id
+            if ($allDevices) { $collectedDeviceIds = @($allDevices.id) }
+            if ($collectedDeviceIds.Count -eq 0) { Write-Warning "No devices found."; return }
+            Write-Verbose "Found $($collectedDeviceIds.Count) devices."
+        }
+
         # Total number of devices to process
         $totalDevices = $collectedDeviceIds.Count
         Write-Debug "Total Devices to Process: $totalDevices"
-
-        if ($totalDevices -eq 0) {
-            Write-Warning "No valid DeviceIDs provided."
-            return
-        }
 
         # Determine batch size (max 499)
         $batchSize = 499

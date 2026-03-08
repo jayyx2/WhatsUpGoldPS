@@ -62,11 +62,10 @@
 
         Author: Jason Alberino (jason@wug.ninja) 2024-09-29
 #>
-    #>
 function Get-WUGDeviceMaintenanceSchedule {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [Alias('id')]
         [int[]]$DeviceId
     )
@@ -83,14 +82,36 @@ function Get-WUGDeviceMaintenanceSchedule {
             Write-Error -Message "Base URI not found. Please run Connect-WUGServer."
             Connect-WUGServer
         }
+
+        $collectedDeviceIds = @()
     }
 
     process {
-        $allMaintenanceConfigs = @()  # Array to store all configurations
-        $totalDevices = $DeviceID.Count
+        foreach ($id in $DeviceId) {
+            $collectedDeviceIds += $id
+        }
+    }
+
+    end {
+        # If no DeviceId was specified, fetch all device IDs
+        if ($collectedDeviceIds.Count -eq 0) {
+            Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+            $allDevices = Get-WUGDevice -View id
+            if ($allDevices) {
+                $collectedDeviceIds = @($allDevices.id)
+            }
+            if ($collectedDeviceIds.Count -eq 0) {
+                Write-Warning "No devices found."
+                return
+            }
+            Write-Verbose "Found $($collectedDeviceIds.Count) devices."
+        }
+
+        $allMaintenanceConfigs = @()
+        $totalDevices = $collectedDeviceIds.Count
         $currentDeviceIndex = 0
 
-        foreach ($id in $DeviceID) {
+        foreach ($id in $collectedDeviceIds) {
             $currentDeviceIndex++
             $percentComplete = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100)
 
@@ -194,9 +215,7 @@ function Get-WUGDeviceMaintenanceSchedule {
 
         # Clear the progress bar after completion
         Write-Progress -Activity "Fetching maintenance schedules" -Completed
-    }
 
-    end {
         Write-Debug "Get-WUGDeviceMaintenanceSchedule function completed."
         return $allMaintenanceConfigs
     }

@@ -34,7 +34,7 @@ function Remove-WUGDevices {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
-        [Parameter()][bool]$DeleteDiscoveredDevices = $false
+        [Parameter()][switch]$DeleteDiscoveredDevices
     )
 
     begin {
@@ -55,7 +55,7 @@ function Remove-WUGDevices {
             $body = @{
                 operation                 = "delete"
                 devices                   = $devices
-                removeDiscoveredResources = $DeleteDiscoveredDevices
+                removeDiscoveredResources = [bool]$DeleteDiscoveredDevices
             }
 
             $jsonBody = $body | ConvertTo-Json -Depth 5

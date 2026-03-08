@@ -34,6 +34,7 @@ function Disconnect-WUGServer {
     process {
         # Inform the user about the disconnection
         if ($global:WhatsUpServerBaseURI) {
+            Write-Information "Disconnecting from $global:WhatsUpServerBaseURI"
             # Clear global variables
             Write-Debug "Clearing global variables related to the WUG server connection"
             $global:WUGBearerHeaders = $null
@@ -42,7 +43,6 @@ function Disconnect-WUGServer {
             $global:tokenUri = $null
             $global:WUGRefreshToken = $null
             $global:IgnoreSSLErrors = $null
-            Write-Information "You've disconnected from $global:WhatsUpServerBaseURI"
         }
         else {
             Write-Information "No active connection found."

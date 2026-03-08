@@ -52,6 +52,15 @@ Used for pagination, specifies the page ID to start from.
 .PARAMETER Limit
 Limits the number of entries per page. Default is 25.
 
+.PARAMETER ApplyThreshold
+Indicates whether the threshold filter is applied. Accepts 'true' or 'false'.
+
+.PARAMETER OverThreshold
+Indicates if the threshold value is applied when over or under. Accepts 'true' or 'false'.
+
+.PARAMETER ThresholdValue
+The threshold filter value.
+
 .EXAMPLE
 PS> Get-WUGDeviceReportPingResponseTime -DeviceId @("1", "2", "3") -Range "lastWeek"
 
@@ -71,7 +80,7 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed ping resp
 function Get-WUGDeviceReportPingResponseTime {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
+        [Parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
@@ -84,9 +93,9 @@ function Get-WUGDeviceReportPingResponseTime {
         [ValidateSet("true", "false")][string]$RollupByDevice,
         [string]$PageId,
         [ValidateRange(0, 250)][int]$Limit,
-        [ValidateSet("true", "false")][string]$applyThreshold,
-        [ValidateSet("true", "false")][string]$overThreshold,
-        [double]$thresholdValue
+        [ValidateSet("true", "false")][string]$ApplyThreshold,
+        [ValidateSet("true", "false")][string]$OverThreshold,
+        [double]$ThresholdValue
     )
 
     begin {
@@ -96,7 +105,7 @@ function Get-WUGDeviceReportPingResponseTime {
         $successes = 0
         $errors = 0
         # Debug message with all parameters
-        Write-Debug "Function: Get-WUGDeviceReportPingResponseTime -- DeviceId:${DeviceId} Range:${Range} RangeStartUtc:${RangeStartUtc} RangeEndUtc:${RangeEndUtc} RangeN:${RangeN} SortBy:${SortBy} SortByDir:${SortByDir} GroupBy:${GroupBy} GroupByDir:${GroupByDir} BusinessHoursId:${BusinessHoursId} RollupByDevice:${RollupByDevice} PageId:${PageId} Limit:${Limit} applyThreshold:${applyThreshold} overThreshold:${overThreshold} thresholdValue:${thresholdValue}"
+        Write-Debug "Function: Get-WUGDeviceReportPingResponseTime -- DeviceId:${DeviceId} Range:${Range} RangeStartUtc:${RangeStartUtc} RangeEndUtc:${RangeEndUtc} RangeN:${RangeN} SortBy:${SortBy} SortByDir:${SortByDir} GroupBy:${GroupBy} GroupByDir:${GroupByDir} BusinessHoursId:${BusinessHoursId} RollupByDevice:${RollupByDevice} PageId:${PageId} Limit:${Limit} ApplyThreshold:${ApplyThreshold} OverThreshold:${OverThreshold} ThresholdValue:${ThresholdValue}"
         # Set static variables
         $finaloutput = @()
         $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
@@ -113,13 +122,13 @@ function Get-WUGDeviceReportPingResponseTime {
         if ($SortByDir) { $queryString += "sortByDir=$SortByDir&" }
         if ($GroupBy) { $queryString += "groupBy=$GroupBy&" }
         if ($GroupByDir) { $queryString += "groupByDir=$GroupByDir&" }
-        if ($ApplyThreshold) { $queryString += "applyThreshold=$applyThreshold&" }
+        if ($ApplyThreshold) { $queryString += "applyThreshold=$ApplyThreshold&" }
         if ($BusinessHoursId) { $queryString += "businessHoursId=$BusinessHoursId&" }
         if ($RollupByDevice) { $queryString += "rollupByDevice=$RollupByDevice&" }
         if ($PageId) { $queryString += "pageId=$PageId&" }
         if ($Limit) { $queryString += "limit=$Limit&" }
-        if ($OverThreshold) { $queryString += "overThreshold=$overThreshold&" }
-        if ($ThresholdValue) { $queryString += "thresholdValue=$thresholdValue&" }
+        if ($OverThreshold) { $queryString += "overThreshold=$OverThreshold&" }
+        if ($ThresholdValue) { $queryString += "thresholdValue=$ThresholdValue&" }
         # Trimming the trailing "&" if it exists
         $queryString = $queryString.TrimEnd('&')
     }
@@ -132,12 +141,17 @@ function Get-WUGDeviceReportPingResponseTime {
     }
 
     end {
+        # If no DeviceId was specified, fetch all device IDs
+        if ($collectedDeviceIds.Count -eq 0) {
+            Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+            $allDevices = Get-WUGDevice -View id
+            if ($allDevices) { $collectedDeviceIds = @($allDevices.id) }
+            if ($collectedDeviceIds.Count -eq 0) { Write-Warning "No devices found."; return }
+            Write-Verbose "Found $($collectedDeviceIds.Count) devices."
+        }
+
         # Total number of devices to process
         $totalDevices = $collectedDeviceIds.Count
-        if ($totalDevices -eq 0) {
-            Write-Warning "No valid DeviceIDs provided."
-            return
-        }
 
         # Determine batch size (max 499)
         $batchSize = 499

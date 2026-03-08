@@ -1,3 +1,63 @@
+<#
+.SYNOPSIS
+    Retrieves monitor templates from WhatsUp Gold.
+
+.DESCRIPTION
+    Get-WUGMonitorTemplate queries the WhatsUp Gold REST API (GET /api/v1/monitors/-)
+    to list active, passive, and performance monitor templates. Supports filtering by type,
+    search string, and various inclusion switches.
+
+.PARAMETER Type
+    Filter by monitor type. Valid values: all, active, performance, passive.
+
+.PARAMETER Search
+    A search string to filter monitor templates by name.
+
+.PARAMETER View
+    The level of detail to return. Valid values: id, basic, info, summary, details. Default: info.
+
+.PARAMETER PageId
+    The page identifier for paginated results.
+
+.PARAMETER Limit
+    The maximum number of results to return per page. Default: 250.
+
+.PARAMETER IncludeDeviceMonitors
+    Include monitors assigned to devices.
+
+.PARAMETER IncludeSystemMonitors
+    Include system-level monitors.
+
+.PARAMETER IncludeCoreMonitors
+    Include core monitors.
+
+.PARAMETER AllMonitors
+    Include all monitors regardless of assignment.
+
+.EXAMPLE
+    Get-WUGMonitorTemplate
+
+    Returns all monitor templates with default settings.
+
+.EXAMPLE
+    Get-WUGMonitorTemplate -Type active -Search "HTTP"
+
+    Returns active monitor templates matching "HTTP".
+
+.EXAMPLE
+    Get-WUGMonitorTemplate -Type performance -View details -AllMonitors
+
+    Returns all performance monitor templates with full details.
+
+.EXAMPLE
+    Get-WUGMonitorTemplate -IncludeDeviceMonitors -IncludeSystemMonitors
+
+    Returns monitor templates including device-assigned and system monitors.
+
+.NOTES
+    Author: Jason Alberino (jason@wug.ninja)
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Monitor-Templates
+#>
 function Get-WUGMonitorTemplate {
     [CmdletBinding(DefaultParameterSetName = 'Default')]
     param(
@@ -126,8 +186,8 @@ function Get-WUGMonitorTemplate {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRrf6W+yx7JI3i
-# aOlJ3hHYahDVOci0x4rPfkPf2Cd9aKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEM6oJPV8xurJk
+# JO2t/z5Vg2S6hj7rNyn0cWzEeNcVhqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -227,17 +287,17 @@ function Get-WUGMonitorTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgZE6OaxtrN2zFTu85XowDPT2JUfFJhfjK
-# OfSbU/0s4VowDQYJKoZIhvcNAQEBBQAEggIAuKpqJCiIUdJoFVQzqRGyeL1zGZZK
-# RYF4powf5YFNoLk9zxv4ElmPpm6iftMk3yIR6zbABVb1fHKgk2rZuWqAoMOW6jlh
-# b/c4kBSaiv1hbzsuNIVmCUotD6kPP08PfZ7QBPaOk/4g5FgG2LB6kRER/dMqZhfw
-# Ai+9Vz1r1UoH8ZpC3R4560JTAYBvDuTJMLMueUlE32QtJgsuLYH63cK/mNIKsryk
-# iED85QqyR8Vaf4X3/UWKeAEFQLYi+0Z6RvNHdLE5khsrHaNw+BwDtotrgi764I0o
-# A3By7AXP/ztalFn1lG1I8+KmtOzpmtkL6WB6vKM5xORwBfw1JKwZDzcYaqvRuWoP
-# NyUbgqwSjuWaZHtcxEINrZIa28mSpt8i3Z1Q+YkDvusuVDZod+PYuVWhpUvoPJqr
-# BhbAy8hc1Z0Ga4Rczc+Br8numT/U5+ypiPrx+/ibbvoDJg6f7JrDzmXvHdYyzI9m
-# KKgbn3i1uCSqE/5IUk1vGnZ+YWryh1mDwIsIfOVFM2Zfnzo/36WjbRCqv3EIwm5w
-# KkQ+BC2FKS827jvaatsk1rpk9vhCStH4vY4A28IZaEr/WJdYU5qbmwLM0J7nD3j1
-# BEZcRe6bj8YifOzMNGqw6inTSQpnKIi+38tjGq6K7CV9PDvSYp75kHaffkCdXCES
-# QFuTeIM6Sws7NLM=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgFaqxn2M2lRsR+sx7U+Uv9J7tVldt/8te
+# gml0gEP+I+gwDQYJKoZIhvcNAQEBBQAEggIAn/KwcDWwXfUK8MXJQyjjHu5+nFpG
+# VByYNzcsYA0PZDajyowPYJlfpamjGKvik8gBQVmjL7Mrmqtpr3lZEbAHBhEf0SkB
+# btD63m3wL8a8FfNjH2zGXRoHYwz+SP/wyo6YNXAewa8SeKM02te5keO39iMgk+cc
+# IKmc2NVqDjBZ9Rdkgngo2hWAHU2TF/mZYYjLHQ1KYLKFXB7EAZNlAHFmr+5Rrdgq
+# fu4FdiH5rlMa/G3Mi7bOtqUpTM4ghoZ6m2464SH4tnic/ThgjtGT0n5iB6zm24O1
+# 4jl2HjZWFarhw9B3mttkcfhV52zRH06ngNNz/DaBPgWVRYtkdwFz6lTOhkImT+jx
+# 7V1meiu0l5wUbh4qmhApMyepHmXOf2L6MSSxzMATn4HWP0qy62IFk0VMPlK1g0nY
+# 8REZ8QQ5vvxC/S0cWwc67TaJ9UiIc5K787Yx1N+sAYcGSwaR7qAY/VqihiV6nerS
+# ehu4fldSzcmh4nUF5K9Mss6Fip2SNJPDga7GJZWGIoaQfhOomld9ywn/I7b8JxuT
+# CnN51OiRONuhg+zBnMqU4fV3u1uyV24GTRd61nU5XjGYRrCVz6b2eJ3e5vCglGHk
+# Y1fRd6WlvVGZwaiVjwpz9Lcndq117Go8NcKKtlesMm95rxxKNOil39YDxlZPfOcr
+# iLr78ZyurNjHQiI=
 # SIG # End signature block

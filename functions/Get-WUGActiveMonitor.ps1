@@ -51,6 +51,18 @@ Assignment device info level for global assignments ("id","basic","card","overvi
 .PARAMETER IncludeAssignments
 If set, get both templates and global assignments (returns a flat list of assignments merged with template info).
 
+.PARAMETER AllMonitors
+Return all monitors (deprecated API parameter). Valid values: "true", "false".
+
+.PARAMETER Limit
+Maximum number of results per page. Valid range: 0-250.
+
+.PARAMETER activeObj
+Internal use — the active monitor object being processed.
+
+.PARAMETER active
+Internal use — the active monitor entry being processed.
+
 .EXAMPLE
 Get-WUGActiveMonitor -IncludeAssignments -Search "Ping"
 
@@ -79,6 +91,9 @@ function Get-WUGActiveMonitor {
         [ValidateSet("true", "false")]
         [string]$IncludeCoreMonitors = "false",
 
+        [ValidateSet("true", "false")]
+        [string]$AllMonitors,
+
         [string]$Search,
         [ValidateSet("true", "false")]
         [string]$PageId,
@@ -93,7 +108,9 @@ function Get-WUGActiveMonitor {
         [string]$AssignmentId,
         [string]$MonitorTypeId,
         [ValidateSet("true", "false")]
-        [string]$EnabledOnly = "true"
+        [string]$EnabledOnly = "true",
+
+        [ValidateRange(0, 250)][int]$Limit
     )
 
     begin {
@@ -138,9 +155,10 @@ function Get-WUGActiveMonitor {
             if ($IncludeDeviceMonitors) { $templateQS += "includeDeviceMonitors=$IncludeDeviceMonitors&" }
             if ($IncludeSystemMonitors) { $templateQS += "includeSystemMonitors=$IncludeSystemMonitors&" }
             if ($IncludeCoreMonitors)   { $templateQS += "includeCoreMonitors=$IncludeCoreMonitors&" }
+            if ($AllMonitors)            { $templateQS += "allMonitors=$AllMonitors&" }
             if ($Search)                { $templateQS += "search=$Search&" }
-            if ($AllMonitors)           { $templateQS += "allMonitors=$AllMonitors&" }
             if ($PageId)                { $templateQS += "pageId=$PageId&" }
+            if ($Limit)                 { $templateQS += "limit=$Limit&" }
             $templateQS = $templateQS.TrimEnd('&')
             $templateURI = "${global:WhatsUpServerBaseURI}/api/v1/monitors/-"
             if ($templateQS) { $templateURI += "?$templateQS" }
@@ -163,6 +181,7 @@ function Get-WUGActiveMonitor {
             if ($MonitorTypeId)  { $qs += "monitorTypeId=$MonitorTypeId&" }
             if ($EnabledOnly)    { $qs += "enabledOnly=$EnabledOnly&" }
             if ($PageId)         { $qs += "pageId=$PageId&" }
+            if ($Limit)          { $qs += "limit=$Limit&" }
             $qs = $qs.TrimEnd('&')
 
             if ($AssignmentId) {
@@ -258,6 +277,7 @@ function Get-WUGActiveMonitor {
         if ($DeviceView)     { $assignQS += "deviceView=$DeviceView&" }
         if ($Search)         { $assignQS += "search=$Search&" }
         if ($PageId)         { $assignQS += "pageId=$PageId&" }
+        if ($Limit)          { $assignQS += "limit=$Limit&" }
         $assignQS = $assignQS.TrimEnd('&')
         $assignURI = "${global:WhatsUpServerBaseURI}/api/v1/monitors/-/assignments/-"
         if ($assignQS) { $assignURI += "?$assignQS" }

@@ -30,16 +30,37 @@ Last modified: 2024-06-15
 function Get-WUGDeviceTemplate {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
+        [Parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [Parameter()] [ValidateSet('all', 'l2', 'tempip', 'simple')] [string] $Options = 'all'
     )
 
     begin {
         $finaloutput = @()
+        $collectedDeviceIds = @()
     }
 
     process {
         foreach ($id in $DeviceID) {
+            $collectedDeviceIds += $id
+        }
+    }
+
+    end {
+        # If no DeviceId was specified, fetch all device IDs
+        if ($collectedDeviceIds.Count -eq 0) {
+            Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+            $allDevices = Get-WUGDevice -View id
+            if ($allDevices) {
+                $collectedDeviceIds = @($allDevices.id)
+            }
+            if ($collectedDeviceIds.Count -eq 0) {
+                Write-Warning "No devices found."
+                return
+            }
+            Write-Verbose "Found $($collectedDeviceIds.Count) devices."
+        }
+
+        foreach ($id in $collectedDeviceIds) {
             $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${id}/config/template?options=${Options}"
             try {
                 $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
@@ -54,9 +75,7 @@ function Get-WUGDeviceTemplate {
                 Write-Error "Error fetching templates for DeviceID ${id}: $_"
             }
         }
-    }
 
-    end {
         Write-Debug "Completed Get-WUGDeviceTemplate function"
         return $finaloutput
     }

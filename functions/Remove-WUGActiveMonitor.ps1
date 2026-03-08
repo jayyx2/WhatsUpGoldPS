@@ -1,3 +1,45 @@
+<#
+.SYNOPSIS
+    Deletes active monitor templates from WhatsUp Gold by search term.
+
+.DESCRIPTION
+    Remove-WUGActiveMonitor deletes active monitor templates matching a search string
+    via the WhatsUp Gold REST API (DELETE /api/v1/monitors/-). Optionally includes
+    device-assigned and system monitors in the deletion scope, and controls whether
+    the operation should fail if a monitor is currently in use.
+
+.PARAMETER Search
+    A search string to identify the active monitors to delete. Required.
+
+.PARAMETER IncludeDeviceMonitors
+    Include device-assigned monitors in the deletion scope. Default: false.
+
+.PARAMETER IncludeSystemMonitors
+    Include system-level monitors in the deletion scope. Default: false.
+
+.PARAMETER FailIfInUse
+    Whether the operation should fail if a matching monitor is currently in use. Default: true.
+
+.EXAMPLE
+    Remove-WUGActiveMonitor -Search "ROC-Mon"
+
+    Deletes active monitor templates matching "ROC-Mon".
+
+.EXAMPLE
+    Remove-WUGActiveMonitor -Search "HTTP" -IncludeDeviceMonitors $true -FailIfInUse $false
+
+    Deletes active monitors matching "HTTP", including device-assigned monitors,
+    even if they are currently in use.
+
+.EXAMPLE
+    Remove-WUGActiveMonitor -Search "Old Monitor" -IncludeDeviceMonitors $true -IncludeSystemMonitors $true
+
+    Deletes all active monitors matching "Old Monitor" from both device and system scopes.
+
+.NOTES
+    Author: Jason Alberino (jason@wug.ninja)
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Monitor-Templates
+#>
 # Broken API?
 # Example: Delete all active monitors containing 'ROC-Mon' in their name
 #Remove-WUGActiveMonitor -Search "ROC-Mon" -IncludeDeviceMonitors $true -IncludeSystemMonitors $false -FailIfInUse $false
@@ -83,8 +125,8 @@ function Remove-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYJocgBPurA8F2
-# zJQbw+8wLDf9tjrK3CXbiLQ3eXo/waCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAfwUwjKKB6Tq3j
+# E5G/jaLJOhDFv43LAM31N083bh5wT6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -184,17 +226,17 @@ function Remove-WUGActiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgGZws0m6caXrK3Gt13HpdBmBWWEG7RxHT
-# JiN/wcSDdXYwDQYJKoZIhvcNAQEBBQAEggIAva34zq/VmhSZ3GZAoADJBTo7nIyX
-# uxTs9GV5biSKdJW5F2chFDcv6TWabifDIawV/sr8AyqP3ppWro24KrumqnarVi+k
-# 2XwuojdHi/JGYHx16V70zk5mL0JHd51ciWcbnuJI55i/gIMolexW0TUTpLg7HtwO
-# Mr2D1Ui+rzhVM+GWz3jjONCZRSX8MO/9ROXhQVeZzBYSmHL9voiE8WLDJlXhl5aE
-# 2Aufv5OsFJ2IDwosTj1ubhCzowA7yzSuqyYuA8302IKh2emUJoFv9HvYAUMb2wZm
-# eBNjBvN04W6qiRqKpys/4itHtCX50MVO8xLNDtdmepfG9g6HX7HWvegeDe+3rMrS
-# EzRT3aABr3NmBPXP4OOPj2jda+UllBhA/4g1MAKf7Xem4HseDGQ6ncuf8Ug08w4/
-# atZSfO/n8oyJysJp/Eo6NWXChi2d2lP3vEn2tSSaxD8BMYnpD3uImLTNwF8lyQ8k
-# ds/BdObU+V2kSLzRVS9qH/fAO3UxNJGITQjwJIs9mnV0xvfUwgoDMv1MqYD3IZox
-# VkAmYg4v7Sb+1slu6ulIHh8IO5UHA8b6iKy1ka4WUYS3HZHkDOL7adk6GaG0CV3V
-# xqfHS0hKTs6tY+ARDBCdHi9tazQmRewAlYBskTEjpGVo/rbeVwfMJzpaulplAnJi
-# c5k23rG9mK4mdAE=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgrva1AZZ+D1xY0pm+GKZP0m1AaY1WU9zz
+# vneuqIrx2agwDQYJKoZIhvcNAQEBBQAEggIAWsRhPJNjh+CJULPJY3WJn27d1BfG
+# YWSD6bPep5n6NezVX9OlFrAX2UPeFlnOTszfgcYd/pRcTb8/5vINiZN2tUguHl1B
+# RGzzLwRcf77HLcEjNExsw7zyMNLDlCo2aIecp9+X18Ba+cCGs+PjuJWs4odo7lP6
+# okm0iiy/YVkFu6dP2R8wZf5b11/EKDFyfb8BMmHg4rZA4hVOhBC5SVBsDCyeYu02
+# tF8n9hq2EoroPZVZNA/RV03rgFFy46uUGweh5RHmOW1h9iyUN9er9lNHYoBEsHMk
+# YE7zNhsPm1LH6YT9HVUjNhSwBiRlTUJsOtd8pEdGa3gvfB7kI7HY7dPuL9Mrs3Qj
+# W7dp6gxQtQy8X2iDw2gtTfaMC9tyLUgt3VzAG50f6rz5Xivpj2KVEn4ZOucN3BnC
+# b0qnDjMxffB4oex1Rprr2rEmhO7h5x7OilunZAzk4A2vXvzmbGqdysC8RW8J2S+2
+# vmrFCzoIb0xKTr5jevErGLb9sITEWbRn9o36mmsgKlvENvQCvl/U/Dg5R2gZxyh4
+# pGWvEjO7Mp+piL/KmiJQa8hgW2c74A+VGxXL0ZW2wOdZdOHm6kejLF0CZj2uWVNz
+# V8Nb76zvX2rXDhtdbNIsXQoo/MjaDXlP/fkTGPfx+P4YwEAmR6zvZ7FS0sZjhKxM
+# 5fkHtWGudQrXFNs=
 # SIG # End signature block

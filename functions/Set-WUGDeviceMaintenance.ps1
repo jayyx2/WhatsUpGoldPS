@@ -146,7 +146,7 @@ function Set-WUGDeviceMaintenance {
             Write-Debug "API Request Body: $bodyJson"
 
             try {
-                $result = Get-WUGAPIResponse -uri "$global:WhatsUpServerBaseURI/api/v1/devices/-/config/maintenance" ` -Method "PATCH" -Body $bodyJson 
+                $result = Get-WUGAPIResponse -uri "$global:WhatsUpServerBaseURI/api/v1/devices/-/config/maintenance" -Method "PATCH" -Body $bodyJson
 
                 if ($result.data.successfulOperations) { $successes += $result.data.successfulOperations }
                 if ($result.data.resourcesWithErrors) { $errors += $result.data.resourcesWithErrors.Count }

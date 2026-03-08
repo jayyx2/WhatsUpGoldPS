@@ -70,7 +70,7 @@ function Invoke-WUGDeviceRefresh {
         if ($AddUseInRescanActiveMonitor)           { $body.addUseInRescanActiveMonitor = $AddUseInRescanActiveMonitor }
         if ($IncludeAssignedRoles)                  { $body.includeAssignedRoles = $IncludeAssignedRoles }
         if ($ResetOptions)                          { $body.resetOptions = $ResetOptions }
-        if ($DropDataOlderThanHours -ne $null)      { $body.dropDataOlderThanHours = $DropDataOlderThanHours }
+        if ($PSBoundParameters.ContainsKey('DropDataOlderThanHours')) { $body.dropDataOlderThanHours = $DropDataOlderThanHours }
 
         $jsonBody = $body | ConvertTo-Json -Depth 4
 

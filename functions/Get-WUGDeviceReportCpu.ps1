@@ -83,7 +83,7 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed CPU utili
 function Get-WUGDeviceReportCpu {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
+        [Parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")]
         [string]$Range,
         [string]$RangeStartUtc,
@@ -137,6 +137,15 @@ function Get-WUGDeviceReportCpu {
     }
 
     end {
+        # If no DeviceId was specified, fetch all device IDs
+        if ($DeviceIds.Count -eq 0) {
+            Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+            $allDevices = Get-WUGDevice -View id
+            if ($allDevices) { $DeviceIds = @($allDevices.id) }
+            if ($DeviceIds.Count -eq 0) { Write-Warning "No devices found."; return }
+            Write-Verbose "Found $($DeviceIds.Count) devices."
+        }
+
         $totalDevices = $DeviceIds.Count
         $currentDeviceIndex = 0
 

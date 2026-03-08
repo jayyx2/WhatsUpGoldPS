@@ -2,7 +2,7 @@
 .SYNOPSIS
 Creates new devices in WhatsUp Gold using device templates.
 
-.PARAMETER -templates <array>
+.PARAMETER -deviceTemplates <array>
 The device templates to use to create the new devices.
 
 .PARAMETER -ApplyL2 [<SwitchParameter>]
@@ -27,18 +27,25 @@ will be updated with the new templates. If the `-UpdateInterfaceState` switch is
 devices will be updated. If the `-UpdateInterfaceNames` switch is specified, the interface names of existing devices will be
 updated. If the `-UpdateActiveMonitors` switch is specified, the active monitors of existing devices will be updated.
 
-EXAMPLES
-Add-WUGDevices -templates "Switch 1", "Router 1"
+.EXAMPLE
+    Add-WUGDeviceTemplates -deviceTemplates $templates
 
-This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates.
+    Creates new devices in WhatsUp Gold using the provided device template array.
 
-Add-WUGDevices -templates "Switch 1", "Router 1" -ApplyL2 -Update -UpdateInterfaceState -UpdateInterfaceNames
+.EXAMPLE
+    Add-WUGDeviceTemplates -deviceTemplates $templates -ApplyL2 -Update -UpdateInterfaceState -UpdateInterfaceNames
 
-This example creates new devices in WhatsUp Gold using the "Switch 1" and "Router 1" templates, applies Layer 2 data, updates
-existing devices with the new templates, updates the interface state of existing devices, and updates the interface names of
-existing devices.
-Author: Jason Alberino
-Date: 2023-03-07
+    Creates new devices using templates, applies Layer 2 data, updates existing devices,
+    and refreshes interface state and names.
+
+.EXAMPLE
+    Add-WUGDeviceTemplates -deviceTemplates $templates -UpdateActiveMonitors
+
+    Creates new devices and updates active monitors on existing devices.
+
+.NOTES
+    Author: Jason Alberino (jason@wug.ninja) 2023-03-07
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Config
 #>
 
 function Add-WUGDeviceTemplates {
@@ -64,7 +71,7 @@ function Add-WUGDeviceTemplates {
 
     #Convert the PowerShell object to a JSON object, up to the specified depth
     $body = @{
-        options   = @("all")
+        options   = $options
         templates = $deviceTemplates
     } | ConvertTo-Json -Depth 10
 
@@ -90,8 +97,8 @@ function Add-WUGDeviceTemplates {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwcvpJ5YLWtS5H
-# /1G9fuJif1+EK91Xw63iojHiEnn0sqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgIyfcc3ezsr1A
+# 2gKd6ajA3/sakBwFC2RYzAXqQ09cPKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -191,17 +198,17 @@ function Add-WUGDeviceTemplates {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHGBryeF3HYaGU1f6h/UH2I7JTisTHobp
-# NxLiQq50jmAwDQYJKoZIhvcNAQEBBQAEggIANyLIL2ulR3oG8lyt04PfYdbYsWg7
-# NaNMhrMEu3pua+GzkbJIoVqVh5+f+TvIBCFLo0Vnx87Bp4EiiejZAPMu079huMR9
-# hx1MiC1AOe5trT30ajB5UAToNILJnHpgdjn5tZizwGYOvfrmclh7AKsUFkhYFoVB
-# vETSIov2GjrxxPqgO7heAS0mZwbjF3QNEmibwCADZwru5V8uhaEZcPl5qWi5SSqh
-# aKbgMwFJ3zdCDxOIeYKqVSuBT/eqkb9RBZNPiRcfoSDUxdZLhhqsAYRABsXXbdk4
-# 9iwKF9b+MPRhM8/8ud12sv/KwcdMcbhd0+WPyCxphMAO4xag27QSMZJN+stINZDJ
-# 8XffZ/WsPKDIND8aMv7UJ/QeNM2bzRUjYwp2ThEG6HZN0czsRLDoH4BhYZ7RVE4O
-# 3v3XbGZzppsuhp2JwOd/eIrwgVZfE7x44GU+WUEF+66zDr20Hw+OZK2Ff84Bb0/3
-# +QmIC2D058rjMedFfYlzxt6jpFIEi2FyZe8ZvspaWh8UEBN7flFhh65C/6qp3C/J
-# biHQQZGBE0W9GUE6wbsLOBet0kCBXERap0uRyUA95fzFtVGNHmRw7VwnZmv/1UAj
-# gIdfDwWd8gTUWhhsQ4RIVltVYb5EJh4MJQfbNyS0POzxxnquDgnuJm70nTD7foZG
-# o5R3oOKrZHhkabU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg1wtYIdewb/Nhq8kpCMzO+DBXYvwYrgXY
+# A+iPPKoU9ScwDQYJKoZIhvcNAQEBBQAEggIA7wYpwxLIRt1RMEhb8hFVE5w4RAF8
+# RWHJPrRAl/a6d3CitPhofIAd/6pscHZt7nuPk68uvhc0S41+LMg9SVizSg2n8YAk
+# q6L3zlz9iRocPF3Ec6QFeBjylWmE1n5weJkxsU4VtfIhu++YKxQmM1+XkC3VB//a
+# YQNRPHaonwfipXO+bkIcU4IJ/tM7ARr+9W9t29GCOZIFz26vpmQPY/VthwaBDKbJ
+# YmWicUctk8dxdK2+cQW3agQyuk0fE27sAuICYKsQNsLxBbRv5RZq2kRlqMKRmcKu
+# nJ6lxGViwjlDrglxIDaT8q6h52zpC9buLNQmSqrv7g02yr0ipL3TO+dEClbgMTOR
+# 7crTd8FuH4YBXtZL6gutiy8TbQIE7+AP7yvds1lEV6smX9qJ5aXkI6rEc7ljY9Go
+# xkvpNhTzuFfk/pYZcjQ2R2fNXaxfjguPsOF77voYbycBDSBznsM1JCnbn7tALALj
+# dcxwVTixTNas5nnmSVLiKy4HPyfyODati6Ef4XkThIoZbritMIhEpcAJ+qc0SnL0
+# vGtAb2Id6Hvv0Eo7XcNZWvSUWR2AtaTpXeN8iVWZuFWQUXfkWetHguvOfIOAS4xA
+# rDQcFAMa3aAvwAEgaQJ/V8SCbVmBgOwB6pBCcHltBYT08hGxapYB9qVACquy1Wer
+# vIJHjRKkM4nSNwU=
 # SIG # End signature block

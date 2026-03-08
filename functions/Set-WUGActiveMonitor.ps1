@@ -116,8 +116,8 @@ function Set-WUGActiveMonitor {
             if ($Name)          { $body.name = $Name }
             if ($Description)   { $body.description = $Description }
             if ($PropertyBags)  { $body.propertyBags = $PropertyBags }
-            if (!$UseInDiscovery) { $body.useInDiscovery = $UseInDiscovery }
-            if (!$Enabled)        { $body.enabled = [System.Convert]::ToBoolean($Enabled) }
+            if ($PSBoundParameters.ContainsKey('UseInDiscovery')) { $body.useInDiscovery = $UseInDiscovery }
+            if ($PSBoundParameters.ContainsKey('Enabled'))        { $body.enabled = [System.Convert]::ToBoolean($Enabled) }
 
             $uri = "${global:WhatsUpServerBaseURI}/api/v1/monitor/${MonitorId}"
             $jsonBody = $body | ConvertTo-Json -Depth 10
@@ -137,7 +137,7 @@ function Set-WUGActiveMonitor {
                 foreach ($deviceId in $DeviceId) {
                     foreach ($assignmentId in $AssignmentId) {
                         $body = @{}
-                        if (!$Enabled)  { $body.enabled = [System.Convert]::ToBoolean($Enabled) }
+                        if ($PSBoundParameters.ContainsKey('Enabled'))  { $body.enabled = [System.Convert]::ToBoolean($Enabled) }
                         if ($Description)        { $body.description = $Description }
 
                         $active = @{}
@@ -167,7 +167,7 @@ function Set-WUGActiveMonitor {
                     $body.type = "active"
                     if ($MonitorTypeId)   { $body.monitorTypeId = $MonitorTypeId }
                     if ($MonitorTypeName) { $body.monitorTypeName = $MonitorTypeName }
-                    if (!$Enabled) { $body.enabled = [System.Convert]::ToBoolean($Enabled) }
+                    if ($PSBoundParameters.ContainsKey('Enabled')) { $body.enabled = [System.Convert]::ToBoolean($Enabled) }
                     if ($Description)    { $body.description = $Description }
 
                     $active = @{}

@@ -1,5 +1,5 @@
 WhatsUpGoldPS
-Copyright (c) 2023-2024 Jason Alberino
+Copyright (c) 2023-2026 Jason Alberino
 
 Third-party notices
 -------------------

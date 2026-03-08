@@ -1,20 +1,32 @@
 <#
 .SYNOPSIS
-Removes a device from the WhatsUp Gold monitoring system.
+Removes one or more devices from the WhatsUp Gold monitoring system.
+
+.DESCRIPTION
+The Remove-WUGDevice function removes one or more devices from WhatsUp Gold using the individual device DELETE endpoint. DeviceIds can be passed as an array or through the pipeline. Each device is removed individually via DELETE /api/v1/devices/{deviceId}.
 
 .PARAMETER DeviceId
-The ID of the device to remove.
+The ID or IDs of the device(s) to remove. Accepts pipeline input.
 
 .PARAMETER DeleteDiscoveredDevices
-If specified, all discovered devices associated with the device to be removed will also be deleted.
+If specified, all discovered devices associated with each device will also be deleted.
 
 .EXAMPLE
 Remove-WUGDevice -DeviceId "12345"
 Removes the device with ID "12345" from the WhatsUp Gold monitoring system.
 
 .EXAMPLE
+Remove-WUGDevice -DeviceId "12345","67890"
+Removes devices with IDs "12345" and "67890".
+
+.EXAMPLE
 Remove-WUGDevice -DeviceId "12345" -DeleteDiscoveredDevices
-Removes the device with ID "12345" from the WhatsUp Gold monitoring system, along with all discovered devices associated with it.
+Removes the device with ID "12345" and all discovered devices associated with it.
+
+.EXAMPLE
+$devices = Get-WUGDevice -View id
+$devices | Remove-WUGDevice
+Removes all devices returned by Get-WUGDevice.
 
 .NOTES
 This function requires the user to be authenticated using Connect-WUGServer before it can be run.
@@ -26,35 +38,59 @@ Last modified: Jason Alberino 2024-06-15
 function Remove-WUGDevice {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)]
-        [string]$DeviceId,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('id')]
+        [string[]]$DeviceId,
         [switch]$DeleteDiscoveredDevices
     )
 
     begin {
-
-        # Construct the API endpoint URI
-        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/$DeviceId"
-        if ($DeleteDiscoveredDevices) {
-            $uri += "?deleteDiscoveredDevices=true"
-        }
+        $collectedDeviceIds = @()
+        $results = @()
     }
 
     process {
-        try {
-            $result = Get-WUGAPIResponse -uri $uri -method "DELETE"
-            if ($result.data.success) {
-                Write-Output "Device $id removed successfully."
-            } else {
-                Write-Warning "Failed to remove device $id."
-            }
-        } catch {
-            Write-Error "Error removing device ${id}: $($_.Exception.Message)"
-        }
+        foreach ($id in $DeviceId) { $collectedDeviceIds += $id }
     }
 
     end {
-        return $result
+        $totalDevices = $collectedDeviceIds.Count
+        if ($totalDevices -eq 0) {
+            Write-Warning "No valid DeviceIDs provided."
+            return
+        }
+
+        $devicesProcessed = 0
+        foreach ($id in $collectedDeviceIds) {
+            $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/$id"
+            if ($DeleteDiscoveredDevices) {
+                $uri += "?deleteDiscoveredDevices=true"
+            }
+
+            try {
+                $result = Get-WUGAPIResponse -uri $uri -method "DELETE"
+                if ($result.data.success) {
+                    Write-Output "Device $id removed successfully."
+                } else {
+                    Write-Warning "Failed to remove device $id."
+                }
+                $results += $result
+            } catch {
+                Write-Error "Error removing device ${id}: $($_.Exception.Message)"
+            }
+
+            $devicesProcessed++
+            if ($totalDevices -gt 1) {
+                $percentComplete = [Math]::Round(($devicesProcessed / $totalDevices) * 100)
+                Write-Progress -Activity "Removing devices" -Status "$devicesProcessed of $totalDevices devices processed" -PercentComplete $percentComplete
+            }
+        }
+
+        if ($totalDevices -gt 1) {
+            Write-Progress -Activity "Removing devices" -Status "All devices processed" -Completed
+        }
+
+        return $results
     }
 }
 

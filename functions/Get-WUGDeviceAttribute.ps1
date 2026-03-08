@@ -41,11 +41,11 @@
     function Get-WUGDeviceAttribute {
         [CmdletBinding(DefaultParameterSetName = 'Default')]
         param(
-            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'Default', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByNames', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByNameContains', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByValueContains', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-            [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByAttributeId', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Parameter(Position = 0, ParameterSetName = 'Default', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Parameter(Position = 0, ParameterSetName = 'ByNames', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Parameter(Position = 0, ParameterSetName = 'ByNameContains', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Parameter(Position = 0, ParameterSetName = 'ByValueContains', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+            [Parameter(Position = 0, ParameterSetName = 'ByAttributeId', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
             [Alias('id')]
             [int[]]$DeviceId,
     
@@ -123,6 +123,22 @@
         }
     
         end {
+            # If no DeviceId was specified, fetch all device IDs
+            if ($collectedDeviceInfo.Count -eq 0) {
+                Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+                $allDevices = Get-WUGDevice -View id
+                if ($allDevices) {
+                    foreach ($dev in $allDevices) {
+                        $collectedDeviceInfo += @{ DeviceId = $dev.id }
+                    }
+                }
+                if ($collectedDeviceInfo.Count -eq 0) {
+                    Write-Warning "No devices found."
+                    return
+                }
+                Write-Verbose "Found $($collectedDeviceInfo.Count) devices."
+            }
+
             Write-Debug "Processing collected device information."
     
             $totalDevices = $collectedDeviceInfo.Count

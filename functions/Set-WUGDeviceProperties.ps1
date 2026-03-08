@@ -29,12 +29,31 @@ Specifies notes for the device. Default is null.
 .PARAMETER snmpOid <string>
 Specifies the SNMP OID for the device. Default is null.
 
-.PARAMETER actionPolicy <array>
-Specifies the action policy for the device. Default is null.
+.PARAMETER actionPolicyName <string>
+Specifies the action policy name to assign to the device. Default is null.
+
+.PARAMETER actionPolicyId <string>
+Specifies the action policy ID to assign to the device. Default is null.
+
+.EXAMPLE
+    Set-WUGDeviceProperties -DeviceId 42 -DisplayName "Web Server 01"
+
+    Sets the display name of device 42 to "Web Server 01".
+
+.EXAMPLE
+    Set-WUGDeviceProperties -DeviceId 42 -note "Production server" -keepDetailsCurrent $true
+
+    Sets the note and enables keeping details current for device 42.
+
+.EXAMPLE
+    Set-WUGDeviceProperties -DeviceId 1,2,3 -DisplayName "Batch Update"
+
+    Updates the display name for devices 1, 2, and 3 in a batch PATCH request.
 
 .NOTES
-Author: Jason Alberino (jason@wug.ninja) 2023-03-24
-Last modified: 2024-03-15
+    Author: Jason Alberino (jason@wug.ninja) 2023-03-24
+    Last modified: 2024-03-15
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Properties
 #>
 function Set-WUGDeviceProperties {
     [CmdletBinding()]
@@ -56,9 +75,9 @@ function Set-WUGDeviceProperties {
         $method = "PUT"
         $body = @{}
         if ($DisplayName) { $body.displayname = $DisplayName }
-        if ($isWireless) { $body.iswireless = $isWireless }
-        if ($collectWireless) { $body.collectwireless = $collectWireless }
-        if ($keepDetailsCurrent) { $body.keepdetailscurrent = $keepDetailsCurrent }
+        if ($PSBoundParameters.ContainsKey('isWireless')) { $body.iswireless = $isWireless }
+        if ($PSBoundParameters.ContainsKey('collectWireless')) { $body.collectwireless = $collectWireless }
+        if ($PSBoundParameters.ContainsKey('keepDetailsCurrent')) { $body.keepdetailscurrent = $keepDetailsCurrent }
         if ($note) { $body.note = $note }
         if ($snmpOid) { $body.snmpoid = $snmpOid }
         if ($actionPolicyId -or $actionPolicyName) {
@@ -101,9 +120,9 @@ function Set-WUGDeviceProperties {
             $body = @{
                 devices = $currentBatch
             }
-            if ($isWireless) { $body.iswireless = $isWireless }
-            if ($collectWireless) { $body.collectwireless = $collectWireless }
-            if ($keepDetailsCurrent) { $body.keepdetailscurrent = $keepDetailsCurrent }
+            if ($PSBoundParameters.ContainsKey('isWireless')) { $body.iswireless = $isWireless }
+            if ($PSBoundParameters.ContainsKey('collectWireless')) { $body.collectwireless = $collectWireless }
+            if ($PSBoundParameters.ContainsKey('keepDetailsCurrent')) { $body.keepdetailscurrent = $keepDetailsCurrent }
             if ($note) { $body.note = $note }
             if ($snmpOid) { $body.snmpoid = $snmpOid }
             if ($actionPolicyId -or $actionPolicyName) {
@@ -141,13 +160,6 @@ function Set-WUGDeviceProperties {
                 Write-Error $errorMessage
             }
         }
-        try {
-            $result = Get-WUGAPIResponse -uri $uri -method "PATCH" -body $body
-            $finalresult = $result.data
-        }
-        catch {
-            Write-Error "Error setting device properties: $($_.Exception.Message)"
-        }
         return $finalresult
     }
 }
@@ -162,8 +174,8 @@ function Set-WUGDeviceProperties {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsQZVlrmcQp3X2
-# ynAXEf908vDlNvDDYGtsjFl+YhaLjqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAm4XU3xf9izIa+
+# 1kOjNKcDLA14xBoD48n3PNd3Mloby6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -263,17 +275,17 @@ function Set-WUGDeviceProperties {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgbIl+k0i8gVhMLcCeMzIG1em38QpfLVqr
-# XBIUIWu5hYkwDQYJKoZIhvcNAQEBBQAEggIA1heCTFNBatdb521iLW8TE596IRgN
-# acMQ3DdvaJ0ogazz+xlqZQh2zFu2j0Jhx9gZP2LVsr5Br6RJYjU95ES4KsXQDuk7
-# 9JX6VyNa/OOY8EMDZiP4I+lOEVqULKccxS6fxP6zi9sMxooX2oomlb3SBvfSBQBC
-# AJx8N9l7Udqd9FHdx5ZBzSymjrm2o5QUOd9acgvukK2gvk97MkctNaP1uAfcNd1N
-# g26tpkOJingdd7As+rGdij3meE9lkVmolKw+4kdMD/bq8tNeWbetojJfdyo6p1Tr
-# UeGe7nrUNtW7u+lLCm4j3KAKLxFovkrJyp7iJQA5ZypTZU2rjhM4w655811prnRm
-# kzqdEFQXQzWOQtpQ18fN8evGaqicw2OvLHUDUe7+sdvure+j8lnwsTwH2ARUoLBE
-# hOsS3jWx+yIqrOLYtaDWjuVlwAtW66XfBRGOXMvrPJ8mn7i0cqU9dQXtD+zDkhMD
-# a8jwhphSjaz9Jvf+J5FbsN83ntSLF0/MwT5IH9hsxPf/40n2klvJMfui8M9pSNfB
-# XIwMQIuBTny8NdXXkpXtlywps78xr9Lcg8an56q2FgyJ3SEGlK02xS8LZ3w4IkQZ
-# LOfUmudN+F96LAqTV4i4wa3dz8FTK1l38R+asi4BLPy1rKJE+o5pW5iZ7OV/jv2N
-# 0lq4zzomSVi3Wno=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgzoqupWSmJqixgSXYaY0ybGDY44lnEA97
+# i0xwsBvJPcgwDQYJKoZIhvcNAQEBBQAEggIA3Xp0cC9iGoXgUSf40tgBd9nxLhBZ
+# Isz78b1lrhG3zP06nRXIbdP4GQ1v25Mwnyw/Uhj07SA4L44V39iTPPtebBgXl8zk
+# TXhxhS7zMp6yEshQV0GLhuAZoPGZizlIbcYu8hXCYGElyv9fuld0/IVm1DWJhC6N
+# 2OPewW2J9Lz4KBjHrj/P9AwXmFHyNEKLwh+awftAklLtBDO8itVI5kwFGeH+dZPr
+# 9HmRB5n8Qc0sCK/0Bo4jqenxd7XagdgIBvn+YFN31gjydyqenXw/zt416ayV5HfT
+# 8eGqUpCzlUpxrL5n0sOPPRf++T8/2gmIw1SRIhon+s4QBDv+THo1X6WOF2hUf3qZ
+# wtWIQj5Hy2C4bido5LrflWMVYCSY3p6Ph/pVGBVtFp6iic2BSupmfEGTaUMhMXcW
+# vgp7sw8HJPxThVV4zUTWXGU0sOfdp2dTU/rPQym23xtnbw+8V9biuDBqY10j64j3
+# jXjvinO176B57yRQ3BD7Jg2LU1jMOdl9FSgU+F5V9VSOI64dqkRGA3wbXbkuqx0H
+# IQHfcqH65J3fyJbVPBFAfvEjow/ha38ZRnECSpJy7Hpc95Cv71lkC6NZKmz/iiis
+# 1fBWUDYbqlQoAf/btvdNx6oEe6nXk/dbMJgUrLYkUFAC9ytjC/+0jkplU22+0qpd
+# w3K2nCMxGUrTCl8=
 # SIG # End signature block

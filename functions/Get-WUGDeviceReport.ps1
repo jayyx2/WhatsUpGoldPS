@@ -1,26 +1,106 @@
+<#
+.SYNOPSIS
+    Retrieves performance and availability reports for one or more WhatsUp Gold devices.
+
+.DESCRIPTION
+    Get-WUGDeviceReport queries the WhatsUp Gold REST API for device-level reports across multiple
+    report types such as CPU, memory, disk, interface, ping, and state change. Results are automatically
+    paginated. Supports sorting, grouping, thresholds, time ranges, and business hours filtering.
+
+.PARAMETER DeviceId
+    One or more device IDs to retrieve reports for. Accepts pipeline input and the alias 'id'. Required.
+
+.PARAMETER ReportType
+    The type of report to retrieve. Required. Valid values: Cpu, Disk, DiskSpaceFree, Interface,
+    InterfaceDiscards, InterfaceErrors, InterfaceTraffic, Memory, PingAvailability, PingResponseTime, StateChange.
+
+.PARAMETER Range
+    The time range preset for the report. Valid values: today, lastPolled, yesterday, lastWeek, lastMonth,
+    lastQuarter, weekToDate, monthToDate, quarterToDate, lastNSeconds, lastNMinutes, lastNHours, lastNDays,
+    lastNWeeks, lastNMonths, custom.
+
+.PARAMETER RangeStartUtc
+    The start date/time in UTC for a custom time range. Used when Range is set to 'custom'.
+
+.PARAMETER RangeEndUtc
+    The end date/time in UTC for a custom time range. Used when Range is set to 'custom'.
+
+.PARAMETER RangeN
+    The number of time units for lastN* range types (e.g., lastNHours with RangeN=4 means last 4 hours). Default: 1.
+
+.PARAMETER SortBy
+    The column to sort results by. Valid values depend on the ReportType selected.
+
+.PARAMETER SortByDir
+    The sort direction. Valid values: asc, desc. Default: desc.
+
+.PARAMETER GroupBy
+    The column to group results by. Valid values depend on the ReportType selected.
+
+.PARAMETER GroupByDir
+    The group sort direction. Valid values: asc, desc.
+
+.PARAMETER ApplyThreshold
+    Whether to apply a threshold filter to the results. Valid values: true, false.
+
+.PARAMETER OverThreshold
+    When ApplyThreshold is true, determines whether to return values over or under the threshold. Valid values: true, false.
+
+.PARAMETER ThresholdValue
+    The numeric threshold value to filter against. Default: 0.0.
+
+.PARAMETER BusinessHoursId
+    The ID of a business hours profile to restrict the report to. Default: 0 (all hours).
+
+.PARAMETER RollupByDevice
+    Whether to roll up (aggregate) results per device. Valid values: true, false.
+
+.PARAMETER PageId
+    The page identifier for retrieving a specific page of paginated results.
+
+.PARAMETER Limit
+    The maximum number of results per page. Valid range: 0-250. Default: 50.
+
+.EXAMPLE
+    Get-WUGDeviceReport -DeviceId 1 -ReportType Cpu -Range lastWeek
+
+    Returns the CPU utilization report for device 1 over the last week.
+
+.EXAMPLE
+    Get-WUGDeviceReport -DeviceId 1,2,3 -ReportType Memory -Range lastNHours -RangeN 8
+
+    Returns the memory utilization report for devices 1, 2, and 3 over the last 8 hours.
+
+.EXAMPLE
+    Get-WUGDeviceReport -DeviceId 5 -ReportType PingAvailability -Range custom -RangeStartUtc '2026-03-01T00:00:00Z' -RangeEndUtc '2026-03-06T00:00:00Z'
+
+    Returns the ping availability report for device 5 within a custom UTC date range.
+
+.EXAMPLE
+    1..10 | Get-WUGDeviceReport -ReportType StateChange -Range today -SortBy deviceName -SortByDir asc
+
+    Pipes device IDs 1 through 10 and retrieves today's state change report sorted by device name ascending.
+
+.EXAMPLE
+    Get-WUGDeviceReport -DeviceId 3 -ReportType Disk -Range lastMonth -ApplyThreshold true -OverThreshold true -ThresholdValue 90
+
+    Returns disk utilization data for device 3 over the last month where values exceed 90%.
+
+.NOTES
+    Author: Jason Alberino (jason@wug.ninja)
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Reports
+#>
 function Get-WUGDeviceReport {
-    [CmdletBinding(DefaultParameterSetName = 'Default')]
+    [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [Alias('id')]
         [int[]]$DeviceId,
 
-        [Parameter(Mandatory = $true, ParameterSetName = 'Cpu')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'Memory')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'Disk')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'Interface')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'Ping')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'Latency')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $true)]
         [ValidateSet("Cpu", "Disk", "DiskSpaceFree", "Interface", "InterfaceDiscards", "InterfaceErrors", "InterfaceTraffic", "Memory", "PingAvailability", "PingResponseTime", "StateChange")]
         [string]$ReportType,
 
-        [Parameter(ParameterSetName = 'Cpu')]
-        [Parameter(ParameterSetName = 'Memory')]
-        [Parameter(ParameterSetName = 'Disk')]
-        [Parameter(ParameterSetName = 'Interface')]
-        [Parameter(ParameterSetName = 'Ping')]
-        [Parameter(ParameterSetName = 'Latency')]
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")]
         [string]$Range,
 
@@ -29,15 +109,11 @@ function Get-WUGDeviceReport {
 
         [int]$RangeN = 1,
 
-        [Parameter(ParameterSetName = 'Disk')]
-        [ValidateSet("defaultColumn", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minFree", "maxFree", "avgFree")]
         [string]$SortBy,
 
         [ValidateSet("asc", "desc")]
         [string]$SortByDir = "desc",
 
-        [Parameter(ParameterSetName = 'Disk')]
-        [ValidateSet("noGrouping", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minFree", "maxFree", "avgFree")]
         [string]$GroupBy,
 
         [ValidateSet("asc", "desc")]
@@ -72,22 +148,78 @@ function Get-WUGDeviceReport {
 
         $baseUri = "${global:WhatsUpServerBaseURI}/api/v1"
 
-        switch ($ReportType) {
-            "Cpu"                { $reportEndpoint = "Cpu" }
-            "Disk"               { $reportEndpoint = "Disk" }
-            "DiskSpaceFree"      { $reportEndpoint = "DiskSpaceFree" }
-            "Interface"          { $reportEndpoint = "Interface" }
-            "InterfaceDiscards"  { $reportEndpoint = "InterfaceDiscards" }
-            "InterfaceErrors"    { $reportEndpoint = "InterfaceErrors" }
-            "InterfaceTraffic"   { $reportEndpoint = "InterfaceTraffic" }
-            "Memory"             { $reportEndpoint = "Memory" }
-            "PingAvailability"   { $reportEndpoint = "PingAvailability" }
-            "PingResponseTime"   { $reportEndpoint = "PingResponseTime" }
-            "StateChange"        { $reportEndpoint = "StateChange" }
-            default { 
-                Write-Error "Invalid ReportType specified."
-                return 
+        # Map ReportType to API endpoint and valid SortBy/GroupBy values
+        $reportConfig = @{
+            "Cpu" = @{
+                Endpoint = "cpu-utilization"
+                SortBy   = @("defaultColumn", "id", "deviceName", "cpu", "cpuId", "pollTimeUtc", "timeFromLastPollSeconds", "minPercent", "maxPercent", "avgPercent")
+                GroupBy  = @("noGrouping", "id", "deviceName", "cpu", "cpuId", "pollTimeUtc", "timeFromLastPollSeconds", "minPercent", "maxPercent", "avgPercent")
             }
+            "Disk" = @{
+                Endpoint = "disk-utilization"
+                SortBy   = @("defaultColumn", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minUsed", "maxUsed", "avgUsed", "avgFree", "minPercent", "maxPercent", "avgPercent")
+                GroupBy  = @("noGrouping", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "mi", "ma", "av")
+            }
+            "DiskSpaceFree" = @{
+                Endpoint = "disk-free-space"
+                SortBy   = @("defaultColumn", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minFree", "maxFree", "avgFree")
+                GroupBy  = @("noGrouping", "id", "deviceName", "disk", "diskId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minFree", "maxFree", "avgFree")
+            }
+            "Interface" = @{
+                Endpoint = "interface-utilization"
+                SortBy   = @("defaultColumn", "id", "deviceName", "interfaceName", "interfaceId", "pollTimeUtc", "timeFromLastPollSeconds", "rxMin", "rxMax", "rxAvg", "rxTotal", "txMin", "txMax", "txAvg", "txTotal", "totalAvg")
+                GroupBy  = @("noGrouping", "id", "deviceName", "interfaceName", "interfaceId", "pollTimeUtc", "timeFromLastPollSeconds", "rxMin", "rxMax", "rxAvg", "rxTotal", "txMin", "txMax", "txAvg", "txTotal", "totalAvg")
+            }
+            "InterfaceDiscards" = @{
+                Endpoint = "interface-discards"
+                SortBy   = @("defaultColumn", "id", "deviceName", "interfaceName", "interfaceId", "pollTimeUtc", "timeFromLastPollSeconds", "rxMin", "rxMax", "rxAvg", "rxTotal", "txMin", "txMax", "txAvg", "txTotal", "totalAvg")
+                GroupBy  = @("noGrouping", "id", "deviceName", "interfaceName", "interfaceId", "pollTimeUtc", "timeFromLastPollSeconds", "rxMin", "rxMax", "rxAvg", "rxTotal", "txMin", "txMax", "txAvg", "txTotal", "totalAvg")
+            }
+            "InterfaceErrors" = @{
+                Endpoint = "interface-errors"
+                SortBy   = @("defaultColumn", "id", "deviceName", "interfaceName", "interfaceId", "pollTimeUtc", "timeFromLastPollSeconds", "rxMin", "rxMax", "rxAvg", "rxTotal", "txMin", "txMax", "txAvg", "txTotal", "totalAvg")
+                GroupBy  = @("noGrouping", "id", "deviceName", "interfaceName", "interfaceId", "pollTimeUtc", "timeFromLastPollSeconds", "rxMin", "rxMax", "rxAvg", "rxTotal", "txMin", "txMax", "txAvg", "txTotal", "totalAvg")
+            }
+            "InterfaceTraffic" = @{
+                Endpoint = "interface-traffic"
+                SortBy   = @("defaultColumn", "id", "deviceName", "interfaceName", "interfaceId", "pollTimeUtc", "timeFromLastPollSeconds", "rxMin", "rxMax", "rxAvg", "rxTotal", "txMin", "txMax", "txAvg", "txTotal", "totalAvg")
+                GroupBy  = @("noGrouping", "id", "deviceName", "interfaceName", "interfaceId", "pollTimeUtc", "timeFromLastPollSeconds", "rxMin", "rxMax", "rxAvg", "rxTotal", "txMin", "txMax", "txAvg", "txTotal", "totalAvg")
+            }
+            "Memory" = @{
+                Endpoint = "memory-utilization"
+                SortBy   = @("defaultColumn", "id", "deviceName", "memory", "memoryId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minUsed", "maxUsed", "avgUsed", "minPercent", "maxPercent", "avgPercent")
+                GroupBy  = @("noGrouping", "id", "deviceName", "memory", "memoryId", "pollTimeUtc", "timeFromLastPollSeconds", "size", "minUsed", "maxUsed", "avgUsed", "minPercent", "maxPercent", "avgPercent")
+            }
+            "PingAvailability" = @{
+                Endpoint = "ping-availability"
+                SortBy   = @("defaultColumn", "id", "deviceName", "interfaceId", "interfaceName", "packetsLost", "packetsSent", "percentAvailable", "percentPacketLoss", "totalTimeMinutes", "timeUnavailableMinutes", "pollTimeUtc", "timeFromLastPollSeconds")
+                GroupBy  = @("noGrouping", "id", "deviceName", "interfaceId", "interfaceName", "packetsLost", "packetsSent", "percentAvailable", "percentPacketLoss", "totalTimeMinutes", "timeUnavailableMinutes", "pollTimeUtc", "timeFromLastPollSeconds")
+            }
+            "PingResponseTime" = @{
+                Endpoint = "ping-response-time"
+                SortBy   = @("defaultColumn", "id", "deviceName", "interfaceId", "interfaceName", "minMilliSec", "maxMilliSec", "avgMilliSec", "pollTimeUtc", "timeFromLastPollSeconds")
+                GroupBy  = @("noGrouping", "id", "deviceName", "interfaceId", "interfaceName", "minMilliSec", "maxMilliSec", "avgMilliSec", "pollTimeUtc", "timeFromLastPollSeconds")
+            }
+            "StateChange" = @{
+                Endpoint = "state-change"
+                SortBy   = @("defaultColumn", "deviceName", "monitorTypeName", "stateName", "startTimeUtc", "endTimeUtc", "totalSeconds", "result")
+                GroupBy  = @("noGrouping", "deviceName", "monitorTypeName", "stateName", "startTimeUtc", "endTimeUtc", "totalSeconds", "result")
+            }
+        }
+
+        $config = $reportConfig[$ReportType]
+        $reportEndpoint = $config.Endpoint
+
+        # Validate SortBy against the allowed values for this report type
+        if ($SortBy -and $SortBy -notin $config.SortBy) {
+            Write-Error "Invalid SortBy value '$SortBy' for report type '$ReportType'. Valid values: $($config.SortBy -join ', ')"
+            return
+        }
+
+        # Validate GroupBy against the allowed values for this report type
+        if ($GroupBy -and $GroupBy -notin $config.GroupBy) {
+            Write-Error "Invalid GroupBy value '$GroupBy' for report type '$ReportType'. Valid values: $($config.GroupBy -join ', ')"
+            return
         }
 
         $queryParams = @{}
@@ -119,30 +251,65 @@ function Get-WUGDeviceReport {
     }
 
     end {
+        # If no DeviceId was specified, fetch all device IDs
+        if ($collectedDeviceIds.Count -eq 0) {
+            Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+            $allDevices = Get-WUGDevice -View id
+            if ($allDevices) {
+                $collectedDeviceIds = @($allDevices.id)
+            }
+            if ($collectedDeviceIds.Count -eq 0) {
+                Write-Warning "No devices found."
+                return
+            }
+            Write-Verbose "Found $($collectedDeviceIds.Count) devices."
+        }
+
+        $totalDevices = $collectedDeviceIds.Count
+        $currentDeviceIndex = 0
+
         foreach ($id in $collectedDeviceIds) {
+            $currentDeviceIndex++
+            $percentCompleteDevices = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100, 2)
+            Write-Progress -Id 1 -Activity "Fetching $ReportType report for $totalDevices devices" -Status "Processing Device $currentDeviceIndex of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
+
             $currentPageId = $null
+            $pageCount = 0
 
             do {
-                $uri = if ($currentPageId) {
-                    "$baseUri/devices/$id/reports/$reportEndpoint?pageId=$currentPageId&$queryString"
+                if ($currentPageId) {
+                    $uri = "$baseUri/devices/$id/reports/$reportEndpoint`?pageId=$currentPageId"
+                    if ($queryString) { $uri += "&$queryString" }
                 } else {
-                    "$baseUri/devices/$id/reports/$reportEndpoint?$queryString"
+                    $uri = "$baseUri/devices/$id/reports/$reportEndpoint"
+                    if ($queryString) { $uri += "?$queryString" }
                 }
 
                 Write-Verbose "API Call: $uri"
 
                 try {
-                    $result = Invoke-RestMethod -Uri $uri -Method Get -ErrorAction Stop
+                    $result = Get-WUGAPIResponse -Uri $uri -Method "GET"
                     $finalOutput += $result.data
                     $currentPageId = $result.paging.nextPageId
+                    $pageCount++
+
+                    if ($result.paging.totalPages) {
+                        $percentCompletePages = ($pageCount / $result.paging.totalPages) * 100
+                        Write-Progress -Id 2 -Activity "Fetching $ReportType report for DeviceID: $id" -Status "Page $pageCount of $($result.paging.totalPages)" -PercentComplete $percentCompletePages
+                    } else {
+                        Write-Progress -Id 2 -Activity "Fetching $ReportType report for DeviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
+                    }
                 }
                 catch {
-                    Write-Error "Failed to fetch data for device $id. Error: $_"
+                    Write-Error "Failed to fetch $ReportType report for device $id. Error: $_"
                     $currentPageId = $null
                 }
             } while ($currentPageId)
+
+            Write-Progress -Id 2 -Activity "Fetching $ReportType report for DeviceID: $id" -Status "Completed" -Completed
         }
 
+        Write-Progress -Id 1 -Activity "Fetching $ReportType report for $totalDevices devices" -Status "All devices processed" -Completed
         return $finalOutput
     }
 }
@@ -150,8 +317,8 @@ function Get-WUGDeviceReport {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFHNQKxMMTiZIs
-# o/tGpEZ6SPlJ/jT0r35PqEWozNvFoKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPckcJzi08m42w
+# wErBrdF/XVgOiwHSGKM0UnoBc2RogKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -251,17 +418,17 @@ function Get-WUGDeviceReport {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg7shu1OOMhzu+38B4RSdF/jYK64feHEnS
-# gtSSa9n4VucwDQYJKoZIhvcNAQEBBQAEggIAm5noTOyG18ZOixWibbbBLwCat8XC
-# WNNjFcrgdPJARh0MsImtlMcYRHhgxtps2GEb93diue8DagtbKL6D23bm+EGYWJ+S
-# CQyQyv2IxdE8D2BSA6wokU8cLThH6z8K00XrL9OtMM+oQIN9CXmjfAu3ymvU2PbZ
-# K9Va8Fq5QsqKNFvq64pmT9AUzICrpOQWnYg/ayJ33hLhIuf1CAzdBwBMlQk323sm
-# 85uAf1EM+etPyR75jrJzMCOex73Dm4UmZrBWvU0fJvq8LLDFszAct66WHLzhTSxI
-# Y74TRJcpgeeTHIx1sp3n6+1LcoJHt2m/EVZsC0t+d4EMbPZzjwhBy+V7/PGM4iLf
-# 2teWNJ19NXjF6yCa92xYRe7MaYq6nmD/KxxccxApHxn+SdeLZj/VxZ2l4IjFAKv+
-# BBj921j5FzZcCgRB15WD7jxjFODcBkFjcTdGxLlSGCgV8ZFnPfne8bGQVlg06Azr
-# WYrKzIBSg8p/G13F2LVqK1XoG+ZAG2gCDZHlWcsVaxf7CpjkHBZEu2tdLtL6rVtH
-# 50ne+SfgMzzSKrAHq2taFQjT+Ksh5ZAOsU8IsklXaY8r4m8ocXPdpJC6J+ibAxR5
-# O6KgORZAoXNiXT0kpTEg4OQE/XtZI+esUnSYDFQYm6TZISN5VH0k94OxsetLqU6d
-# 7tlM+s2Jf45zdGk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgOjJZf2s7QPCpNCywzuiJ3ZAeLn15OPOX
+# taSbIHS97SwwDQYJKoZIhvcNAQEBBQAEggIARX4EC1Vh1QJu1I8KnIRDXVlPmOTI
+# EDdyqD8zk8tocUComQVY3SYJntoYWGHnNALymoOBDrKvkWkl946ptFw991BDe7SQ
+# PYz6FELkBwDg/33pZSvhPCz+n2+JqYQstIn1AcwwUIA92CjQoYQhVDGrTsi79BN6
+# ImiWEiLeHWD/SoD/Syg2P6jWlGLb2ZyKM7v6URoiwC/6mwm0nb7J09FM7VQ4NvWe
+# Y5dO7Gak5pssBw3HpBcLytCSMTUERHieBx6A4/TZPyplHX10yWLhmTx3E5jxbWXk
+# o3C0x7+jIze7sVmsGzhAeoNIM4JGlDcWCC+x7oB236wSMZoe2reNWNX66A8J015Z
+# gf6U0g7xtweiLs1NE3FfBWy9jtXY9HNDMCfajl9uf5L2tZHeP3AKFFfA+CRpaPQr
+# bEDO7wKa/p97+2jGCzJB6g81u1KoXC3TQtbfdeE09R6rzxCnvQgToff6hEZzPPlD
+# G+4thlAqmaeXbWYnrkSbaoKSDcXLBW8f2woAxshtz8V8Qn7R4IJ3O/4tsWis8h6E
+# ZZmETpbqzsMSsn+sSDqbSUjQ3N6jePmGW8yYpA3QAxElBSM/wvWOlHjdCsArWl7X
+# O2Lk9DYAtn41cNeynE6Q/8masQyFgx8UUAp1/lJ9bAm2PEGvi3XnL6DiOD32/sRC
+# HZtuPhVBl1wcXk4=
 # SIG # End signature block

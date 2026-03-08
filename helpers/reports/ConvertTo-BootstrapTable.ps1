@@ -1,60 +1,47 @@
-#Import module if we have to
-if (!(Get-Module -Name WhatsUpGoldPS)) {Import-Module -Name WhatsUpGoldPS}
-#Set your credential
-if(!$Credential){$Credential = Get-Credential}
-#Enter your server name or IP
-$ServerIpOrHostName = "192.168.1.250"
-#Enter a filename
-$jsonFilePath = "C:\temp\json.json"
-#This uses WhatsUpGoldPS Connect-WUGServer function to authenticate
-if(!$global:WUGBearerHeaders){
-    Connect-WUGServer -serverUri $ServerIpOrHostName -Credential $Credential -IgnoreSSLErrors -Protocol https
-}
-#This uses WhatsUpGoldPS Get-WUGDevice function to search for monitored devices with "192.168.1." and requests the card view
-#It then uses PowerShell's Select-Object to isolate data, converts it to JSON, and outputs to a file
-# Example: build a custom object per device
-$Dashboard = Get-WUGDevice -SearchValue "192.168.1." -View card |
-    Where-Object { $_.downActiveMonitors -ne $null } |
-    ForEach-Object {
-        [pscustomobject]@{
-            '...'              = $_.id
-            id                 = $_.id
-            name               = $_.name
-            networkAddress     = $_.networkAddress
-            hostName           = $_.hostName
+function ConvertTo-BootstrapTable {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string] $JsonFilePath
+    )
 
-            # Build an array of full-detail monitor objects
-            downActiveMonitors = $_.downActiveMonitors | ForEach-Object {
-                [pscustomobject]@{
-                    state           = $_.state
-                    reason          = $_.reason
-                    lastChangeUtc   = $_.lastChangeUtc
-                    monitorTypeName = $_.monitorTypeName
-                    comment         = $_.comment
-                    enabled         = $_.enabled
-                }
-            }
+    $jsonData = Get-Content -Path $JsonFilePath | ConvertFrom-Json
+    $firstObject = $jsonData[0]
+
+    $columns = @()
+    $firstObject.PSObject.Properties | ForEach-Object {
+        $column = @{
+            field      = $_.Name
+            title      = $_.Name
+            sortable   = $true
+            searchable = $true
         }
+        if ($_.Name -eq 'downActiveMonitors') {
+            $column.formatter = 'formatDownActiveMonitors'
+        }
+        if ($_.Name -eq '...') {
+            $column.formatter = 'formatId'
+            $column.title = ''
+            $column.sortable = $false
+            $column.searchable = $false
+            $column.switchable = $false
+        }
+        $columns += $column
     }
 
-# Convert to JSON. Increase -Depth if needed for nesting
-$Dashboard | ConvertTo-Json | Out-File $jsonFilePath -Force
-Write-Information "${jsonFilePath} created."
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson = $jsonData | ConvertTo-Json -Depth 5 -Compress
 
-#Where is your HTML template file?
-$templateFilePath = ".\examples\Bootstrap-Table-Sample.html"
-#What is the file path and name to output?
-$outputFilePath = "C:\temp\Example-Custom-Report.html"
-#What are we replacing in the file with our $Dashboard data?
-$customPlaceholder = 'replaceThisHere'
-Convert-HTMLTemplate -TemplateFilePath $templateFilePath -JsonFilePath $jsonFilePath -OutputFilePath $outputFilePath -Placeholder $customPlaceholder -ReportName "Down Active Monitor Details"
-Write-Information "${outputFilePath} created."
+    return @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+}
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5LvFj5cuqL1ji
-# Kwh05w9J3nWUL81Ui5C8s2nqSL/EHqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWhWMaehaSZrRc
+# XVfHYFsQymVCJpmaUWjwAqDivWqMb6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -154,17 +141,17 @@ Write-Information "${outputFilePath} created."
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgbYbQjtWA2gtSbIe01aBm/HMUyGq3GVFT
-# NxMgG+2SA0MwDQYJKoZIhvcNAQEBBQAEggIAU8gQ+vfArFlS+3LAvifMgaEsLuSb
-# YYOrCubwh77YwXezaYMI7/mkXZLUz5ndyhwZQAQZwwGMNxtYFuuQjiiIdeD6eaDK
-# rhCm04JYRUri95PlBHvdKVc0W83yzk4dmoYDxqo0fQPpQvlTk0rFobAo22pvwmHp
-# lgQ8orj3CLMrosaQACBIERRRpHtwPebkWzooyns30HnolNTH1uw/854kYxu/Xu4o
-# JdT84KgtSEEnbKzvb3Rdml71pxJI8NtURLNfX9ccspXRFdeWUys3hOHAhfTA+xTT
-# 4159Qf3i3xzIvMN7Acmuhf+3fZ4558oqNgM89QSnpQ00J+q8vkzMGjB78ZQBonIQ
-# FVuRbqb2AJgiYw8fVW8zkk4AmyUlnSzU8gQjBVMR5Mkedh7fc0lrdVhPYeaBojHv
-# iAdSHNn1IYhngiA1ZWfWUnPP6VmyOBhYuI2C3wyUlxfxbZ/YjeKqho5MIZhxQgz6
-# 9myY891LXk8f/1eXKnTyGoa9VTQJ4q0oPunzxEdx+NrsKY8498BDz1Ro0z630Y94
-# 7BpDqPvz1+v1i6vNWkm88MB2IutPTv7w0Sw1gOx0diT/kp0rRF4oApnpd1bLnGHU
-# 66NJJi2nbvbbEUWno9RbLipSo/NC7hl+flNh5Acalky0ZOwcX/+CQqg1yjzynH+w
-# slffmuhspDtMO0c=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgqd3E6UmrpmJGOxmD4pqjaEPGKc3josrT
+# vklaXjfAVb0wDQYJKoZIhvcNAQEBBQAEggIA6947I0ZU0RzhBghdnFWyzFiADoDq
+# UzPa1TZMuCBBGIyN+V1zchVLNtRPYxZbjW3qVafW7GF8OhvqUIOisEoJagD9wedZ
+# BoqblD2q5RYPAU5CADnV3CKtMxvW3L2Itudj4Z+Xz/GypoiMJINy2yiS1lR3J/Bu
+# pUXElxeKTMwAFhFb/tqk9amjQurpJ32J+dyxSQ42EgZ8OCoPfkhTlwk59xKFgRue
+# 9HWBluqpCt76axu7XqNXeylYN24hnpquLvT0okNKp1d1FeOY57CqtfbUoHMFrvGp
+# qaytcDtpwA8LlpR9btgmrZsIheCdPf4UdXmaqqnDrYQFBoAUiOcZkn4IJHpa/YiL
+# wkRiqO5e63ANHMI2tgANXLYLsWkiCNmgcI18GH0ZYtRcPZ0zR6nldi13MgJrZQXz
+# zWar57sGhjF0KPjl+lp01Acm22iK1aUz5RuQgdCBjTCKHLBvtvCxjMEEWSNv7U1G
+# 8k2JEBXjc07TLBZOmkwcD6KSQHk54q/q5qhW0j10QAPDSe2xdWI0xGhJ0x6aRzRT
+# GPpNarC2wTURdrirMLTw1hbBtReNF3XSqHaea1nJkhnf/00TBuJuNjqZ5zL6xLKy
+# i5C7fiMC8sD/RFuNlCo4ikPJAFfoKQPEJ4NKCiDjWY2YRgLgJySEVfvbRFcn+OXh
+# +mLkdM+0FOWtEfg=
 # SIG # End signature block

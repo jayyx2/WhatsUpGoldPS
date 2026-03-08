@@ -74,7 +74,7 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed device gr
 
 function Get-WUGDeviceGroupReportMaintenance {
     [CmdletBinding()] param (
-        [int[]]$GroupId,
+        [int[]]$GroupId = @(-2),
         [ValidateSet("true", "false")][string]$ReturnHierarchy,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
@@ -82,7 +82,7 @@ function Get-WUGDeviceGroupReportMaintenance {
         [int]$RangeN = 1,
         [ValidateSet("defaultColumn","id","name","startTimeUtc","durationSeconds","maintenanceMode","userName","reason")][string]$SortBy,
         [ValidateSet("asc", "desc")][string]$SortByDir,
-        [ValidateSet("defaultColumn","id","name","startTimeUtc","durationSeconds","maintenanceMode","userName","reason")][string]$GroupBy,
+        [ValidateSet("noGrouping","id","name","startTimeUtc","durationSeconds","maintenanceMode","userName","reason")][string]$GroupBy,
         [ValidateSet("asc", "desc")][string]$GroupByDir,
         [int]$BusinessHoursId,
         [ValidateSet("true", "false")][string]$RollupByDevice,
@@ -100,6 +100,7 @@ function Get-WUGDeviceGroupReportMaintenance {
         $totalGroups = $GroupId.Count
         $currentGroupIndex = 0
         # Building the query string
+        if ($ReturnHierarchy) { $queryString += "returnHierarchy=$ReturnHierarchy&" }
         if ($Range) { $queryString += "range=$Range&" }
         if ($RangeStartUtc) { $queryString += "rangeStartUtc=$RangeStartUtc&" }
         if ($RangeEndUtc) { $queryString += "rangeEndUtc=$RangeEndUtc&" }
@@ -108,9 +109,6 @@ function Get-WUGDeviceGroupReportMaintenance {
         if ($SortByDir) { $queryString += "sortByDir=$SortByDir&" }
         if ($GroupBy) { $queryString += "groupBy=$GroupBy&" }
         if ($GroupByDir) { $queryString += "groupByDir=$GroupByDir&" }
-        if ($ApplyThreshold) { $queryString += "applyThreshold=$ApplyThreshold&" }
-        if ($OverThreshold) { $queryString += "overThreshold=$OverThreshold&" }
-        if ($ThresholdValue) { $queryString += "thresholdValue=$ThresholdValue&" }
         if ($BusinessHoursId) { $queryString += "businessHoursId=$BusinessHoursId&" }
         if ($RollupByDevice) { $queryString += "rollupByDevice=$RollupByDevice&" }
         if ($PageId) { $queryString += "pageId=$PageId&" }
@@ -129,7 +127,7 @@ function Get-WUGDeviceGroupReportMaintenance {
             do {
                 if ($currentPageId) {
                     $uri = "${baseUri}${id}${endUri}?pageId=$currentPageId"
-                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                    if($null -ne $queryString){$uri += "&${queryString}"}
                 } else {$uri = "${baseUri}${id}${endUri}?${queryString}"}
                 try {
                     $result = Get-WUGAPIResponse -uri $uri -method "GET"

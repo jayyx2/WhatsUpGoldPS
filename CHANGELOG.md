@@ -1,11 +1,70 @@
 # WhatsUpGoldPS Release History
-## 0.1.19 - 2026-03-05 [not going to PSGallery release yet]
+## 0.1.19 - 2026-03-08 [not going to PSGallery release yet, need more testing]
 * Changed
-  * Added SNMP Table property bags to Add-WUGActiveMonitor
-  * Updated all signatures with cool, new certificate
-  
+  * Added SNMP Table property bags to Add-WUGActiveMonitor for /api/v1/monitors endpoints
+  * Updated all signatures with new certificate
+  * Reorganized helpers/ into subdirectories: reports/, vmware/, proxmox/
+  * Moved examples/Custom_report.ps1, examples/Bootstrap-Table-Sample.html → helpers/reports/
+  * Moved examples/Rename_and_update_devices_based_on_vCenter_data.ps1 → helpers/vmware/
+  * Moved helpers/ConvertTo-BootstrapTable.ps1, helpers/ConvertTo-HTMLTemplate.ps1 → helpers/reports/
+  * Fixed malformed comment-based help block in Add-WUGDeviceTemplates (corrected EXAMPLES → .EXAMPLE, moved Author into .NOTES)
+  * Removed ghost exports `Add-WUGDevices`, `ConvertTo-BootstrapTable`, `Convert-HTMLTemplate` from psd1 FunctionsToExport and psm1 Export-ModuleMember
+  * Usability: Get-WUGDeviceGroupReport now defaults GroupId to -2 (All Devices) when not specified
+  * Usability: Get-WUGDeviceReport now defaults to all devices via Get-WUGDevice when DeviceId is not specified
+  * Usability: Get-WUGDeviceAttribute DeviceId no longer mandatory; auto-fetches all device IDs when omitted
+  * Usability: Get-WUGDeviceProperties DeviceId no longer mandatory; auto-fetches all device IDs when omitted
+  * Usability: Get-WUGDeviceTemplate DeviceId no longer mandatory; auto-fetches all device IDs when omitted
+  * Usability: Get-WUGDeviceMaintenanceSchedule DeviceId no longer mandatory; auto-fetches all device IDs when omitted
+  * Usability: All 12 Get-WUGDeviceGroupReportXXXX variants now default GroupId to -2 (All Devices) when not specified
+  * Usability: All 11 Get-WUGDeviceReportXXXX variants DeviceId no longer mandatory; auto-fetches all device IDs when omitted
+  * Restructured Get-WUGDeviceReportMemory from process-block iteration to collect-then-iterate pattern (consistent with other report variants)
+
+* Bugfixes
+  * Fixed Remove-WUGDevice using undefined `$id` variable instead of `$DeviceId` in output/warning/error messages
+  * Fixed Set-WUGActiveMonitor inverted boolean logic: `!$Enabled` and `!$UseInDiscovery` checks were only including API properties when values were falsy; replaced with `$PSBoundParameters.ContainsKey()` checks (4 locations)
+  * Fixed Set-WUGDeviceProperties duplicate API call after batch loop that overwrote accumulated `$finalresult` with only last batch's data
+  * Restored `AllMonitors` (deprecated API param) in Get-WUGActiveMonitor — added as a proper parameter with query string support
+  * Fixed stray backtick in Set-WUGDeviceMaintenance API call
+  * Fixed `$ReturnHierarchy` param declared but never appended to query string in all 12 Get-WUGDeviceGroupReport variants (Cpu, Disk, DiskSpaceFree, Interface, InterfaceDiscards, InterfaceErrors, InterfaceTraffic, Maintenance, Memory, PingAvailability, PingResponseTime, StateChange)
+  * Fixed Get-WUGDeviceGroupReportPingAvailability SortBy/GroupBy ValidateSet using memory report fields instead of ping availability fields
+  * Fixed Get-WUGDeviceGroupReportMaintenance query builder referencing `$ApplyThreshold`/`$OverThreshold`/`$ThresholdValue` not declared in param block (API does not support thresholds for maintenance) — removed ghost refs
+  * Fixed Get-WUGDeviceGroupReportStateChange and Get-WUGDeviceReportStateChange query builders referencing threshold params not in param block — added `$ApplyThreshold`, `$OverThreshold`, `$ThresholdValue` to param blocks
+  * Fixed Get-WUGDeviceReportInterfaceErrors `[bool]` types for `$ApplyThreshold`, `$OverThreshold`, `$RollupByDevice` (sends True/False not true/false) — changed to `[ValidateSet("true","false")][string]`; fixed `[int]$PageId` to `[string]$PageId`
+  * Fixed Get-WUGDeviceGroupReportDisk abbreviated GroupBy values (`mi`, `ma`, `av`) — replaced with full field names (`minUsed`, `maxUsed`, `avgUsed`, etc.)
+  * Fixed Get-WUGDeviceGroupReportMaintenance GroupBy ValidateSet starting with `defaultColumn` instead of `noGrouping`
+  * Fixed Get-WUGDeviceGroupReportPingResponseTime and Get-WUGDeviceReportPingResponseTime lowercase threshold param names (`$applyThreshold` etc.) — renamed to PascalCase (`$ApplyThreshold` etc.)
+  * Added missing `$Limit` parameter to Get-WUGActiveMonitor (API supports `limit` on templates, device assignments, and global assignments endpoints)
+  * Added missing `$ReturnHierarchy` and `$State` parameters to Get-WUGDevice search query (GET /device-groups/{groupId}/devices/- endpoint)
+  * Fixed Set-WUGDeviceProperties boolean params (`$isWireless`, `$collectWireless`, `$keepDetailsCurrent`) using `if ($var)` which fails when setting to `$false` — replaced with `$PSBoundParameters.ContainsKey()` (both single and batch code paths)
+  * Fixed Add-WUGDeviceTemplates request body using hardcoded `@("all")` instead of the `$options` variable built from switch parameters (`ApplyL2`, `Update`, `UpdateInterfaceState`, `UpdateInterfaceNames`, `UpdateActiveMonitors`)
+  * Fixed Disconnect-WUGServer `Write-Information` referencing `$global:WhatsUpServerBaseURI` after it was already set to `$null` — moved message before clearing globals, changed wording to "Disconnecting from"
+  * Fixed Invoke-WUGDeviceRefresh `DropDataOlderThanHours` always being sent in the request body — `[int]` defaults to 0 which is `-ne $null`; replaced with `$PSBoundParameters.ContainsKey()` check
+  * Fixed stray `#>` comment terminator after help block in Get-WUGDeviceMaintenanceSchedule
+  * Fixed `!$null -eq $queryString` null-check logic in 13 report functions — expression parsed as `(!$null) -eq $queryString` (always `$true` for non-empty strings by accident); corrected to `$null -ne $queryString`
+  * Changed Remove-WUGDevices `$DeleteDiscoveredDevices` from `[bool]` to `[switch]` for idiomatic PowerShell usage
+
+* Enhancements
+  * Remove-WUGDevice now accepts an array of DeviceIds (`[string[]]`) with pipeline support, loops through each device individually via DELETE endpoint
+
 * Added
+  * Get-WUGDeviceReport (-ReportType parameter) now can be used instead of individual Get-WUGDeviceReportXXXX functions for /api/v1/devices/{id}/reports endpoints (Cpu, Disk, DiskSpaceFree, Interface, InterfaceDiscards, InterfaceErrors, InterfaceTraffic, Memory, PingAvailability, PingResponseTime, StateChange)
+  * Get-WUGDeviceGroupReport (-ReportType parameter) now can be used instead of Get-WUGDeviceGroupReportXXXX functions for /api/v1/device-groups/{id}/reports endpoints (Cpu, Disk, DiskSpaceFree, Interface, InterfaceDiscards, InterfaceErrors, InterfaceTraffic, Memory, PingAvailability, PingResponseTime, StateChange, Maintenance)
   * Get-WUGProduct for /api/v1/product endpoints
+  * Get-WUGDeviceScan for /api/v1/device-scan endpoints
+  * Get-WUGDeviceRole and Set-WUGDeviceRole for /api/v1/device-role endpoints
+  * helpers/vmware/ - New VMware vSphere discovery and sync scripts (discover-vsphere-immediate-add-with-attributes.ps1, discover-vsphere-nodes-and-guests-discover-then-add.ps1)
+  * helpers/proxmox/ - New Proxmox VE discovery and sync scripts (ProxmoxHelpers.ps1, discover-proxmox-nodes-and-guests scripts, Rename_and_update_devices_based_on_Proxmox_data.ps1)
+  * helpers/hyperv/ - New Hyper-V discovery and sync scripts (HypervHelpers.ps1, discover-hyperv-immediate-add-with-attributes.ps1, discover-hyperv-hosts-and-guests-discover-then-add.ps1)
+  * helpers/nutanix/ - New Nutanix Prism discovery and sync scripts (NutanixHelpers.ps1, discover-nutanix-immediate-add-with-attributes.ps1, discover-nutanix-hosts-and-guests-discover-then-add.ps1)
+
+* Documentation
+  * Added full comment-based help (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE, .NOTES) to Add-WUGActiveMonitorToDevice, Get-WUGMonitorTemplate, Remove-WUGActiveMonitor, Get-WUGDeviceGroupReport
+  * Added .EXAMPLE sections to Add-WUGDeviceTemplates, Set-WUGDeviceProperties
+  * Added .NOTES to Get-WUGDevice, Get-WUGDeviceReport, Get-WUGDeviceScan
+  * Added missing .PARAMETER help: Get-WUGDevice (ReturnHierarchy, State), Get-WUGDeviceReportPingAvailability (6 threshold params), Get-WUGDeviceReportPingResponseTime (ApplyThreshold, OverThreshold, ThresholdValue), Get-WUGActiveMonitor (AllMonitors, Limit, activeObj, active), Get-WUGDeviceRole (7 switch/kind params), Add-WUGActiveMonitor (UseInDiscovery + 15 SNMPTable params), Set-WUGDeviceProperties (actionPolicyName, actionPolicyId)
+  * Fixed Add-WUGDeviceTemplates .PARAMETER name mismatch (`templates` → `deviceTemplates`)
+  * Rewrote README.MD with full function reference table, quick start guide, report parameter reference, and helper script directory listing
+
 
 ## 0.1.17/18 - 2025-12-08
 * Changed

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<!-- Author: jason@wug.ninja                        -->
+<!-- 2024-03-22 tested by running Custom_report.ps1 -->
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
+    <title>ReplaceYourReportNameHere</title>
+    <link rel="icon" type="image/x-icon" href="https://wug.ninja/favicon.ico">
+    <!-- You could provide local copies of these instead for offline scenarios -->
+    <!-- Add the necessary Bootstrap CSS file -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap/dist/css/bootstrap.min.css"
+        crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.css"
+        crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.min.css"
+        crossorigin="anonymous">
+    <!-- Add the necessary Bootstrap and jQuery JavaScript files -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery/dist/jquery.min.js" crossorigin="anonymous"></script>
+    <!-- Add Popper.js before Bootstrap -->
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core/dist/umd/popper.min.js" crossorigin="anonymous"></script>
+    <!-- Add Bootstrap and Bootstrap table-->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap/dist/js/bootstrap.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.js" crossorigin="anonymous"></script>
+    <!-- Add the necessary dependencies for the TableExport plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js" crossorigin="anonymous"></script>
+    <!-- Add tableExport -->
+    <script src="https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin/tableExport.min.js" crossorigin="anonymous"></script>
+    <style>
+        .export-menu {margin-top: 3rem;margin-right: 15px;}
+        button#exportBtn {margin-top: 10px;}
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid">
+        <div class="float-end btn-group" role="group">
+            <button id="exportBtn" type="button" class="btn btn-secondary dropdown-toggle rounded-end" style=""
+                data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <i class="bi bi-download" style=""></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end export-menu">
+                <li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>
+                <li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>
+                <li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>
+                <li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>
+                <li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>
+                <li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>
+                <li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>
+                <li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>
+            </ul>
+        </div>
+        <table id="table" data-toolbar="#toolbar"
+            data-classes="table table-light table-striped table-responsive table-sm caption-top"
+            data-show-export="true"
+            data-show-toggle="true"
+            data-show-columns="true"
+            data-search="true">
+            <caption class="p-0 bg-secondary text-white">
+                <div id="caption" class="d-flex justify-content-between">
+                    <div class="" style=""><h5 class="m-1 bg-secondary text-white">WhatsUpGoldPS Custom Report</h6></div>
+                    <div class=""></div>
+                    <div class="" style=""><h5 class="bg-secondary text-white">ReplaceYourReportNameHere</h6></div>
+                    <div class=""></div>
+                    <div class="" style=""><h5 class="m-1 bg-secondary text-white justify-content-center">Updated: ReplaceUpdateTimeHere</h6></div>
+                </div>
+            </caption>
+        </table>
+    </div>
+    <script type="text/javascript">
+    var $table = $('#table');
+
+    function escapeHtml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function formatDownActiveMonitors(value, row, index) {
+        if (value === null || value === undefined || value === '') {
+            return '-';
+        }
+
+        return '<div class="monitor-cell">' + escapeHtml(value).replace(/\n/g, '<br><br>') + '</div>';
+    }
+
+    function formatId(value, row, index) {
+        if (value) {
+            return `
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="idDropdown${index}" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    <i class="bi bi-three-dots"></i>
+                </button>
+                <ul class="dropdown-menu" aria-labelledby="idDropdown${index}">
+                    <li><a class="dropdown-item" target="_parent" href="/NmConsole/#v=Wug_view_device_deviceproperties_DeviceProperties/p=%7B%22deviceId%22%3A${value}%7D">Device Properties</a></li>
+                    <li><a class="dropdown-item" target="_parent" href="/NmConsole/#v=Reporting_fullpagepanel_FullPagePanel/p=%7B%22reportClass%22%3A%22Wug_report_statechangetimeline_StateChangeTimelineReport%22%2C%22filters%22%3A%5B%7B%22filterClass%22%3A%22Wug_filter_DeviceGroup%22%2C%22value%22%3A%7B%22id%22%3A${value}%2C%22isDevice%22%3Atrue%2C%22recurse%22%3Afalse%7D%7D%5D%7D">State Change Timeline</a></li>
+                    <li><a class="dropdown-item" target="_parent" href="/NmConsole/#v=Wug_view_dashboard_DeviceStatus/p=%7B%22deviceId%22%3A${value}%7D">Device Status</a></li>
+                </ul>
+            `;
+        }
+
+        return '-';
+    }
+
+    function getExportRows() {
+        const rows = $table.bootstrapTable('getData', {
+            useCurrentPage: false,
+            includeHiddenRows: true
+        });
+
+        return rows.map(row => ({
+            id: row.id ?? '',
+            name: row.name ?? '',
+            networkAddress: row.networkAddress ?? '',
+            hostName: row.hostName ?? '',
+            downActiveMonitors: row.downActiveMonitors ?? ''
+        }));
+    }
+
+    function downloadBlob(content, fileName, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        saveAs(blob, fileName);
+    }
+
+    function escapeCsvValue(value) {
+        const stringValue = String(value ?? '');
+        if (stringValue.includes('"') || stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('\r') || stringValue.includes('\t')) {
+            return '"' + stringValue.replace(/"/g, '""') + '"';
+        }
+        return stringValue;
+    }
+
+    function exportDelimited(rows, delimiter, fileName, mimeType) {
+        if (!rows.length) {
+            downloadBlob('', fileName, mimeType);
+            return;
+        }
+
+        const headers = Object.keys(rows[0]);
+        const lines = [
+            headers.join(delimiter),
+            ...rows.map(row => headers.map(h => escapeCsvValue(row[h])).join(delimiter))
+        ];
+
+        downloadBlob(lines.join('\r\n'), fileName, mimeType);
+    }
+
+    function exportTxt(rows) {
+        if (!rows.length) {
+            downloadBlob('', 'custom_report_export.txt', 'text/plain;charset=utf-8');
+            return;
+        }
+
+        const content = rows.map((row, index) => {
+            return [
+                `Row ${index + 1}`,
+                `id: ${row.id}`,
+                `name: ${row.name}`,
+                `networkAddress: ${row.networkAddress}`,
+                `hostName: ${row.hostName}`,
+                `downActiveMonitors: ${row.downActiveMonitors}`,
+                ''
+            ].join('\r\n');
+        }).join('\r\n');
+
+        downloadBlob(content, 'custom_report_export.txt', 'text/plain;charset=utf-8');
+    }
+
+    function exportJson(rows) {
+        downloadBlob(
+            JSON.stringify(rows, null, 2),
+            'custom_report_export.json',
+            'application/json;charset=utf-8'
+        );
+    }
+
+    function exportSql(rows) {
+        if (!rows.length) {
+            downloadBlob('', 'custom_report_export.sql', 'text/plain;charset=utf-8');
+            return;
+        }
+
+        const tableName = 'custom_report_export';
+        const columns = Object.keys(rows[0]);
+
+        const sql = rows.map(row => {
+            const values = columns.map(col => {
+                const v = String(row[col] ?? '').replace(/'/g, "''");
+                return `'${v}'`;
+            });
+            return `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${values.join(', ')});`;
+        }).join('\r\n');
+
+        downloadBlob(sql, 'custom_report_export.sql', 'text/plain;charset=utf-8');
+    }
+
+    function exportXlsx(rows, fileName) {
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'custom_report_export');
+        XLSX.writeFile(workbook, fileName);
+    }
+
+    function exportPng() {
+        const tableElement = document.querySelector('#table');
+        html2canvas(tableElement).then(canvas => {
+            canvas.toBlob(function(blob) {
+                saveAs(blob, 'custom_report_export.png');
+            });
+        });
+    }
+
+    function runExport(format) {
+        const rows = getExportRows();
+
+        switch (format) {
+            case 'csv':
+                exportDelimited(rows, ',', 'custom_report_export.csv', 'text/csv;charset=utf-8');
+                break;
+            case 'tsv':
+                exportDelimited(rows, '\t', 'custom_report_export.tsv', 'text/tab-separated-values;charset=utf-8');
+                break;
+            case 'txt':
+                exportTxt(rows);
+                break;
+            case 'json':
+                exportJson(rows);
+                break;
+            case 'sql':
+                exportSql(rows);
+                break;
+            case 'xlsx':
+                exportXlsx(rows, 'custom_report_export.xlsx');
+                break;
+            case 'xls':
+                exportXlsx(rows, 'custom_report_export.xls.xlsx');
+                break;
+            case 'png':
+                exportPng();
+                break;
+            default:
+                console.warn('Unsupported export format:', format);
+                break;
+        }
+    }
+
+    $(document).ready(function () {
+        $table.bootstrapTable({
+            replaceThisHere,
+            toolbar: '#toolbar'
+        });
+
+        $(".export-menu a").on("click", function (e) {
+            e.preventDefault();
+            const exportFormat = $(this).data("type");
+            runExport(exportFormat);
+        });
+    });
+</script>
+</body>
+</html>

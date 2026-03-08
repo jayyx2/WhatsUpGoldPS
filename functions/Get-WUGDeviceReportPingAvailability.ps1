@@ -52,6 +52,24 @@ Used for pagination, specifies the page ID to start from.
 .PARAMETER Limit
 Limits the number of entries per page. Default is 25.
 
+.PARAMETER availableApplyThreshold
+Indicates whether the availability threshold filter is applied. Accepts 'true' or 'false'.
+
+.PARAMETER availableOverThreshold
+Indicates if the availability threshold is applied when over or under. Accepts 'true' or 'false'.
+
+.PARAMETER percentageAvailableThresholdValue
+The availability threshold percentage value.
+
+.PARAMETER packetLossApplyThreshold
+Indicates whether the packet loss threshold filter is applied. Accepts 'true' or 'false'.
+
+.PARAMETER packetLossOverThreshold
+Indicates if the packet loss threshold is applied when over or under. Accepts 'true' or 'false'.
+
+.PARAMETER packetLossPercentageThresholdValue
+The packet loss threshold percentage value.
+
 .EXAMPLE
 PS> Get-WUGDeviceReportPingAvailability -DeviceId @("1", "2", "3") -Range "lastWeek"
 
@@ -71,7 +89,7 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed ping avai
 function Get-WUGDeviceReportPingAvailability {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
+        [Parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
@@ -146,14 +164,18 @@ function Get-WUGDeviceReportPingAvailability {
     }
 
     end {
+        # If no DeviceId was specified, fetch all device IDs
+        if ($collectedDeviceIds.Count -eq 0) {
+            Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+            $allDevices = Get-WUGDevice -View id
+            if ($allDevices) { $collectedDeviceIds = @($allDevices.id) }
+            if ($collectedDeviceIds.Count -eq 0) { Write-Warning "No devices found."; return }
+            Write-Verbose "Found $($collectedDeviceIds.Count) devices."
+        }
+
         # Total number of devices to process
         $totalDevices = $collectedDeviceIds.Count
         Write-Debug "Total Devices to Process: $totalDevices"
-
-        if ($totalDevices -eq 0) {
-            Write-Warning "No valid DeviceIDs provided."
-            return
-        }
 
         # Determine batch size (max 499)
         $batchSize = 499

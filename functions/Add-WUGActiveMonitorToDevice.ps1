@@ -1,3 +1,62 @@
+<#
+.SYNOPSIS
+    Assigns an active monitor to a device in WhatsUp Gold.
+
+.DESCRIPTION
+    Add-WUGActiveMonitorToDevice assigns a specified active monitor template to a device
+    via the WhatsUp Gold REST API (POST /api/v1/devices/{deviceId}/monitors/-). Optional
+    parameters control polling interval, comment, argument, interface binding, critical
+    order, and action policy.
+
+.PARAMETER DeviceId
+    The ID of the device to assign the monitor to. Required.
+
+.PARAMETER MonitorId
+    The monitor template ID (monitorTypeId) to assign. Required.
+
+.PARAMETER Enabled
+    Whether the monitor should be enabled. Valid values: true, false. Default: true.
+
+.PARAMETER Comment
+    An optional comment for the monitor assignment.
+
+.PARAMETER Argument
+    An optional argument string passed to the monitor.
+
+.PARAMETER InterfaceId
+    The interface ID to bind the monitor to, if applicable.
+
+.PARAMETER PollingIntervalSeconds
+    The polling interval in seconds (10-86400).
+
+.PARAMETER CriticalOrder
+    The critical order ranking (0-100).
+
+.PARAMETER ActionPolicyId
+    The ID of the action policy to associate with this monitor.
+
+.PARAMETER ActionPolicyName
+    The name of the action policy to associate with this monitor.
+
+.EXAMPLE
+    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5
+
+    Assigns active monitor template 5 to device 42 with default settings.
+
+.EXAMPLE
+    Add-WUGActiveMonitorToDevice -DeviceId 42 -MonitorId 5 -PollingIntervalSeconds 60 -Comment "HTTP check"
+
+    Assigns active monitor 5 to device 42 with a 60-second polling interval and a comment.
+
+.EXAMPLE
+    Add-WUGActiveMonitorToDevice -DeviceId 100 -MonitorId 12 -Enabled false -ActionPolicyName "Email Admins"
+
+    Assigns monitor 12 to device 100 in a disabled state with the "Email Admins" action policy.
+
+.NOTES
+    Author: Jason Alberino (jason@wug.ninja)
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Monitors
+#>
 function Add-WUGActiveMonitorToDevice {
     [CmdletBinding()]
     param(
@@ -70,8 +129,8 @@ function Add-WUGActiveMonitorToDevice {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMesRkAdkLXq9e
-# EYOs/JNhPr3UY/fKsWls2OS2Ew38NqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAX0m9yRpqdnxpX
+# aBEhjEf4aSsOHY36Xq2Uisehw48R0aCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -171,17 +230,17 @@ function Add-WUGActiveMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgvsk54wL9pA05YgPjRPfkvqli89xTsI4B
-# JiNWSheNroQwDQYJKoZIhvcNAQEBBQAEggIAfS3aA8ATH+maLd9o+thmHWefdD/r
-# eJEPjW7E9IW6wN2bzfDzDL1YVpKZTcOw9LG6d4yp6gK3RraaI+oZlXVMgz6IZ3az
-# W/HxHIjCaL7fehR47+gN2Q3qFsigCCAIGIsfbva3bU1MGveoFmCDBcrzdRuEQZXo
-# WQ8ptaZmxRvI65YTKLESRRJhkxVk2Acc7us3ZsHF8hJM345NdUgRxEOxncAxIRMh
-# 8MPf7N2EU+LSS8VGIO9OHvYDA9otoYwLJ1QWBQLp9kZxUOwh4W6KyHi6HV+TQv9S
-# JOqx4Zvb8tuHs37Mk4jpOLqFHfnqTM54o706MWLeKQFSuVUUmwINv8LYWAuSxqLN
-# 5D7ZzxlZTzl4d0fRGt9wtmzk/m7Mkz1xsVUHErwimckKL98ZUta7jxPYs2qb2k8F
-# hfcjE4R+ZH6WGdd1UUAvDG5twAm9rBsuzX2Of08zFbDT5UFoPcStn4eatYtNL20l
-# 36A+Ta6s7PuADXhsjs3QLtj7wLn61BnR6AxMZur+/VHxG/OJ8NsfAz0HgPee/s7l
-# 4/k1YbAAhiEJ2X4b4Yr9VxFOG+NTWpyxZqDL9D5M6uhJPMfyyjjZE3AZ04N2HpSD
-# aNi1mc53iA4l2GgWcRZzyPYhmE5UTtmqVZ/+OcF9rxgMBUl12vf7nx9ckpo088a4
-# nRsYdhONFvC6v7A=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgXp24VhKLHEScyyf4xLBJ9k1LW5VFesd5
+# U1cZDN48eVcwDQYJKoZIhvcNAQEBBQAEggIAXP+mSn9jxqoEs/UQmZwQ95ZnxxFX
+# OBU4qqUIItShIvJZCB9P5l7tC67VmFOQ/T4XGOFdSiB2Is6UHNcbRpjXkWb3LCqC
+# FqJG7CfaTTNr9lpPKmrvtOpmHyz8dp1f673fmQ/PbtE5Q42kQaEDYRLdwM7h3SiG
+# FFsZjKzQ/iYePeBEva9ZGX1xwJli7LjMrSLkhUn+Ys5tOkuC8T4lKYfZetE7qiDp
+# 3SemPkij5BpP8W6AFue3cAMdPik7CgodOqeU/DNiVHBf19FBjn+E/OuyFDecofps
+# XO/GgC3gMCWwOUk8khueCofAEn8RdHe4kelnSVUNyk6vYiYpPvqDcMcB9QIsU5bx
+# pOkdCIdr8QwOS6wAH0kgFqOD08/YKmsw6cEl88BoF73cPy0p6dypWN8kE5jtKHBJ
+# pbS5kWelCsW8+SKAwUs9Vi9sCw+m8WnnVE+Zz6osQY4Yvfvrmde9hAhvRY/tDbRP
+# 3DACkHWjz070e/HlB8YCODr/t5LOwe+518KDcQQk7Z8eYNAO8c+j08RnOJDP+nNC
+# IfAt02RD10ZWcmX2dqw0jT8C/5WDQIVDkZgl2WCHpWtZQWIO4kLPTYkFj45hG9Ka
+# JaWGT9Kr6+CKDN13w3w/0kFYQaQwgJpCBLJb8rcht+jjT2ojsEPy9AbA76xzdkxn
+# u6+8gTCw9uwqQm4=
 # SIG # End signature block

@@ -80,7 +80,7 @@ Provides an interface to WhatsUp Gold's REST API for fetching detailed Memory ut
 function Get-WUGDeviceReportMemory {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
+        [Parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int[]]$DeviceId,
         [ValidateSet("today", "lastPolled", "yesterday", "lastWeek", "lastMonth", "lastQuarter", "weekToDate", "monthToDate", "quarterToDate", "lastNSeconds", "lastNMinutes", "lastNHours", "lastNDays", "lastNWeeks", "lastNMonths", "custom")][string]$Range,
         [string]$RangeStartUtc,
         [string]$RangeEndUtc,
@@ -101,11 +101,10 @@ function Get-WUGDeviceReportMemory {
     begin {
         #Set static variables
         $finaloutput = @()
+        $collectedDeviceIds = @()
         $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
         $endUri = "memory-utilization"
         $queryString = ""
-        $totalDevices = $DeviceId.Count
-        $currentDeviceIndex = 0
         # Building the query string
         if ($Range) { $queryString += "range=$Range&" }
         if ($RangeStartUtc) { $queryString += "rangeStartUtc=$RangeStartUtc&" }
@@ -128,31 +127,47 @@ function Get-WUGDeviceReportMemory {
 
     process {
         foreach ($id in $DeviceId) {
+            $collectedDeviceIds += $id
+            Write-Debug "Collected DeviceID: $id"
+        }
+    }
+    
+
+    end {
+        # If no DeviceId was specified, fetch all device IDs
+        if ($collectedDeviceIds.Count -eq 0) {
+            Write-Verbose "No DeviceId specified. Fetching all device IDs via Get-WUGDevice."
+            $allDevices = Get-WUGDevice -View id
+            if ($allDevices) { $collectedDeviceIds = @($allDevices.id) }
+            if ($collectedDeviceIds.Count -eq 0) { Write-Warning "No devices found."; return }
+            Write-Verbose "Found $($collectedDeviceIds.Count) devices."
+        }
+
+        $totalDevices = $collectedDeviceIds.Count
+        $currentDeviceIndex = 0
+
+        foreach ($id in $collectedDeviceIds) {
             $currentDeviceIndex++
             $percentCompleteDevices = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100, 2)
             # Main progress for device processing with Id 1
             Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "Processing Device $currentDeviceIndex of $totalDevices (DeviceID: $id)" -PercentComplete $percentCompleteDevices
-    
+
             $currentPageId = $null
             $pageCount = 0
-    
+
             do {
                 if ($currentPageId) {
                     $uri = "${baseUri}/${id}/reports/${endUri}?pageId=$currentPageId"
-                    if(!$null -eq $queryString){$uri += "&${queryString}"}
+                    if ($null -ne $queryString) { $uri += "&${queryString}" }
                 } else {
                     $uri = "${baseUri}/${id}/reports/${endUri}?${queryString}"
                 }
                 try {
                     $result = Get-WUGAPIResponse -uri $uri -method "GET"
-                    #Conditional data addtions/conversions
-                    #foreach ($data in $result.data) {
-                    #    #Do Nothing
-                    #}
                     $finaloutput += $result.data
                     $currentPageId = $result.paging.nextPageId
                     $pageCount++
-    
+
                     # Page progress for the current device with Id 2
                     if ($result.paging.totalPages) {
                         $percentCompletePages = ($pageCount / $result.paging.totalPages) * 100
@@ -161,24 +176,21 @@ function Get-WUGDeviceReportMemory {
                         # Indicate ongoing progress if total pages aren't known
                         Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for deviceID: $id" -Status "Processing page $pageCount" -PercentComplete 0
                     }
-    
+
                 } catch {
                     Write-Error "Error fetching device report ${endUri} for DeviceID ${id}: $_"
                     $currentPageId = $null
                 }
-    
+
             } while ($currentPageId)
-    
+
             # Clear the page progress for the current device after all pages are processed
             Write-Progress -Id 2 -Activity "Fetching device report ${endUri} for DeviceID: $id" -Status "Completed" -Completed
         }
-    
+
         # Clear the main device progress after all devices are processed
         Write-Progress -Id 1 -Activity "Fetching device report ${endUri} for $totalDevices devices" -Status "All devices processed" -Completed
-    }
-    
 
-    end {
         return $finaloutput
     }
 }

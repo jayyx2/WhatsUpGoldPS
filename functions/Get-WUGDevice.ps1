@@ -22,6 +22,12 @@
     .PARAMETER Limit
     The maximum number of devices to retrieve. Default is 250.
 
+    .PARAMETER ReturnHierarchy
+    Whether to return all descendant groups of the parent group. Valid values: "true", "false".
+
+    .PARAMETER State
+    Filter devices by state (e.g., "up", "down").
+
     .EXAMPLE
     Get-WUGDevice -DeviceId 2367, 2368
 
@@ -37,6 +43,9 @@
 
     Retrieves all devices (up to the limit).
 
+    .NOTES
+    Author: Jason Alberino (jason@wug.ninja)
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Devices
     #>
     function Get-WUGDevice {
     [CmdletBinding()]
@@ -45,7 +54,9 @@
         [Parameter()][string] $SearchValue,
         [Parameter()][string] $DeviceGroupID = "-1",  # Default to All Devices
         [Parameter()][ValidateSet("id", "basic", "card", "overview")][string] $View = "card",
-        [ValidateRange(1, 250)][int]$Limit = 250
+        [ValidateRange(1, 250)][int]$Limit = 250,
+        [ValidateSet("true", "false")][string]$ReturnHierarchy,
+        [string]$State
     )
 
     begin {
@@ -112,6 +123,8 @@
             if ($SearchValue) { $queryString += "search=$([System.Web.HttpUtility]::UrlEncode($SearchValue))&" }
             if ($View) { $queryString += "view=$([System.Web.HttpUtility]::UrlEncode($View))&" }
             if ($Limit) { $queryString += "limit=$Limit&" }
+            if ($ReturnHierarchy) { $queryString += "returnHierarchy=$ReturnHierarchy&" }
+            if ($State) { $queryString += "state=$([System.Web.HttpUtility]::UrlEncode($State))&" }
             $queryString = $queryString.TrimEnd('&')
 
             $searchUri = "$baseUri$queryString"
@@ -177,8 +190,8 @@
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCddV3FHXbRa/J9
-# kMJFnCsZLn4ap0q7wAmsVMSU2Jb5qaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgPguNOd426vq0
+# 7hiH1Bd135PZIlQYM4yuXEyyDweyiKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -278,17 +291,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgUZ+1/szZZzUw4kpe+59LTt0R1T45QMEf
-# UzNlbYbGVvswDQYJKoZIhvcNAQEBBQAEggIAc08NJvdZyx5LFlD+uHhEbImVKBuj
-# +7UQz/vBXvBaKJ3npiNxDKTyfqA7zeaaodlDOooiKT27H8IjVKdjW0XzoohNvgsw
-# nFvXvvVzD+x5GqNreuuCaoNkf71xNN+sB9fvAf0E8WEWvbc6NRBHl3mMNPZDL6xY
-# T54KSXcZS2OrLIaSRu3LT1e2YNkPme6A/uYzp/tfiG4HbQsER7C6o+HJ3Fct0g85
-# t19r0rp0Bx6geqR0rmG7M7/fU3zQid7L0ip1yec6AnkgIA24NsryB26XV+L0iSVW
-# c3bnK/TNBu5hnjjQJeWOBASSztJ7rBVx4aiCm7oOwnPgQNZC/DbdlWvKWpapNX3k
-# rLJfeYN+cN1nYE6laJJrKpCtbJgBu9MW92JWpD8KQ38jXlTz5m+60Wj0EDNBHJCa
-# EL9x1otQPf4e+VKKcorQdhipV/7HrqCBo28Q+i2h86T8feA6pqcK5F6466DCtpFZ
-# lwL/8AgMbqr7ylTcHvmdlQKrYxoJxRYzby+MYR21FvRO/h5R9dO3qxkKbHlZJMYu
-# QrTSlz+/DhtDlITS5crgHsyxRX2Iz/IsW9m5KNFuhZjUwmzc9kj11JyYUVlRo0bv
-# bsTg7MtpwiQM+igCmblLme68Xa/0ljoJNDSruR/nTthrDoPkO+qDfHEy9jtH996y
-# WrBak1oqACgcjaw=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgqla42vnKEOaCNOicvxZNCaGDqlu8FGXd
+# Enr2eL7SK5QwDQYJKoZIhvcNAQEBBQAEggIABJYXWE5wfl9av2XvHV5/NwL2N9h4
+# nVU+WA32bF05k2mAPmeMO3zVAP46sAgDi4R6gPClN6nrVzupGhnX4nMn3b1PXEv9
+# ppwIR/yiVJXwZu0SCwkKk5zo3aOWiemGRvhCAAjvlt+QwhNXAttNHoCYu6oJjkyK
+# NBmK+Nssz+U9eRgdDCl0IoQd5owYzkBuKrn5GqpxA9SbyX0iUgidu5Ecpg/gL2pZ
+# uZrh9Fer6b48F3SxnVjSt0lulVQvZP0IcjOc+hWew+NAAr0PxnXSNJ7/M1kXjVwb
+# eVxGJbdsoDL5Q8EWuY1DCLGqtrmHMUdQuaBsorOadx2di7c9pe30x0JnJo+rXMnY
+# HuMyVr77ie4AXlz62yBCroD6wet8qTff/uoa4Hf4kTzq+4s7QyGUOr+QmMQb+F8l
+# pkb7VPY4s4bq5hHPoXOyaozbh22l9X/tDuIV3iFZkcaPIeokHqH1C+vpbfD/AuNz
+# necRmjYbULJ9gryHnsMHIWMJuVu2Q1PYNgG5zUxS3159nE8KEs9svQdiImJbwqEX
+# vCEM6r/3xC0E0pyznIkBVg6jxsdAF04mC2rIvQHlVA2RcYnw/M6JAlA5vVeb3OT4
+# d3b6zHdl+GHGu0+YZlOQydx9hrA1zdN9Bdx/7GH0GsoSF2z4n+siSKSfiW0vOUAc
+# 8uTjdjZmgE5Kzm8=
 # SIG # End signature block

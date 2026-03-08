@@ -10,6 +10,33 @@ A PowerShell module for the **WhatsUp Gold REST API**. Manage devices, monitors,
 
 ---
 
+## What is WhatsUpGoldPS?
+
+WhatsUpGoldPS is a PowerShell automation module for the WhatsUp Gold REST API.
+
+It allows administrators to automate monitoring infrastructure operations such as:
+
+- device onboarding
+- monitor configuration
+- device group management
+- infrastructure discovery
+- monitoring reports
+
+The module exposes the WhatsUp Gold API through native PowerShell commands.
+
+Example:
+
+Get-WUGDevice
+Add-WUGDevice
+Set-WUGDeviceProperties
+Invoke-WUGDevicePollNow
+
+The project includes:
+
+• 75 PowerShell functions  
+• automation helpers for VMware, Proxmox, Hyper-V, Nutanix, Azure, AWS, GCP, and OCI  
+• a full CRUD test harness validating real API operations  
+
 ## Quick Start
 
 ```powershell

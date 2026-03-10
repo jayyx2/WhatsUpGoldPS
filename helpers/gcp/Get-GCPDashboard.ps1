@@ -1,67 +1,141 @@
-function Convert-HTMLTemplate {
-    <#
-    .SYNOPSIS
-        Populates an HTML template with Bootstrap Table data from a JSON file.
-    .DESCRIPTION
-        Reads an HTML template file, replaces a placeholder string with Bootstrap Table
-        configuration generated from a JSON data file, sets the report name and update time,
-        and writes the result to an output file.
-    .PARAMETER TemplateFilePath
-        Path to the HTML template file containing the placeholder.
-    .PARAMETER JsonFilePath
-        Path to the JSON data file.
-    .PARAMETER OutputFilePath
-        Path for the generated output HTML file.
-    .PARAMETER Placeholder
-        The placeholder string in the template to replace with table data.
-    .PARAMETER ReportName
-        The report title. Defaults to 'Custom Report'.
-    .PARAMETER UpdateTime
-        Override the update timestamp. Defaults to the current date and time.
-    .EXAMPLE
-        Convert-HTMLTemplate -TemplateFilePath ".\template.html" -JsonFilePath "C:\temp\data.json" -OutputFilePath "C:\temp\report.html" -Placeholder "replaceThisHere"
-        Generates an HTML report by replacing the placeholder with the JSON data.
-    .EXAMPLE
-        Convert-HTMLTemplate -TemplateFilePath $template -JsonFilePath $json -OutputFilePath $output -Placeholder "replaceThisHere" -ReportName "Down Monitor Report" -UpdateTime "2025-01-15 10:30:00"
-        Generates a named report with a custom timestamp.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string] $TemplateFilePath,
+<#
+.SYNOPSIS
+    Generates an interactive HTML dashboard report for GCP environments.
+.DESCRIPTION
+    Orchestration script that authenticates to GCP (via service account key or
+    existing gcloud session), scans a project for Compute Engine VMs, Cloud SQL
+    instances, and forwarding rules, and produces a searchable, sortable Bootstrap
+    Table HTML dashboard. Output includes both a JSON data file and a self-contained
+    HTML report.
+.PARAMETER KeyFilePath
+    Path to a GCP service account JSON key file for authentication. If omitted,
+    uses the existing gcloud CLI session.
+.PARAMETER Project
+    The GCP project ID to scan. If omitted, prompts interactively.
+.PARAMETER SkipCloudSQL
+    Exclude Cloud SQL instances from the dashboard results.
+.PARAMETER SkipForwardingRules
+    Exclude forwarding rules (load balancers) from the dashboard results.
+.EXAMPLE
+    .\Get-GCPDashboard.ps1 -Project "my-gcp-project"
 
-        [Parameter(Mandatory = $true)]
-        [string] $JsonFilePath,
+    Generates a dashboard using the default gcloud session for a specific project.
+.EXAMPLE
+    .\Get-GCPDashboard.ps1 -KeyFilePath "C:\keys\sa.json" -Project "my-project"
 
-        [Parameter(Mandatory = $true)]
-        [string] $OutputFilePath,
+    Authenticates with a service account and generates the dashboard.
+.EXAMPLE
+    .\Get-GCPDashboard.ps1 -Project "my-project" -SkipCloudSQL -SkipForwardingRules
 
-        [Parameter(Mandatory = $true)]
-        [string] $Placeholder,
+    Generates a dashboard with only Compute Engine instances.
+.EXAMPLE
+    .\Get-GCPDashboard.ps1 -Project "prod-project"
 
-        [string] $ReportName = 'Custom Report',
-        [string] $UpdateTime
-    )
+    Scans all Compute, Cloud SQL, and Forwarding Rule resources in the production project.
+.OUTPUTS
+    System.Void
+    Produces a JSON file (gcp_dashboard.json) and an HTML dashboard
+    (GCP-Dashboard.html) in the system temp directory, then opens the HTML in the default browser.
+.NOTES
+    Author  : jason@wug.ninja
+    Version : 1.0.0
+    Date    : 2025-07-15
+    Requires: PowerShell 5.1+, GoogleCloud PowerShell module, gcloud CLI, GCPHelpers.ps1 in the same directory.
+.LINK
+    https://github.com/jayyx2/WhatsUpGoldPS
+#>
 
-    $JSONtoReplace = ConvertTo-BootstrapTable -JsonFilePath $JsonFilePath
-    $replacement = "$JSONtoReplace"
+param (
+    [Parameter(Mandatory = $false)]
+    [string]$KeyFilePath,
 
-    $htmlTemplate = Get-Content -Path $TemplateFilePath -Raw
-    $htmlTemplate = $htmlTemplate -replace $Placeholder, $replacement
+    [Parameter(Mandatory = $false)]
+    [string]$Project,
 
-    $htmlTemplate = $htmlTemplate -replace 'ReplaceYourReportNameHere', $ReportName
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipCloudSQL,
 
-    if (-not $UpdateTime) {
-        $UpdateTime = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    }
-    $htmlTemplate = $htmlTemplate -replace 'ReplaceUpdateTimeHere', $UpdateTime
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipForwardingRules
+)
 
-    Set-Content -Path $OutputFilePath -Value $htmlTemplate
+# --- Configuration -----------------------------------------------------------
+$helpersPath = Join-Path $PSScriptRoot "GCPHelpers.ps1"
+if (Test-Path $helpersPath) {
+    . $helpersPath
 }
+else {
+    throw "GCPHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
+}
+
+if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
+    if (-not (Get-Module -Name WhatsUpGoldPS)) {
+        Import-Module -Name WhatsUpGoldPS
+    }
+}
+
+# --- Authenticate ------------------------------------------------------------
+if ($KeyFilePath -and $Project) {
+    Connect-GCPAccount -KeyFilePath $KeyFilePath -Project $Project
+}
+elseif (-not $Project) {
+    $Project = Read-Host -Prompt "Enter GCP project ID"
+    if (-not $Project) {
+        throw "A GCP project ID is required."
+    }
+}
+
+# Output paths
+$outputDir = if ($env:TEMP) { $env:TEMP } else { "C:\temp" }
+$jsonPath  = Join-Path $outputDir "gcp_dashboard.json"
+$htmlPath  = Join-Path $outputDir "GCP-Dashboard.html"
+if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
+
+# --- Collect data ------------------------------------------------------------
+Write-Host "`nScanning GCP project: $Project" -ForegroundColor Cyan
+$dashboardData = Get-GCPDashboard -Project $Project -IncludeCloudSQL (-not $SkipCloudSQL) -IncludeForwardingRules (-not $SkipForwardingRules)
+
+if (-not $dashboardData -or $dashboardData.Count -eq 0) {
+    Write-Warning "No resources collected. Exiting."
+    return
+}
+
+# --- Summary -----------------------------------------------------------------
+$running = @($dashboardData | Where-Object { $_.Status -in 'RUNNING','RUNNABLE','EXTERNAL','INTERNAL' }).Count
+$stopped = $dashboardData.Count - $running
+$compute = @($dashboardData | Where-Object { $_.ResourceType -eq 'Compute' }).Count
+$sql     = @($dashboardData | Where-Object { $_.ResourceType -eq 'CloudSQL' }).Count
+$fwd     = @($dashboardData | Where-Object { $_.ResourceType -eq 'ForwardingRule' }).Count
+
+Write-Host "`n--- GCP Summary ---" -ForegroundColor Yellow
+Write-Host "  Total:   $($dashboardData.Count)"
+Write-Host "  Running: $running" -ForegroundColor Green
+Write-Host "  Other:   $stopped" -ForegroundColor Red
+Write-Host "  Compute: $compute | Cloud SQL: $sql | Forwarding Rules: $fwd"
+
+# --- Generate outputs --------------------------------------------------------
+$dashboardData | ConvertTo-Json -Depth 5 | Out-File $jsonPath -Force -Encoding UTF8
+Write-Host "`nJSON data written to $jsonPath" -ForegroundColor Yellow
+
+$templatePath = Join-Path $PSScriptRoot "GCP-Dashboard-Template.html"
+Export-GCPDashboardHtml -DashboardData $dashboardData -OutputPath $htmlPath -ReportTitle "GCP Dashboard" -TemplatePath $templatePath
+Write-Host "HTML dashboard written to $htmlPath" -ForegroundColor Yellow
+
+# --- Optional: Open in browser -----------------------------------------------
+if ($env:OS -match 'Windows') {
+    $openBrowser = Read-Host -Prompt "Open dashboard in browser? (Y/N)"
+    if ($openBrowser -match '^[Yy]') {
+        Start-Process $htmlPath
+    }
+}
+
+Write-Host "Done." -ForegroundColor Green
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfQLhEFO6+YaID
-# XKwOQsn9ffirgn0WTKWldCK8rfoAq6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPnIwSKq0tQH01
+# adxgaMIbFjzblqAopoCmkRfFIb2aPqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -161,17 +235,17 @@ function Convert-HTMLTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgE2eDEOLGBF9tkM8vGLpZZQgq4MqBZ+HB
-# aktSzsDzw9swDQYJKoZIhvcNAQEBBQAEggIAc6MKR9+yczB3MfAerKB/H75yW8sJ
-# hYDC11fDP3J3+I+JBTNnwtFByj/329t6Nm7beBXMk62PpM4RnyRz3hJKMYuLSkXV
-# KRsJLy3EobatSxZqQwYw/MOT77ptwz7Sivpl1LiorlfHkTVxIVpoizme4Y4MiaDT
-# N9TOoMNPhs4tfBulfJeeQXG6DX2v3ZajXyCW6rjJq8jmTOVzhhKU1ieRvi1ItWAx
-# MKNPRhhGpxwFUVa2uInA1pJ9LFvxF7XFUjCoBhSZvN5Oxp/QVsVpMp7LXTfOe0Kb
-# mBKyCbCxqR+Z0D5kWHOYXDvTMVDtcJo4pPhAxjCPtr4TsdvYakSy7k+1PXcIRxAC
-# 0t1b8nWDgcH2VG8fM2BEuD2M4nXQv1XRKl13vzj6PbRKdrzyfi5Hib4ySafml9pe
-# +yRSiNE1aEIPMefIMAwqG52/M4+2LJvYlnBUcxvhV+r3k5j2I9cT7+fbixikSCjb
-# uv3gX3olg118rK1hWsTNEWRXe9I0u7DGqbbFaHHzjFZ3UbKU8hF1Mb0J9XqbCHYS
-# u//VPL4vFAAIeVk8Y8fMINJ7yvyrR/UL0d1CaUt5er5j2gpKjtB6129gMHMc4s8u
-# Bwc/v6Flfy7isTXKfPiuWifm7IJy0yos3sf2yyNkxIWPXTavfiIYeNz+XI+9TMtV
-# n636kQHHUImI27E=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQghm1znHWjRaJuAVDXaAhcJckcg85eCGpo
+# tWs/GzCFqBMwDQYJKoZIhvcNAQEBBQAEggIA33l0shJDiZJP4r7TCxeTnXRUJKDq
+# Eff5CrUz5EIkS7NSjiou0xZudwaF5NlOJqaUySG9NZB8sR3djAk1mobWaQXZI0TO
+# S44Y41k/kLvYJWWwvEleBdn8hTcb7+iZADPRum4scGlfzrerPnXXF7qGyhLDeuea
+# JyLuzYli5q/J+bs3M6v9mmtzRDNvAEDEXCd41ENofbZclJwLLyijsghpCyITOpGB
+# KX/XWzOLjwdeSBqMe2YSB+skg7h3TtPfo15I92nnHayn7ll4uild91owWRXvkPis
+# dto+T4DH2T8EqzYaKltkWeoFVPjsaqIZI8x4rbHzZ8+XJ5Z89b7VGNY/K6hxMiLq
+# UU9VOxY2KF4Lc2kzlCg586vwvTfBPj+uoEypAs3Rr3XNddW7S9gCs8Gd+OITa2rS
+# JtPMdwnFN/9+/3HL7wO6U1CgwcrGN//WN9s7dRY9e4kLlSfwJYbN5jA78+zt0qVi
+# NOzAGo5+YgxE1FFza/8gGJEU8ArOdobMwXycNfnAq+b1RDr1zyRQ9hGTU07D3jbk
+# ei3w0FuqOWfDWt9CXRiyk0yn/xg0ld2COMm+J7erz8DIPTuZgGZfPRVfngE4AcNu
+# ihGaTVVIktfC0HbvdxsDNZse31mTmfbvvwVk2b+tfHA3ukFbDTU26QCFRcvVPF9z
+# bmRYLMUK3lyyr7M=
 # SIG # End signature block

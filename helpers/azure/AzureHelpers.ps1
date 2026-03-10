@@ -19,6 +19,12 @@ function Connect-AzureServicePrincipal {
         The Application (client) ID of the service principal.
     .PARAMETER ClientSecret
         The client secret string for the service principal.
+    .EXAMPLE
+        Connect-AzureServicePrincipal -TenantId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -ApplicationId "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy" -ClientSecret "MySecretValue"
+        Authenticates to Azure using a service principal with a client secret.
+    .EXAMPLE
+        $ctx = Connect-AzureServicePrincipal -TenantId $tenantId -ApplicationId $appId -ClientSecret $secret
+        Authenticates and stores the Azure context in a variable for later use.
     #>
     param(
         [Parameter(Mandatory)][string]$TenantId,
@@ -46,6 +52,12 @@ function Get-AzureSubscriptions {
     .DESCRIPTION
         Wraps Get-AzSubscription and returns a simplified collection of
         subscription objects with Id, Name, State, and TenantId.
+    .EXAMPLE
+        Get-AzureSubscriptions
+        Returns all Azure subscriptions accessible to the current identity.
+    .EXAMPLE
+        Get-AzureSubscriptions | Where-Object { $_.State -eq "Enabled" }
+        Returns only enabled subscriptions.
     #>
 
     $subs = Get-AzSubscription -ErrorAction Stop
@@ -65,6 +77,12 @@ function Get-AzureResourceGroups {
         Returns all resource groups in the current subscription.
     .DESCRIPTION
         Wraps Get-AzResourceGroup and returns a simplified collection.
+    .EXAMPLE
+        Get-AzureResourceGroups
+        Returns all resource groups in the current subscription.
+    .EXAMPLE
+        Get-AzureResourceGroups | Where-Object { $_.Location -eq "eastus" }
+        Returns only resource groups located in East US.
     #>
 
     $rgs = Get-AzResourceGroup -ErrorAction Stop
@@ -87,6 +105,12 @@ function Get-AzureResources {
         a simplified collection with key properties.
     .PARAMETER ResourceGroupName
         The name of the resource group to enumerate.
+    .EXAMPLE
+        Get-AzureResources -ResourceGroupName "Production-RG"
+        Returns all resources within the Production-RG resource group.
+    .EXAMPLE
+        Get-AzureResources -ResourceGroupName "Production-RG" | Where-Object { $_.ResourceType -like "*virtualMachines*" }
+        Returns only virtual machine resources from the specified resource group.
     #>
     param(
         [Parameter(Mandatory)][string]$ResourceGroupName
@@ -120,6 +144,12 @@ function Get-AzureResourceMetrics {
     .PARAMETER MaxMetrics
         Maximum number of metrics to retrieve values for. Defaults to 20
         to prevent excessive API calls on resources with many metrics.
+    .EXAMPLE
+        Get-AzureResourceMetrics -ResourceId "/subscriptions/xxxx/resourceGroups/myRG/providers/Microsoft.Compute/virtualMachines/myVM"
+        Returns up to 20 recent metric values for the specified Azure VM.
+    .EXAMPLE
+        Get-AzureResourceMetrics -ResourceId $resource.ResourceId -MaxMetrics 5
+        Returns only the first 5 metric definitions and their latest values.
     #>
     param(
         [Parameter(Mandatory)][string]$ResourceId,
@@ -188,6 +218,13 @@ function Get-AzureResourceDetail {
         Whether to fetch metric data. Defaults to $true.
     .PARAMETER MaxMetrics
         Maximum number of metrics to retrieve. Defaults to 20.
+    .EXAMPLE
+        $resources = Get-AzureResources -ResourceGroupName "Production-RG"
+        Get-AzureResourceDetail -Resource $resources[0] -SubscriptionName "MySub" -SubscriptionId "xxxx" -ResourceGroupName "Production-RG"
+        Returns a detailed summary of the first resource including up to 20 metric values.
+    .EXAMPLE
+        Get-AzureResourceDetail -Resource $resource -SubscriptionName "MySub" -SubscriptionId "xxxx" -ResourceGroupName "myRG" -IncludeMetrics $false
+        Returns resource details without fetching Azure Monitor metrics.
     #>
     param(
         [Parameter(Mandatory)]$Resource,
@@ -235,6 +272,13 @@ function Resolve-AzureResourceIP {
         it attempts DNS resolution of the FQDN. Returns $null if no IP found.
     .PARAMETER Resource
         A resource object from Get-AzureResources (needs ResourceId, ResourceType, ResourceName).
+    .EXAMPLE
+        $resources = Get-AzureResources -ResourceGroupName "Production-RG"
+        $ip = Resolve-AzureResourceIP -Resource ($resources | Where-Object { $_.ResourceType -like "*virtualMachines*" } | Select-Object -First 1)
+        Resolves the public or private IP of the first VM in the resource group.
+    .EXAMPLE
+        $resources | ForEach-Object { Resolve-AzureResourceIP -Resource $_ }
+        Attempts IP resolution for every resource in the collection.
     #>
     param(
         [Parameter(Mandatory)]$Resource
@@ -319,11 +363,213 @@ function Resolve-AzureResourceIP {
     return $ip
 }
 
+function Get-AzureDashboard {
+    <#
+    .SYNOPSIS
+        Builds a unified dashboard view of Azure resources across subscriptions.
+    .DESCRIPTION
+        Enumerates accessible subscriptions, iterates through their resource groups,
+        and returns a flat collection of resources with metadata suitable for
+        Bootstrap Table display. Each row contains resource name, type, provisioning
+        state, resolved IP, location, subscription, resource group, SKU, tags, and
+        optional Azure Monitor metrics.
+    .PARAMETER SubscriptionIds
+        Optional array of subscription IDs to limit scope. If omitted, scans all
+        enabled subscriptions accessible to the current authenticated session.
+    .PARAMETER IncludeMetrics
+        Whether to fetch Azure Monitor metrics for each resource. Defaults to $false
+        to avoid excessive API calls on large environments.
+    .EXAMPLE
+        Get-AzureDashboard
+
+        Returns all resources across all accessible Azure subscriptions.
+    .EXAMPLE
+        Get-AzureDashboard -SubscriptionIds "xxxx-yyyy" -IncludeMetrics $true
+
+        Returns resources from one subscription with metric data.
+    .EXAMPLE
+        Connect-AzureServicePrincipal -TenantId $tid -ApplicationId $aid -ClientSecret $secret
+        $data = Get-AzureDashboard -SubscriptionIds $subId
+        Export-AzureDashboardHtml -DashboardData $data -OutputPath "C:\Reports\azure.html"
+        Start-Process "C:\Reports\azure.html"
+
+        End-to-end: authenticate via service principal, gather data, export HTML, and open in browser.
+    .OUTPUTS
+        PSCustomObject[]
+        Each object contains: ResourceName, ResourceType, ProvisioningState, IPAddress,
+        Location, Subscription, ResourceGroup, Kind, Sku, Tags, Metrics.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, Az PowerShell modules (Az.Accounts, Az.Resources, Az.Monitor).
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    param(
+        [string[]]$SubscriptionIds,
+        [bool]$IncludeMetrics = $false
+    )
+
+    $subscriptions = Get-AzureSubscriptions | Where-Object { $_.State -eq 'Enabled' }
+    if ($SubscriptionIds) {
+        $subscriptions = $subscriptions | Where-Object { $_.SubscriptionId -in $SubscriptionIds }
+    }
+
+    $results = @()
+    foreach ($sub in $subscriptions) {
+        Set-AzContext -SubscriptionId $sub.SubscriptionId -ErrorAction SilentlyContinue | Out-Null
+
+        try {
+            $rgs = Get-AzureResourceGroups
+        }
+        catch {
+            Write-Warning "Failed to list RGs for $($sub.SubscriptionName): $($_.Exception.Message)"
+            continue
+        }
+
+        foreach ($rg in $rgs) {
+            try {
+                $resources = Get-AzureResources -ResourceGroupName $rg.ResourceGroupName
+            }
+            catch {
+                Write-Warning "Failed to list resources in $($rg.ResourceGroupName): $($_.Exception.Message)"
+                continue
+            }
+
+            foreach ($r in $resources) {
+                $ip = "N/A"
+                try { $ip = Resolve-AzureResourceIP -Resource $r; if (-not $ip) { $ip = "N/A" } } catch {}
+
+                $metricsSummary = "N/A"
+                if ($IncludeMetrics) {
+                    try {
+                        $metrics = Get-AzureResourceMetrics -ResourceId $r.ResourceId -MaxMetrics 5
+                        if ($metrics) {
+                            $metricsSummary = ($metrics | ForEach-Object { "$($_.DisplayName): $($_.LastValue)" }) -join "; "
+                        }
+                    }
+                    catch {}
+                }
+
+                $results += [PSCustomObject]@{
+                    ResourceName      = $r.ResourceName
+                    ResourceType      = ($r.ResourceType -split '/')[-1]
+                    ProvisioningState = $r.ProvisioningState
+                    IPAddress         = $ip
+                    Location          = $r.Location
+                    Subscription      = $sub.SubscriptionName
+                    ResourceGroup     = $rg.ResourceGroupName
+                    Kind              = $r.Kind
+                    Sku               = $r.Sku
+                    Tags              = $r.Tags
+                    Metrics           = $metricsSummary
+                }
+            }
+        }
+    }
+
+    return $results
+}
+
+function Export-AzureDashboardHtml {
+    <#
+    .SYNOPSIS
+        Renders Azure dashboard data into a self-contained HTML file.
+    .DESCRIPTION
+        Takes the output of Get-AzureDashboard and generates a Bootstrap-based
+        HTML report with sortable, searchable, and exportable tables. The report
+        uses Bootstrap 5 and Bootstrap-Table for interactive filtering, sorting,
+        column toggling, and CSV/JSON export.
+    .PARAMETER DashboardData
+        Array of PSCustomObject from Get-AzureDashboard containing Azure resource details.
+    .PARAMETER OutputPath
+        File path for the output HTML file. Parent directory must exist.
+    .PARAMETER ReportTitle
+        Title shown in the report header. Defaults to "Azure Dashboard".
+    .PARAMETER TemplatePath
+        Optional path to a custom HTML template. If omitted, uses the
+        Azure-Dashboard-Template.html in the same directory as this script.
+    .EXAMPLE
+        $data = Get-AzureDashboard
+        Export-AzureDashboardHtml -DashboardData $data -OutputPath "C:\Reports\azure.html"
+
+        Exports the dashboard data to an HTML file using the default template.
+    .EXAMPLE
+        Export-AzureDashboardHtml -DashboardData $data -OutputPath "$env:TEMP\azure.html" -ReportTitle "Prod Azure"
+
+        Exports with a custom report title.
+    .EXAMPLE
+        Connect-AzAccount
+        $data = Get-AzureDashboard -SubscriptionIds $subId -IncludeMetrics $true
+        Export-AzureDashboardHtml -DashboardData $data -OutputPath "C:\Reports\azure.html"
+        Start-Process "C:\Reports\azure.html"
+
+        Full pipeline: authenticate, gather with metrics, export, and open the report in a browser.
+    .OUTPUTS
+        System.Void
+        Writes an HTML file to the path specified by OutputPath.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, Azure-Dashboard-Template.html in the script directory.
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = "Azure Dashboard",
+        [string]$TemplatePath
+    )
+
+    if (-not $TemplatePath) {
+        $TemplatePath = Join-Path $PSScriptRoot "Azure-Dashboard-Template.html"
+    }
+
+    if (-not (Test-Path $TemplatePath)) {
+        throw "HTML template not found at $TemplatePath"
+    }
+
+    $firstObj = $DashboardData | Select-Object -First 1
+    $columns = @()
+    foreach ($prop in $firstObj.PSObject.Properties) {
+        $col = @{
+            field      = $prop.Name
+            title      = ($prop.Name -creplace '([A-Z])', ' $1').Trim()
+            sortable   = $true
+            searchable = $true
+        }
+        if ($prop.Name -eq 'ProvisioningState') {
+            $col.formatter = 'formatState'
+        }
+        $columns += $col
+    }
+
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = $DashboardData | ConvertTo-Json -Depth 5 -Compress
+
+    $tableConfig = @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+
+    $html = Get-Content -Path $TemplatePath -Raw
+    $html = $html -replace 'replaceThisHere', $tableConfig
+    $html = $html -replace 'ReplaceYourReportNameHere', $ReportTitle
+    $html = $html -replace 'ReplaceUpdateTimeHere', (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    Set-Content -Path $OutputPath -Value $html -Encoding UTF8
+    Write-Verbose "Azure Dashboard HTML written to $OutputPath"
+}
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALE69jJ6QH/cxU
-# erdOFLJO0K+KRa330Zd9r1+JWla0iKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaNvjHOt0yCQPz
+# VUhYsObcueXm/VvrwB97YuRoEsRfF6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -423,17 +669,17 @@ function Resolve-AzureResourceIP {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgW1Z4swNpRbaEAuc4WzMh+uYQEMeCz5BC
-# GnUkc4RD27MwDQYJKoZIhvcNAQEBBQAEggIA4PV+POnHnVeF32zWcdYhaQJGtz0c
-# /yi50Cby0UrK1WYjcGyhFI5o6mvOtUwT4/5FEJ3RaM8NrnQO/iXxZFcWhqXbz8nM
-# crUTVBExB7Xqsa0QzD2J8ewtAa269irOp740DnOvQscXC2Zu+z23hdCKv9wLU8+P
-# 9Zpkpz+rp1f0RcouaOQi/nC0Wwftaj/FbFYdLT4vnrfjzcU+eMJIy1bmwP+uHWcx
-# /C2bLPrY66GRPNyQdRhYppJoF4hCrYEyHa6CNFl3yaIB7je3W4bcPOZ4q3+9vQ0x
-# uTLxRgypH75rN4GPRydBT4f19Y/PT03+jh18pyFA5OVCNJtgoFzN6/+E0ABaog/W
-# yU6T4vsHLtaX2DWQ0g4Vp29ZFhIGbw+jmFMHNa6PEbx7TvSsmJiUb9NjIrYSr7lU
-# LC/OouD8wT97VymNGdWydBUSay+a5ZOmMLeDe8xzFhkAgBXUZHil+Vkil1dlWN9F
-# RIP7lp2VI/Lscr25hJv/i2gu4g1usqcm2OStpjuYgQtuVMnwPA/gfCwqDdbGCEm7
-# WSnStc2xTKcjlqErJz7oPedZLlpXT9ladYdsQa8twatZBVMpYZXruba70MEz9/y8
-# kwMiekTpG5UrPh+QUcGZ4+JGkjnNp71NPP1T1BRVzd180LYbZeF1wHIN1MQN2dnK
-# zXqy5u/o4dTkf70=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgPGVm6fzXvThUxelbwD3lnHbGrzotZQWw
+# YhAxegPTN4EwDQYJKoZIhvcNAQEBBQAEggIAOSL2CZKD3f0khMsoEVnY0UEgq1UH
+# kis9QZ5BB5yng7J3063nH69tGO1ArUN5LchC0T5zfhblVoMU9FRVfnrtyQ38L2ho
+# P2masYrvIrk3cc+8b+4ezURC/wP7mkmXhfe3IrRU+z8AglfIeUxoyIPCwKMvjZZ+
+# PpLomSEcSMyrlEX4tm/sLafnhTrqllXg5fXJ98VGwayQ5eprQyzCADzBPNOcIQjm
+# bv1MuRSurg4jstKmbeeOormI5eUjgUluDvKksImDBlh2f7/vvkRgHDzNK0dh2znj
+# NaCZhAVV7NgJzzuZI8Z1bp9SX4kHaofmlZdCxBfQoiDcDhirKgiuL/TUGNEk0gNx
+# Sx5Ghv77OAiPKl4I1LB/G58Zah8UJxtMK/c4C7+/rf7QBw+deehbwqT/UKPe0e9/
+# EXgkKygBC2VChbdni0L1IsibxctZqY+k0rPX/Vb7o0bo0rr4nXT5XpaKdfbF9IUy
+# QbtUcUycMFCKDL7S+4G4d5Sn4Lee5iaBPs7WgMw+Hwt0pLxsvl3BevJ8XyyiX5S8
+# qy8yB99gadCUtH2Z7++dR1XncEMAs2PRvqCYMGGQluFjU+VibTfikeP7MPahe6v5
+# o0EgXVkpRRPOvdj+AWatdseLPAuagM3ib40cpocMiN/SKUd0NrIPnSxmu+U//Snr
+# 02HYjUN44YzHOQ0=
 # SIG # End signature block

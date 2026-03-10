@@ -1,5 +1,5 @@
 # WhatsUpGoldPS Release History
-## 0.1.19 - 2026-03-08 [not going to PSGallery release yet, need more testing]
+## 0.1.19 - 2026-03-09 [not going to PSGallery release yet, need more testing]
 * Changed
   * Added SNMP Table property bags to Add-WUGActiveMonitor for /api/v1/monitors endpoints
   * Updated all signatures with new certificate
@@ -115,6 +115,21 @@
   * Added missing .PARAMETER help: Get-WUGDevice (ReturnHierarchy, State), Get-WUGDeviceReportPingAvailability (6 threshold params), Get-WUGDeviceReportPingResponseTime (ApplyThreshold, OverThreshold, ThresholdValue), Get-WUGActiveMonitor (AllMonitors, Limit, activeObj, active), Get-WUGDeviceRole (7 switch/kind params), Add-WUGActiveMonitor (UseInDiscovery + 15 SNMPTable params), Set-WUGDeviceProperties (actionPolicyName, actionPolicyId)
   * Fixed Add-WUGDeviceTemplates .PARAMETER name mismatch (`templates` → `deviceTemplates`)
   * Rewrote README.MD with full function reference table, quick start guide, report parameter reference, and helper script directory listing
+  * Added .EXAMPLE sections to all 63 existing helper functions across all subdirectories (aws, azure, gcp, hyperv, nutanix, oci, proxmox, vmware, reports, test)
+  * Added comment-based help (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE) to ConvertTo-BootstrapTable and ConvertTo-HTMLTemplate in helpers/reports/
+  * Added comprehensive CBH documentation (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE, .OUTPUTS, .NOTES, .LINK) to all 14 dashboard helper functions (Get-*Dashboard, Export-*DashboardHtml) across 7 platforms
+  * Added full CBH documentation (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE, .OUTPUTS, .NOTES, .LINK) to all 9 dashboard orchestration scripts (Get-*Dashboard.ps1), replacing plain comment headers with proper PowerShell help blocks
+
+* Dashboard Suites
+  * helpers/f5/ — New F5 BIG-IP dashboard suite: F5Helpers.ps1 with Connect-F5Server, Invoke-F5RestMethod, Get-F5SystemInfo, Get-F5VirtualServers, Get-F5VirtualServerStats, Get-F5Pools, Get-F5PoolMembers, Get-F5PoolMemberStats, Get-F5Nodes, Get-F5Dashboard, Get-F5StatusIndicator, Format-F5Bytes, Export-F5DashboardHtml; F5-Dashboard-Template.html; Get-F5Dashboard.ps1 orchestration script. Queries F5 BIG-IP REST API for virtual servers, pools, pool members, and nodes with traffic stats, then produces an interactive Bootstrap Table HTML dashboard.
+  * helpers/certificates/ — New SSL/TLS Certificate dashboard suite: CertificateHelpers.ps1 with Get-CertificateInfo, Get-CertificateDashboard, Export-CertificateDashboardHtml; Certificate-Dashboard-Template.html; Get-CertificateDashboard.ps1 orchestration script. Scans hostnames/IPs (with configurable ports) via TCP handshake for SSL certificate details (issuer, subject, SAN, expiry, thumbprint, key size, chain status), then produces an interactive Bootstrap Table HTML dashboard with expiry countdown highlighting.
+  * helpers/hyperv/ — Added Get-HypervDashboard and Export-HypervDashboardHtml functions to HypervHelpers.ps1; added Hyperv-Dashboard-Template.html and Get-HypervDashboard.ps1 orchestration script. Queries Hyper-V hosts via CIM sessions for VM details (CPU, memory, disk, network, snapshots, replication, heartbeat) and produces a searchable HTML dashboard.
+  * helpers/nutanix/ — Added Get-NutanixDashboard and Export-NutanixDashboardHtml functions to NutanixHelpers.ps1; added Nutanix-Dashboard-Template.html and Get-NutanixDashboard.ps1 orchestration script. Queries Nutanix Prism API for cluster, host, and VM details with protection domain and NGT status.
+  * helpers/proxmox/ — Added Get-ProxmoxDashboard and Export-ProxmoxDashboardHtml functions to ProxmoxHelpers.ps1; added Proxmox-Dashboard-Template.html and Get-ProxmoxDashboard.ps1 orchestration script. Queries Proxmox VE API for node and VM details with HA state, network I/O, and tags.
+  * helpers/aws/ — Added Get-AWSDashboard and Export-AWSDashboardHtml functions to AWSHelpers.ps1; added AWS-Dashboard-Template.html and Get-AWSDashboard.ps1 orchestration script. Queries EC2 instances, RDS databases, and ELBv2 load balancers across regions with resolved IPs.
+  * helpers/azure/ — Added Get-AzureDashboard and Export-AzureDashboardHtml functions to AzureHelpers.ps1; added Azure-Dashboard-Template.html and Get-AzureDashboard.ps1 orchestration script. Enumerates resources across subscriptions and resource groups with optional Azure Monitor metrics.
+  * helpers/gcp/ — Added Get-GCPDashboard and Export-GCPDashboardHtml functions to GCPHelpers.ps1; added GCP-Dashboard-Template.html and Get-GCPDashboard.ps1 orchestration script. Queries Compute Engine VMs, Cloud SQL instances, and forwarding rules per project.
+  * helpers/oci/ — Added Get-OCIDashboard and Export-OCIDashboardHtml functions to OCIHelpers.ps1; added OCI-Dashboard-Template.html and Get-OCIDashboard.ps1 orchestration script. Queries Compute instances, DB Systems, Autonomous Databases, and Load Balancers across compartments.
 
 
 ## 0.1.17/18 - 2025-12-08

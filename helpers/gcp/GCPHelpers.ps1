@@ -21,6 +21,12 @@ function Connect-GCPAccount {
         Path to the service account JSON key file.
     .PARAMETER Project
         The GCP project ID to set as default.
+    .EXAMPLE
+        Connect-GCPAccount -KeyFilePath "C:\keys\service-account.json" -Project "my-gcp-project-123"
+        Authenticates to GCP using the specified service account key and sets the default project.
+    .EXAMPLE
+        Connect-GCPAccount -KeyFilePath $env:GCP_KEY_FILE -Project $env:GCP_PROJECT
+        Authenticates using paths from environment variables.
     #>
     param(
         [Parameter(Mandatory)][string]$KeyFilePath,
@@ -59,6 +65,9 @@ function Get-GCPAccessToken {
     <#
     .SYNOPSIS
         Returns a current OAuth2 access token from gcloud for REST API calls.
+    .EXAMPLE
+        $token = Get-GCPAccessToken
+        Returns a bearer token string for use in REST API Authorization headers.
     #>
 
     $token = & gcloud auth print-access-token 2>&1
@@ -72,6 +81,12 @@ function Get-GCPProjects {
     <#
     .SYNOPSIS
         Returns all accessible GCP projects.
+    .EXAMPLE
+        Get-GCPProjects
+        Returns all GCP projects accessible to the authenticated service account.
+    .EXAMPLE
+        Get-GCPProjects | Where-Object { $_.State -eq "ACTIVE" }
+        Returns only active GCP projects.
     #>
 
     $json = & gcloud projects list --format=json 2>&1
@@ -97,6 +112,15 @@ function Get-GCPComputeInstances {
         across all zones, returning a simplified collection with key properties.
     .PARAMETER Project
         The GCP project ID. If omitted, uses the default gcloud project.
+    .EXAMPLE
+        Get-GCPComputeInstances
+        Returns all Compute Engine VMs in the default project.
+    .EXAMPLE
+        Get-GCPComputeInstances -Project "my-gcp-project-123"
+        Returns all VMs in the specified project.
+    .EXAMPLE
+        Get-GCPComputeInstances | Where-Object { $_.Status -eq "RUNNING" }
+        Returns only running VM instances.
     #>
     param(
         [string]$Project
@@ -175,6 +199,15 @@ function Get-GCPCloudSQLInstances {
         Returns all Cloud SQL instances in the specified project.
     .PARAMETER Project
         The GCP project ID.
+    .EXAMPLE
+        Get-GCPCloudSQLInstances
+        Returns all Cloud SQL instances in the default project.
+    .EXAMPLE
+        Get-GCPCloudSQLInstances -Project "my-gcp-project-123"
+        Returns all Cloud SQL instances in the specified project with IP, tier, and status.
+    .EXAMPLE
+        Get-GCPCloudSQLInstances | Where-Object { $_.DatabaseVersion -like "MYSQL*" }
+        Returns only MySQL Cloud SQL instances.
     #>
     param(
         [string]$Project
@@ -224,6 +257,15 @@ function Get-GCPForwardingRules {
         which represent load balancer entry points with IP addresses.
     .PARAMETER Project
         The GCP project ID.
+    .EXAMPLE
+        Get-GCPForwardingRules
+        Returns all global and regional forwarding rules (load balancer frontends) in the default project.
+    .EXAMPLE
+        Get-GCPForwardingRules -Project "my-gcp-project-123"
+        Returns all forwarding rules in the specified project.
+    .EXAMPLE
+        Get-GCPForwardingRules | Where-Object { $_.Scheme -eq "EXTERNAL" }
+        Returns only external-facing forwarding rules.
     #>
     param(
         [string]$Project
@@ -294,6 +336,15 @@ function Get-GCPCloudMonitoringMetrics {
         Hashtable of resource labels to filter on (e.g. @{instance_id="123456"}).
     .PARAMETER MetricTypes
         Array of metric type strings to retrieve. If omitted, uses sensible defaults.
+    .EXAMPLE
+        Get-GCPCloudMonitoringMetrics -Project "my-project" -ResourceType "gce_instance" -ResourceLabels @{instance_id="1234567890"}
+        Returns default Compute Engine metrics (CPU, network, disk) for the specified VM instance.
+    .EXAMPLE
+        Get-GCPCloudMonitoringMetrics -Project "my-project" -ResourceType "cloudsql_database" -ResourceLabels @{database_id="my-project:mydb"}
+        Returns default Cloud SQL metrics (CPU, memory, disk utilization) for the specified database.
+    .EXAMPLE
+        Get-GCPCloudMonitoringMetrics -Project "my-project" -ResourceType "gce_instance" -ResourceLabels @{instance_id="123"} -MetricTypes @("compute.googleapis.com/instance/cpu/utilization")
+        Returns only CPU utilization metrics for the specified instance.
     #>
     param(
         [Parameter(Mandatory)][string]$Project,
@@ -391,6 +442,18 @@ function Resolve-GCPResourceIP {
         The type of resource: ComputeEngine, CloudSQL, or ForwardingRule.
     .PARAMETER Resource
         The resource object from the corresponding Get-GCP* function.
+    .EXAMPLE
+        $vms = Get-GCPComputeInstances
+        $ip = Resolve-GCPResourceIP -ResourceType "ComputeEngine" -Resource $vms[0]
+        Resolves the IP for the first Compute Engine VM (prefers external IP).
+    .EXAMPLE
+        $dbs = Get-GCPCloudSQLInstances
+        Resolve-GCPResourceIP -ResourceType "CloudSQL" -Resource $dbs[0]
+        Resolves the IP for a Cloud SQL instance (prefers public IP).
+    .EXAMPLE
+        $rules = Get-GCPForwardingRules
+        Resolve-GCPResourceIP -ResourceType "ForwardingRule" -Resource $rules[0]
+        Returns the IP address of the first forwarding rule.
     #>
     param(
         [Parameter(Mandatory)][ValidateSet("ComputeEngine", "CloudSQL", "ForwardingRule")][string]$ResourceType,
@@ -426,11 +489,231 @@ function Resolve-GCPResourceIP {
     return $ip
 }
 
+function Get-GCPDashboard {
+    <#
+    .SYNOPSIS
+        Builds a unified dashboard view of GCP Compute, Cloud SQL, and Forwarding Rules.
+    .DESCRIPTION
+        Queries the specified project for Compute Engine VMs, Cloud SQL instances,
+        and forwarding rules then returns a flat collection suitable for Bootstrap
+        Table display. Each row contains resource type, name, status, resolved IP,
+        region, zone, machine type, network, disk count, labels, and creation time.
+    .PARAMETER Project
+        The GCP project ID. If omitted, uses the default gcloud project.
+    .PARAMETER IncludeCloudSQL
+        Include Cloud SQL instances in the results. Defaults to $true.
+    .PARAMETER IncludeForwardingRules
+        Include forwarding rules (load balancers) in the results. Defaults to $true.
+    .EXAMPLE
+        Get-GCPDashboard
+
+        Returns all Compute, Cloud SQL, and forwarding rule resources in the default project.
+    .EXAMPLE
+        Get-GCPDashboard -Project "my-project" -IncludeCloudSQL $false
+
+        Returns only Compute and forwarding rule resources.
+    .EXAMPLE
+        Connect-GCPAccount -KeyFilePath "C:\keys\sa.json" -Project "my-project"
+        $data = Get-GCPDashboard -Project "my-project"
+        Export-GCPDashboardHtml -DashboardData $data -OutputPath "C:\Reports\gcp.html"
+        Start-Process "C:\Reports\gcp.html"
+
+        End-to-end: authenticate with service account, gather data, export HTML, and open in browser.
+    .OUTPUTS
+        PSCustomObject[]
+        Each object contains: ResourceType, Name, Status, IPAddress, InternalIP,
+        Region, Zone, MachineType, Network, DiskCount, Labels, CreationTime.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, GoogleCloud PowerShell module, gcloud CLI authenticated.
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    param(
+        [string]$Project,
+        [bool]$IncludeCloudSQL = $true,
+        [bool]$IncludeForwardingRules = $true
+    )
+
+    $results = @()
+
+    # Compute Engine VMs
+    try {
+        $instances = Get-GCPComputeInstances -Project $Project
+        foreach ($inst in $instances) {
+            $ip = Resolve-GCPResourceIP -ResourceType "ComputeEngine" -Resource $inst
+            $results += [PSCustomObject]@{
+                ResourceType = "Compute"
+                Name         = $inst.Name
+                Status       = $inst.Status
+                IPAddress    = if ($ip) { $ip } else { "N/A" }
+                InternalIP   = $inst.InternalIP
+                Region       = $inst.Region
+                Zone         = $inst.Zone
+                MachineType  = $inst.MachineType
+                Network      = $inst.Network
+                DiskCount    = $inst.DiskCount
+                Labels       = $inst.Labels
+                CreationTime = $inst.CreationTime
+            }
+        }
+    }
+    catch { Write-Warning "Compute query failed: $($_.Exception.Message)" }
+
+    # Cloud SQL
+    if ($IncludeCloudSQL) {
+        try {
+            $dbs = Get-GCPCloudSQLInstances -Project $Project
+            foreach ($db in $dbs) {
+                $ip = Resolve-GCPResourceIP -ResourceType "CloudSQL" -Resource $db
+                $results += [PSCustomObject]@{
+                    ResourceType = "CloudSQL"
+                    Name         = $db.InstanceName
+                    Status       = $db.State
+                    IPAddress    = if ($ip) { $ip } else { "N/A" }
+                    InternalIP   = $db.PrivateIP
+                    Region       = $db.Region
+                    Zone         = $db.GceZone
+                    MachineType  = $db.Tier
+                    Network      = "N/A"
+                    DiskCount    = $db.DataDiskSizeGB
+                    Labels       = ""
+                    CreationTime = "N/A"
+                }
+            }
+        }
+        catch { Write-Warning "Cloud SQL query failed: $($_.Exception.Message)" }
+    }
+
+    # Forwarding Rules
+    if ($IncludeForwardingRules) {
+        try {
+            $rules = Get-GCPForwardingRules -Project $Project
+            foreach ($rule in $rules) {
+                $ip = Resolve-GCPResourceIP -ResourceType "ForwardingRule" -Resource $rule
+                $results += [PSCustomObject]@{
+                    ResourceType = "ForwardingRule"
+                    Name         = $rule.Name
+                    Status       = $rule.Scheme
+                    IPAddress    = if ($ip) { $ip } else { "N/A" }
+                    InternalIP   = "N/A"
+                    Region       = $rule.Region
+                    Zone         = "N/A"
+                    MachineType  = "$($rule.IPProtocol) $($rule.PortRange)"
+                    Network      = $rule.Network
+                    DiskCount    = "N/A"
+                    Labels       = ""
+                    CreationTime = "N/A"
+                }
+            }
+        }
+        catch { Write-Warning "Forwarding rules query failed: $($_.Exception.Message)" }
+    }
+
+    return $results
+}
+
+function Export-GCPDashboardHtml {
+    <#
+    .SYNOPSIS
+        Renders GCP dashboard data into a self-contained HTML file.
+    .DESCRIPTION
+        Takes the output of Get-GCPDashboard and generates a Bootstrap-based
+        HTML report with sortable, searchable, and exportable tables. The report
+        uses Bootstrap 5 and Bootstrap-Table for interactive filtering, sorting,
+        column toggling, and CSV/JSON export.
+    .PARAMETER DashboardData
+        Array of PSCustomObject from Get-GCPDashboard containing Compute, Cloud SQL,
+        and forwarding rule details.
+    .PARAMETER OutputPath
+        File path for the output HTML file. Parent directory must exist.
+    .PARAMETER ReportTitle
+        Title shown in the report header. Defaults to "GCP Dashboard".
+    .PARAMETER TemplatePath
+        Optional path to a custom HTML template. If omitted, uses the
+        GCP-Dashboard-Template.html in the same directory as this script.
+    .EXAMPLE
+        $data = Get-GCPDashboard -Project "my-project"
+        Export-GCPDashboardHtml -DashboardData $data -OutputPath "C:\Reports\gcp.html"
+
+        Exports the dashboard data to an HTML file using the default template.
+    .EXAMPLE
+        Export-GCPDashboardHtml -DashboardData $data -OutputPath "$env:TEMP\gcp.html" -ReportTitle "Prod GCP"
+
+        Exports with a custom report title.
+    .EXAMPLE
+        Connect-GCPAccount -KeyFilePath "C:\keys\sa.json" -Project "my-project"
+        $data = Get-GCPDashboard -Project "my-project"
+        Export-GCPDashboardHtml -DashboardData $data -OutputPath "C:\Reports\gcp.html"
+        Start-Process "C:\Reports\gcp.html"
+
+        Full pipeline: authenticate, gather, export, and open the report in a browser.
+    .OUTPUTS
+        System.Void
+        Writes an HTML file to the path specified by OutputPath.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, GCP-Dashboard-Template.html in the script directory.
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = "GCP Dashboard",
+        [string]$TemplatePath
+    )
+
+    if (-not $TemplatePath) {
+        $TemplatePath = Join-Path $PSScriptRoot "GCP-Dashboard-Template.html"
+    }
+
+    if (-not (Test-Path $TemplatePath)) {
+        throw "HTML template not found at $TemplatePath"
+    }
+
+    $firstObj = $DashboardData | Select-Object -First 1
+    $columns = @()
+    foreach ($prop in $firstObj.PSObject.Properties) {
+        $col = @{
+            field      = $prop.Name
+            title      = ($prop.Name -creplace '([A-Z])', ' $1').Trim()
+            sortable   = $true
+            searchable = $true
+        }
+        if ($prop.Name -eq 'Status') {
+            $col.formatter = 'formatStatus'
+        }
+        $columns += $col
+    }
+
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = $DashboardData | ConvertTo-Json -Depth 5 -Compress
+
+    $tableConfig = @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+
+    $html = Get-Content -Path $TemplatePath -Raw
+    $html = $html -replace 'replaceThisHere', $tableConfig
+    $html = $html -replace 'ReplaceYourReportNameHere', $ReportTitle
+    $html = $html -replace 'ReplaceUpdateTimeHere', (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    Set-Content -Path $OutputPath -Value $html -Encoding UTF8
+    Write-Verbose "GCP Dashboard HTML written to $OutputPath"
+}
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASQw8/SOMzU5k1
-# R4IidSExkp/Et6h9MCf0AfIZ2p3PEaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMqInuGNOYRn/f
+# /ngGfTYA+64PiiO1gfKzsYcLPwOS9qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -530,17 +813,17 @@ function Resolve-GCPResourceIP {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgXr3qcEr/GXMB9zTvWKN/aOruQvHisFcE
-# FEPzR7S64bMwDQYJKoZIhvcNAQEBBQAEggIAv/XhlCw773JT+HRpuGeZGfOFLZiB
-# 8BFqzvaWaRXZelIRgmDIqiJtW8DQbkxFjxNimcK5Ebt4f6Q3ckmGtyKvjoDO/4j6
-# nt5cxJSnhshusXFDS4SiFuViZPIWim5tZU1XL7dnuVWTbsYYfFJgO3WT28bSZtHh
-# YAns1pVXXSiBJNs2UnrfTOXAr30IQ2+ANcRM1K3eZ5asVHbiv2Ud6kqfso9Rv2ia
-# nKUf0qSP8BEWBVc82AV5ZkWvdXm6ZuwsRY6ePQ6v4931IFKFiltauC6ME0tAWhky
-# kGtXA1P5jnKiQUhxiHkzTRlA30c8ZaiT31qlvsSAVdqW4TV2tcU5OA9cI+gmnIW/
-# jHtJ4m+dtLbCjyzShHUbW/lcg7EHknKDTIvP1gGwWFX3k6P16jbClC6ghApxq14U
-# O0WRcfWBvR+GX59z4sssDW7JMUmcuyqAmpahVT+DjdxouUsnVkQjy3niAbFmUVSX
-# fww/orZvM482j3GnhEbzYSM/6JqDSII7pC8YZ0dX3symcdisXHippOnFg90rTFFq
-# VrnIrCWDdlsBB6Q+Ac4IbEhZy/3Y5nmnWTv75RW7+wzT056RoRlOKPTGqEH6Zpy1
-# Z3EyjizUi6N2WGfpTmjGo96HLkJQRWZZC+qsL+nq2irTWsavnIKrKCBhAWsEuEJU
-# k0/XVzUn3SAjFQ8=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgkpW+PKcx1LON/aITuRiHdlF3YJb7CS3p
+# Qd/xnFEO2N4wDQYJKoZIhvcNAQEBBQAEggIAFfPhKG+dYsT7d7zsJ2fjs9V1iczG
+# CdlCTznN3EmUJJxnv4LT9EsrBGijm+ecrzIB8S6T7Ag8t1g8FPGnqqG0V7SMzC2l
+# VGeEXSpWIP+xSU5+aeNUM7KsVekPM9QpacmIlgTDEoJzQcA+/PYhGd2kA1LzTz6p
+# ni/Zmd2IK23G6nX6FrvIt7OmSQeEaepVPhOkIHG4WEPpaCUtEgmyuQPawL+L9Dbv
+# 03YGfazD36pXICYnKX66bidWfFaRXrIFzFd+8+8dacYM1LHo0xROrz93Iu5K24xV
+# W5fU1+9KiEoN16NzIUnzugZ1eYOH7BHxMZZl70Fft6mOa9hgZ/1F/D8yXVgXpf/i
+# mGU5eVVwdGUd3HLJfLybjbe3ekTgGpSMQPvIKq/gXIaWXQMavHP28b1/BE7BW9vd
+# c6iXLD6vK+Bi6nh/CrIig1RAWc2XkxRUMqr3cASnL4x/zxltl/Bag0xBrCMWsKml
+# MW7orptLavt0KtHX//127x81GIx0m5o3qQwXbqHJY1gNNDSe8Hr8H6dSV00ADYTn
+# 6DbaHBtCzlXO99VfudBw/qLlZpkTJ+2mB4x1Y6Yscct7areNYw4qqRCfzF46Mzjr
+# 30EYoXun5Q4SqdfBzT25biSud5umcQjdE8VLUaavyZWKMvrua+JeLJM5fVDmp6To
+# QtDg43tqOIxJKQg=
 # SIG # End signature block

@@ -10,6 +10,25 @@ function Initialize-SSLBypass {
 }
 
 function Connect-ProxmoxServer {
+    <#
+    .SYNOPSIS
+        Authenticates to a Proxmox VE server and returns an auth cookie.
+    .DESCRIPTION
+        Posts credentials to the Proxmox API ticket endpoint and returns
+        a PVEAuthCookie string for use in subsequent API calls.
+    .PARAMETER Server
+        The base URI of the Proxmox VE server (e.g. https://192.168.1.100:8006).
+    .PARAMETER Username
+        The Proxmox username (e.g. root@pam).
+    .PARAMETER Password
+        The password for authentication.
+    .EXAMPLE
+        $cookie = Connect-ProxmoxServer -Server "https://192.168.1.100:8006" -Username "root@pam" -Password "MyPassword"
+        Authenticates and returns the PVEAuthCookie for subsequent API calls.
+    .EXAMPLE
+        $cookie = Connect-ProxmoxServer -Server "https://pve.lab.local:8006" -Username "admin@pve" -Password $pass
+        Connects to Proxmox using a stored password variable.
+    #>
     param(
         [string]$Server,
         [string]$Username,
@@ -29,6 +48,20 @@ function Connect-ProxmoxServer {
 }
 
 function Get-ProxmoxNodes {
+    <#
+    .SYNOPSIS
+        Returns all nodes in the Proxmox cluster.
+    .PARAMETER Server
+        The base URI of the Proxmox VE server.
+    .PARAMETER Cookie
+        The PVEAuthCookie from Connect-ProxmoxServer.
+    .EXAMPLE
+        $nodes = Get-ProxmoxNodes -Server "https://192.168.1.100:8006" -Cookie $cookie
+        Returns all nodes in the Proxmox cluster.
+    .EXAMPLE
+        Get-ProxmoxNodes -Server $server -Cookie $cookie | ForEach-Object { $_.node }
+        Lists all node names in the cluster.
+    #>
     param(
         [string]$Server,
         [string]$Cookie
@@ -38,6 +71,22 @@ function Get-ProxmoxNodes {
 }
 
 function Get-ProxmoxVMs {
+    <#
+    .SYNOPSIS
+        Returns all QEMU VMs on a specific Proxmox node.
+    .PARAMETER Server
+        The base URI of the Proxmox VE server.
+    .PARAMETER Cookie
+        The PVEAuthCookie from Connect-ProxmoxServer.
+    .PARAMETER Node
+        The name of the Proxmox node.
+    .EXAMPLE
+        $vms = Get-ProxmoxVMs -Server "https://192.168.1.100:8006" -Cookie $cookie -Node "pve1"
+        Returns all VMs on the pve1 node.
+    .EXAMPLE
+        Get-ProxmoxVMs -Server $server -Cookie $cookie -Node "pve1" | Where-Object { $_.status -eq "running" }
+        Returns only running VMs on the node.
+    #>
     param(
         [string]$Server,
         [string]$Cookie,
@@ -48,6 +97,25 @@ function Get-ProxmoxVMs {
 }
 
 function Get-ProxmoxNodeDetail {
+    <#
+    .SYNOPSIS
+        Returns detailed status information for a Proxmox node.
+    .DESCRIPTION
+        Retrieves node status, network configuration, and version information
+        including CPU, memory, swap, disk, and load averages.
+    .PARAMETER Server
+        The base URI of the Proxmox VE server.
+    .PARAMETER Cookie
+        The PVEAuthCookie from Connect-ProxmoxServer.
+    .PARAMETER Node
+        The name of the Proxmox node.
+    .EXAMPLE
+        Get-ProxmoxNodeDetail -Server "https://192.168.1.100:8006" -Cookie $cookie -Node "pve1"
+        Returns CPU, memory, disk, and version details for the pve1 node.
+    .EXAMPLE
+        Get-ProxmoxNodes -Server $server -Cookie $cookie | ForEach-Object { Get-ProxmoxNodeDetail -Server $server -Cookie $cookie -Node $_.node }
+        Returns detailed information for every node in the cluster.
+    #>
     param(
         [string]$Server,
         [string]$Cookie,
@@ -109,6 +177,28 @@ function Get-ProxmoxNodeDetail {
 }
 
 function Get-ProxmoxVMDetail {
+    <#
+    .SYNOPSIS
+        Returns detailed status and configuration for a specific Proxmox VM.
+    .DESCRIPTION
+        Retrieves VM configuration and live status including CPU, memory, disk,
+        network I/O, and attempts to get the IP address via the QEMU guest agent.
+    .PARAMETER Server
+        The base URI of the Proxmox VE server.
+    .PARAMETER Cookie
+        The PVEAuthCookie from Connect-ProxmoxServer.
+    .PARAMETER Node
+        The name of the Proxmox node hosting the VM.
+    .PARAMETER VMID
+        The numeric VM ID.
+    .EXAMPLE
+        Get-ProxmoxVMDetail -Server "https://192.168.1.100:8006" -Cookie $cookie -Node "pve1" -VMID 100
+        Returns detailed status for VM 100 on node pve1.
+    .EXAMPLE
+        $vms = Get-ProxmoxVMs -Server $server -Cookie $cookie -Node "pve1"
+        $vms | ForEach-Object { Get-ProxmoxVMDetail -Server $server -Cookie $cookie -Node "pve1" -VMID $_.vmid }
+        Returns detailed information for every VM on the node.
+    #>
     param(
         [string]$Server,
         [string]$Cookie,
@@ -166,11 +256,194 @@ function Get-ProxmoxVMDetail {
     }
 }
 
+function Get-ProxmoxDashboard {
+    <#
+    .SYNOPSIS
+        Builds a flat dashboard view combining Proxmox nodes and their VMs.
+    .DESCRIPTION
+        Queries the Proxmox VE API for node list, node details, and VM details,
+        then returns a unified collection of objects suitable for an interactive
+        Bootstrap Table dashboard. Each row represents a VM enriched with its
+        parent node context including CPU, RAM, PVE version, and HA state.
+    .PARAMETER Server
+        The base URI of the Proxmox VE server (e.g. https://pve:8006).
+    .PARAMETER Cookie
+        The PVEAuthCookie string obtained from Connect-ProxmoxServer.
+    .EXAMPLE
+        $cookie = Connect-ProxmoxServer -Server "https://pve:8006" -Username "root@pam" -Password "pass"
+        Get-ProxmoxDashboard -Server "https://pve:8006" -Cookie $cookie
+
+        Returns a flat dashboard view of all VMs across the specified Proxmox node.
+    .EXAMPLE
+        $data = Get-ProxmoxDashboard -Server $server -Cookie $cookie
+        $data | Where-Object { $_.Status -eq "running" }
+
+        Retrieves the dashboard and filters for running VMs.
+    .EXAMPLE
+        $cookie = Connect-ProxmoxServer -Server "https://pve:8006" -Username "root@pam" -Password $pass
+        $data = Get-ProxmoxDashboard -Server "https://pve:8006" -Cookie $cookie
+        Export-ProxmoxDashboardHtml -DashboardData $data -OutputPath "C:\Reports\proxmox.html"
+        Start-Process "C:\Reports\proxmox.html"
+
+        End-to-end: authenticate, gather data, export HTML, and open in browser.
+    .OUTPUTS
+        PSCustomObject[]
+        Each object contains VM details enriched with node context: VMID, VMName, Status,
+        IPAddress, Node, NodeIP, NodeCPU, NodeRAM_Used, NodeRAM_Total, PVEVersion, CPUs,
+        CPUPercent, RAM_Used, RAM_Total, Disk_Used, Disk_Total, NetIn_KB, NetOut_KB,
+        Uptime, Tags, HAState, HAManaged.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, network access to Proxmox VE API (port 8006).
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [Parameter(Mandatory)][string]$Cookie
+    )
+
+    $nodes = Get-ProxmoxNodes -Server $Server -Cookie $Cookie
+    $results = @()
+
+    foreach ($node in $nodes) {
+        $nodeName = $node.node
+        $nodeDetail = Get-ProxmoxNodeDetail -Server $Server -Cookie $Cookie -Node $nodeName
+        $vms = Get-ProxmoxVMs -Server $Server -Cookie $Cookie -Node $nodeName
+
+        foreach ($vm in $vms) {
+            $vmDetail = Get-ProxmoxVMDetail -Server $Server -Cookie $Cookie -Node $nodeName -VMID $vm.vmid
+
+            $results += [PSCustomObject]@{
+                VMID          = $vmDetail.VMID
+                VMName        = $vmDetail.Name
+                Status        = $vmDetail.Status
+                IPAddress     = $vmDetail.IPAddress
+                Node          = $nodeName
+                NodeIP        = $nodeDetail.IPAddress
+                NodeCPU       = $nodeDetail.CPUPercent
+                NodeRAM_Used  = $nodeDetail.RAM_Used
+                NodeRAM_Total = $nodeDetail.RAM_Total
+                PVEVersion    = $nodeDetail.PVEVersion
+                CPUs          = $vmDetail.CPUs
+                CPUPercent    = $vmDetail.CPUPercent
+                RAM_Used      = $vmDetail.RAM_Used
+                RAM_Total     = $vmDetail.RAM_Total
+                Disk_Used     = $vmDetail.Disk_Used
+                Disk_Total    = $vmDetail.Disk_Total
+                NetIn_KB      = $vmDetail.NetIn_KB
+                NetOut_KB     = $vmDetail.NetOut_KB
+                Uptime        = $vmDetail.Uptime
+                Tags          = $vmDetail.Tags
+                HAState       = $vmDetail.HAState
+                HAManaged     = $vmDetail.HAManaged
+            }
+        }
+    }
+
+    return $results
+}
+
+function Export-ProxmoxDashboardHtml {
+    <#
+    .SYNOPSIS
+        Renders Proxmox dashboard data into a self-contained HTML file.
+    .DESCRIPTION
+        Takes the output of Get-ProxmoxDashboard and generates a Bootstrap-based
+        HTML report with sortable, searchable, and exportable tables. The report
+        uses Bootstrap 5 and Bootstrap-Table for interactive filtering, sorting,
+        column toggling, and CSV/JSON export.
+    .PARAMETER DashboardData
+        Array of PSCustomObject from Get-ProxmoxDashboard containing VM and node details.
+    .PARAMETER OutputPath
+        File path for the output HTML file. Parent directory must exist.
+    .PARAMETER ReportTitle
+        Title shown in the report header. Defaults to "Proxmox Dashboard".
+    .PARAMETER TemplatePath
+        Optional path to a custom HTML template. If omitted, uses the
+        Proxmox-Dashboard-Template.html in the same directory as this script.
+    .EXAMPLE
+        $data = Get-ProxmoxDashboard -Server $server -Cookie $cookie
+        Export-ProxmoxDashboardHtml -DashboardData $data -OutputPath "C:\Reports\proxmox.html"
+
+        Exports the dashboard data to an HTML file using the default template.
+    .EXAMPLE
+        Export-ProxmoxDashboardHtml -DashboardData $data -OutputPath "$env:TEMP\proxmox.html" -ReportTitle "Lab Proxmox"
+
+        Exports with a custom report title.
+    .EXAMPLE
+        $cookie = Connect-ProxmoxServer -Server $server -Username "root@pam" -Password $pass
+        $data = Get-ProxmoxDashboard -Server $server -Cookie $cookie
+        Export-ProxmoxDashboardHtml -DashboardData $data -OutputPath "C:\Reports\proxmox.html"
+        Start-Process "C:\Reports\proxmox.html"
+
+        Full pipeline: authenticate, gather, export, and open the report in a browser.
+    .OUTPUTS
+        System.Void
+        Writes an HTML file to the path specified by OutputPath.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, Proxmox-Dashboard-Template.html in the script directory.
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = "Proxmox Dashboard",
+        [string]$TemplatePath
+    )
+
+    if (-not $TemplatePath) {
+        $TemplatePath = Join-Path $PSScriptRoot "Proxmox-Dashboard-Template.html"
+    }
+
+    if (-not (Test-Path $TemplatePath)) {
+        throw "HTML template not found at $TemplatePath"
+    }
+
+    $firstObj = $DashboardData | Select-Object -First 1
+    $columns = @()
+    foreach ($prop in $firstObj.PSObject.Properties) {
+        $col = @{
+            field      = $prop.Name
+            title      = ($prop.Name -creplace '([A-Z])', ' $1').Trim()
+            sortable   = $true
+            searchable = $true
+        }
+        if ($prop.Name -eq 'Status') {
+            $col.formatter = 'formatStatus'
+        }
+        $columns += $col
+    }
+
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = $DashboardData | ConvertTo-Json -Depth 5 -Compress
+
+    $tableConfig = @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+
+    $html = Get-Content -Path $TemplatePath -Raw
+    $html = $html -replace 'replaceThisHere', $tableConfig
+    $html = $html -replace 'ReplaceYourReportNameHere', $ReportTitle
+    $html = $html -replace 'ReplaceUpdateTimeHere', (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    Set-Content -Path $OutputPath -Value $html -Encoding UTF8
+    Write-Verbose "Proxmox Dashboard HTML written to $OutputPath"
+}
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCXixlcY7VIYAXe
-# QoJj0TZgFG94+p/o9BWPqGOX5EVLm6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA6n7AJ37ogt+OF
+# YX5W32mhNfy0R/fcvNekmvwbLJdbR6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -270,17 +543,17 @@ function Get-ProxmoxVMDetail {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCcKMYBg5OUkvPX3xqKEDpRkVcVx/o2Kg
-# RG7gzegtVbswDQYJKoZIhvcNAQEBBQAEggIAqxoUrF1+/4cSmm7Cmx584jPIbak5
-# bw7n5NwP8ZSQvvMEMMY/oYz/dK2S6P+MPy06hS/ZsSdX/8GkguLQeGspFK+pF8uq
-# /vKFsD5YY8eSLZxsDx0xjfhpT6xeikUJAKUy9IycSUv1C4t1239cJnxl/u/DZAq2
-# LUkgyelzpKcS/TarKkvlduMWxcpY4OxlhrNnb3pf2TPa1lTqhlzJsOUr3X2ggjdH
-# ECwnUHAMw9ZY+6/OW38A5CFo0U2Pju245CDsH67QxamO2IQCt2PEKtvtKzEdN8Oi
-# UEm/w+Vt9OzjrlOKU76WpXXwt70/ILy6cE4Z0Dd8aWTfHevXpFES5ZGv0ZvVyDTA
-# JeziOVdqWYno/e2fUWlz/DZ/Jla/eZ1jrwlUZrh+jswUhMzdKrM9857dgo9d953O
-# bsvAznEAKXomvq1lWBg78Qn93SYFafLuxuYCOK+kvwfELB4HRWutjl1ChmuHi6QC
-# eLSPZZYkv+1TyYfiHFFORpYA5RLudvSBOQQlzLDUy6ksYXAwG4/IeLNFQJIjlL7b
-# m7RLPt720aClZEPQxMFRFk6YqRvr2WEy/5lbOG5BSVwAZ3EpfefGojXrvsjMGG/R
-# 1lqnGSQl/6GUrd/Ifpp5afOh61CembVC+yE8jT5fePqPvixPeVKAh813a5+Wz1DT
-# 6/7zMrrn+u094sk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgqkqH4TvX3npCbGku7HklaISdAYOkTrPm
+# S4QnjzeTffYwDQYJKoZIhvcNAQEBBQAEggIAXtE5Ti9338Gm0oH7xr2vRA0lZKDy
+# droEhhrAFOVlHlPCxHocUN9cqchbA8NcSfeIx9TQYNq9ueONkk/Yw8sJEp9BCgt+
+# DfO2e97S924Mx3YSjSaJ5DpMsZqRJsXJ/KpkGgO7UoyFUwICoZtRdLnAFnqS+XXE
+# oJ6/OyTzigBqUy8sbsHlZHeHhRZunox6vMcVb9XEwuhc9Z+Smdq328zeASMD1/C3
+# zInNqSnYpdOP6Y+wrb3OwhRpaSUHB+w10AsGz4dMdL41uAIYg++XF6cqVOsmrtg2
+# rnOMUNwVlAUuM8P7zS/nRG1sxwJhwIQU71gCLz4r07a9prk9bvEd84NOlEIErcH9
+# /rDzlN9Fom8Oq1TBBMZr244Wu98etYCkhDAyX4ELY/6VTQ2t01VO4y2vO3YAq1Sb
+# lHSUwLG4EI8bPCYR9lZWm51e9PddUTMWhCir1icMjHP2hIXJhMFJdEmncN1rq8Wb
+# RiCRXet+OOqAelVsO7SLbq0UAQd9wpH8tdnZzbt0Z1PxcsSE2gsvwQmnB1noaP9U
+# DgXKJOJ6mN8NtPd3RTjHhic2NJtsDXrVAL61iXdkphC9ddQTZRVpGb8uu/FyLKp8
+# BuKh6AR/nENnTyv5M1XiLgNra3q24hU5tIqInh5URKhU9qxd11QQz8UMkZ+caSjI
+# ypjD8kNTfVULSKk=
 # SIG # End signature block

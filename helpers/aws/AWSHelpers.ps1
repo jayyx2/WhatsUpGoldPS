@@ -25,6 +25,12 @@ function Connect-AWSProfile {
         The default AWS region (e.g. us-east-1). Defaults to us-east-1.
     .PARAMETER ProfileName
         Use a stored AWS credential profile instead of keys.
+    .EXAMPLE
+        Connect-AWSProfile -AccessKey "AKIAIOSFODNN7EXAMPLE" -SecretKey "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" -Region "us-east-1"
+        Authenticates to AWS using an IAM access key pair in the us-east-1 region.
+    .EXAMPLE
+        Connect-AWSProfile -ProfileName "MyStoredProfile" -Region "eu-west-1"
+        Authenticates using a previously stored credential profile and sets the default region to eu-west-1.
     #>
     param(
         [Parameter(ParameterSetName = "Keys", Mandatory)][string]$AccessKey,
@@ -57,6 +63,12 @@ function Get-AWSRegionList {
         Returns all enabled AWS regions.
     .DESCRIPTION
         Wraps Get-EC2Region and returns a simplified collection.
+    .EXAMPLE
+        Get-AWSRegionList
+        Returns all enabled AWS regions with their endpoint URLs.
+    .EXAMPLE
+        Get-AWSRegionList | Where-Object { $_.RegionName -like "us-*" }
+        Returns only US-based AWS regions.
     #>
 
     $regions = Get-EC2Region -ErrorAction Stop
@@ -77,6 +89,15 @@ function Get-AWSEC2Instances {
         objects with key properties suitable for WUG device creation.
     .PARAMETER Region
         The AWS region to query. If omitted, uses the default region.
+    .EXAMPLE
+        Get-AWSEC2Instances
+        Returns all EC2 instances in the default region.
+    .EXAMPLE
+        Get-AWSEC2Instances -Region "us-west-2"
+        Returns all EC2 instances in the us-west-2 region.
+    .EXAMPLE
+        Get-AWSEC2Instances -Region "eu-west-1" | Where-Object { $_.State -eq "running" }
+        Returns only running EC2 instances in the eu-west-1 region.
     #>
     param(
         [string]$Region
@@ -145,6 +166,15 @@ function Get-AWSRDSInstances {
         Returns all RDS database instances in the specified region.
     .PARAMETER Region
         The AWS region to query.
+    .EXAMPLE
+        Get-AWSRDSInstances
+        Returns all RDS database instances in the default region.
+    .EXAMPLE
+        Get-AWSRDSInstances -Region "us-east-1"
+        Returns all RDS instances in us-east-1 with endpoint, engine, and status details.
+    .EXAMPLE
+        Get-AWSRDSInstances | Where-Object { $_.Engine -eq "mysql" }
+        Returns only MySQL RDS instances.
     #>
     param(
         [string]$Region
@@ -188,6 +218,15 @@ function Get-AWSLoadBalancers {
         Returns all ELBv2 (ALB/NLB) load balancers in the specified region.
     .PARAMETER Region
         The AWS region to query.
+    .EXAMPLE
+        Get-AWSLoadBalancers
+        Returns all ALB and NLB load balancers in the default region.
+    .EXAMPLE
+        Get-AWSLoadBalancers -Region "us-west-2"
+        Returns all load balancers in us-west-2 with DNS names, type, and state.
+    .EXAMPLE
+        Get-AWSLoadBalancers | Where-Object { $_.Type -eq "application" }
+        Returns only Application Load Balancers.
     #>
     param(
         [string]$Region
@@ -232,6 +271,15 @@ function Get-AWSCloudWatchMetrics {
         Array of metric names to retrieve. If omitted, uses defaults per namespace.
     .PARAMETER Region
         The AWS region.
+    .EXAMPLE
+        Get-AWSCloudWatchMetrics -Namespace "AWS/EC2" -DimensionName "InstanceId" -DimensionValue "i-0123456789abcdef0"
+        Returns default EC2 metrics (CPUUtilization, NetworkIn, etc.) for the specified instance.
+    .EXAMPLE
+        Get-AWSCloudWatchMetrics -Namespace "AWS/RDS" -DimensionName "DBInstanceIdentifier" -DimensionValue "mydb" -Region "us-east-1"
+        Returns default RDS metrics for the specified database in us-east-1.
+    .EXAMPLE
+        Get-AWSCloudWatchMetrics -Namespace "AWS/EC2" -DimensionName "InstanceId" -DimensionValue "i-0123456789abcdef0" -MetricNames @("CPUUtilization")
+        Returns only the CPUUtilization metric for the specified EC2 instance.
     #>
     param(
         [Parameter(Mandatory)][string]$Namespace,
@@ -312,6 +360,18 @@ function Resolve-AWSResourceIP {
         The type of resource: EC2, RDS, or ELB.
     .PARAMETER Resource
         The resource object from the corresponding Get-AWS* function.
+    .EXAMPLE
+        $instances = Get-AWSEC2Instances
+        $ip = Resolve-AWSResourceIP -ResourceType "EC2" -Resource $instances[0]
+        Resolves the IP address for the first EC2 instance (prefers public IP).
+    .EXAMPLE
+        $rds = Get-AWSRDSInstances
+        Resolve-AWSResourceIP -ResourceType "RDS" -Resource $rds[0]
+        Resolves the IP address for an RDS instance by performing DNS lookup on its endpoint.
+    .EXAMPLE
+        $elbs = Get-AWSLoadBalancers
+        Resolve-AWSResourceIP -ResourceType "ELB" -Resource $elbs[0]
+        Resolves the IP address for a load balancer by performing DNS lookup on its DNS name.
     #>
     param(
         [Parameter(Mandatory)][ValidateSet("EC2", "RDS", "ELB")][string]$ResourceType,
@@ -356,11 +416,241 @@ function Resolve-AWSResourceIP {
     return $ip
 }
 
+function Get-AWSDashboard {
+    <#
+    .SYNOPSIS
+        Builds a unified dashboard view of AWS EC2, RDS, and ELB resources.
+    .DESCRIPTION
+        Queries each specified region for EC2 instances, RDS databases, and ELBv2
+        load balancers then returns a flat collection suitable for Bootstrap Table
+        display. Each row represents a resource with resolved IP addresses,
+        instance type, platform, VPC, and monitoring status.
+    .PARAMETER Regions
+        Array of AWS region names to query (e.g. "us-east-1","eu-west-1").
+        Defaults to the current default region if omitted.
+    .PARAMETER IncludeRDS
+        Include RDS instances in the results. Defaults to $true.
+    .PARAMETER IncludeELB
+        Include ELBv2 load balancers in the results. Defaults to $true.
+    .EXAMPLE
+        Get-AWSDashboard
+
+        Returns all EC2, RDS, and ELB resources in the current default region.
+    .EXAMPLE
+        Get-AWSDashboard -Regions "us-east-1","us-west-2" -IncludeRDS $false
+
+        Returns EC2 and ELB resources across two regions.
+    .EXAMPLE
+        Connect-AWSProfile -ProfileName "prod"
+        $data = Get-AWSDashboard -Regions "us-east-1","eu-west-1"
+        Export-AWSDashboardHtml -DashboardData $data -OutputPath "C:\Reports\aws.html"
+        Start-Process "C:\Reports\aws.html"
+
+        End-to-end: authenticate, gather data across regions, export HTML, and open in browser.
+    .OUTPUTS
+        PSCustomObject[]
+        Each object contains resource details: ResourceType, Name, State, IPAddress,
+        PrivateIP, Region, AvailabilityZone, InstanceType, Platform, VpcId, DiskCount,
+        LaunchTime, Monitoring, Tags.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, AWS.Tools PowerShell modules (AWS.Tools.EC2, AWS.Tools.RDS, AWS.Tools.ElasticLoadBalancingV2).
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    param(
+        [string[]]$Regions,
+        [bool]$IncludeRDS = $true,
+        [bool]$IncludeELB = $true
+    )
+
+    if (-not $Regions) { $Regions = @((Get-DefaultAWSRegion).Region) }
+
+    $results = @()
+    foreach ($region in $Regions) {
+        # EC2
+        try {
+            $instances = Get-AWSEC2Instances -Region $region
+            foreach ($inst in $instances) {
+                $ip = Resolve-AWSResourceIP -ResourceType "EC2" -Resource $inst
+                $results += [PSCustomObject]@{
+                    ResourceType     = "EC2"
+                    Name             = $inst.Name
+                    State            = $inst.State
+                    IPAddress        = if ($ip) { $ip } else { "N/A" }
+                    PrivateIP        = $inst.PrivateIP
+                    Region           = $inst.Region
+                    AvailabilityZone = $inst.AvailabilityZone
+                    InstanceType     = $inst.InstanceType
+                    Platform         = $inst.Platform
+                    VpcId            = $inst.VpcId
+                    DiskCount        = $inst.DiskCount
+                    LaunchTime       = $inst.LaunchTime
+                    Monitoring       = $inst.Monitoring
+                    Tags             = $inst.Tags
+                }
+            }
+        }
+        catch { Write-Warning "EC2 query failed for ${region}: $($_.Exception.Message)" }
+
+        # RDS
+        if ($IncludeRDS) {
+            try {
+                $rdsInstances = Get-AWSRDSInstances -Region $region
+                foreach ($db in $rdsInstances) {
+                    $ip = Resolve-AWSResourceIP -ResourceType "RDS" -Resource $db
+                    $results += [PSCustomObject]@{
+                        ResourceType     = "RDS"
+                        Name             = $db.DBInstanceId
+                        State            = $db.Status
+                        IPAddress        = if ($ip) { $ip } else { "N/A" }
+                        PrivateIP        = "N/A"
+                        Region           = $db.Region
+                        AvailabilityZone = $db.AvailabilityZone
+                        InstanceType     = $db.DBInstanceClass
+                        Platform         = "$($db.Engine) $($db.EngineVersion)"
+                        VpcId            = $db.VpcId
+                        DiskCount        = $db.AllocatedStorageGB
+                        LaunchTime       = "N/A"
+                        Monitoring       = "N/A"
+                        Tags             = ""
+                    }
+                }
+            }
+            catch { Write-Warning "RDS query failed for ${region}: $($_.Exception.Message)" }
+        }
+
+        # ELB
+        if ($IncludeELB) {
+            try {
+                $lbs = Get-AWSLoadBalancers -Region $region
+                foreach ($lb in $lbs) {
+                    $ip = Resolve-AWSResourceIP -ResourceType "ELB" -Resource $lb
+                    $results += [PSCustomObject]@{
+                        ResourceType     = "ELB"
+                        Name             = $lb.LoadBalancerName
+                        State            = $lb.State
+                        IPAddress        = if ($ip) { $ip } else { "N/A" }
+                        PrivateIP        = "N/A"
+                        Region           = $lb.Region
+                        AvailabilityZone = $lb.AvailabilityZones
+                        InstanceType     = "$($lb.Type)/$($lb.Scheme)"
+                        Platform         = "ELBv2"
+                        VpcId            = $lb.VpcId
+                        DiskCount        = "N/A"
+                        LaunchTime       = "N/A"
+                        Monitoring       = "N/A"
+                        Tags             = ""
+                    }
+                }
+            }
+            catch { Write-Warning "ELB query failed for ${region}: $($_.Exception.Message)" }
+        }
+    }
+
+    return $results
+}
+
+function Export-AWSDashboardHtml {
+    <#
+    .SYNOPSIS
+        Renders AWS dashboard data into a self-contained HTML file.
+    .DESCRIPTION
+        Takes the output of Get-AWSDashboard and generates a Bootstrap-based
+        HTML report with sortable, searchable, and exportable tables. The report
+        uses Bootstrap 5 and Bootstrap-Table for interactive filtering, sorting,
+        column toggling, and CSV/JSON export.
+    .PARAMETER DashboardData
+        Array of PSCustomObject from Get-AWSDashboard containing EC2, RDS, and ELB details.
+    .PARAMETER OutputPath
+        File path for the output HTML file. Parent directory must exist.
+    .PARAMETER ReportTitle
+        Title shown in the report header. Defaults to "AWS Dashboard".
+    .PARAMETER TemplatePath
+        Optional path to a custom HTML template. If omitted, uses the
+        AWS-Dashboard-Template.html in the same directory as this script.
+    .EXAMPLE
+        $data = Get-AWSDashboard -Regions "us-east-1"
+        Export-AWSDashboardHtml -DashboardData $data -OutputPath "C:\Reports\aws.html"
+
+        Exports the dashboard data to an HTML file using the default template.
+    .EXAMPLE
+        Export-AWSDashboardHtml -DashboardData $data -OutputPath "$env:TEMP\aws.html" -ReportTitle "Production AWS"
+
+        Exports with a custom report title.
+    .EXAMPLE
+        Connect-AWSProfile -ProfileName "prod"
+        $data = Get-AWSDashboard -Regions "us-east-1"
+        Export-AWSDashboardHtml -DashboardData $data -OutputPath "C:\Reports\aws.html"
+        Start-Process "C:\Reports\aws.html"
+
+        Full pipeline: authenticate, gather, export, and open the report in a browser.
+    .OUTPUTS
+        System.Void
+        Writes an HTML file to the path specified by OutputPath.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, AWS-Dashboard-Template.html in the script directory.
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = "AWS Dashboard",
+        [string]$TemplatePath
+    )
+
+    if (-not $TemplatePath) {
+        $TemplatePath = Join-Path $PSScriptRoot "AWS-Dashboard-Template.html"
+    }
+
+    if (-not (Test-Path $TemplatePath)) {
+        throw "HTML template not found at $TemplatePath"
+    }
+
+    $firstObj = $DashboardData | Select-Object -First 1
+    $columns = @()
+    foreach ($prop in $firstObj.PSObject.Properties) {
+        $col = @{
+            field      = $prop.Name
+            title      = ($prop.Name -creplace '([A-Z])', ' $1').Trim()
+            sortable   = $true
+            searchable = $true
+        }
+        if ($prop.Name -eq 'State') {
+            $col.formatter = 'formatState'
+        }
+        $columns += $col
+    }
+
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = $DashboardData | ConvertTo-Json -Depth 5 -Compress
+
+    $tableConfig = @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+
+    $html = Get-Content -Path $TemplatePath -Raw
+    $html = $html -replace 'replaceThisHere', $tableConfig
+    $html = $html -replace 'ReplaceYourReportNameHere', $ReportTitle
+    $html = $html -replace 'ReplaceUpdateTimeHere', (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    Set-Content -Path $OutputPath -Value $html -Encoding UTF8
+    Write-Verbose "AWS Dashboard HTML written to $OutputPath"
+}
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASM52ClaxWFKH+
-# 30sFw6NR6mAgEONirYq0cq0v4XfS+qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGZGQ0/xS0F5og
+# ZZvMTPn/ClYDSCRPQTB079hzVzgXUKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -460,17 +750,17 @@ function Resolve-AWSResourceIP {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgbnFroQ9ufqY2m3F31ovyHAEgW7yr0Xf8
-# HsQtW8SThGcwDQYJKoZIhvcNAQEBBQAEggIALeFtPGfDh2ecVi+iPFjfwEczlczh
-# JjZxfeVaHYQMppkxwaqHMqH93OLpjYjY5prl6bla//aIAgiGKSWdNPEcyPc/A56k
-# 2kRu3jZ1J81MW8MXAoq185JQ6PzPmzlvCoxsCg+Ow5/KJWK4HVIe1q1OH5MlKes0
-# CssPN5QqLPVxjxHZA1Mu14YUTn3e74iq0cHUnW/Wq7XpRyYut60UWh8f1RE7rcta
-# Ia8LejZFY3iOQUEAgk9bfyecUYqjG4Piagiv9zx7KeUmrL6Dv0Qhm/T9IPRlli1R
-# 5TiSt1anfAMZWrDltqt02U/8knKyWYxN6CwKf3ZEGmdAFAOv+kq00XvqEA2JUqRz
-# YLpovK8D/RdhuMNP3Oxm8pSX5D/ZuN8KhXAZAgbUG2P5oqveMINiCwE7q5Ygvbom
-# DnhWbUtdh6zsNwFYcrOgzjuA2qUArXdFadSYEkrsyi7D/Kll5M77MqnEyEFlwmi+
-# TIvLo9k+wIFi92YjDVjurBb+MkVPVHf7zG0FDe0MdnYvZSH6+x2SxnT0OZ2fIEHH
-# yQ8QfPWlog3GJfVHeeQ91bJoWdHDXvwCR6dkckeNpSNpzLi1AXah1o/1bXLPEqnm
-# Po9Qo2z1JvNKkVbIm345it9ZX5TWj7v2hjgD94qPAbf1uk4tcdJmzuGE7lZ7WKAB
-# UhXc9OHv6jLzGXI=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg2qf7mShePtzlEkXnzXigmtGEc/Ro0eAo
+# 0+YRXirdX+4wDQYJKoZIhvcNAQEBBQAEggIAbQ34VsUEgEUGf9ZJ4He5Dx9Oy2vv
+# T+Nv/i34Nf7KtuGuXCLRJZcRXRrUnE3AULBcNSkgLzCYEnZ+E7oCShxVZRTrmuFT
+# vJQw6xR4ucdX70q4CPe5Koze6G4tTD/vPjsFzXU456kDI7jhe1g/o6LyHLDQ+Uke
+# Gn+JABoMKbthjLhpvUQsVWXmoqfwcm6CHVJVWe0E43peZfklbfq9A3CmSbnAU1kO
+# F2WGGHAkBHhtHkDe8FaIYGsWBQwAvgWPfbE2t+2PG6S28aeVg3CssX5JShUfN8PC
+# aElPm5fm4v1U2/BQFSKUP8G33jK4K/B81gqQhkCesqBsO3HQ+za1B299JYmTME3e
+# RfnA8pkffrFDZrVJXJ/Fu1Gt1Mjr0DyaotjQfcUWy4lMZSQyuhjLNFC9k/eoDd2a
+# unn/Jimgam4OdFrcl+q2FYmwOvNQHwMQjYCYHVghj/He4lcH+qZpJYK4zy2FiyY6
+# kb0VW3pQGNbw9epSE2aRq+ucOxM/Vh3HHwDf2tsPH0cqYnnk6wAEPi5FfrNZemhc
+# NEOe9XnjvXNe//HndFyTc3ZAt3a9Crv0it0CHvEb0pPYcHU9t4y0Apc+8DixtS9l
+# bunZRVSNt+rPGJi9jZjWgT/mjhu8N63jlYKSMaTWC4igH1X8mTwAn8BthImt0QKx
+# 8guCVt0qpBdrC0I=
 # SIG # End signature block

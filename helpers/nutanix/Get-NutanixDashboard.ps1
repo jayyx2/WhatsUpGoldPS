@@ -1,67 +1,155 @@
-function Convert-HTMLTemplate {
-    <#
-    .SYNOPSIS
-        Populates an HTML template with Bootstrap Table data from a JSON file.
-    .DESCRIPTION
-        Reads an HTML template file, replaces a placeholder string with Bootstrap Table
-        configuration generated from a JSON data file, sets the report name and update time,
-        and writes the result to an output file.
-    .PARAMETER TemplateFilePath
-        Path to the HTML template file containing the placeholder.
-    .PARAMETER JsonFilePath
-        Path to the JSON data file.
-    .PARAMETER OutputFilePath
-        Path for the generated output HTML file.
-    .PARAMETER Placeholder
-        The placeholder string in the template to replace with table data.
-    .PARAMETER ReportName
-        The report title. Defaults to 'Custom Report'.
-    .PARAMETER UpdateTime
-        Override the update timestamp. Defaults to the current date and time.
-    .EXAMPLE
-        Convert-HTMLTemplate -TemplateFilePath ".\template.html" -JsonFilePath "C:\temp\data.json" -OutputFilePath "C:\temp\report.html" -Placeholder "replaceThisHere"
-        Generates an HTML report by replacing the placeholder with the JSON data.
-    .EXAMPLE
-        Convert-HTMLTemplate -TemplateFilePath $template -JsonFilePath $json -OutputFilePath $output -Placeholder "replaceThisHere" -ReportName "Down Monitor Report" -UpdateTime "2025-01-15 10:30:00"
-        Generates a named report with a custom timestamp.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string] $TemplateFilePath,
+<#
+.SYNOPSIS
+    Generates an interactive HTML dashboard report for Nutanix environments.
+.DESCRIPTION
+    Orchestration script that connects to one or more Nutanix Prism clusters,
+    collects VM details (CPU, memory, disk, network, protection domains, NGT),
+    and produces a searchable, sortable Bootstrap Table HTML dashboard. Output
+    includes both a JSON data file and a self-contained HTML report.
+.PARAMETER NutanixClusters
+    One or more Nutanix Prism URIs (e.g. https://192.168.1.50:9440). If omitted,
+    prompts interactively.
+.PARAMETER NutanixCredential
+    A PSCredential object for authenticating to the Nutanix Prism API. If omitted,
+    prompts interactively via Get-Credential.
+.PARAMETER SkipSSLCheck
+    Bypass SSL certificate validation. Useful for lab environments with self-signed
+    certificates.
+.EXAMPLE
+    .\Get-NutanixDashboard.ps1
 
-        [Parameter(Mandatory = $true)]
-        [string] $JsonFilePath,
+    Prompts for Nutanix Prism cluster URI(s) and credentials, then generates the dashboard.
+.EXAMPLE
+    .\Get-NutanixDashboard.ps1 -NutanixClusters "https://prism01:9440" -NutanixCredential (Get-Credential)
 
-        [Parameter(Mandatory = $true)]
-        [string] $OutputFilePath,
+    Generates a dashboard for a single Nutanix cluster.
+.EXAMPLE
+    .\Get-NutanixDashboard.ps1 -NutanixClusters "https://c1:9440","https://c2:9440" -SkipSSLCheck
 
-        [Parameter(Mandatory = $true)]
-        [string] $Placeholder,
+    Connects to multiple clusters with SSL bypass and generates a combined dashboard.
+.EXAMPLE
+    $cred = Get-Credential
+    .\Get-NutanixDashboard.ps1 -NutanixClusters "https://prism01:9440" -NutanixCredential $cred
 
-        [string] $ReportName = 'Custom Report',
-        [string] $UpdateTime
-    )
+    Authenticates with pre-created credentials and builds the report.
+.OUTPUTS
+    System.Void
+    Produces a JSON file (nutanix_dashboard.json) and an HTML dashboard
+    (Nutanix-Dashboard.html) in the system temp directory, then opens the HTML in the default browser.
+.NOTES
+    Author  : jason@wug.ninja
+    Version : 1.0.0
+    Date    : 2025-07-15
+    Requires: PowerShell 5.1+, network access to Nutanix Prism API (port 9440), NutanixHelpers.ps1 in the same directory.
+.LINK
+    https://github.com/jayyx2/WhatsUpGoldPS
+#>
 
-    $JSONtoReplace = ConvertTo-BootstrapTable -JsonFilePath $JsonFilePath
-    $replacement = "$JSONtoReplace"
+param (
+    [Parameter(Mandatory = $false)]
+    [string[]]$NutanixClusters,
 
-    $htmlTemplate = Get-Content -Path $TemplateFilePath -Raw
-    $htmlTemplate = $htmlTemplate -replace $Placeholder, $replacement
+    [Parameter(Mandatory = $false)]
+    [pscredential]$NutanixCredential,
 
-    $htmlTemplate = $htmlTemplate -replace 'ReplaceYourReportNameHere', $ReportName
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipSSLCheck
+)
 
-    if (-not $UpdateTime) {
-        $UpdateTime = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    }
-    $htmlTemplate = $htmlTemplate -replace 'ReplaceUpdateTimeHere', $UpdateTime
-
-    Set-Content -Path $OutputFilePath -Value $htmlTemplate
+# --- Configuration -----------------------------------------------------------
+$helpersPath = Join-Path $PSScriptRoot "NutanixHelpers.ps1"
+if (Test-Path $helpersPath) {
+    . $helpersPath
 }
+else {
+    throw "NutanixHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
+}
+
+if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
+    if (-not (Get-Module -Name WhatsUpGoldPS)) {
+        Import-Module -Name WhatsUpGoldPS
+    }
+}
+
+if ($SkipSSLCheck) {
+    Initialize-SSLBypass
+}
+
+# --- Input prompts -----------------------------------------------------------
+if (-not $NutanixClusters -or $NutanixClusters.Count -eq 0) {
+    $hostInput = Read-Host -Prompt "Enter Nutanix Prism URI(s) (comma-separated, e.g. https://192.168.1.50:9440)"
+    $NutanixClusters = $hostInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+}
+
+if (-not $NutanixClusters -or $NutanixClusters.Count -eq 0) {
+    throw "At least one Nutanix Prism cluster URI must be specified."
+}
+
+if (-not $NutanixCredential) {
+    $NutanixCredential = Get-Credential -Message "Enter Nutanix Prism credentials"
+}
+
+# Output paths
+$outputDir = if ($env:TEMP) { $env:TEMP } else { "C:\temp" }
+$jsonPath  = Join-Path $outputDir "nutanix_dashboard.json"
+$htmlPath  = Join-Path $outputDir "Nutanix-Dashboard.html"
+if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
+
+# --- Collect data from each cluster ------------------------------------------
+$allDashboardData = @()
+
+foreach ($clusterUri in $NutanixClusters) {
+    Write-Host "Connecting to $clusterUri ..." -ForegroundColor Cyan
+    try {
+        $headers = Connect-NutanixCluster -Server $clusterUri -Credential $NutanixCredential
+        Write-Host "  Connected." -ForegroundColor Green
+
+        $dashData = Get-NutanixDashboard -Server $clusterUri -Headers $headers
+        $allDashboardData += $dashData
+        Write-Host "  Retrieved $($dashData.Count) VMs." -ForegroundColor Green
+    }
+    catch {
+        Write-Warning "Failed to collect from ${clusterUri}: $($_.Exception.Message)"
+    }
+}
+
+if ($allDashboardData.Count -eq 0) {
+    Write-Warning "No data collected. Exiting."
+    return
+}
+
+# --- Summary -----------------------------------------------------------------
+$on   = @($allDashboardData | Where-Object { $_.PowerState -eq 'on' }).Count
+$off  = $allDashboardData.Count - $on
+$hosts = @($allDashboardData | Select-Object -ExpandProperty Host -Unique).Count
+$clusters = @($allDashboardData | Select-Object -ExpandProperty ClusterName -Unique).Count
+
+Write-Host "`n--- Nutanix Summary ---" -ForegroundColor Yellow
+Write-Host "  Clusters:   $clusters"
+Write-Host "  Hosts:      $hosts"
+Write-Host "  Powered On: $on" -ForegroundColor Green
+Write-Host "  Powered Off:$off" -ForegroundColor Red
+
+# --- Generate outputs --------------------------------------------------------
+$allDashboardData | ConvertTo-Json -Depth 5 | Out-File $jsonPath -Force -Encoding UTF8
+Write-Host "`nJSON data written to $jsonPath" -ForegroundColor Yellow
+
+$templatePath = Join-Path $PSScriptRoot "Nutanix-Dashboard-Template.html"
+Export-NutanixDashboardHtml -DashboardData $allDashboardData -OutputPath $htmlPath -ReportTitle "Nutanix Dashboard" -TemplatePath $templatePath
+Write-Host "HTML dashboard written to $htmlPath" -ForegroundColor Yellow
+
+$openBrowser = Read-Host -Prompt "Open dashboard in browser? (Y/N)"
+if ($openBrowser -match '^[Yy]') {
+    Start-Process $htmlPath
+}
+
+Write-Host "`nDone." -ForegroundColor Green
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfQLhEFO6+YaID
-# XKwOQsn9ffirgn0WTKWldCK8rfoAq6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCt+JZmIzikqk9G
+# 8eO+QnrWfvXOVH7iWLoda96fFuYHCaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -161,17 +249,17 @@ function Convert-HTMLTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgE2eDEOLGBF9tkM8vGLpZZQgq4MqBZ+HB
-# aktSzsDzw9swDQYJKoZIhvcNAQEBBQAEggIAc6MKR9+yczB3MfAerKB/H75yW8sJ
-# hYDC11fDP3J3+I+JBTNnwtFByj/329t6Nm7beBXMk62PpM4RnyRz3hJKMYuLSkXV
-# KRsJLy3EobatSxZqQwYw/MOT77ptwz7Sivpl1LiorlfHkTVxIVpoizme4Y4MiaDT
-# N9TOoMNPhs4tfBulfJeeQXG6DX2v3ZajXyCW6rjJq8jmTOVzhhKU1ieRvi1ItWAx
-# MKNPRhhGpxwFUVa2uInA1pJ9LFvxF7XFUjCoBhSZvN5Oxp/QVsVpMp7LXTfOe0Kb
-# mBKyCbCxqR+Z0D5kWHOYXDvTMVDtcJo4pPhAxjCPtr4TsdvYakSy7k+1PXcIRxAC
-# 0t1b8nWDgcH2VG8fM2BEuD2M4nXQv1XRKl13vzj6PbRKdrzyfi5Hib4ySafml9pe
-# +yRSiNE1aEIPMefIMAwqG52/M4+2LJvYlnBUcxvhV+r3k5j2I9cT7+fbixikSCjb
-# uv3gX3olg118rK1hWsTNEWRXe9I0u7DGqbbFaHHzjFZ3UbKU8hF1Mb0J9XqbCHYS
-# u//VPL4vFAAIeVk8Y8fMINJ7yvyrR/UL0d1CaUt5er5j2gpKjtB6129gMHMc4s8u
-# Bwc/v6Flfy7isTXKfPiuWifm7IJy0yos3sf2yyNkxIWPXTavfiIYeNz+XI+9TMtV
-# n636kQHHUImI27E=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIYX/LrP8KCpazaCsU53+wwajI4uTIt/7
+# fr7x3+R2IwcwDQYJKoZIhvcNAQEBBQAEggIAuwMVw/wSR+/Mr1XcP6xUMGj5UoED
+# mzqzatLPuky0ttYdXZa3P8gQaSEMFjTQ/dBXA3IOXZYTi9lbTtRRX77/wP6KbHrP
+# VEFlsD4ax1/aMckJmb2VQeDhYAZZk71PtzgpTmuhlsoBEstZmAi1a0NXK1l0x3UH
+# BZX720rDpuuxgPmfxapLNkctAceSC50Fd8UY+t4oExnBzxg/P/X5bbIZHNB+aAve
+# Dt2ZixIn55LbV/ltI5YAGXvtmEdpCNcQLwvstD0MJF7qrc0YR4ERVv7NwPj6wsur
+# MF6p734VGG4dK4hblzc4PbNqJz+rD0pkMMm9g52pOwEKVuwhyvYpjTGdoobmDks9
+# G9Butszkr4KexOnGd/FsbK5Gf7kdB5Zctfj03iNrTMVGjfrhrJdOvDMPX2mq24EN
+# xWx7LP28XYXYyDqC8E2/c7FcbbFFWoL+7Z4093PNeOYUsAP96aTIQB5+qiOA6uY3
+# /fZIpkSlKHhXQ124k0P0J0vm2nMiBka4wp/bzGaAPYu1GKo2/TScZxqE12dIMqq7
+# +txnBS+I2B1iaVdZUa6tOxTzfmJjrmn7wOmHD+sLVHHSMqswyuTwm+DWtpclJtYV
+# foSHpbfK4AoSLzKE15H6GqCKL21T5SHRDj6Nq2voUMq5vXlFfPhwfKC2T1icPhSx
+# INcU/AB/lSffGNY=
 # SIG # End signature block

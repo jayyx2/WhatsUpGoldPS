@@ -1,67 +1,151 @@
-function Convert-HTMLTemplate {
-    <#
-    .SYNOPSIS
-        Populates an HTML template with Bootstrap Table data from a JSON file.
-    .DESCRIPTION
-        Reads an HTML template file, replaces a placeholder string with Bootstrap Table
-        configuration generated from a JSON data file, sets the report name and update time,
-        and writes the result to an output file.
-    .PARAMETER TemplateFilePath
-        Path to the HTML template file containing the placeholder.
-    .PARAMETER JsonFilePath
-        Path to the JSON data file.
-    .PARAMETER OutputFilePath
-        Path for the generated output HTML file.
-    .PARAMETER Placeholder
-        The placeholder string in the template to replace with table data.
-    .PARAMETER ReportName
-        The report title. Defaults to 'Custom Report'.
-    .PARAMETER UpdateTime
-        Override the update timestamp. Defaults to the current date and time.
-    .EXAMPLE
-        Convert-HTMLTemplate -TemplateFilePath ".\template.html" -JsonFilePath "C:\temp\data.json" -OutputFilePath "C:\temp\report.html" -Placeholder "replaceThisHere"
-        Generates an HTML report by replacing the placeholder with the JSON data.
-    .EXAMPLE
-        Convert-HTMLTemplate -TemplateFilePath $template -JsonFilePath $json -OutputFilePath $output -Placeholder "replaceThisHere" -ReportName "Down Monitor Report" -UpdateTime "2025-01-15 10:30:00"
-        Generates a named report with a custom timestamp.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string] $TemplateFilePath,
+<#
+.SYNOPSIS
+    Generates an interactive HTML dashboard report for Azure environments.
+.DESCRIPTION
+    Orchestration script that authenticates to Azure (via service principal or
+    existing session), enumerates resources across subscriptions and resource groups,
+    and produces a searchable, sortable Bootstrap Table HTML dashboard. Optionally
+    includes Azure Monitor metrics. Output includes both a JSON data file and a
+    self-contained HTML report.
+.PARAMETER TenantId
+    Azure AD tenant ID for service principal authentication. Use with ApplicationId
+    and ClientSecret. If omitted, uses the existing Azure session.
+.PARAMETER ApplicationId
+    Azure AD application (client) ID for service principal authentication.
+.PARAMETER ClientSecret
+    Client secret for the Azure AD application.
+.PARAMETER SubscriptionIds
+    Optional array of subscription IDs to limit scope. If omitted, scans all
+    enabled subscriptions.
+.PARAMETER IncludeMetrics
+    Fetch Azure Monitor metrics for each resource. Can increase API calls
+    significantly on large environments.
+.EXAMPLE
+    .\Get-AzureDashboard.ps1
 
-        [Parameter(Mandatory = $true)]
-        [string] $JsonFilePath,
+    Uses the existing Azure session and scans all accessible subscriptions.
+.EXAMPLE
+    .\Get-AzureDashboard.ps1 -SubscriptionIds "xxxx-yyyy"
 
-        [Parameter(Mandatory = $true)]
-        [string] $OutputFilePath,
+    Generates a dashboard for a specific subscription.
+.EXAMPLE
+    .\Get-AzureDashboard.ps1 -TenantId $tid -ApplicationId $aid -ClientSecret $secret
 
-        [Parameter(Mandatory = $true)]
-        [string] $Placeholder,
+    Authenticates via service principal and scans all subscriptions.
+.EXAMPLE
+    .\Get-AzureDashboard.ps1 -SubscriptionIds "xxxx-yyyy" -IncludeMetrics
 
-        [string] $ReportName = 'Custom Report',
-        [string] $UpdateTime
-    )
+    Generates a dashboard with Azure Monitor metric data included.
+.OUTPUTS
+    System.Void
+    Produces a JSON file (azure_dashboard.json) and an HTML dashboard
+    (Azure-Dashboard.html) in the system temp directory, then opens the HTML in the default browser.
+.NOTES
+    Author  : jason@wug.ninja
+    Version : 1.0.0
+    Date    : 2025-07-15
+    Requires: PowerShell 5.1+, Az PowerShell modules, AzureHelpers.ps1 in the same directory.
+.LINK
+    https://github.com/jayyx2/WhatsUpGoldPS
+#>
 
-    $JSONtoReplace = ConvertTo-BootstrapTable -JsonFilePath $JsonFilePath
-    $replacement = "$JSONtoReplace"
+param (
+    [Parameter(Mandatory = $false)]
+    [string]$TenantId,
 
-    $htmlTemplate = Get-Content -Path $TemplateFilePath -Raw
-    $htmlTemplate = $htmlTemplate -replace $Placeholder, $replacement
+    [Parameter(Mandatory = $false)]
+    [string]$ApplicationId,
 
-    $htmlTemplate = $htmlTemplate -replace 'ReplaceYourReportNameHere', $ReportName
+    [Parameter(Mandatory = $false)]
+    [string]$ClientSecret,
 
-    if (-not $UpdateTime) {
-        $UpdateTime = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    }
-    $htmlTemplate = $htmlTemplate -replace 'ReplaceUpdateTimeHere', $UpdateTime
+    [Parameter(Mandatory = $false)]
+    [string[]]$SubscriptionIds,
 
-    Set-Content -Path $OutputFilePath -Value $htmlTemplate
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeMetrics
+)
+
+# --- Configuration -----------------------------------------------------------
+$helpersPath = Join-Path $PSScriptRoot "AzureHelpers.ps1"
+if (Test-Path $helpersPath) {
+    . $helpersPath
 }
+else {
+    throw "AzureHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
+}
+
+if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
+    if (-not (Get-Module -Name WhatsUpGoldPS)) {
+        Import-Module -Name WhatsUpGoldPS
+    }
+}
+
+# --- Authenticate ------------------------------------------------------------
+if ($TenantId -and $ApplicationId -and $ClientSecret) {
+    Connect-AzureServicePrincipal -TenantId $TenantId -ApplicationId $ApplicationId -ClientSecret $ClientSecret
+}
+else {
+    Write-Host "No service principal specified. Using existing Azure session..." -ForegroundColor Yellow
+    try {
+        Get-AzContext -ErrorAction Stop | Out-Null
+    }
+    catch {
+        Write-Host "No active Azure session. Running Connect-AzAccount..." -ForegroundColor Cyan
+        Connect-AzAccount
+    }
+}
+
+# Output paths
+$outputDir = if ($env:TEMP) { $env:TEMP } else { "C:\temp" }
+$jsonPath  = Join-Path $outputDir "azure_dashboard.json"
+$htmlPath  = Join-Path $outputDir "Azure-Dashboard.html"
+if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
+
+# --- Collect data ------------------------------------------------------------
+Write-Host "`nEnumerating Azure resources..." -ForegroundColor Cyan
+$dashboardData = Get-AzureDashboard -SubscriptionIds $SubscriptionIds -IncludeMetrics $IncludeMetrics
+
+if (-not $dashboardData -or $dashboardData.Count -eq 0) {
+    Write-Warning "No resources collected. Exiting."
+    return
+}
+
+# --- Summary -----------------------------------------------------------------
+$succeeded = @($dashboardData | Where-Object { $_.ProvisioningState -in 'Succeeded','Running','Available','Ready' }).Count
+$other     = $dashboardData.Count - $succeeded
+$subs      = @($dashboardData | Select-Object -ExpandProperty Subscription -Unique).Count
+$rgs       = @($dashboardData | Select-Object -ExpandProperty ResourceGroup -Unique).Count
+
+Write-Host "`n--- Azure Summary ---" -ForegroundColor Yellow
+Write-Host "  Total:         $($dashboardData.Count)"
+Write-Host "  Succeeded:     $succeeded" -ForegroundColor Green
+Write-Host "  Other:         $other" -ForegroundColor Red
+Write-Host "  Subscriptions: $subs | Resource Groups: $rgs"
+
+# --- Generate outputs --------------------------------------------------------
+$dashboardData | ConvertTo-Json -Depth 5 | Out-File $jsonPath -Force -Encoding UTF8
+Write-Host "`nJSON data written to $jsonPath" -ForegroundColor Yellow
+
+$templatePath = Join-Path $PSScriptRoot "Azure-Dashboard-Template.html"
+Export-AzureDashboardHtml -DashboardData $dashboardData -OutputPath $htmlPath -ReportTitle "Azure Dashboard" -TemplatePath $templatePath
+Write-Host "HTML dashboard written to $htmlPath" -ForegroundColor Yellow
+
+# --- Optional: Open in browser -----------------------------------------------
+if ($env:OS -match 'Windows') {
+    $openBrowser = Read-Host -Prompt "Open dashboard in browser? (Y/N)"
+    if ($openBrowser -match '^[Yy]') {
+        Start-Process $htmlPath
+    }
+}
+
+Write-Host "Done." -ForegroundColor Green
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfQLhEFO6+YaID
-# XKwOQsn9ffirgn0WTKWldCK8rfoAq6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwxPlQ1i7Zo5Nw
+# 3tuqihAKL5Aapzz/fV5Wcf9ffB7YY6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -161,17 +245,17 @@ function Convert-HTMLTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgE2eDEOLGBF9tkM8vGLpZZQgq4MqBZ+HB
-# aktSzsDzw9swDQYJKoZIhvcNAQEBBQAEggIAc6MKR9+yczB3MfAerKB/H75yW8sJ
-# hYDC11fDP3J3+I+JBTNnwtFByj/329t6Nm7beBXMk62PpM4RnyRz3hJKMYuLSkXV
-# KRsJLy3EobatSxZqQwYw/MOT77ptwz7Sivpl1LiorlfHkTVxIVpoizme4Y4MiaDT
-# N9TOoMNPhs4tfBulfJeeQXG6DX2v3ZajXyCW6rjJq8jmTOVzhhKU1ieRvi1ItWAx
-# MKNPRhhGpxwFUVa2uInA1pJ9LFvxF7XFUjCoBhSZvN5Oxp/QVsVpMp7LXTfOe0Kb
-# mBKyCbCxqR+Z0D5kWHOYXDvTMVDtcJo4pPhAxjCPtr4TsdvYakSy7k+1PXcIRxAC
-# 0t1b8nWDgcH2VG8fM2BEuD2M4nXQv1XRKl13vzj6PbRKdrzyfi5Hib4ySafml9pe
-# +yRSiNE1aEIPMefIMAwqG52/M4+2LJvYlnBUcxvhV+r3k5j2I9cT7+fbixikSCjb
-# uv3gX3olg118rK1hWsTNEWRXe9I0u7DGqbbFaHHzjFZ3UbKU8hF1Mb0J9XqbCHYS
-# u//VPL4vFAAIeVk8Y8fMINJ7yvyrR/UL0d1CaUt5er5j2gpKjtB6129gMHMc4s8u
-# Bwc/v6Flfy7isTXKfPiuWifm7IJy0yos3sf2yyNkxIWPXTavfiIYeNz+XI+9TMtV
-# n636kQHHUImI27E=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg8Da81rUp09ZuITSbLZnOJCdV1RW6bMRQ
+# Se5vr0g7ZhkwDQYJKoZIhvcNAQEBBQAEggIAC8GJ1it2AZcOc7BhzhgvvT9876VA
+# t2YHUdy0SZJTCJ5sng0Ca+lWUtMGGEx1G0rmJzTU9wBDNhQKW8R+b/os6MtAgUOT
+# dHXIgLq+RbzfdKg8xoufSgxO71tTh/rwoFBLcqWm0LKX33i7Qo/gBnywCGgZzZfE
+# mgsPDhfuu/lNVIUAhcRwMex2uvFwq6R578IRPEvzN0vgyb+lQNiyNdK1G0FBG6Q1
+# WDtZKyP7LJCDeCNvO8iQtVNJA3tx8zZxO425Tdx8D9GS0k6VNalwS87rPthWJAoY
+# EsbJvKG7rKm+vYzrOa5/rGR/oQvedRdecF4UTvF3DLRtMaalkQ5aEhMEEMpc16/v
+# H1PYyHv3nYPUq+Pxm2u/+HeWLUnTR16Uf6Dv1MnVV+4UzLcEsLeEwgRqjf2nzuUB
+# o8iiwwVQ0IslQWBl7mlsV2cZoReemQlAM/mA7MARCopEjmHzT/lHr3EFIN7nG2ek
+# 7S+FB/w39S+CuZ69x+oNACZUXMSP19DILeLBzpnZvgWhdhcyADidnPGuTJQCqf63
+# D7UAM5zBt/g836CrWMcaUfmCJLrDlMFS8XHaTtenxUKnTmdBoHhAyt3CF+Qy9KwH
+# wumMv4fEnaOuSJy82Ww4XakMhO0lKoeXj/im8G1D3oORukqyFlO51JLcnXV12HZW
+# KNIRK0w8UJwYduQ=
 # SIG # End signature block

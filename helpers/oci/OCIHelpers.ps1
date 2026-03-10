@@ -24,6 +24,12 @@ function Connect-OCIProfile {
         Path to the OCI config file. Defaults to ~/.oci/config.
     .PARAMETER Profile
         The profile name in the config file. Defaults to DEFAULT.
+    .EXAMPLE
+        Connect-OCIProfile
+        Validates the default OCI config file (~/.oci/config) with the DEFAULT profile.
+    .EXAMPLE
+        Connect-OCIProfile -ConfigFile "C:\oci\config" -Profile "production"
+        Validates connectivity using a custom config file and the "production" profile.
     #>
     param(
         [string]$ConfigFile,
@@ -65,6 +71,12 @@ function Get-OCICompartments {
         Path to the OCI config file.
     .PARAMETER Profile
         The profile name in the config file.
+    .EXAMPLE
+        Get-OCICompartments -TenancyId "ocid1.tenancy.oc1..aaaaaaaexample"
+        Returns all active compartments in the tenancy using default config.
+    .EXAMPLE
+        Get-OCICompartments -TenancyId $tenancyId -ConfigFile "C:\oci\config" -Profile "dev"
+        Returns compartments using a custom config file and profile.
     #>
     param(
         [Parameter(Mandatory)][string]$TenancyId,
@@ -112,6 +124,15 @@ function Get-OCIComputeInstances {
         Path to the OCI config file.
     .PARAMETER Profile
         The profile name in the config file.
+    .EXAMPLE
+        Get-OCIComputeInstances -CompartmentId "ocid1.compartment.oc1..aaaaaaaexample"
+        Returns all compute instances in the specified compartment.
+    .EXAMPLE
+        Get-OCIComputeInstances -CompartmentId $compartmentId -Region "us-ashburn-1"
+        Returns compute instances in a specific region.
+    .EXAMPLE
+        Get-OCIComputeInstances -CompartmentId $compartmentId | Where-Object { $_.LifecycleState -eq "RUNNING" }
+        Returns only running compute instances.
     #>
     param(
         [Parameter(Mandatory)][string]$CompartmentId,
@@ -209,6 +230,12 @@ function Get-OCIDBSystems {
         Path to the OCI config file.
     .PARAMETER Profile
         The profile name in the config file.
+    .EXAMPLE
+        Get-OCIDBSystems -CompartmentId "ocid1.compartment.oc1..aaaaaaaexample"
+        Returns all Oracle DB System instances in the compartment.
+    .EXAMPLE
+        Get-OCIDBSystems -CompartmentId $compartmentId -Region "us-phoenix-1"
+        Returns DB Systems in a specific region.
     #>
     param(
         [Parameter(Mandatory)][string]$CompartmentId,
@@ -284,6 +311,12 @@ function Get-OCIAutonomousDatabases {
         Path to the OCI config file.
     .PARAMETER Profile
         The profile name in the config file.
+    .EXAMPLE
+        Get-OCIAutonomousDatabases -CompartmentId "ocid1.compartment.oc1..aaaaaaaexample"
+        Returns all Autonomous Database instances in the compartment.
+    .EXAMPLE
+        Get-OCIAutonomousDatabases -CompartmentId $compartmentId | Where-Object { $_.DbWorkload -eq "OLTP" }
+        Returns only OLTP Autonomous Database instances.
     #>
     param(
         [Parameter(Mandatory)][string]$CompartmentId,
@@ -341,6 +374,12 @@ function Get-OCILoadBalancers {
         Path to the OCI config file.
     .PARAMETER Profile
         The profile name in the config file.
+    .EXAMPLE
+        Get-OCILoadBalancers -CompartmentId "ocid1.compartment.oc1..aaaaaaaexample"
+        Returns all load balancers in the compartment.
+    .EXAMPLE
+        Get-OCILoadBalancers -CompartmentId $compartmentId -Region "us-ashburn-1" | Where-Object { $_.LifecycleState -eq "ACTIVE" }
+        Returns only active load balancers in us-ashburn-1.
     #>
     param(
         [Parameter(Mandatory)][string]$CompartmentId,
@@ -407,6 +446,12 @@ function Get-OCIMonitoringMetrics {
         Array of metric names to query. If omitted, uses defaults per namespace.
     .PARAMETER Region
         Override the OCI region.
+    .EXAMPLE
+        Get-OCIMonitoringMetrics -CompartmentId $compartmentId -Namespace "oci_computeagent" -ResourceId "ocid1.instance.oc1..aaaaaaaexample"
+        Returns default compute metrics (CPU, memory, disk, network) for the specified instance.
+    .EXAMPLE
+        Get-OCIMonitoringMetrics -CompartmentId $compartmentId -Namespace "oci_lbaas" -ResourceId $lbId -MetricNames @("ActiveConnections")
+        Returns only the ActiveConnections metric for a load balancer.
     #>
     param(
         [Parameter(Mandatory)][string]$CompartmentId,
@@ -510,6 +555,18 @@ function Resolve-OCIResourceIP {
         The type of resource: Compute, DBSystem, AutonomousDB, or LoadBalancer.
     .PARAMETER Resource
         The resource object from the corresponding Get-OCI* function.
+    .EXAMPLE
+        $instances = Get-OCIComputeInstances -CompartmentId $compartmentId
+        $ip = Resolve-OCIResourceIP -ResourceType "Compute" -Resource $instances[0]
+        Resolves the IP for the first compute instance (prefers public IP).
+    .EXAMPLE
+        $lbs = Get-OCILoadBalancers -CompartmentId $compartmentId
+        Resolve-OCIResourceIP -ResourceType "LoadBalancer" -Resource $lbs[0]
+        Returns the primary IP of the first load balancer.
+    .EXAMPLE
+        $dbs = Get-OCIAutonomousDatabases -CompartmentId $compartmentId
+        Resolve-OCIResourceIP -ResourceType "AutonomousDB" -Resource $dbs[0]
+        Returns the private endpoint IP of the first Autonomous Database.
     #>
     param(
         [Parameter(Mandatory)][ValidateSet("Compute", "DBSystem", "AutonomousDB", "LoadBalancer")][string]$ResourceType,
@@ -556,11 +613,281 @@ function Resolve-OCIResourceIP {
     return $ip
 }
 
+function Get-OCIDashboard {
+    <#
+    .SYNOPSIS
+        Builds a unified dashboard view of OCI Compute, DB Systems, Autonomous DBs, and Load Balancers.
+    .DESCRIPTION
+        Iterates compartments and collects compute instances, DB systems, autonomous
+        databases, and load balancers into a flat collection suitable for Bootstrap
+        Table display. Each row contains resource type, name, lifecycle state,
+        resolved IP, region, availability domain, shape, creation time, and tags.
+    .PARAMETER TenancyId
+        The OCID of the tenancy (root compartment).
+    .PARAMETER CompartmentIds
+        Optional array of compartment OCIDs to limit scope. If omitted, discovers
+        and scans all active compartments under the tenancy.
+    .PARAMETER Region
+        OCI region override (e.g. us-ashburn-1). Uses the configured default if omitted.
+    .PARAMETER ConfigFile
+        Path to the OCI config file. Defaults to ~/.oci/config.
+    .PARAMETER Profile
+        The OCI config profile name to use. Defaults to DEFAULT.
+    .PARAMETER IncludeDBSystems
+        Include Oracle DB Systems in the results. Defaults to $true.
+    .PARAMETER IncludeAutonomousDBs
+        Include Autonomous Databases in the results. Defaults to $true.
+    .PARAMETER IncludeLoadBalancers
+        Include Load Balancers in the results. Defaults to $true.
+    .EXAMPLE
+        Get-OCIDashboard -TenancyId "ocid1.tenancy.oc1..aaaaaaaexample"
+
+        Returns all resources across all active compartments.
+    .EXAMPLE
+        Get-OCIDashboard -TenancyId $tenancyId -CompartmentIds $compId -IncludeDBSystems $false
+
+        Returns compute, autonomous DBs, and load balancers from a single compartment.
+    .EXAMPLE
+        Connect-OCIProfile -ConfigFile "~/.oci/config" -Profile "PROD"
+        $data = Get-OCIDashboard -TenancyId $tenancyId -Region "us-ashburn-1"
+        Export-OCIDashboardHtml -DashboardData $data -OutputPath "C:\Reports\oci.html"
+        Start-Process "C:\Reports\oci.html"
+
+        End-to-end: configure profile, gather data, export HTML, and open in browser.
+    .OUTPUTS
+        PSCustomObject[]
+        Each object contains: ResourceType, Name, LifecycleState, IPAddress, PrivateIP,
+        Region, AvailabilityDomain, Shape, TimeCreated, Tags.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, OCI.PSModules, OCI config file (~/.oci/config).
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    param(
+        [Parameter(Mandatory)][string]$TenancyId,
+        [string[]]$CompartmentIds,
+        [string]$Region,
+        [string]$ConfigFile,
+        [string]$Profile,
+        [bool]$IncludeDBSystems = $true,
+        [bool]$IncludeAutonomousDBs = $true,
+        [bool]$IncludeLoadBalancers = $true
+    )
+
+    $commonSplat = @{}
+    if ($Region)     { $commonSplat["Region"] = $Region }
+    if ($ConfigFile) { $commonSplat["ConfigFile"] = $ConfigFile }
+    if ($Profile)    { $commonSplat["Profile"] = $Profile }
+
+    if (-not $CompartmentIds) {
+        try {
+            $compartments = Get-OCICompartments -TenancyId $TenancyId @commonSplat
+            $CompartmentIds = @($TenancyId) + @($compartments | Select-Object -ExpandProperty CompartmentId)
+        }
+        catch {
+            Write-Warning "Failed to list compartments: $($_.Exception.Message)"
+            $CompartmentIds = @($TenancyId)
+        }
+    }
+
+    $results = @()
+    foreach ($compId in $CompartmentIds) {
+        # Compute
+        try {
+            $instances = Get-OCIComputeInstances -CompartmentId $compId @commonSplat
+            foreach ($inst in $instances) {
+                $ip = Resolve-OCIResourceIP -ResourceType "Compute" -Resource $inst
+                $results += [PSCustomObject]@{
+                    ResourceType       = "Compute"
+                    Name               = $inst.Name
+                    LifecycleState     = $inst.LifecycleState
+                    IPAddress          = if ($ip) { $ip } else { "N/A" }
+                    PrivateIP          = $inst.PrivateIP
+                    Region             = $inst.Region
+                    AvailabilityDomain = $inst.AvailabilityDomain
+                    Shape              = $inst.Shape
+                    TimeCreated        = $inst.TimeCreated
+                    Tags               = $inst.Tags
+                }
+            }
+        }
+        catch { Write-Warning "Compute query failed for compartment ${compId}: $($_.Exception.Message)" }
+
+        # DB Systems
+        if ($IncludeDBSystems) {
+            try {
+                $dbs = Get-OCIDBSystems -CompartmentId $compId @commonSplat
+                foreach ($db in $dbs) {
+                    $ip = Resolve-OCIResourceIP -ResourceType "DBSystem" -Resource $db
+                    $results += [PSCustomObject]@{
+                        ResourceType       = "DBSystem"
+                        Name               = $db.Name
+                        LifecycleState     = $db.LifecycleState
+                        IPAddress          = if ($ip) { $ip } else { "N/A" }
+                        PrivateIP          = "N/A"
+                        Region             = $db.Region
+                        AvailabilityDomain = $db.AvailabilityDomain
+                        Shape              = $db.Shape
+                        TimeCreated        = $db.TimeCreated
+                        Tags               = ""
+                    }
+                }
+            }
+            catch { Write-Warning "DB Systems query failed for compartment ${compId}: $($_.Exception.Message)" }
+        }
+
+        # Autonomous Databases
+        if ($IncludeAutonomousDBs) {
+            try {
+                $adbs = Get-OCIAutonomousDatabases -CompartmentId $compId @commonSplat
+                foreach ($adb in $adbs) {
+                    $ip = Resolve-OCIResourceIP -ResourceType "AutonomousDB" -Resource $adb
+                    $results += [PSCustomObject]@{
+                        ResourceType       = "AutonomousDB"
+                        Name               = $adb.Name
+                        LifecycleState     = $adb.LifecycleState
+                        IPAddress          = if ($ip) { $ip } else { "N/A" }
+                        PrivateIP          = $adb.PrivateEndpointIp
+                        Region             = $adb.Region
+                        AvailabilityDomain = "N/A"
+                        Shape              = "$($adb.CpuCoreCount) OCPUs"
+                        TimeCreated        = $adb.TimeCreated
+                        Tags               = ""
+                    }
+                }
+            }
+            catch { Write-Warning "Autonomous DB query failed for compartment ${compId}: $($_.Exception.Message)" }
+        }
+
+        # Load Balancers
+        if ($IncludeLoadBalancers) {
+            try {
+                $lbs = Get-OCILoadBalancers -CompartmentId $compId @commonSplat
+                foreach ($lb in $lbs) {
+                    $ip = Resolve-OCIResourceIP -ResourceType "LoadBalancer" -Resource $lb
+                    $results += [PSCustomObject]@{
+                        ResourceType       = "LoadBalancer"
+                        Name               = $lb.Name
+                        LifecycleState     = $lb.LifecycleState
+                        IPAddress          = if ($ip) { $ip } else { "N/A" }
+                        PrivateIP          = "N/A"
+                        Region             = $lb.Region
+                        AvailabilityDomain = "N/A"
+                        Shape              = $lb.ShapeName
+                        TimeCreated        = $lb.TimeCreated
+                        Tags               = ""
+                    }
+                }
+            }
+            catch { Write-Warning "Load Balancer query failed for compartment ${compId}: $($_.Exception.Message)" }
+        }
+    }
+
+    return $results
+}
+
+function Export-OCIDashboardHtml {
+    <#
+    .SYNOPSIS
+        Renders OCI dashboard data into a self-contained HTML file.
+    .DESCRIPTION
+        Takes the output of Get-OCIDashboard and generates a Bootstrap-based
+        HTML report with sortable, searchable, and exportable tables. The report
+        uses Bootstrap 5 and Bootstrap-Table for interactive filtering, sorting,
+        column toggling, and CSV/JSON export.
+    .PARAMETER DashboardData
+        Array of PSCustomObject from Get-OCIDashboard containing Compute, DB System,
+        Autonomous DB, and Load Balancer details.
+    .PARAMETER OutputPath
+        File path for the output HTML file. Parent directory must exist.
+    .PARAMETER ReportTitle
+        Title shown in the report header. Defaults to "OCI Dashboard".
+    .PARAMETER TemplatePath
+        Optional path to a custom HTML template. If omitted, uses the
+        OCI-Dashboard-Template.html in the same directory as this script.
+    .EXAMPLE
+        $data = Get-OCIDashboard -TenancyId $tenancyId
+        Export-OCIDashboardHtml -DashboardData $data -OutputPath "C:\Reports\oci.html"
+
+        Exports the dashboard data to an HTML file using the default template.
+    .EXAMPLE
+        Export-OCIDashboardHtml -DashboardData $data -OutputPath "$env:TEMP\oci.html" -ReportTitle "Prod OCI"
+
+        Exports with a custom report title.
+    .EXAMPLE
+        Connect-OCIProfile -Profile "PROD"
+        $data = Get-OCIDashboard -TenancyId $tenancyId -Region "us-ashburn-1"
+        Export-OCIDashboardHtml -DashboardData $data -OutputPath "C:\Reports\oci.html"
+        Start-Process "C:\Reports\oci.html"
+
+        Full pipeline: configure profile, gather, export, and open the report in a browser.
+    .OUTPUTS
+        System.Void
+        Writes an HTML file to the path specified by OutputPath.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, OCI-Dashboard-Template.html in the script directory.
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = "OCI Dashboard",
+        [string]$TemplatePath
+    )
+
+    if (-not $TemplatePath) {
+        $TemplatePath = Join-Path $PSScriptRoot "OCI-Dashboard-Template.html"
+    }
+
+    if (-not (Test-Path $TemplatePath)) {
+        throw "HTML template not found at $TemplatePath"
+    }
+
+    $firstObj = $DashboardData | Select-Object -First 1
+    $columns = @()
+    foreach ($prop in $firstObj.PSObject.Properties) {
+        $col = @{
+            field      = $prop.Name
+            title      = ($prop.Name -creplace '([A-Z])', ' $1').Trim()
+            sortable   = $true
+            searchable = $true
+        }
+        if ($prop.Name -eq 'LifecycleState') {
+            $col.formatter = 'formatState'
+        }
+        $columns += $col
+    }
+
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = $DashboardData | ConvertTo-Json -Depth 5 -Compress
+
+    $tableConfig = @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+
+    $html = Get-Content -Path $TemplatePath -Raw
+    $html = $html -replace 'replaceThisHere', $tableConfig
+    $html = $html -replace 'ReplaceYourReportNameHere', $ReportTitle
+    $html = $html -replace 'ReplaceUpdateTimeHere', (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    Set-Content -Path $OutputPath -Value $html -Encoding UTF8
+    Write-Verbose "OCI Dashboard HTML written to $OutputPath"
+}
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmKb+CLc4qIc55
-# 26FJmKFGLdugiic90r8z/2fyZqf23aCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCpmhZiQvBfQUML
+# sDYyTd4S2+ExYoAXQ7nslrNbvk3uFaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -660,17 +987,17 @@ function Resolve-OCIResourceIP {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgyzPwTwZDt8/lorvAPVzN5j0f9gyFB5g6
-# uSLlmdsU/1gwDQYJKoZIhvcNAQEBBQAEggIABctZOmgK5gNAyFhEY7eBEynfRZwc
-# IqqIe0V2VDqhVbTkGno5mfQW1AWm4B/6LNKd+ttKdbzRCEtg4ujOAXczuRStFgjI
-# nxYpchfs8p/9hh+bYWC1VIpi7nooJ2qsQPjbwDetp/fQ90rgWRUSfkSp18wVHlJN
-# uufiktSWLoiyXsvGdKlIx1OyE19IyEP75d3aNsDs8pl/Q7jAgdHuy+9XaVX2DdEO
-# M4fPu5+YWFz1TgRrWt5ftO7sak2ZxmC6cGbK5UCnPSGZUmY4cA44a31/ZA9zFSii
-# OVoGkFr0EMOlGvlJyVG7g7nZjwag0fYKCylq1uZL1Ra21kyc/DzxstSNqCWK3yzJ
-# l0n3lnj+5KFyJlSkGlf28U+bOAQLShJJWpGZsz25eB+xTs54/lL/JAvID/isj0dR
-# VBDuxSIPIBwmLMRp08N9YXj7R+WcXtftodBIfyT2EPOF92Sy791qW5YnFmjqpwJU
-# 3lJPDGgpFGagYL+uFbo/W4zRImpkwltylXN4OFbvRtWEaLigEW32sSw8gY5S/Hga
-# iJkqo83DYlu5h2i4V6y/5669cvMMtWkAMm5gnnjrGt0W9XR3t8TeksxoBjG6PgbO
-# TJd+MFHgH5+ygzHVLnSxltdgW50ylr+O9erovPo8XaH/DRJi0OIQJPIQeG7xKCpA
-# 25JqDf5VXOrgIYA=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgegVXOIeyLTOqqkXtbnsgUF6CUamlWqIj
+# p4MRdAYIJSUwDQYJKoZIhvcNAQEBBQAEggIAxtBQp7/MyvD139Qiw38J7id1qWJr
+# kd99/5GCZOP6ahLg8VB67/VA2vB+Sn1URpq/kwqRAxt5wu/aKXBY2r/QSZWRDmf/
+# f6XnxdVtyBdLURrMc7zT477BB/mh8YHeMR9n8MPrkO0hYFzDfbA08RhclQQpqzBz
+# e5RC2WegHcZdLvvEeeOrgqAlEjuWeOIDPQjK1khEoDTPIt0XG5fDZkxG4F1HC/Cg
+# RukYp7sWI3+ssLcgeN543hTiaO5XW/RjITDlPvEKnC4NSPJmdizS1J3PSDP+Fk4q
+# MDp3VBJYhBseHdW4hPO7BLRJbyNvO/RzbmoH5DYGj/J6Jz5sCXaWROuGBJYPXggT
+# rJaJXaHr60yVJtQsZ6omb6eJsroCrzOJowPcc++KTCJemf1sebqRWd6cFZAWv92h
+# +rvJbFZQEVZcdUEWKWUlGP88D2Djsr9XzkdebXTJwvLBJ8Pltx1OjXjQ1sGUXHXY
+# GlX+J7tGvFaTcn2ezCNfWRWZc16Ae4NZKmH7I9oY68KeUKIFil0BUGmhZy4P+GLa
+# GiPhYtL41mFltMjwrQweIEZpc/wB/SpYRH05mZZCemu2KK/u7HlaRSNK91D2d0fk
+# onJJcE67apV7vgmuhlzAtgdmol9ZaHLEVcn7TWVH7VKfhznMBQUfBxt75j5I2PeN
+# bf0w19IH+uOemas=
 # SIG # End signature block

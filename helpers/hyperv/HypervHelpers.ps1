@@ -11,6 +11,13 @@ function Connect-HypervHost {
         PSCredential for authentication.
     .PARAMETER UseDCOM
         Use DCOM instead of WSMan (for older hosts without WinRM).
+    .EXAMPLE
+        $cred = Get-Credential
+        $session = Connect-HypervHost -ComputerName "hyperv01.lab.local" -Credential $cred
+        Creates a CIM session to the specified Hyper-V host using WSMan.
+    .EXAMPLE
+        $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred -UseDCOM
+        Creates a CIM session using DCOM for compatibility with older hosts.
     #>
     param(
         [Parameter(Mandatory)][string]$ComputerName,
@@ -40,6 +47,15 @@ function Get-HypervHostDetail {
         Gathers detailed information about a Hyper-V host.
     .PARAMETER CimSession
         An active CIM session to the Hyper-V host.
+    .EXAMPLE
+        $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred
+        Get-HypervHostDetail -CimSession $session
+        Returns OS, CPU, RAM, and uptime details for the Hyper-V host.
+    .EXAMPLE
+        $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred
+        $hostInfo = Get-HypervHostDetail -CimSession $session
+        $hostInfo.IPAddress
+        Retrieves and displays the primary IP address of the Hyper-V host.
     #>
     param(
         [Parameter(Mandatory)][Microsoft.Management.Infrastructure.CimSession]$CimSession
@@ -97,6 +113,13 @@ function Get-HypervVMs {
         Returns a list of VMs on the Hyper-V host.
     .PARAMETER CimSession
         An active CIM session to the Hyper-V host.
+    .EXAMPLE
+        $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred
+        $vms = Get-HypervVMs -CimSession $session
+        Returns all VMs on the Hyper-V host.
+    .EXAMPLE
+        Get-HypervVMs -CimSession $session | Where-Object { $_.State -eq "Running" }
+        Returns only running VMs on the host.
     #>
     param(
         [Parameter(Mandatory)][Microsoft.Management.Infrastructure.CimSession]$CimSession
@@ -113,6 +136,14 @@ function Get-HypervVMDetail {
         An active CIM session to the Hyper-V host.
     .PARAMETER VM
         A VM object returned by Get-VM.
+    .EXAMPLE
+        $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred
+        $vms = Get-HypervVMs -CimSession $session
+        Get-HypervVMDetail -CimSession $session -VM $vms[0]
+        Returns detailed information (IP, CPU, memory, disks, NICs) for the first VM.
+    .EXAMPLE
+        Get-HypervVMs -CimSession $session | ForEach-Object { Get-HypervVMDetail -CimSession $session -VM $_ }
+        Returns detailed information for every VM on the host.
     #>
     param(
         [Parameter(Mandatory)][Microsoft.Management.Infrastructure.CimSession]$CimSession,
@@ -180,11 +211,205 @@ function Get-HypervVMDetail {
     }
 }
 
+function Get-HypervDashboard {
+    <#
+    .SYNOPSIS
+        Builds a flat dashboard view combining Hyper-V hosts and their VMs.
+    .DESCRIPTION
+        Connects to one or more Hyper-V hosts, gathers host details and VM
+        details, then returns a unified collection of objects suitable for
+        rendering in an interactive Bootstrap Table dashboard. Each row
+        represents a VM enriched with its parent host context including
+        host CPU model, RAM, OS, and IP address.
+    .PARAMETER CimSessions
+        One or more active CIM sessions to Hyper-V hosts. Create sessions
+        using Connect-HypervHost.
+    .EXAMPLE
+        $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred
+        Get-HypervDashboard -CimSessions $session
+
+        Returns a flat dashboard view of all VMs across the specified host.
+    .EXAMPLE
+        $sessions = @("hyperv01","hyperv02") | ForEach-Object { Connect-HypervHost -ComputerName $_ -Credential $cred }
+        $dashboard = Get-HypervDashboard -CimSessions $sessions
+
+        Returns a unified view across multiple Hyper-V hosts.
+    .EXAMPLE
+        $cred = Get-Credential
+        $sessions = @("hyperv01","hyperv02") | ForEach-Object { Connect-HypervHost -ComputerName $_ -Credential $cred }
+        $data = Get-HypervDashboard -CimSessions $sessions
+        Export-HypervDashboardHtml -DashboardData $data -OutputPath "C:\Reports\hyperv.html"
+        Start-Process "C:\Reports\hyperv.html"
+
+        End-to-end: connect to hosts, gather dashboard data, export HTML, and open in browser.
+    .OUTPUTS
+        PSCustomObject[]
+        Each object contains VM details enriched with host context: VMName, State, Status,
+        IPAddress, Host, HostIP, HostOS, HostCPUModel, HostRAM_TotalGB, HostRAM_FreeGB,
+        Generation, CPUCount, CPUUsagePct, MemoryAssignedGB, MemoryStartupGB, DynamicMemory,
+        DiskCount, DiskTotalGB, NicCount, SwitchNames, VLanIds, SnapshotCount, Heartbeat,
+        ReplicationState, Uptime, Notes.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, Hyper-V PowerShell module, CIM sessions to target hosts.
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    param(
+        [Parameter(Mandatory)]$CimSessions
+    )
+
+    if ($CimSessions -isnot [System.Collections.IEnumerable] -or $CimSessions -is [string]) {
+        $CimSessions = @($CimSessions)
+    }
+
+    $results = @()
+
+    foreach ($session in $CimSessions) {
+        $hostDetail = Get-HypervHostDetail -CimSession $session
+        $vms = Get-HypervVMs -CimSession $session
+
+        foreach ($vm in $vms) {
+            $vmDetail = Get-HypervVMDetail -CimSession $session -VM $vm
+
+            $results += [PSCustomObject]@{
+                VMName            = $vmDetail.Name
+                State             = $vmDetail.State
+                Status            = $vmDetail.Status
+                IPAddress         = $vmDetail.IPAddress
+                Host              = $hostDetail.HostName
+                HostIP            = $hostDetail.IPAddress
+                HostOS            = $hostDetail.OSName
+                HostCPUModel      = $hostDetail.CPUModel
+                HostRAM_TotalGB   = $hostDetail.RAM_TotalGB
+                HostRAM_FreeGB    = $hostDetail.RAM_FreeGB
+                Generation        = $vmDetail.Generation
+                CPUCount          = $vmDetail.CPUCount
+                CPUUsagePct       = $vmDetail.CPUUsagePct
+                MemoryAssignedGB  = $vmDetail.MemoryAssignedGB
+                MemoryStartupGB   = $vmDetail.MemoryStartupGB
+                DynamicMemory     = $vmDetail.DynamicMemory
+                DiskCount         = $vmDetail.DiskCount
+                DiskTotalGB       = $vmDetail.DiskTotalGB
+                NicCount          = $vmDetail.NicCount
+                SwitchNames       = $vmDetail.SwitchNames
+                VLanIds           = $vmDetail.VLanIds
+                SnapshotCount     = $vmDetail.SnapshotCount
+                Heartbeat         = $vmDetail.Heartbeat
+                ReplicationState  = $vmDetail.ReplicationState
+                Uptime            = "$($vmDetail.Uptime)"
+                Notes             = $vmDetail.Notes
+            }
+        }
+    }
+
+    return $results
+}
+
+function Export-HypervDashboardHtml {
+    <#
+    .SYNOPSIS
+        Renders Hyper-V dashboard data into a self-contained HTML file.
+    .DESCRIPTION
+        Takes the output of Get-HypervDashboard and generates a Bootstrap-based
+        HTML report with sortable, searchable, and exportable tables. The report
+        uses Bootstrap 5 and Bootstrap-Table for interactive filtering, sorting,
+        column toggling, and CSV/JSON export.
+    .PARAMETER DashboardData
+        Array of PSCustomObject from Get-HypervDashboard containing VM and host details.
+    .PARAMETER OutputPath
+        File path for the output HTML file. Parent directory must exist.
+    .PARAMETER ReportTitle
+        Title shown in the report header. Defaults to "Hyper-V Dashboard".
+    .PARAMETER TemplatePath
+        Optional path to a custom HTML template. If omitted, uses the
+        Hyperv-Dashboard-Template.html in the same directory as this script.
+    .EXAMPLE
+        $data = Get-HypervDashboard -CimSessions $sessions
+        Export-HypervDashboardHtml -DashboardData $data -OutputPath "C:\Reports\hyperv.html"
+
+        Exports the dashboard data to an HTML file using the default template.
+    .EXAMPLE
+        Export-HypervDashboardHtml -DashboardData $data -OutputPath "$env:TEMP\hyperv.html" -ReportTitle "Production Hyper-V"
+
+        Exports with a custom report title.
+    .EXAMPLE
+        $cred = Get-Credential
+        $sessions = @("hv01","hv02") | ForEach-Object { Connect-HypervHost -ComputerName $_ -Credential $cred }
+        $data = Get-HypervDashboard -CimSessions $sessions
+        Export-HypervDashboardHtml -DashboardData $data -OutputPath "C:\Reports\hyperv.html"
+        Start-Process "C:\Reports\hyperv.html"
+
+        Full pipeline: connect, gather, export, and open the report in a browser.
+    .OUTPUTS
+        System.Void
+        Writes an HTML file to the path specified by OutputPath.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, Hyperv-Dashboard-Template.html in the script directory.
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = "Hyper-V Dashboard",
+        [string]$TemplatePath
+    )
+
+    if (-not $TemplatePath) {
+        $TemplatePath = Join-Path $PSScriptRoot "Hyperv-Dashboard-Template.html"
+    }
+
+    if (-not (Test-Path $TemplatePath)) {
+        throw "HTML template not found at $TemplatePath"
+    }
+
+    $firstObj = $DashboardData | Select-Object -First 1
+    $columns = @()
+    foreach ($prop in $firstObj.PSObject.Properties) {
+        $col = @{
+            field      = $prop.Name
+            title      = ($prop.Name -creplace '([A-Z])', ' $1').Trim()
+            sortable   = $true
+            searchable = $true
+        }
+        if ($prop.Name -eq 'State') {
+            $col.formatter = 'formatState'
+        }
+        if ($prop.Name -eq 'Heartbeat') {
+            $col.formatter = 'formatHeartbeat'
+        }
+        $columns += $col
+    }
+
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = $DashboardData | ConvertTo-Json -Depth 5 -Compress
+
+    $tableConfig = @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+
+    $html = Get-Content -Path $TemplatePath -Raw
+    $html = $html -replace 'replaceThisHere', $tableConfig
+    $html = $html -replace 'ReplaceYourReportNameHere', $ReportTitle
+    $html = $html -replace 'ReplaceUpdateTimeHere', (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    Set-Content -Path $OutputPath -Value $html -Encoding UTF8
+    Write-Verbose "Hyper-V Dashboard HTML written to $OutputPath"
+}
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUHnG8nL2JtWS9
-# v4T+3DA7VO26CdiwUFj2HH21RB7Cc6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQNU7EdzV2djTO
+# h6qcp1ga0GlKUr6YVk6aKQ6KEGKKIKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -284,17 +509,17 @@ function Get-HypervVMDetail {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgObUoHgdtihBZ/B+m4nvVlrSb9Hmk15jb
-# ru+1Dmw8KPEwDQYJKoZIhvcNAQEBBQAEggIAW0CzE7N7bNayAHMEeAgbDZ7jJwB5
-# pKfCtRUgmlyg2rZliO5GnWeTKbhjLa5KESLnfndfopnUklPO//L3fZOG5n5sDFxz
-# nPfE7RYS/l2sJoazv4n0ZB8rtHN99djFniL6J++UmZXVZyZF/IFnDi2n4Xtbta/N
-# S6H47aqZ4vs9B7vBxqWq25P4VnJeCuJARKhIxWAX4qm7GiA2+or8gTLKX5eChkOW
-# 4KSY0dyqf9BcY/wlMXliS2EE+YVPnU8pyNcto/Are4zloeaPybWCvTSYnsTw0Wha
-# 35s9YAtgGaTyZdGR2SC2uZqWfMsxtmUXs5e/PXOzJ+s0aZxD2lv/9+9mBO97c95d
-# JfROs3JaG1VRIc13b9liWF9fsnBAxykhuMAmYBh3SD63Jos7Rtki4D5AW0OspRyM
-# aLqoEqbVsiqC1V+4snn6SHyc1tCoSpb5Ne5r7LvtGTJgeh2XmsM9rUggZ39jwW2B
-# R+x34oSFJYlm3NaH189qNNl6dN7KzUe+u01XT0YlPDFuevawEzTmFk6OJ072NCHo
-# Hi0SBQTETAjh1QaGjQHMPf9xsMgXaMPkSr+99b4meyIWtjxmiaPuy3/tqbkmZrl8
-# iFW1ejA/uyOsFwukNjNqNcZshnX86GRz4+t5guseK/41d9iLVMyldmxmC/80ufqx
-# E8FbWKpm5DHFUyA=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgquFdO5KjyWRym39igUOTJG3jQhgHVL9L
+# dQAhpusFkRgwDQYJKoZIhvcNAQEBBQAEggIAHd1KESTbM/AiiEf8R47e0h+CRBsd
+# LCWnB2M0LEWbmBpu6Cql3UGLcRuV/W7Q5T2IphaXSA3s0I4jsKBbP33LbMi6+Haf
+# 7+7CE4+voQbXc68ES0/lHByjPzEBht3oFE3SoP25MwchmC39DudK7S8k1nKoFw1y
+# xiJF5yXB8p7hI29LCyA0AiJXM7FVjGmFCMaLK7xFtgahK34wTXaNxu0nU0+Svuf3
+# wUztof8i914psd2pdi0lCMQXes5mgx4IlT+R1W91brCBi58QH8FujcgCnQxNog1q
+# pMQ+Kzs+vkF7jZbsk788mYs5YuT5rettL+Q+JbzTxjxtMvkV34WOGxiP6ZihP5oI
+# f8VtYMmfnKYMsUnGiFA/4FggSzMbDU+ezDNJZZnaUuV2CL2h3bdMlsqI5ni0y73d
+# oqN8uZzXaOgfKwDTXvHNUOa+uZAQbF7Otxg0VmgCNMkna5TBNlrpobXD+8hR46GG
+# T0SdcIIUm4gqZiOKJHx/PiHFPRM8Fg3eKwJa0aBvvJxd7rmtvaBsnXapemxb/Xsq
+# XsNlCVch4K6cPKPFo3egt4V5K89eyouDfUEVTJuQrtK0o6uGMT+PhVTstueUi+jW
+# WLFlwNyuKUeS4/xFl6a9Yji9z5ct6LN0Rd3RDjXWm4wDfrKo3ESFXBruPqe7s0BD
+# 9tjbZWhiowWJ2LA=
 # SIG # End signature block

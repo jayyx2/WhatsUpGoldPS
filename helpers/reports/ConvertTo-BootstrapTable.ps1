@@ -1,4 +1,20 @@
 function ConvertTo-BootstrapTable {
+    <#
+    .SYNOPSIS
+        Converts a JSON data file into Bootstrap Table column and data configuration.
+    .DESCRIPTION
+        Reads a JSON file, auto-generates column definitions from the first object's
+        properties, and returns a JavaScript-ready string with columns and data arrays
+        suitable for embedding in a Bootstrap Table HTML template.
+    .PARAMETER JsonFilePath
+        The path to a JSON file containing an array of objects.
+    .EXAMPLE
+        ConvertTo-BootstrapTable -JsonFilePath "C:\temp\devices.json"
+        Returns a Bootstrap Table columns and data configuration string from the JSON file.
+    .EXAMPLE
+        $tableConfig = ConvertTo-BootstrapTable -JsonFilePath $jsonFilePath
+        Stores the table configuration for use in an HTML template replacement.
+    #>
     param (
         [Parameter(Mandatory = $true)]
         [string] $JsonFilePath
@@ -40,8 +56,8 @@ function ConvertTo-BootstrapTable {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWhWMaehaSZrRc
-# XVfHYFsQymVCJpmaUWjwAqDivWqMb6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/6uwTnmG3KiZ0
+# 0kEY6D2ly6kFBr/Ej6f0CWDH16aIbaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -141,17 +157,17 @@ function ConvertTo-BootstrapTable {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgqd3E6UmrpmJGOxmD4pqjaEPGKc3josrT
-# vklaXjfAVb0wDQYJKoZIhvcNAQEBBQAEggIA6947I0ZU0RzhBghdnFWyzFiADoDq
-# UzPa1TZMuCBBGIyN+V1zchVLNtRPYxZbjW3qVafW7GF8OhvqUIOisEoJagD9wedZ
-# BoqblD2q5RYPAU5CADnV3CKtMxvW3L2Itudj4Z+Xz/GypoiMJINy2yiS1lR3J/Bu
-# pUXElxeKTMwAFhFb/tqk9amjQurpJ32J+dyxSQ42EgZ8OCoPfkhTlwk59xKFgRue
-# 9HWBluqpCt76axu7XqNXeylYN24hnpquLvT0okNKp1d1FeOY57CqtfbUoHMFrvGp
-# qaytcDtpwA8LlpR9btgmrZsIheCdPf4UdXmaqqnDrYQFBoAUiOcZkn4IJHpa/YiL
-# wkRiqO5e63ANHMI2tgANXLYLsWkiCNmgcI18GH0ZYtRcPZ0zR6nldi13MgJrZQXz
-# zWar57sGhjF0KPjl+lp01Acm22iK1aUz5RuQgdCBjTCKHLBvtvCxjMEEWSNv7U1G
-# 8k2JEBXjc07TLBZOmkwcD6KSQHk54q/q5qhW0j10QAPDSe2xdWI0xGhJ0x6aRzRT
-# GPpNarC2wTURdrirMLTw1hbBtReNF3XSqHaea1nJkhnf/00TBuJuNjqZ5zL6xLKy
-# i5C7fiMC8sD/RFuNlCo4ikPJAFfoKQPEJ4NKCiDjWY2YRgLgJySEVfvbRFcn+OXh
-# +mLkdM+0FOWtEfg=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgakPLhlF3N54hnKD99i+I4eJTkC+LjUAR
+# n1PhJKic4TQwDQYJKoZIhvcNAQEBBQAEggIAq1jk86BcK8QiNq2ck6bIAfpMR9Lh
+# A93XeDK74rNVrP43JlRcbMOUAgnM09KGrKYi7HxjR0AMjGQZSJchPvmFByOMYigo
+# Hl2tYu1HM5q9Ze/f4MR9990Dso6cQU+bEIv1X9NqTRPv5oOhul7XPl0C7pTFGdu1
+# VTUA8RJHqHv/4hkhoiuMWHJa0yaLsnwWuf7RONn03f4pAj9uAEu2hDRxfiZ83fDY
+# NsTjXRLMh62RB2Kvn31FKKL9Q5KgdOaSlCVBrwkpd9PGH0NBYBH93bcMBGGHpKAE
+# 3wx98/nYIgL3xsgy2e3xpJ6vZ9Th2tAe8XGNl1cIDH4zyZFx1vcNX5PBWEGdbJp6
+# 4kc2Um0CzE/nysanUd6nFzRsBsBI0AjgP5rwKezPI0r7o0eoExBADnb29d2ikTKG
+# Ei6YtRLEXZseb52fgxsEvqMy7cumvYnJRjL7kzaNu7IDs2YJ92NT5/V13bNyUtp9
+# 4OAEv6/Hn6nsZlKpTNR0WRnPMObZ+DQnXwax1CBVpzR7GDradueecv0APrWma6if
+# tNZEIsI/Y1ODi77ViBJylHF5I3omdzp587OY6v3cT7273lBkVnM04GeKYkJbZYcc
+# mgFTpR/KI5sqnTE0HkveTq8IHJV4k3X3K0tla9oP5bpErklxgRU21R8Jv5nmxgFW
+# E1OFf4vgb9qZ5zo=
 # SIG # End signature block

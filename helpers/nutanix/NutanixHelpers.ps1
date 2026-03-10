@@ -20,6 +20,13 @@ function Connect-NutanixCluster {
         The base URI of Prism Element or Prism Central (e.g. https://192.168.1.50:9440).
     .PARAMETER Credential
         PSCredential for Prism authentication.
+    .EXAMPLE
+        $cred = Get-Credential
+        $headers = Connect-NutanixCluster -Server "https://192.168.1.50:9440" -Credential $cred
+        Authenticates to the Nutanix Prism API and returns authorization headers.
+    .EXAMPLE
+        $headers = Connect-NutanixCluster -Server "https://prism.lab.local:9440" -Credential (Get-Credential)
+        Connects to Prism Central and stores the auth headers for subsequent API calls.
     #>
     param(
         [Parameter(Mandatory)][string]$Server,
@@ -56,6 +63,10 @@ function Get-NutanixCluster {
         The Prism base URI.
     .PARAMETER Headers
         Auth headers from Connect-NutanixCluster.
+    .EXAMPLE
+        $headers = Connect-NutanixCluster -Server "https://192.168.1.50:9440" -Credential $cred
+        Get-NutanixCluster -Server "https://192.168.1.50:9440" -Headers $headers
+        Returns cluster name, version, node count, and other cluster-level details.
     #>
     param(
         [Parameter(Mandatory)][string]$Server,
@@ -84,6 +95,12 @@ function Get-NutanixHosts {
         The Prism base URI.
     .PARAMETER Headers
         Auth headers from Connect-NutanixCluster.
+    .EXAMPLE
+        $hosts = Get-NutanixHosts -Server "https://192.168.1.50:9440" -Headers $headers
+        Returns all hypervisor hosts in the Nutanix cluster.
+    .EXAMPLE
+        Get-NutanixHosts -Server $server -Headers $headers | ForEach-Object { $_.name }
+        Lists the names of all hosts in the cluster.
     #>
     param(
         [Parameter(Mandatory)][string]$Server,
@@ -101,6 +118,12 @@ function Get-NutanixVMs {
         The Prism base URI.
     .PARAMETER Headers
         Auth headers from Connect-NutanixCluster.
+    .EXAMPLE
+        $vms = Get-NutanixVMs -Server "https://192.168.1.50:9440" -Headers $headers
+        Returns all VMs in the Nutanix cluster including NIC and disk configurations.
+    .EXAMPLE
+        Get-NutanixVMs -Server $server -Headers $headers | Where-Object { $_.power_state -eq "on" }
+        Returns only powered-on VMs.
     #>
     param(
         [Parameter(Mandatory)][string]$Server,
@@ -116,6 +139,13 @@ function Get-NutanixHostDetail {
         Formats detailed information about a Nutanix AHV/ESXi host.
     .PARAMETER HostEntity
         A host object from Get-NutanixHosts.
+    .EXAMPLE
+        $hosts = Get-NutanixHosts -Server $server -Headers $headers
+        Get-NutanixHostDetail -HostEntity $hosts[0]
+        Returns CPU, memory, storage, and network details for the first host.
+    .EXAMPLE
+        Get-NutanixHosts -Server $server -Headers $headers | ForEach-Object { Get-NutanixHostDetail -HostEntity $_ }
+        Returns detailed information for every host in the cluster.
     #>
     param(
         [Parameter(Mandatory)]$HostEntity
@@ -173,6 +203,15 @@ function Get-NutanixVMDetail {
         A VM object from Get-NutanixVMs.
     .PARAMETER HostLookup
         A hashtable mapping host UUIDs to host names for display.
+    .EXAMPLE
+        $vms = Get-NutanixVMs -Server $server -Headers $headers
+        Get-NutanixVMDetail -VMEntity $vms[0]
+        Returns detailed information (IP, CPU, memory, disks) for the first VM.
+    .EXAMPLE
+        $hosts = Get-NutanixHosts -Server $server -Headers $headers
+        $lookup = @{}; $hosts | ForEach-Object { $lookup[$_.uuid] = $_.name }
+        $vms | ForEach-Object { Get-NutanixVMDetail -VMEntity $_ -HostLookup $lookup }
+        Returns VM details with host names resolved via lookup table.
     #>
     param(
         [Parameter(Mandatory)]$VMEntity,
@@ -242,11 +281,200 @@ function Get-NutanixVMDetail {
     }
 }
 
+function Get-NutanixDashboard {
+    <#
+    .SYNOPSIS
+        Builds a flat dashboard view combining Nutanix cluster, hosts, and VMs.
+    .DESCRIPTION
+        Queries the Nutanix Prism API for cluster info, hosts, and VMs,
+        then returns a unified collection of objects suitable for an
+        interactive Bootstrap Table dashboard. Each row represents a VM
+        enriched with host CPU/memory usage and cluster context.
+    .PARAMETER Server
+        The Prism base URI (e.g. https://192.168.1.50:9440).
+    .PARAMETER Headers
+        Auth headers hashtable obtained from Connect-NutanixCluster.
+    .EXAMPLE
+        $headers = Connect-NutanixCluster -Server "https://192.168.1.50:9440" -Credential $cred
+        Get-NutanixDashboard -Server "https://192.168.1.50:9440" -Headers $headers
+
+        Returns a flat dashboard view of all VMs across the specified cluster.
+    .EXAMPLE
+        $dashboard = Get-NutanixDashboard -Server $server -Headers $headers
+        $dashboard | Where-Object { $_.PowerState -eq "on" }
+
+        Retrieves the dashboard and filters for powered-on VMs.
+    .EXAMPLE
+        $cred = Get-Credential
+        $headers = Connect-NutanixCluster -Server "https://prism01:9440" -Credential $cred
+        $data = Get-NutanixDashboard -Server "https://prism01:9440" -Headers $headers
+        Export-NutanixDashboardHtml -DashboardData $data -OutputPath "C:\Reports\nutanix.html"
+        Start-Process "C:\Reports\nutanix.html"
+
+        End-to-end: authenticate, gather data, export HTML, and open in browser.
+    .OUTPUTS
+        PSCustomObject[]
+        Each object contains VM details enriched with host and cluster context: VMName,
+        PowerState, IPAddress, Host, HostIP, HostCPUUsage, HostMemUsage, ClusterName,
+        ClusterVersion, NumCPU, CoresPerVcpu, MemoryGB, DiskCount, DiskTotalGB, NicCount,
+        VLanIds, NetworkNames, GuestOS, ProtectionDomain, NgtEnabled, MachineType, Description.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, network access to Nutanix Prism API (port 9440).
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [Parameter(Mandatory)][hashtable]$Headers
+    )
+
+    $cluster = Get-NutanixCluster -Server $Server -Headers $Headers
+    $hosts = Get-NutanixHosts -Server $Server -Headers $Headers
+    $vms = Get-NutanixVMs -Server $Server -Headers $Headers
+
+    # Build host lookup
+    $hostLookup = @{}
+    $hostDetails = @{}
+    foreach ($h in $hosts) {
+        $hostLookup[$h.uuid] = $h.name
+        $hostDetails[$h.uuid] = Get-NutanixHostDetail -HostEntity $h
+    }
+
+    $results = @()
+    foreach ($vm in $vms) {
+        $vmDetail = Get-NutanixVMDetail -VMEntity $vm -HostLookup $hostLookup
+        $hd = if ($hostDetails.ContainsKey($vm.host_uuid)) { $hostDetails[$vm.host_uuid] } else { $null }
+
+        $results += [PSCustomObject]@{
+            VMName           = $vmDetail.Name
+            PowerState       = $vmDetail.PowerState
+            IPAddress        = $vmDetail.IPAddress
+            Host             = $vmDetail.Host
+            HostIP           = if ($hd) { $hd.HypervisorIP } else { "N/A" }
+            HostCPUUsage     = if ($hd) { $hd.CPUUsagePct } else { "N/A" }
+            HostMemUsage     = if ($hd) { $hd.MemUsagePct } else { "N/A" }
+            ClusterName      = $cluster.ClusterName
+            ClusterVersion   = $cluster.ClusterVersion
+            NumCPU           = $vmDetail.NumCPU
+            CoresPerVcpu     = $vmDetail.NumCoresPerVcpu
+            MemoryGB         = $vmDetail.MemoryGB
+            DiskCount        = $vmDetail.DiskCount
+            DiskTotalGB      = $vmDetail.DiskTotalGB
+            NicCount         = $vmDetail.NicCount
+            VLanIds          = $vmDetail.VLanIds
+            NetworkNames     = $vmDetail.NetworkNames
+            GuestOS          = $vmDetail.GuestOS
+            ProtectionDomain = $vmDetail.ProtectionDomain
+            NgtEnabled       = $vmDetail.NgtEnabled
+            MachineType      = $vmDetail.MachineType
+            Description      = $vmDetail.Description
+        }
+    }
+
+    return $results
+}
+
+function Export-NutanixDashboardHtml {
+    <#
+    .SYNOPSIS
+        Renders Nutanix dashboard data into a self-contained HTML file.
+    .DESCRIPTION
+        Takes the output of Get-NutanixDashboard and generates a Bootstrap-based
+        HTML report with sortable, searchable, and exportable tables. The report
+        uses Bootstrap 5 and Bootstrap-Table for interactive filtering, sorting,
+        column toggling, and CSV/JSON export.
+    .PARAMETER DashboardData
+        Array of PSCustomObject from Get-NutanixDashboard containing VM and cluster details.
+    .PARAMETER OutputPath
+        File path for the output HTML file. Parent directory must exist.
+    .PARAMETER ReportTitle
+        Title shown in the report header. Defaults to "Nutanix Dashboard".
+    .PARAMETER TemplatePath
+        Optional path to a custom HTML template. If omitted, uses the
+        Nutanix-Dashboard-Template.html in the same directory as this script.
+    .EXAMPLE
+        $data = Get-NutanixDashboard -Server $server -Headers $headers
+        Export-NutanixDashboardHtml -DashboardData $data -OutputPath "C:\Reports\nutanix.html"
+
+        Exports the dashboard data to an HTML file using the default template.
+    .EXAMPLE
+        Export-NutanixDashboardHtml -DashboardData $data -OutputPath "$env:TEMP\nutanix.html" -ReportTitle "Production Nutanix"
+
+        Exports with a custom report title.
+    .EXAMPLE
+        $headers = Connect-NutanixCluster -Server $server -Credential $cred
+        $data = Get-NutanixDashboard -Server $server -Headers $headers
+        Export-NutanixDashboardHtml -DashboardData $data -OutputPath "C:\Reports\nutanix.html"
+        Start-Process "C:\Reports\nutanix.html"
+
+        Full pipeline: authenticate, gather, export, and open the report in a browser.
+    .OUTPUTS
+        System.Void
+        Writes an HTML file to the path specified by OutputPath.
+    .NOTES
+        Author  : jason@wug.ninja
+        Version : 1.0.0
+        Date    : 2025-07-15
+        Requires: PowerShell 5.1+, Nutanix-Dashboard-Template.html in the script directory.
+    .LINK
+        https://github.com/jayyx2/WhatsUpGoldPS
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = "Nutanix Dashboard",
+        [string]$TemplatePath
+    )
+
+    if (-not $TemplatePath) {
+        $TemplatePath = Join-Path $PSScriptRoot "Nutanix-Dashboard-Template.html"
+    }
+
+    if (-not (Test-Path $TemplatePath)) {
+        throw "HTML template not found at $TemplatePath"
+    }
+
+    $firstObj = $DashboardData | Select-Object -First 1
+    $columns = @()
+    foreach ($prop in $firstObj.PSObject.Properties) {
+        $col = @{
+            field      = $prop.Name
+            title      = ($prop.Name -creplace '([A-Z])', ' $1').Trim()
+            sortable   = $true
+            searchable = $true
+        }
+        if ($prop.Name -eq 'PowerState') {
+            $col.formatter = 'formatPowerState'
+        }
+        $columns += $col
+    }
+
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = $DashboardData | ConvertTo-Json -Depth 5 -Compress
+
+    $tableConfig = @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+
+    $html = Get-Content -Path $TemplatePath -Raw
+    $html = $html -replace 'replaceThisHere', $tableConfig
+    $html = $html -replace 'ReplaceYourReportNameHere', $ReportTitle
+    $html = $html -replace 'ReplaceUpdateTimeHere', (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+
+    Set-Content -Path $OutputPath -Value $html -Encoding UTF8
+    Write-Verbose "Nutanix Dashboard HTML written to $OutputPath"
+}
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDetuuU2E9iNFBZ
-# S7XEenI0dm42rE3oaVwgHzIvP1YCbqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClzYsPuNss9QHy
+# MQn2qp5i3nPcdwOB+oqfgPhuQTTYtKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -346,17 +574,17 @@ function Get-NutanixVMDetail {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIsNGUZ9q5P1zv3ySmaSNJ/cbpJ7p/LM7
-# BGB5Ox8ilzEwDQYJKoZIhvcNAQEBBQAEggIA46Bua27Ttb3q1vTGjYCG3koV2g+u
-# 94vHcaQ7bKPgBzVDYAqE1oogog/UZpk/OgOZxrhclKBr4inu3q79XE6tgnyRjRaM
-# a/YdSMIDrnYUa8oXhWHr58slhUsw7GPNwN1h5LlYrzlO5w23m6ULYOHhJUpP2SxK
-# ZjBIcuFWTI9O5JAIhgeOUHPt90/sdOgeH+ojRWiMIbOB8a70KCjD1yq1JMyBjDcl
-# WHuimG0G7v9z6GZz/c7G3gtiRWnXEOi+eABxBvJsQTJcSXEP9o4e9oLeeFit/9us
-# h1yxSytXWRu+5vISTtEHJCDqS/VtdHqc+KXBk/Rilx2KJzWNNC++uLSkYpM1E1Mk
-# mBk91K2z1XkDLawmOq8lLhh3HjszqQu8YVAH7eVIZXaJYTMpYi25ja7jpjoCts3E
-# yCQOc2X+fus4p0m+q7W40Ohpvgl46CSkNXtsXK+0dmLcyzHAs6kcXrFChAoIdYus
-# yffjgAkiay6nJPbSA0WDbs6GGS8ezqBsMcMX21qeIP7GkWqoG4Rvx9Dfuh80ehEu
-# CzzgT+gjupgOuQzTR+YGV7QwxSHLPAb82riNSYcvfhdldH2rHVs/XaY/Ni9+zx2J
-# rkvSteOTxCrhs/mf2MpxRH4p0mI7XUh7eLO0aKVrVK7M1j5RWoYfK0JcHxB+R9zE
-# Ae38aCJsbBy7j2E=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgQN3kSLRHwsO4sdLs2Lvsb35NHGe2Dzft
+# 8EDGhCeLi68wDQYJKoZIhvcNAQEBBQAEggIAaHK7mtafzafRxaM9Z+2D1PsjHxhi
+# us3TifYC4t2ts+jwyilsss/edhQrZp7DaXgJdC9YyO80Q7zoi397XzLK6RL/SfJR
+# SrB2GOxcarekgStt55EHr8nIk4NUfi46gcxjqdSCvE0spfnbozT/jXpy8CYW4I+/
+# mebf285n1eVaZNlm/qWQrDniNs0E3TyjcW69m1Q3W/B//D1CdOdHZs0Cmcwf0ZE9
+# rTRJFSPdaWQTDxkY07BotAsQG5DYENmyF0dyMzS/tid8UK3FssvZDplkR/4cmp2q
+# axcPndvp6ReWTp/YwSActiCIOHrC0fxzeXTJmxKND0F0ol3AJzZQ7tHmqzy8W7i2
+# N/L7UVKzDOvbvO85ZfzPaWFR7xy4YX/9a4mK7Mvh2+17xo5eBAgEaqweN9R2u80Y
+# 3gN0WqCRnrIh1E57m6c2M3La8IZE1LCdkCBTj7RX0IhkPzFfbta7YRMZW1uaZNSv
+# AlMcAf1fCogRGWdZaKOeYmsDV4LuwIJVBFW4+x8ksM+uVqdL8tntLj+cCqMeDQAR
+# pSMbBi6g4W3tYRaEGmYgL4ecGtjaOobWUpAJQYQmJGfcg9CbBAM+mqX944lHGCXZ
+# X0GaQ7NXCeX3NngCpqM6qNUNkzE99v82CtOqzShYFtR7fNyXQmx2nmDhKrtACxBv
+# 95cjEKsfQrJ5MYA=
 # SIG # End signature block

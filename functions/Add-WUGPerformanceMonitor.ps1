@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # API Endpoint Reference
 # Source: WhatsUpGold 2024 REST API Spec v0.3
 #
@@ -263,7 +263,7 @@
 function Add-WUGPerformanceMonitor {
     [CmdletBinding(DefaultParameterSetName = 'Snmp', SupportsShouldProcess = $true)]
     param(
-        # ── Common parameters (all parameter sets) ───────────────────────────
+        # -- Common parameters (all parameter sets) ---------------------------
         [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
         [Alias('id')]
         [int]$DeviceId,
@@ -291,7 +291,7 @@ function Add-WUGPerformanceMonitor {
         [ValidateSet("true", "false")]
         [string]$Enabled = "true",
 
-        # ── RestApi parameters ───────────────────────────────────────────────
+        # -- RestApi parameters -----------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'RestApi')]
         [string]$RestApiUrl,
         [Parameter(Mandatory = $true, ParameterSetName = 'RestApi')]
@@ -309,7 +309,7 @@ function Add-WUGPerformanceMonitor {
         [Parameter(ParameterSetName = 'RestApi')]
         [string]$RestApiCustomHeader = '',
 
-        # ── PowerShell parameters ────────────────────────────────────────────
+        # -- PowerShell parameters --------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'PowerShell')]
         [string]$ScriptText,
         [Parameter(ParameterSetName = 'PowerShell')]
@@ -322,7 +322,7 @@ function Add-WUGPerformanceMonitor {
         [Parameter(ParameterSetName = 'PowerShell')]
         [string]$ScriptReferenceVariables = '',
 
-        # ── WmiRaw parameters ────────────────────────────────────────────────
+        # -- WmiRaw parameters ------------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'WmiRaw')]
         [string]$WmiRawRelativePath,
         [Parameter(Mandatory = $true, ParameterSetName = 'WmiRaw')]
@@ -336,7 +336,7 @@ function Add-WUGPerformanceMonitor {
         [Parameter(ParameterSetName = 'WmiRaw')]
         [string]$WmiRawDeviceAddress = '',
 
-        # ── WmiFormatted parameters ──────────────────────────────────────────
+        # -- WmiFormatted parameters ------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'WmiFormatted')]
         [string]$WmiFormattedRelativePath,
         [Parameter(Mandatory = $true, ParameterSetName = 'WmiFormatted')]
@@ -350,7 +350,7 @@ function Add-WUGPerformanceMonitor {
         [Parameter(ParameterSetName = 'WmiFormatted')]
         [string]$WmiFormattedDeviceAddress = '',
 
-        # ── WindowsPerformanceCounter parameters ─────────────────────────────
+        # -- WindowsPerformanceCounter parameters -----------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'WindowsPerformanceCounter')]
         [string]$PerfCounterCategory,
         [Parameter(Mandatory = $true, ParameterSetName = 'WindowsPerformanceCounter')]
@@ -360,7 +360,7 @@ function Add-WUGPerformanceMonitor {
         [Parameter(ParameterSetName = 'WindowsPerformanceCounter')]
         [int]$PerfCounterSampleInterval = 1000,
 
-        # ── Ssh parameters ───────────────────────────────────────────────────
+        # -- Ssh parameters ---------------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'Ssh')]
         [string]$SshCommand,
         [Parameter(ParameterSetName = 'Ssh')]
@@ -375,7 +375,7 @@ function Add-WUGPerformanceMonitor {
         [Parameter(ParameterSetName = 'Ssh')]
         [string]$SshCredentialID = '-1',
 
-        # ── Snmp parameters ──────────────────────────────────────────────────
+        # -- Snmp parameters --------------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'Snmp')]
         [string]$SnmpOID,
         [Parameter(ParameterSetName = 'Snmp')]
@@ -388,7 +388,7 @@ function Add-WUGPerformanceMonitor {
         [Parameter(ParameterSetName = 'Snmp')]
         [int]$SnmpTimeout = 3,
 
-        # ── AzureMetrics parameters ──────────────────────────────────────────
+        # -- AzureMetrics parameters ------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'AzureMetrics')]
         [string]$AzureResourceId,
         [Parameter(Mandatory = $true, ParameterSetName = 'AzureMetrics')]
@@ -411,7 +411,7 @@ function Add-WUGPerformanceMonitor {
         [Parameter(ParameterSetName = 'AzureMetrics')]
         [string]$AzureDeviceName = '',
 
-        # ── CloudWatch parameters ────────────────────────────────────────────
+        # -- CloudWatch parameters --------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'CloudWatch')]
         [string]$CloudWatchNamespace,
         [Parameter(Mandatory = $true, ParameterSetName = 'CloudWatch')]
@@ -660,8 +660,8 @@ function Add-WUGPerformanceMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAkpi1S7IZDUMi9
-# h6LJr8f2lOOO8EovpM8ZnNiM/hvPgaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVTJsskE5jlwom
+# RDk39UKML6UHkuuGF6cORyLWWbKfHqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -761,17 +761,17 @@ function Add-WUGPerformanceMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgU7EtSIcz5U2tVWM2wLetd5iVTaNVjnnJ
-# D42S7236uEowDQYJKoZIhvcNAQEBBQAEggIAkcXy98jtthMZ08zpfgtjK4Olmg26
-# o/VdarYqwFRdg8zaO+c1LT0p3tMw1nLdC9WzdYQ3naxO8XLIbAx6zg+4EEpHwdWn
-# ntjenixVvkWbgbQzmbBmTst4i1Bt9OrOlvXcNWsBZMGBCs0tm2bTVjQhOf1bZeOz
-# 3syO8FF3otN45NqwX00TfQ+xBkJjZ1qQlu1EVBVCB0JwIHLwBU2kmJCuuOHjwjTt
-# 1mIvLbDjp+sVVMlxe4OithhceBl88pDDt2LameaqfGlHCP//+TxlEVAh6vIIuOQA
-# oIfmi6j7Pp6YuHI5v5mbx9OmZKIx4vofzdfKR8j6N6+1XParbD+h0NtgLaXWfmoM
-# DauK5mTvXxlMKtPigvUJXnjndp1bpoHE0/lJScQgDQQ1Cl/UWaxCVAYv83CLtiFU
-# ZGkcoZsSly/9grpsjd+8fZcmzcHD9p7qUXvNGnibSdwT0iT50LsTEuUsBkfpxkvb
-# tUeRzkRIYt+N6LEWUc7RSPItHUHkQfGUZRMyrDZMDlOwcYcTHXqRm+fGwPIiwUGC
-# YdgQjATABam90fTzs3U8JA4eZj8bE4N90vjg7Sgbxl8Bh1NCDU/EiU2A0Aeo5J8x
-# MCoggzTT1vELbwbIxmdH8TVuOMWGMU39cFoe2fN/aeDvHAV7DTgpGZwLr5CA8VNR
-# 5jhIiLI6oqd7xow=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgPpAw/NjD5jB4jpa//3TdCsVB8V0bWvKo
+# H7b4gR7IVBwwDQYJKoZIhvcNAQEBBQAEggIAJLGr2XzJqt6pCVS0FwxzGno1vr9J
+# u4t5EsBL7WwJxpAmH7HZmeAGOeYxd+aZVq3LT4E6DWbHpmAjsYyfBlX23USMm10p
+# zZb/sb8IqQghyyD2oTj+bIBq443miYput/cSyJNnIXaQSYy3S+FX4yvGiiIdmuTT
+# jiS3JvS3/r5fTg99qjZZ4bawcrQ4ZDPuGGgY5FCQHByO6IRWAWJ7Bs44MJ4TRf/X
+# L4UTw3P0Y6fXwoO04keWJC7cTCdcSI7mQja9/gPqpBefSDZU9HcujpgppHKluo+y
+# gS8fqNaDmxp03CQ9NMFZ5IB632pr3EOeRVikZyFO+uEZkfDCyv6sVPMRI92g5Keu
+# jKxdMDjQwwfk26MuNn1S6XzVqBlmLsQ1U5cO2tQ0PDRSxkZjPKr54GF7ZHcOn3eZ
+# YutNqkpY9cF/gXHbZz9NQIv6uhzuiX0SIhp96i/+ZlrlFRxOYSjqjQpfN2q/S4jP
+# JrFjCC+26rcmbNJ0S2Sfms0+umH+HCPvnZyC/xdMkTjoIMIXcqB7sWNI6ga9ds2M
+# 2Xzt9ggfKrM4JyWexPKwJju1tVRZVxrW/RcJgl9DxgM9ruqlehriVGoTHAo7SWmW
+# dE7t3aWoI6JCMcQGTYjTO+9ABebtSwkomZ2EU8d5ag/vRG7MsxPdE8brH12OKKk0
+# n6SCc/TK4llhZY4=
 # SIG # End signature block

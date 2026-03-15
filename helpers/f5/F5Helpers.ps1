@@ -1,7 +1,7 @@
-# =============================================================================
+﻿# =============================================================================
 # F5 BIG-IP Helpers for WhatsUpGoldPS
 # Uses the F5 iControl REST API (BIG-IP 11.5+).
-# No additional modules required – uses Invoke-RestMethod directly.
+# No additional modules required - uses Invoke-RestMethod directly.
 #
 # Typical workflow:
 #   1. Connect-F5Server  (authenticates, stores token/headers in script scope)
@@ -11,7 +11,7 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Script-scoped state – keeps auth context between calls
+# Script-scoped state - keeps auth context between calls
 # ---------------------------------------------------------------------------
 $script:F5Session = @{
     BaseUri  = $null
@@ -266,7 +266,7 @@ function Get-F5VirtualServers {
         $poolName = if ($vs.pool) { ($vs.pool -replace '^/[^/]+/', '') } else { "None" }
         $poolPath = if ($vs.pool) { $vs.pool } else { $null }
 
-        # Profiles – detailed with context (clientside / serverside / all)
+        # Profiles - detailed with context (clientside / serverside / all)
         $profiles = @()
         $profilesDetailed = @()
         if ($vs.profilesReference -and $vs.profilesReference.items) {
@@ -864,7 +864,7 @@ function Get-F5Dashboard {
     .EXAMPLE
         $data = Get-F5Dashboard
         $data | Select-Object VSName, VSStatus, PoolName, MemberName, MemberState | Format-Table
-        # Full dashboard with stats — VS, pool, and member health at a glance.
+        # Full dashboard with stats - VS, pool, and member health at a glance.
     .EXAMPLE
         Get-F5Dashboard -IncludeStats $false
         # Skip live stats for faster results (config data only).
@@ -1088,7 +1088,7 @@ function Get-F5Dashboard {
         } else { $null }
 
         if ($poolMembers.Count -eq 0) {
-            # VS with no pool or no members – emit a single row with all VS columns
+            # VS with no pool or no members - emit a single row with all VS columns
             $row = [ordered]@{}
             $row["TrafficChain"]           = "$($vs.Name) -> $($vs.Pool) -> (no members)"
             foreach ($k in $vsColumns.Keys) { $row[$k] = $vsColumns[$k] }
@@ -1282,7 +1282,7 @@ function Export-F5DashboardHtml {
         Export-F5DashboardHtml -DashboardData $data -OutputPath "$env:TEMP\f5.html" -ReportTitle "Production F5 Status"
         # Custom report title.
     .EXAMPLE
-        # Full end-to-end: connect → gather → render → open
+        # Full end-to-end: connect -> gather -> render -> open
         Connect-F5Server -F5Host "bigip01" -Credential (Get-Credential) -IgnoreSSLErrors
         $data = Get-F5Dashboard
         $outPath = "$env:TEMP\F5-Dashboard.html"
@@ -1342,8 +1342,8 @@ function Export-F5DashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAU20I4J7gabyPc
-# DWSs3AFzhBtpYQZ8bAEc0k4zdTnpWaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD904VLE/4jQqrc
+# pgaxqzMGCQNYoecxnzIcR0kXaleY+qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1443,17 +1443,17 @@ function Export-F5DashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgbyMO0ahlZP98q8KobjZNx7qVV//R4Ci+
-# anvHKG4S9cIwDQYJKoZIhvcNAQEBBQAEggIABtdaLdJbdv4R82VcK0P/Kr9ExgNy
-# K5Pk4kLo6a5vgsUXV2GjPwOZtuYRrwSn6cmf8ebco0A7vupYiNHSBz7vfZsusRlY
-# whIX6Pbjjo580RSMGvsQMvmMnLi9RwBAhS9+jX896qHk5YgbNz6ejkyz+1RiDPvG
-# Y0n4HCvI0geUR7taZCjhL2VV78TZepAZhyQKUuKP3TK5tkU9BYjGN5TmI56dRt3I
-# vVqqBxq2h8hFe4VugFnZGKNMzKo/Zec3tEq3oyh9J1wJINOUuijs+ZWS7377CQ9S
-# 4qhtCZp7A8HNuI50whv42BuAqIgJU4keIRQsIwyTljMocOOpZB7JmihHwflPd4XF
-# sLzMAZrILE586FDs0j5dbuSFaSkZpwGz18dIsu8Qnk8bVibIH+O8PY7qlXH6a/CA
-# HliSJnPR+g6bnKHJnsVTZ3YrFBe19wT5ctKXZOwuuju/82CryumxGlUbVDJkRR8t
-# lYHMpyFXfiJrKPWt5kwgf1Exlpm7VMyq+6/ELAkdC5f3ND1r9woVcoQcpnsYteqD
-# ZP1sO75KFIE8g33ZFi/8Hi6TYxeR9OIRZaXCZk945xGzhccHuD+FAH0HYw27ppg8
-# EhZNbLfaOgwhFV/65MdnsOIYiEwZVTtnOGZM1gZsPeOed/A/SdLVWXyRbXFj+59+
-# FqxFS6yVnfR57zU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgInPrITX9X9gl2pmmpRzVm7r/oG2BKRdw
+# eQPlAiT3g28wDQYJKoZIhvcNAQEBBQAEggIAhmd4yE915xJHee55+MnRuxS3+/+4
+# y9GVjmLJ6DAjIiUfTLp3wW1WFOqTS9BKN3vExSKvumWOl8jj/swomWPt21htmR2N
+# 2MMa/31SpHx8NH5tnJZyxvjWHzvdQe6LANxEcN4ZzPnbQEsRf4+lxyHgnEOqzK30
+# LeG2qeiFhx84/tH0QD0DffZqDtQ93WQr1A5tNQ55thcl+ky3qIYO0If/EdsvB0yx
+# o3juQ+Gjqvs2BDeTAKpNH2VgitWnAZsS9WjczP0K2JpQFiZupu07lA7Y30M+82OY
+# zCYeUVYn8818K5aDduNcfCGVNat9Y+vMFDierxTIIQTA4lfYmgAX/d4oU5VIrhMa
+# 6qL3//DI652nFk60hLTyGpIbFSldav9Ae3SMCcPeDgsHk59SzGY6lr3SkO/w7ICG
+# WvIbcCKuRTpa0VESAYe8lsAoI5r+uvuOhyvWGQAFk5LgiTdBZubjYlkHdETAYnxk
+# 9IDI2/12ZuNggsEqK2SdDEFSarGbn7jiIc/QUxsHtlPWQQXBa4yOaWuvyNsgUa/T
+# 03WdfUTX+hroEnM44IMidYl8ZGVF05cgl7y28ZJUh+rNU5xtTricS/L9DhhtNDjv
+# IwEcWwvf+Sy8Ztrsh8kWvz6PdFizioOy7e4NvxZXbI3tI0N9gUJMlzofZ8393xTG
+# BqOICbX2Bgm0XrY=
 # SIG # End signature block

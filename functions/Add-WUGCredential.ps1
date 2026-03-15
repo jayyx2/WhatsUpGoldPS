@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # API Endpoint Reference
 # Source: WhatsUpGold 2024 REST API Spec v0.3
 #
@@ -13,16 +13,16 @@
 #     - data.idMap.resultId = new credential ID
 #
 # Property bag name prefixes by type:
-#   snmpv1   → CredSnmpV1:ReadCommunity, WriteCommunity
-#   snmpv2   → CredSnmpV2:ReadCommunity, WriteCommunity
-#   snmpv3   → CredSnmpV3:Username, Context, AuthPassword, AuthProtocol, EncryptPassword, EncryptProtocol
-#   windows  → CredWindows:DomainAndUserid, Password
-#   ssh      → CredSSH:Username, Password, ConfirmPassword, EnablePassword, ConfirmEnablePassword, Timeout, Port
-#   ado      → CredADO:Username, Password
-#   aws      → CredAWS:AccessKeyID, SecureAccessKey
-#   azure    → CredAzure:SecureKey, TenantID, ClientID, EnrollmentNumber, EnrollmentAccessKey
-#   redfish  → CredRedfishBmc:Username, Password, Protocol, Port, Timeout, Retries, IgnoreCertificateErrors
-#   restapi  → CredRestAPI:Username, Password, Authtype, GrantType, AuthorizeUrl, TokenUrl,
+#   snmpv1   -> CredSnmpV1:ReadCommunity, WriteCommunity
+#   snmpv2   -> CredSnmpV2:ReadCommunity, WriteCommunity
+#   snmpv3   -> CredSnmpV3:Username, Context, AuthPassword, AuthProtocol, EncryptPassword, EncryptProtocol
+#   windows  -> CredWindows:DomainAndUserid, Password
+#   ssh      -> CredSSH:Username, Password, ConfirmPassword, EnablePassword, ConfirmEnablePassword, Timeout, Port
+#   ado      -> CredADO:Username, Password
+#   aws      -> CredAWS:AccessKeyID, SecureAccessKey
+#   azure    -> CredAzure:SecureKey, TenantID, ClientID, EnrollmentNumber, EnrollmentAccessKey
+#   redfish  -> CredRedfishBmc:Username, Password, Protocol, Port, Timeout, Retries, IgnoreCertificateErrors
+#   restapi  -> CredRestAPI:Username, Password, Authtype, GrantType, AuthorizeUrl, TokenUrl,
 #              ClientId, ClientSecret, Scope, OptionalParams, PwdGrantUserName, PwdGrantPassword,
 #              IgnoreCertificateErrorsForOAuth2Token, RefreshToken
 # ============================================================
@@ -211,7 +211,7 @@
 function Add-WUGCredential {
     [CmdletBinding(DefaultParameterSetName = 'snmpV2', SupportsShouldProcess = $true)]
     param(
-        # ── Common parameters (all typed parameter sets) ─────────────────────
+        # -- Common parameters (all typed parameter sets) ---------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'snmpV1')]
         [Parameter(Mandatory = $true, ParameterSetName = 'snmpV2')]
         [Parameter(Mandatory = $true, ParameterSetName = 'snmpV3')]
@@ -252,7 +252,7 @@ function Add-WUGCredential {
         [ValidateSet('snmpV1', 'snmpV2', 'snmpV3', 'windows', 'ado', 'telnet', 'ssh', 'vmware', 'jmx', 'smis', 'aws', 'azure', 'meraki', 'restapi', 'ubiquiti', 'redfish')]
         [string]$Type,
 
-        # ── SNMP v1 / v2 parameters ─────────────────────────────────────────
+        # -- SNMP v1 / v2 parameters -----------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'snmpV1')]
         [Parameter(Mandatory = $true, ParameterSetName = 'snmpV2')]
         [string]$SnmpReadCommunity,
@@ -261,7 +261,7 @@ function Add-WUGCredential {
         [Parameter(ParameterSetName = 'snmpV2')]
         [string]$SnmpWriteCommunity = '',
 
-        # ── SNMP v3 parameters ───────────────────────────────────────────────
+        # -- SNMP v3 parameters -----------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'snmpV3')]
         [string]$SnmpV3Username,
 
@@ -282,14 +282,14 @@ function Add-WUGCredential {
         [ValidateSet('1', '3')]
         [string]$SnmpV3EncryptProtocol = '1',
 
-        # ── Windows parameters ───────────────────────────────────────────────
+        # -- Windows parameters -----------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'windows')]
         [string]$WindowsUser,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'windows')]
         [string]$WindowsPassword,
 
-        # ── SSH parameters ───────────────────────────────────────────────────
+        # -- SSH parameters ---------------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'ssh')]
         [string]$SshUsername,
 
@@ -305,21 +305,21 @@ function Add-WUGCredential {
         [Parameter(ParameterSetName = 'ssh')]
         [string]$SshPort = '22',
 
-        # ── ADO parameters ───────────────────────────────────────────────────
+        # -- ADO parameters ---------------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'ado')]
         [string]$AdoUsername,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'ado')]
         [string]$AdoPassword,
 
-        # ── AWS parameters ───────────────────────────────────────────────────
+        # -- AWS parameters ---------------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'aws')]
         [string]$AwsAccessKeyID,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'aws')]
         [string]$AwsSecureAccessKey,
 
-        # ── Azure parameters ─────────────────────────────────────────────────
+        # -- Azure parameters -------------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'azure')]
         [string]$AzureSecureKey,
 
@@ -335,7 +335,7 @@ function Add-WUGCredential {
         [Parameter(ParameterSetName = 'azure')]
         [string]$AzureEnrollmentAccessKey = '',
 
-        # ── Redfish parameters ───────────────────────────────────────────────
+        # -- Redfish parameters -----------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'redfish')]
         [string]$RedfishUsername,
 
@@ -357,7 +357,7 @@ function Add-WUGCredential {
         [Parameter(ParameterSetName = 'redfish')]
         [string]$RedfishIgnoreCertErrors = 'True',
 
-        # ── REST API parameters ──────────────────────────────────────────────
+        # -- REST API parameters ----------------------------------------------
         [Parameter(ParameterSetName = 'restapi')]
         [string]$RestApiUsername = '',
 
@@ -401,7 +401,7 @@ function Add-WUGCredential {
         [Parameter(ParameterSetName = 'restapi')]
         [string]$RestApiRefreshToken = '',
 
-        # ── Generic / ByBody fallback ────────────────────────────────────────
+        # -- Generic / ByBody fallback ----------------------------------------
         [Parameter(ParameterSetName = 'ByProperties')]
         [object[]]$PropertyBags,
 
@@ -525,7 +525,7 @@ function Add-WUGCredential {
             }
 
             'ByBody' {
-                # Body is already set — skip property-bag build
+                # Body is already set - skip property-bag build
             }
         }
 
@@ -574,8 +574,8 @@ function Add-WUGCredential {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAEi69z8ktEz8YL
-# 8w1hk6t47UJG3oKH8P2vMHUn/JeavKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtY0Z9VwendGN5
+# XO1WVFtNUlTeAibKdd17f1Z0HtnWDaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -675,17 +675,17 @@ function Add-WUGCredential {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgti/gDPJ2SFCJJ8tuvP6if6uXhwm/HRvR
-# 8pQsJYPcFoUwDQYJKoZIhvcNAQEBBQAEggIAZzIIokfrJRBtwlW53UO4X9ucx3hF
-# yj7oSlLh2nksjUbFNT0Tko7DStGAC02MPy7cwccadR8TJvdlK61o7VQWA12EE9nz
-# xOGH9ZgIugBwVuVYw3niB7gb31LY7RefdcOfp9ZP2pCAKh92um8xMQ1/pFcgNA9k
-# sU8wLEVnDCbp24q2lUlUqy56STX9gZS+leVxBIfs7y+AFy69nBGb3b577asat/nS
-# i1DjETSz2gqmrfUjZqiKMG6VATaP2JIhaOr2w6U8TIAaukwXEh+idnUxrHo2DRW1
-# GDInw5CpFP2AD9BQit4CfguQ3Xt1HyyH+o/uMGYxFs2W5uOiRczzHiqq4lVfpVrl
-# w3fZlX08W5hPWdQ0tbN3BaOaAsZAh/ODrJ2z2U1WOtBcTkZ2y3dCVcrfa/WeF2Lf
-# n/atpoW39BE3/9b6SlNaWHkjFeJn9ieboXyy6Ne7QLBo11DEsmu4e/N5YZH1zYzP
-# W+L27EJ7m+iYOqOjpgl0bUNuspGGsnQLl3eErFC1fC84F/dcHqYTstQMoQI5buvM
-# 4LvPVsWvdhfnxECdpfsKoHACrv8Tk/RY+SSPmZhwW/J/SL4hCvYFRn3GIY6n8IwW
-# sah/IrI939J9jTMHV8BR4mTFyvnpp7U0rf1+709VDBEVtVzQtMUoSw7Xop7n/GX4
-# xZCbGbFpvXvijpE=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIf6p6v388Bw/jRi9tAB2Y0Eflb0R/EWi
+# UgWipoZs0MIwDQYJKoZIhvcNAQEBBQAEggIA3HH8HnxRqxQhr4wTERp4JAbsUiiG
+# nSheHhc6TtdcQVb+6CM167BC31utbS3IVlC0TNeIMAzjtht3zLh1qLBcUIc+PU3s
+# zojN1cXqeLaYrHpIJrher8TBJHghX6EHptpKVKOAECfbfmG5s8Iy3IB9VlWUlAeI
+# nk6s9+d8DiQYSJSquO7Dxm5wrFBr3s7OOeJQ4Msutsi5APkhO3Fb+WnZnRKasAkX
+# CEisoeemLPyNruvp5QedDsuYFR9Zf2Ik8qZOBFwbLeIOvv4y+A2K4HBf9tFDRg+x
+# Vwey+uEfAIJanwJ67rQpeHbv4TjEWGiuKH9bnwTsPyOa/0p1Jpyu9JkVdSE53kcM
+# LcL8ehko/btOzjuIpLIqeLeBwu92VVd1F/j+OIo411efQnvnrBW9xOMAS6k2WlYY
+# n20dM9b2GKXGTFNO7VU2NBLgOA9m2G0/+QMPGxV9HUNFBWAygFkALGSYTVLU++LD
+# VDZO8GUxKHFLnl48awMoniZMCnoy6Qw2ocsaGhnYQEDHOLUPAl9PQO3K46H/L4oh
+# Z7rkQRwxlzG3xQmkWVLeC+27iWLpxCYrWJlUxciYyjgg2npOA/KC/h+4sKBuKZmi
+# cCOx/g2yvcjZephrVijdIw6qREZlLi0UwAHV96056C2HEveoPBwyFs2pPAfAuTgj
+# C9oBlooAOj3pBF8=
 # SIG # End signature block

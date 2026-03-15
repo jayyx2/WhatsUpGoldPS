@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # API Endpoint Reference
 # Source: WhatsUpGold 2024 REST API
 #
@@ -134,7 +134,7 @@
 function Add-WUGPassiveMonitor {
     [CmdletBinding(DefaultParameterSetName = 'SnmpTrap', SupportsShouldProcess = $true)]
     param(
-        # ── Common parameters (all parameter sets) ───────────────────────────
+        # -- Common parameters (all parameter sets) ---------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'SnmpTrap')]
         [Parameter(Mandatory = $true, ParameterSetName = 'Syslog')]
         [Parameter(Mandatory = $true, ParameterSetName = 'WinEvent')]
@@ -150,7 +150,7 @@ function Add-WUGPassiveMonitor {
         [Parameter()]
         [bool]$UseInDiscovery = $false,
 
-        # ── SNMP Trap parameters ─────────────────────────────────────────────
+        # -- SNMP Trap parameters ---------------------------------------------
         [Parameter(ParameterSetName = 'SnmpTrap')]
         [ValidateSet('Any', 'ColdStart', 'WarmStart', 'LinkDown', 'LinkUp',
                      'AuthenticationFailure', 'EgpNeighborLoss', 'EnterpriseSpecific')]
@@ -173,7 +173,7 @@ function Add-WUGPassiveMonitor {
         [ValidateSet('0', '1')]
         [string]$SnmpTrapInvertResult = '0',
 
-        # ── Syslog parameters ─────────────────────────────────────────────────
+        # -- Syslog parameters -------------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'Syslog')]
         [string]$SyslogExpression,
 
@@ -185,7 +185,7 @@ function Add-WUGPassiveMonitor {
         [ValidateSet('0', '1')]
         [string]$SyslogInvertResult = '0',
 
-        # ── WinEvent parameters ────────────────────────────────────────────────
+        # -- WinEvent parameters ------------------------------------------------
         [Parameter(Mandatory = $true, ParameterSetName = 'WinEvent')]
         [string]$WinEventExpression,
 
@@ -250,12 +250,12 @@ function Add-WUGPassiveMonitor {
                 }
                 # Auto-promote to EnterpriseSpecific when an OID is supplied
                 if ($SnmpTrapOID -and $SnmpTrapGenericType -ne 'EnterpriseSpecific') {
-                    Write-Verbose "SnmpTrapOID provided — auto-setting GenericType to EnterpriseSpecific."
+                    Write-Verbose "SnmpTrapOID provided - auto-setting GenericType to EnterpriseSpecific."
                     $SnmpTrapGenericType = 'EnterpriseSpecific'
                 }
                 $nMajorValue = $nMajorMap[$SnmpTrapGenericType]
 
-                # Build sExpressions XML — XML-escape the expression text
+                # Build sExpressions XML - XML-escape the expression text
                 $escapedExpr = [System.Security.SecurityElement]::Escape($SnmpTrapExpression)
                 $expressionXml = "<Expressions>`r`n  <Expression sExpression=`"$escapedExpr`" bMatchCase=`"$SnmpTrapMatchCase`" bInvertResult=`"$SnmpTrapInvertResult`" />`r`n</Expressions>"
 
@@ -353,8 +353,8 @@ function Add-WUGPassiveMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCx4n7xvTihpdcr
-# z64Z7mREZhZsW+JlLnB37FYp509SHaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrvt89BGvXEl+t
+# QtHlbQPFM86ey+JWgbOM+dY6984xgKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -454,17 +454,17 @@ function Add-WUGPassiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgyORYeNPsmIEOhaNlWhlAlDBU/xsQlyrH
-# 5g/5pPP3wLcwDQYJKoZIhvcNAQEBBQAEggIALRK/3H8Iav+jPHotNotxTzaSiZ9+
-# JQovyQO3IaMAYWqRk0AkJu2pN1/yziFXoq9dSx1/CxYjOFKvEag34Os3WcCx7XzH
-# evmECXqdROHGNi70IG4XitrQ7EhJAD22a0U0OkHb+ZuqJSiIXKD2ZZ8lY41r/99F
-# AQ86W1JtU0iAQ6Ntny6C62kyULb8GUyPXNuK35psQPFcO6UINrya5+3RbJMeHgTo
-# zkVFYItOA2HKJpvcfYjP1Qf+COpnlIPOJRq0qOheJT/Szqjv+coaLGK2N2JD1t1g
-# 6vrb9ZSU5UwgmdNcAJxosU/LHKTkhN/BoW56qgx6WpUFO2o3Jv213NpEGTnY+QFG
-# hQNeYf+l6cDQzUP0yx0Mms0FxiYNHnGyHCPvebsn1VogvZPuEct7Td0whOfR2bd3
-# tybzKGn6NL5cpnAoMg5jxs5xfS/edIuF2SYhRCEC5YsW9jepiI8/fs3xxWQPKXGS
-# cIULwQ50fVt4PFD++CzJW8ftAurmKVIxU9OFKn8mD0pcBdNsQoYpeJ38tBr9fVoh
-# Ha4Ij1zdQiEDRYjdlpVO2Ww/RX28YS+FLZnvQ337Pky9SoeqH6+8kw33l7MFr7mm
-# w4Ow6fypfZDxfwWRiFOrUKiN+Q8oaoztRiIrbqeHz5/W+PVyg+Qv0fy574TKX2EO
-# 3JfrN1J/zLPERzQ=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgAN4fJq22fLNg0NEerFI5q4BEaAQNWZ4P
+# Hr+O3mhaXQMwDQYJKoZIhvcNAQEBBQAEggIA5BfBPrhsepBjAlFhdt5DMjmZqTS6
+# jBlvbDFcWcgCPSZrbbvjt8GNCXQ9KEjPZ5pdxgbrDyhcmnFAP/1oWHYDeF4chEZe
+# 3s73esOMeoAo4ePaFazEn6kOr8AznC6wUg53v0bugjkiyjnJI54sez5xjgZx2REy
+# S2/IeJvc6+vHr+JZFhmdAbEeDcFnEewPn9p0pDPGB8GN/EPHdAgbDH1K0ntruqaD
+# kFCn3mTe7d5LIqb1KUV4swWXW/9oNQLls/X56CIlBl9PDrIDCrUdTwbrXcWkbaAI
+# I53gxYgdm85R051RDjv7tYCdlA2cA+SNqUgtuxqeipL+T+zFSMUpHs6kxFEXqIBJ
+# 4faDfyPj+h8t2UZYcX0d51eM+lo+ANQG6X5TNemLU8f5Jm9461RuxI+0pMPnVtjO
+# NFj3Hfgfpx2kaRLBhTLM5XmSut8RTIh9sWcjRJqge8Xg1zpIdAJbD9bkF3iqsG5S
+# u+TNYwtVgV0drtEg5Fk0exDgdCf5H5FPkieN+3hKNvgltHRLPnjBqbyifrv7U7CB
+# TibN9xXNuIoMjD+D591Tpk7HWjUgax80sHgPWqYzETyr1jP/T83XQtkWs4U3Bv33
+# poucbLuffMYf6TqfpoXbJMd61JAhwGgl4+lRLiEwrW/SWIqpEewN3SYz3BYfI0i3
+# KgfJfCmeTvQNE9s=
 # SIG # End signature block

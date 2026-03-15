@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Azure Helpers for WhatsUpGoldPS
 # Requires the Az PowerShell modules. Install them first if not already present:
 #   Install-Module -Name Az -Scope CurrentUser -Repository PSGallery -Force
@@ -573,8 +573,8 @@ function Export-AzureDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGxHx8Fa+r/ith
-# BW0lJ5zCGKI3kKxuSIMyFCBx1dMj4KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBU+bbTYMoqUIAX
+# 8akHdreUn7F59G7h2yHuv9cCwpPvZ6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -674,17 +674,17 @@ function Export-AzureDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgAhZRZ/eGROCTzMQEAMU1PkwOgR815InG
-# ZzVRAShXFecwDQYJKoZIhvcNAQEBBQAEggIAW4pAc0qPnakBVpic5jyU0Feu4Sye
-# 6yPf69aRf55vD/jdR/H6V+NWGGStVR0wiSFIkCL9t2Q4pauz/UZ8PP1xtJfwHO7g
-# c7wWA6awXmeMrHEqz8o1LWru1DNZRADfEe1BjWHPQSK7g0P0TcbGE6b2i3mVr7l9
-# urLTn7CpB8yFrNq4LANwF0uTvhCaOkOsEiYydmQxAvYr0Gg/lxCh069QvUd8+xxH
-# mYPqpr8+laB8ftRzqqFCQ7ovvG1BLMQj4bEFaBSWt/i8G+Y9LtpRjXxaIFlpBpvI
-# Jq2kjsfEcgl7WpwaJ0E/OaHED3V1bQ5A+8dYh6zmwilejb7LfdRyiEbDhso23fBb
-# XvopoqgQAsR9zBADWFHpFVTEHrq6rf+s/+aQ1OnA7nhE22NoyO1BgjSQTFCibCKL
-# Iuzxso9EiRizuKtneB4Cc1rUMjAeqyXEew786BkULti1ddJ48y14FCelByE7Nz5o
-# naeo7zfxz+KrLUvTOVWR+r00Glz5qhV7i0rRDqbMQU5QD+paz5jKDchVmS1Hwyw5
-# HK1KwVfj8uG++bjSb3ZZSVTf9OvfMEWmkmvfIRtiFEnAmIwSB2EC1wcYnAUrdjKx
-# sNODREeUTjWVjG9RFR609B+3EAPK8Da1X5zCvVKe0l4smUl4CbRYNygl3MmDokjB
-# PMUnt+DL5HMv8bo=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgnIUpFfVPj4oX1yrn6iVKtN0zeIGE54zA
+# YNx1ZE2I0YAwDQYJKoZIhvcNAQEBBQAEggIAp57fL1Jq2/rPfWE4JextCLMmP7O5
+# hTJCydqLwQoQj2i9jwl3uJtsogXRWxBj5SmTtVoKzZNiGVLl2eQlehZUnXcqa+ID
+# s+7nvz1S1tyyh0oerDLUGixoOsTMBXINOrCq7tiMlNnRV2uUIcOrgSIXkvo8pmI7
+# nRfGsJnSlFEnanFsmlB1zhxTFehCMf773G/6ThpmF37XcJfWICupzzEGluyZvDCh
+# AJyzy83EysFjquObkVNbWiruq57/1Ke5Kj4vSLoui/WEqu/z9egEBvGa1I6ApGRe
+# mqGUSxbnDuZkgrpBhUAR4JQYMajCvKudJSaNAfmJK7Sg4S/PHJVHXwTMoxl+Q30t
+# ZGp2NNaq6zUEPAntkmDDmdaLy8Azs+dkOzYLX45htcd/iCSOKwaDu5CaDu6HZClu
+# DwqaKfw5rZRD6blRXHwxmAZDyWEwxhJOIOOvWqzzzU1O7AKJcB+aKRB5d0t+nxKl
+# GO9aRPCgdW7U2LBVECuVJUQdpCHPz1UQcNIP3AAdWB9Xo6FDLCSvPyKzcGy+IuGv
+# M7J8o3RaKX9cpM/QT0Qv+efqNipZt31rUGp80gJDXgN33KQPMD6QkkhUjnOlghEf
+# 30wBinyerxBsrpumGAA0vnRjW7aRcMzs4dyl6i6KURu+VeqnqQKZ7fPUE9lLf361
+# vXvQvBtXQKvR3AU=
 # SIG # End signature block

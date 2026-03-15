@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     End-to-end integration test harness for every WhatsUpGoldPS cmdlet.
 
@@ -47,7 +47,7 @@ param(
     [switch]$IgnoreSSLErrors
 )
 
-#region ── Helpers ────────────────────────────────────────────────────────────
+#region -- Helpers ------------------------------------------------------------
 $script:TestResults = [System.Collections.Generic.List[PSCustomObject]]::new()
 
 function Record-Test {
@@ -86,14 +86,14 @@ function Invoke-Test {
 }
 #endregion
 
-#region ── Module import ──────────────────────────────────────────────────────
+#region -- Module import ------------------------------------------------------
 if (-not (Get-Module -Name WhatsUpGoldPS)) {
     try   { Import-Module WhatsUpGoldPS -ErrorAction Stop }
     catch { Write-Error "Cannot load WhatsUpGoldPS module: $_"; return }
 }
 #endregion
 
-#region ── Prompt for connection details ──────────────────────────────────────
+#region -- Prompt for connection details --------------------------------------
 if (-not $ServerUri) {
     $ServerUri = Read-Host "Enter WhatsUp Gold server hostname or IP"
 }
@@ -102,7 +102,7 @@ if (-not $Credential) {
 }
 #endregion
 
-#region ── Connect ────────────────────────────────────────────────────────────
+#region -- Connect ------------------------------------------------------------
 Write-Host "`n============================================================" -ForegroundColor Cyan
 Write-Host " WhatsUpGoldPS End-to-End Test Suite" -ForegroundColor Cyan
 Write-Host "============================================================`n" -ForegroundColor Cyan
@@ -121,7 +121,7 @@ Invoke-Test -Cmdlet 'Connect-WUGServer' -Endpoint 'POST /token' -Test {
     if (-not $global:WUGBearerHeaders) { throw "No bearer headers after connect" }
 }
 
-# Abort early if authentication failed — no point running 130+ tests against a dead connection
+# Abort early if authentication failed - no point running 130+ tests against a dead connection
 if (-not $global:WUGBearerHeaders) {
     Write-Host "`n  FATAL: Authentication failed. Cannot continue." -ForegroundColor Red
     Write-Host "  Check server URI, credentials, and SSL/port settings.`n" -ForegroundColor Red
@@ -130,7 +130,7 @@ if (-not $global:WUGBearerHeaders) {
 }
 #endregion
 
-#region ── System / Product tests ─────────────────────────────────────────────
+#region -- System / Product tests ---------------------------------------------
 Write-Host "`n[2/12] Testing system/product endpoints ..." -ForegroundColor Cyan
 
 Invoke-Test -Cmdlet 'Get-WUGProduct' -Endpoint 'GET /product/*' -Test {
@@ -139,7 +139,7 @@ Invoke-Test -Cmdlet 'Get-WUGProduct' -Endpoint 'GET /product/*' -Test {
 }
 #endregion
 
-#region ── Device Group tests ─────────────────────────────────────────────────
+#region -- Device Group tests -------------------------------------------------
 Write-Host "`n[3/12] Testing device-group endpoints ..." -ForegroundColor Cyan
 
 $script:TestGroupId = $null
@@ -185,30 +185,30 @@ if ($script:TestGroupId) {
     Invoke-Test -Cmdlet 'Get-WUGDeviceGroup (status)' -Endpoint 'GET /device-groups/{id}/status' -Test {
         Get-WUGDeviceGroup -ConfigGroupId $script:TestGroupId -GroupStatus -ErrorAction Stop | Out-Null
     }
-    # Set-WUGDeviceGroup — Properties (update definition)
+    # Set-WUGDeviceGroup - Properties (update definition)
     Invoke-Test -Cmdlet 'Set-WUGDeviceGroup (rename)' -Endpoint 'PUT /device-groups/{id}/definition' -Test {
         Set-WUGDeviceGroup -GroupId $script:TestGroupId -Description "Renamed by test" -Confirm:$false -ErrorAction Stop | Out-Null
     }
 
-    # Set-WUGDeviceGroup — PollNow
+    # Set-WUGDeviceGroup - PollNow
     Invoke-Test -Cmdlet 'Set-WUGDeviceGroup (pollNow)' -Endpoint 'PUT /device-groups/{id}/poll-now' -Test {
         Set-WUGDeviceGroup -GroupId $script:TestGroupId -PollNow -Confirm:$false -ErrorAction Stop | Out-Null
     }
 
-    # Set-WUGDeviceGroup — Refresh with options
+    # Set-WUGDeviceGroup - Refresh with options
     Invoke-Test -Cmdlet 'Set-WUGDeviceGroup (refresh)' -Endpoint 'PUT /device-groups/{id}/refresh' -Test {
         Set-WUGDeviceGroup -GroupId $script:TestGroupId -Refresh -Confirm:$false -ErrorAction Stop | Out-Null
     }
 
-    # Set-WUGDeviceGroup — ListDeviceIds (deduplicated)
+    # Set-WUGDeviceGroup - ListDeviceIds (deduplicated)
     Invoke-Test -Cmdlet 'Set-WUGDeviceGroup (listDeviceIds)' -Endpoint 'GET /device-groups/{id}/devices/-' -Test {
         $ids = Set-WUGDeviceGroup -GroupId $script:TestGroupId -ListDeviceIds -ErrorAction Stop
-        # Empty group is fine — just verify it runs without error
+        # Empty group is fine - just verify it runs without error
     }
 }
 #endregion
 
-#region ── Credential library tests ───────────────────────────────────────────
+#region -- Credential library tests -------------------------------------------
 Write-Host "`n[4/12] Testing credential endpoints ..." -ForegroundColor Cyan
 
 Invoke-Test -Cmdlet 'Get-WUGCredential (list)' -Endpoint 'GET /credentials/-' -Test {
@@ -244,7 +244,7 @@ if ($script:TestCredentialId) {
 }
 #endregion
 
-#region ── Device Role library tests ──────────────────────────────────────────
+#region -- Device Role library tests ------------------------------------------
 Write-Host "`n[5/12] Testing device-role library endpoints ..." -ForegroundColor Cyan
 
 $script:TestRoleId = $null
@@ -300,13 +300,13 @@ Invoke-Test -Cmdlet 'Get-WUGRole (percentVars)' -Endpoint 'GET /device-role/-/pe
     Get-WUGRole -PercentVariables -Choice monitoredDevice -ErrorAction Stop | Out-Null
 }
 
-# ── Import / Export device role templates ────────────────────────────────────
+# -- Import / Export device role templates ------------------------------------
 Invoke-Test -Cmdlet 'Import-WUGRoleTemplate (verify)' -Endpoint 'POST /device-role/-/config/import/verify' -Test {
     $pkg = '{"pkg":{"package":{"name":"test"}},"apply":{}}'
     Import-WUGRoleTemplate -Body $pkg -Verify -Confirm:$false -ErrorAction Stop | Out-Null
 }
 
-# Disabled — API returns 400 regardless of body shape; revisit when WUG documents the correct request format
+# Disabled - API returns 400 regardless of body shape; revisit when WUG documents the correct request format
 #Invoke-Test -Cmdlet 'Export-WUGRoleTemplate (content)' -Endpoint 'POST /device-role/-/config/export/content' -Test {
 #    $roles = Get-WUGRole -Limit 1 -ErrorAction Stop
 #    if ($null -eq $roles -or $roles.Count -eq 0) { throw "No roles available" }
@@ -317,7 +317,7 @@ Invoke-Test -Cmdlet 'Import-WUGRoleTemplate (verify)' -Endpoint 'POST /device-ro
 #    Export-WUGRoleTemplate -Body $exportBody -Content -Confirm:$false -ErrorAction Stop | Out-Null
 #}
 
-# ── Community device role template import (helper script) ────────────────────
+# -- Community device role template import (helper script) --------------------
 Invoke-Test -Cmdlet 'Import-CommunityDeviceRoleTemplates (listOnly)' -Endpoint 'GitHub API (list)' -Test {
     $helperPath = Join-Path $PSScriptRoot '..\templates\Import-CommunityDeviceRoleTemplates.ps1'
     if (-not (Test-Path $helperPath)) { throw "Helper script not found at $helperPath" }
@@ -330,7 +330,7 @@ Invoke-Test -Cmdlet 'Import-CommunityDeviceRoleTemplates (single)' -Endpoint 'PO
 }
 #endregion
 
-#region ── Monitor template library tests ─────────────────────────────────────
+#region -- Monitor template library tests -------------------------------------
 Write-Host "`n[6/12] Testing monitor template endpoints ..." -ForegroundColor Cyan
 
 Invoke-Test -Cmdlet 'Get-WUGActiveMonitor (templates)' -Endpoint 'GET /monitors/-' -Test {
@@ -374,7 +374,7 @@ if ($script:TestMonitorId) {
 }
 #endregion
 
-#region ── Device creation & CRUD tests ───────────────────────────────────────
+#region -- Device creation & CRUD tests ---------------------------------------
 Write-Host "`n[7/12] Creating test device and running device CRUD ..." -ForegroundColor Cyan
 
 # We create a device via Add-WUGDeviceTemplate using the loopback address
@@ -401,7 +401,7 @@ if ($script:TestDeviceId) {
     Start-Sleep -Seconds 5
 }
 
-# ── Create test credentials and assign to device ─────────────────────────────
+# -- Create test credentials and assign to device -----------------------------
 $script:TestCredentialIds = [System.Collections.Generic.List[string]]::new()
 
 if ($script:TestDeviceId) {
@@ -442,7 +442,7 @@ if ($script:TestDeviceId) {
     }
 }
 
-# ── Device GET operations ────────────────────────────────────────────────────
+# -- Device GET operations ----------------------------------------------------
 if ($script:TestDeviceId) {
     Invoke-Test -Cmdlet 'Get-WUGDevice (byId)' -Endpoint 'GET /devices/{id}' -Test {
         $d = Get-WUGDevice -DeviceId $script:TestDeviceId -ErrorAction Stop
@@ -491,12 +491,12 @@ if ($script:TestDeviceId) {
         Get-WUGDeviceRole -DeviceId "$($script:TestDeviceId)" -ErrorAction Stop | Out-Null
     }
 
-    # ── Device SET/UPDATE operations ─────────────────────────────────────────
+    # -- Device SET/UPDATE operations -----------------------------------------
     Invoke-Test -Cmdlet 'Set-WUGDeviceProperties' -Endpoint 'PUT /devices/{id}/properties' -Test {
         Set-WUGDeviceProperties -DeviceId $script:TestDeviceId -note "Updated by test at $(Get-Date -Format 'HH:mm:ss')" -Confirm:$false -ErrorAction Stop | Out-Null
     }
 
-    # ── Attributes ───────────────────────────────────────────────────────────
+    # -- Attributes -----------------------------------------------------------
     Invoke-Test -Cmdlet 'Set-WUGDeviceAttribute (add)' -Endpoint 'POST /devices/{id}/attributes/-' -Test {
         Set-WUGDeviceAttribute -DeviceId $script:TestDeviceId -Name "WUGPSTest" -Value "TestValue1" -Confirm:$false -ErrorAction Stop | Out-Null
     }
@@ -514,12 +514,12 @@ if ($script:TestDeviceId) {
         Set-WUGDeviceAttribute -DeviceId $script:TestDeviceId -Name "WUGPSTest" -Value "TestValue2" -Confirm:$false -ErrorAction Stop | Out-Null
     }
 
-    # Remove-WUGDeviceAttribute — use -All (attribute IDs are not reliably returned by the add/get APIs)
+    # Remove-WUGDeviceAttribute - use -All (attribute IDs are not reliably returned by the add/get APIs)
     Invoke-Test -Cmdlet 'Remove-WUGDeviceAttribute (all)' -Endpoint 'DELETE /devices/{id}/attributes/-' -Test {
         Remove-WUGDeviceAttribute -DeviceId $script:TestDeviceId -All -Confirm:$false -ErrorAction Stop | Out-Null
     }
 
-    # ── Maintenance ──────────────────────────────────────────────────────────
+    # -- Maintenance ----------------------------------------------------------
     Invoke-Test -Cmdlet 'Set-WUGDeviceMaintenance (enable)' -Endpoint 'PUT /devices/-/maintenance' -Test {
         Set-WUGDeviceMaintenance -DeviceId $script:TestDeviceId -Enabled $true -Reason "Test maintenance" -TimeInterval "30m" -Confirm:$false -ErrorAction Stop | Out-Null
     }
@@ -538,7 +538,7 @@ if ($script:TestDeviceId) {
         Set-WUGDeviceMaintenance -DeviceId $script:TestDeviceId -Enabled $false -Reason "Cleanup" -Confirm:$false -ErrorAction Stop | Out-Null
     }
 
-    # ── Monitors on device ───────────────────────────────────────────────────
+    # -- Monitors on device ---------------------------------------------------
     Invoke-Test -Cmdlet 'Get-WUGActiveMonitor (device)' -Endpoint 'GET /devices/{id}/monitors/-' -Test {
         $devMons = Get-WUGActiveMonitor -DeviceId "$($script:TestDeviceId)" -ErrorAction Stop
         if ($null -eq $devMons) { throw "Null result" }
@@ -564,7 +564,7 @@ if ($script:TestDeviceId) {
         }
     }
 
-    # ── Group membership ─────────────────────────────────────────────────────
+    # -- Group membership -----------------------------------------------------
     if ($script:TestGroupId) {
         Invoke-Test -Cmdlet 'Add-WUGDeviceGroupMember' -Endpoint 'POST /device-groups/{id}/devices/-' -Test {
             Add-WUGDeviceGroupMember -GroupId $script:TestGroupId -DeviceId "$($script:TestDeviceId)" -Confirm:$false -ErrorAction Stop | Out-Null
@@ -585,14 +585,14 @@ if ($script:TestDeviceId) {
         }
     }
 
-    # ── Polling — use ByGroup (single-device POST may 404 on some WUG versions)
+    # -- Polling - use ByGroup (single-device POST may 404 on some WUG versions)
     if ($script:TestGroupId) {
         Invoke-Test -Cmdlet 'Invoke-WUGDevicePollNow (byGroup)' -Endpoint 'PUT /device-groups/{id}/poll-now' -Test {
             Invoke-WUGDevicePollNow -GroupId ([int]$script:TestGroupId) -Confirm:$false -ErrorAction Stop | Out-Null
         }
     }
 
-    # ── Refresh — use ByGroup (PATCH /devices/refresh may 405 on some WUG versions)
+    # -- Refresh - use ByGroup (PATCH /devices/refresh may 405 on some WUG versions)
     if ($script:TestGroupId) {
         Invoke-Test -Cmdlet 'Invoke-WUGDeviceRefresh (byGroup)' -Endpoint 'PUT /device-groups/{id}/refresh' -Test {
             Invoke-WUGDeviceRefresh -GroupId ([int]$script:TestGroupId) -Confirm:$false -ErrorAction Stop | Out-Null
@@ -604,7 +604,7 @@ if ($script:TestDeviceId) {
         Invoke-WUGDeviceRefresh -DeviceId $script:TestDeviceId -Confirm:$false -ErrorAction Stop | Out-Null
     }
 
-    # ── Device Scan ──────────────────────────────────────────────────────────
+    # -- Device Scan ----------------------------------------------------------
     Invoke-Test -Cmdlet 'Get-WUGDeviceScan (list)' -Endpoint 'GET /device-scans/-' -Test {
         Get-WUGDeviceScan -Limit 5 -ErrorAction Stop | Out-Null
     }
@@ -617,12 +617,12 @@ if ($script:TestDeviceId) {
         Get-WUGDeviceScan -Model newDevice -Limit 5 -ErrorAction Stop | Out-Null
     }
 
-    # ── Add-WUGDevice (scan-based) ──────────────────────────────────────────
+    # -- Add-WUGDevice (scan-based) ------------------------------------------
     $script:ScanDeviceId = $null
     Invoke-Test -Cmdlet 'Add-WUGDevice (scan)' -Endpoint 'PATCH /device-groups/{id}/newDevice' -Test {
         $scanResult = Add-WUGDevice -IpOrName '127.0.0.2' -GroupId 0 -Confirm:$false -ErrorAction Stop
         if (-not $scanResult) { throw "No result from Add-WUGDevice" }
-        # The API returns a scan/discovery result — capture the scan ID if available
+        # The API returns a scan/discovery result - capture the scan ID if available
         $script:AddDeviceScanResult = $scanResult
     }
 
@@ -640,14 +640,14 @@ if ($script:TestDeviceId) {
 }
 #endregion
 
-#region ── Performance monitor tests ──────────────────────────────────────────
+#region -- Performance monitor tests ------------------------------------------
 Write-Host "`n[8/12] Testing Add-WUGPerformanceMonitor ..." -ForegroundColor Cyan
 
 $script:PerfMonitorIds = [System.Collections.Generic.List[string]]::new()
 
 if ($script:TestDeviceId) {
 
-    # ── Per-type basic assignment (9 types) ──────────────────────────────────
+    # -- Per-type basic assignment (9 types) ----------------------------------
     Invoke-Test -Cmdlet 'Add-WUGPerformanceMonitor (RestApi)' -Endpoint 'POST /monitors/- + POST /devices/{id}/monitors/-' -Test {
         $r = Add-WUGPerformanceMonitor -DeviceId $script:TestDeviceId -Type RestApi -RestApiUrl 'https://localhost/api/health' -RestApiJsonPath '$.status' -Confirm:$false -ErrorAction Stop
         if (-not $r -or -not $r.MonitorId) { throw "No result or MonitorId returned" }
@@ -709,7 +709,7 @@ if ($script:TestDeviceId) {
         $script:PerfMonitorIds.Add("$($r.MonitorId)")
     }
 
-    # ── Required field validation (mandatory params — PowerShell enforces) ───
+    # -- Required field validation (mandatory params - PowerShell enforces) ---
     Invoke-Test -Cmdlet 'Add-WUGPerformanceMonitor (RestApi mandatory params)' -Endpoint '(validation)' -Test {
         $param = (Get-Command Add-WUGPerformanceMonitor).Parameters['RestApiUrl']
         $isMandatory = $param.Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] -and $_.Mandatory }
@@ -722,7 +722,7 @@ if ($script:TestDeviceId) {
         if (-not $isMandatory) { throw "WmiRawRelativePath should be a mandatory parameter" }
     }
 
-    # ── Invalid Type ──────────────────────────────────────────────────
+    # -- Invalid Type --------------------------------------------------
     Invoke-Test -Cmdlet 'Add-WUGPerformanceMonitor (invalid type)' -Endpoint '(validation)' -Test {
         $threw = $false
         try { Add-WUGPerformanceMonitor -DeviceId $script:TestDeviceId -Type 'NonExistentType' -Confirm:$false -ErrorAction Stop 2>$null }
@@ -730,15 +730,15 @@ if ($script:TestDeviceId) {
         if (-not $threw) { throw "Expected parameter validation error but none occurred" }
     }
 
-    # ── Invalid DeviceId ─────────────────────────────────────────────────────
+    # -- Invalid DeviceId -----------------------------------------------------
     Invoke-Test -Cmdlet 'Add-WUGPerformanceMonitor (invalid device)' -Endpoint 'POST /monitors/- + POST /devices/{id}/monitors/-' -Test {
         $threw = $false
         try { Add-WUGPerformanceMonitor -DeviceId ([int]::MaxValue) -Type Snmp -SnmpOID '1.3.6.1.4.1.9.9.13.1.4.1.3' -Confirm:$false -ErrorAction Stop 2>$null }
         catch { $threw = $true }
-        if (-not $threw) { Write-Verbose "Function did not throw — acceptable if it returned warning or failed assignment" }
+        if (-not $threw) { Write-Verbose "Function did not throw - acceptable if it returned warning or failed assignment" }
     }
 
-    # ── Pipeline input ───────────────────────────────────────────────────────
+    # -- Pipeline input -------------------------------------------------------
     Invoke-Test -Cmdlet 'Add-WUGPerformanceMonitor (pipeline)' -Endpoint 'POST /monitors/- + POST /devices/{id}/monitors/-' -Test {
         $obj = [PSCustomObject]@{ DeviceId = $script:TestDeviceId }
         $r = $obj | Add-WUGPerformanceMonitor -Type Snmp -SnmpOID '1.3.6.1.2.1.1.3.0' -Confirm:$false -ErrorAction Stop
@@ -751,8 +751,8 @@ else {
 }
 #endregion
 
-#region ── Assign performance monitors to device tests ────────────────────────
-Write-Host "`n─── Phase [8.5/12] Add-WUGPerformanceMonitorToDevice ───" -ForegroundColor Cyan
+#region -- Assign performance monitors to device tests ------------------------
+Write-Host "`n--- Phase [8.5/12] Add-WUGPerformanceMonitorToDevice ---" -ForegroundColor Cyan
 if ($script:TestDeviceId) {
     # Create 5 perf monitors in library ONLY (no device assignment) for assignment testing.
     # Remove-WUGActiveMonitor -RemoveAssignments does not reliably unassign performance monitors,
@@ -820,13 +820,13 @@ else {
 }
 #endregion
 
-#region ── Active monitor (extended types) tests ──────────────────────────────
+#region -- Active monitor (extended types) tests ------------------------------
 Write-Host "`n[9/12] Testing Add-WUGActiveMonitor (extended types) ..." -ForegroundColor Cyan
 
 $script:ActiveMonitorTestNames = [System.Collections.Generic.List[string]]::new()
 $script:FirstExtActiveMonId = $null
 
-# ── Per-type basic creation (11 extended types) ──────────────────────────────
+# -- Per-type basic creation (11 extended types) ------------------------------
 Invoke-Test -Cmdlet 'Add-WUGActiveMonitor (Dns)' -Endpoint 'POST /monitors/-' -Test {
     $monName = "_test_activemon_dns_$(Get-Date -Format 'yyyyMMddHHmmss')"
     $r = Add-WUGActiveMonitor -Type Dns -Name $monName -DnsDomain 'example.com' -DnsRecordType a -Confirm:$false -ErrorAction Stop
@@ -898,7 +898,7 @@ Invoke-Test -Cmdlet 'Add-WUGActiveMonitor (Ssh)' -Endpoint 'POST /monitors/-' -T
     $script:ActiveMonitorTestNames.Add($monName)
 }
 
-# ── Missing core types (TcpIp, SNMP constant, SNMP range, SNMPTable, Process, Certificate, Service, WMIFormatted, Ftp) ──
+# -- Missing core types (TcpIp, SNMP constant, SNMP range, SNMPTable, Process, Certificate, Service, WMIFormatted, Ftp) --
 
 Invoke-Test -Cmdlet 'Add-WUGActiveMonitor (TcpIp)' -Endpoint 'POST /monitors/-' -Test {
     $monName = "_test_activemon_tcpip_$(Get-Date -Format 'yyyyMMddHHmmss')"
@@ -971,7 +971,7 @@ Invoke-Test -Cmdlet 'Add-WUGActiveMonitor (Ftp)' -Endpoint 'POST /monitors/-' -T
     $script:ActiveMonitorTestNames.Add($monName)
 }
 
-# ── Assign extended active monitors to device ────────────────────────────────
+# -- Assign extended active monitors to device --------------------------------
 if ($script:TestDeviceId -and $script:FirstExtActiveMonId) {
     Invoke-Test -Cmdlet 'Add-WUGActiveMonitorToDevice (extended)' -Endpoint 'POST /devices/{id}/monitors/-' -Test {
         $result = Add-WUGActiveMonitorToDevice -DeviceId $script:TestDeviceId -MonitorId ([int]$script:FirstExtActiveMonId) -ErrorAction Stop
@@ -979,7 +979,7 @@ if ($script:TestDeviceId -and $script:FirstExtActiveMonId) {
     }
 }
 
-# ── Validation: mandatory parameter declarations ─────────────────────────────
+# -- Validation: mandatory parameter declarations -----------------------------
 Invoke-Test -Cmdlet 'Add-WUGActiveMonitor (Ssh mandatory params)' -Endpoint '(validation)' -Test {
     $param = (Get-Command Add-WUGActiveMonitor).Parameters['SshExpectedOutput']
     $isMandatory = $param.Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] -and $_.Mandatory }
@@ -992,7 +992,7 @@ Invoke-Test -Cmdlet 'Add-WUGActiveMonitor (RestApi mandatory params)' -Endpoint 
     if (-not $isMandatory) { throw "RestApiUrl should be a mandatory parameter" }
 }
 
-# ── Validation: invalid type ─────────────────────────────────────────────────
+# -- Validation: invalid type -------------------------------------------------
 Invoke-Test -Cmdlet 'Add-WUGActiveMonitor (invalid type)' -Endpoint '(validation)' -Test {
     $threw = $false
     try { Add-WUGActiveMonitor -Type 'NotAType' -Name '_test_should_fail' -Confirm:$false -ErrorAction Stop 2>$null }
@@ -1001,7 +1001,7 @@ Invoke-Test -Cmdlet 'Add-WUGActiveMonitor (invalid type)' -Endpoint '(validation
 }
 #endregion
 
-#region ── Reports (device-level) ─────────────────────────────────────────────
+#region -- Reports (device-level) ---------------------------------------------
 Write-Host "`n[10/12] Testing device report endpoints ..." -ForegroundColor Cyan
 
 if ($script:TestDeviceId) {
@@ -1034,7 +1034,7 @@ if ($script:TestDeviceId) {
         ))
     }
 
-    # ── Report parameter variations ──────────────────────────────────────────
+    # -- Report parameter variations ------------------------------------------
     Invoke-Test -Cmdlet 'Get-WUGDeviceReport (lastNHours)' -Endpoint 'GET /devices/{id}/reports/cpu (lastN)' -Test {
         Get-WUGDeviceReport -DeviceId $script:TestDeviceId -ReportType Cpu -Range lastNHours -RangeN 4 -ErrorAction Stop | Out-Null
     }
@@ -1071,10 +1071,10 @@ if ($script:TestDeviceId) {
 }
 #endregion
 
-#region ── Reports (group-level) ──────────────────────────────────────────────
+#region -- Reports (group-level) ----------------------------------------------
 Write-Host "`n[11/12] Testing device-group report endpoints ..." -ForegroundColor Cyan
 
-# Use root group (0) for group reports — always exists and has aggregated data
+# Use root group (0) for group reports - always exists and has aggregated data
 
 # Test the umbrella Get-WUGDeviceGroupReport with each ReportType
 $groupReportTypes = @('Cpu','Disk','DiskSpaceFree','Interface','InterfaceDiscards','InterfaceErrors','InterfaceTraffic','Memory','PingAvailability','PingResponseTime','StateChange','Maintenance')
@@ -1106,7 +1106,7 @@ foreach ($r in $groupReportCmdlets) {
     ))
 }
 
-# ── Group report parameter variations ────────────────────────────────────────
+# -- Group report parameter variations ----------------------------------------
 Invoke-Test -Cmdlet 'Get-WUGDeviceGroupReport (hierarchy)' -Endpoint 'GET /device-groups/{id}/reports/cpu (hierarchy)' -Test {
     Get-WUGDeviceGroupReport -GroupId 0 -ReportType Cpu -Range today -ReturnHierarchy true -ErrorAction Stop | Out-Null
 }
@@ -1138,13 +1138,13 @@ Invoke-Test -Cmdlet 'Get-WUGDeviceGroupReport (pipeline)' -Endpoint 'GET /device
 }
 #endregion
 
-#region ── Passive monitor tests ──────────────────────────────────────────────
-Write-Host "`n─── Phase [10.5/12] Add-WUGPassiveMonitor + Add-WUGPassiveMonitorToDevice ───" -ForegroundColor Cyan
+#region -- Passive monitor tests ----------------------------------------------
+Write-Host "`n--- Phase [10.5/12] Add-WUGPassiveMonitor + Add-WUGPassiveMonitorToDevice ---" -ForegroundColor Cyan
 
 $script:PassiveMonitorIds = [System.Collections.Generic.List[string]]::new()
 
 if ($script:TestDeviceId) {
-    # ── SNMP Trap creation ───────────────────────────────────────────────────
+    # -- SNMP Trap creation ---------------------------------------------------
     Invoke-Test -Cmdlet 'Add-WUGPassiveMonitor (SnmpTrap basic)' -Endpoint 'POST /monitors/-' -Test {
         $monName = "WhatsUpGoldPS-Test-SnmpTrap-$(Get-Date -Format 'yyyyMMddHHmmss')"
         $r = Add-WUGPassiveMonitor -Type SnmpTrap -Name $monName -SnmpTrapExpression 'test trap pattern' -Confirm:$false -ErrorAction Stop
@@ -1167,7 +1167,7 @@ if ($script:TestDeviceId) {
         $script:PassiveMonitorIds.Add("$($r.MonitorId)")
     }
 
-    # ── Assign to device ─────────────────────────────────────────────────────
+    # -- Assign to device -----------------------------------------------------
     if ($script:PassiveMonitorIds.Count -ge 3) {
         Invoke-Test -Cmdlet 'Add-WUGPassiveMonitorToDevice (single)' -Endpoint 'POST /devices/{id}/monitors/-' -Test {
             $result = Add-WUGPassiveMonitorToDevice -DeviceId $script:TestDeviceId -MonitorId ([int]$script:PassiveMonitorIds[0]) -ErrorAction Stop
@@ -1187,7 +1187,7 @@ if ($script:TestDeviceId) {
         }
     }
 
-    # ── Validation: invalid type ─────────────────────────────────────────────
+    # -- Validation: invalid type ---------------------------------------------
     Invoke-Test -Cmdlet 'Add-WUGPassiveMonitor (invalid type)' -Endpoint '(validation)' -Test {
         $threw = $false
         try { Add-WUGPassiveMonitor -Type 'NonExistentType' -Name 'bad' -Confirm:$false -ErrorAction Stop 2>$null }
@@ -1195,7 +1195,7 @@ if ($script:TestDeviceId) {
         if (-not $threw) { throw "Expected parameter validation error but none occurred" }
     }
 
-    # ── Syslog passive monitors ─────────────────────────────────────────────
+    # -- Syslog passive monitors ---------------------------------------------
     Invoke-Test -Cmdlet 'Add-WUGPassiveMonitor (Syslog)' -Endpoint 'POST /monitors/-' -Test {
         $monName = "WhatsUpGoldPS-Test-Syslog-$(Get-Date -Format 'yyyyMMddHHmmss')"
         $r = Add-WUGPassiveMonitor -Type Syslog -Name $monName -SyslogExpression "error|critical" -Confirm:$false -ErrorAction Stop
@@ -1210,7 +1210,7 @@ if ($script:TestDeviceId) {
         $script:PassiveMonitorIds.Add("$($r.MonitorId)")
     }
 
-    # ── WinEvent passive monitors ────────────────────────────────────────────
+    # -- WinEvent passive monitors --------------------------------------------
     Invoke-Test -Cmdlet 'Add-WUGPassiveMonitor (WinEvent)' -Endpoint 'POST /monitors/-' -Test {
         $monName = "WhatsUpGoldPS-Test-WinEvent-$(Get-Date -Format 'yyyyMMddHHmmss')"
         $r = Add-WUGPassiveMonitor -Type WinEvent -Name $monName -WinEventExpression "Application Error" -Confirm:$false -ErrorAction Stop
@@ -1225,7 +1225,7 @@ if ($script:TestDeviceId) {
         $script:PassiveMonitorIds.Add("$($r.MonitorId)")
     }
 
-    # ── Assign remaining passive monitors to device ──────────────────────────
+    # -- Assign remaining passive monitors to device --------------------------
     if ($script:PassiveMonitorIds.Count -ge 2) {
         Invoke-Test -Cmdlet 'Add-WUGPassiveMonitorToDevice (multi-monitor)' -Endpoint 'POST /devices/{id}/monitors/-' -Test {
             $ids = $script:PassiveMonitorIds | ForEach-Object { [int]$_ }
@@ -1239,10 +1239,10 @@ else {
 }
 #endregion
 
-#region ── Cleanup ────────────────────────────────────────────────────────────
+#region -- Cleanup ------------------------------------------------------------
 Write-Host "`n[12/12] Cleaning up test artefacts ..." -ForegroundColor Cyan
 
-# Remove passive monitors created during phase 10.5 (use BySearch — ById endpoint only works for active monitors)
+# Remove passive monitors created during phase 10.5 (use BySearch - ById endpoint only works for active monitors)
 if ($script:PassiveMonitorNames.Count -gt 0) {
     foreach ($pmName in $script:PassiveMonitorNames) {
         Invoke-Test -Cmdlet "Remove-WUGActiveMonitor (passiveMon $pmName)" -Endpoint 'DELETE /monitors/-?type=passive' -Test {
@@ -1251,7 +1251,7 @@ if ($script:PassiveMonitorNames.Count -gt 0) {
     }
 }
 
-# Remove performance monitors created during phase 8 (use BySearch — ById endpoint only works for active monitors)
+# Remove performance monitors created during phase 8 (use BySearch - ById endpoint only works for active monitors)
 # Performance monitors auto-named: PerfMon-{Type}-Device{DeviceId}-{timestamp}
 Invoke-Test -Cmdlet 'Remove-WUGActiveMonitor (perfMons by search)' -Endpoint 'DELETE /monitors/-?type=performance' -Test {
     Remove-WUGActiveMonitor -Search "PerfMon-" -Type performance -FailIfInUse $false -Confirm:$false -ErrorAction Stop | Out-Null
@@ -1316,7 +1316,7 @@ Invoke-Test -Cmdlet 'Disconnect-WUGServer' -Endpoint '(session cleanup)' -Test {
 }
 #endregion
 
-#region ── Summary ────────────────────────────────────────────────────────────
+#region -- Summary ------------------------------------------------------------
 Write-Host "`n============================================================" -ForegroundColor Cyan
 Write-Host " TEST RESULTS SUMMARY" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
@@ -1344,7 +1344,7 @@ Write-Host "`n============================================================" -For
 # Output structured results for programmatic consumption
 $script:TestResults | Format-Table -AutoSize -Property Cmdlet, Endpoint, Status, Detail
 
-#region ── HTML Dashboard ─────────────────────────────────────────────────────
+#region -- HTML Dashboard -----------------------------------------------------
 try {
     $templatePath = Join-Path $PSScriptRoot 'Test-Dashboard-Template.html'
     if (Test-Path $templatePath) {
@@ -1401,8 +1401,8 @@ $script:TestResults
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChp+ARdeh4jBvG
-# 75M36uCrND96s+WCNHQw+kfX0ew8WqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBSpQwhNUX09UsA
+# cWkTXJdcaPRwtPh5mPH5vEmUPPYmCqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1502,17 +1502,17 @@ $script:TestResults
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgV4oAyvb6tMT4CDVIZnigH+Jr1hmxXudW
-# bz+vBHzX+QAwDQYJKoZIhvcNAQEBBQAEggIAC1fiIV3NgKgp/ORZO9Clj7S50eku
-# UxEXsHcL3tmaPAZT5EhQ3HzX+2dZdJTEtnG5K7V330RPe4AQR0KaNSUzupY+ohg6
-# 5g8pG7SuduUJSU3roAD3Qz5oRXf5qSXyIsI523qZwE8gZyCzT+Kg9mg5VFsqA9v6
-# Xeys769xeKG4/qAnhc07m4I0BUp9Rtp0s8HK15mhTX0Q9X5OG+gxvsSuUuWuNgXk
-# D2aJQAW55i3T7IkU4DYS2cBqygvyfvG18U4YVJQrW60oh/6jPeSQkfpCXLJSpsOK
-# e16XXZ/2bmy2AO+IPmxHbwuUXSetInAEIf+0Tmwcs6qcAbfuBCj7Uk3xK7rDifEX
-# OPZIsiQWgctsHCDCQLGYYCbWDj8CfVr7SQ1loQXEAHqls0CfUF6S26AyxBTZtIA/
-# XBiQ8hNlKPwtrNyNBkpHhHWCKatFhbJOHONPW6s1cvGSA8du4q9JaKJdoXLC0q29
-# 5jerM55FxIsfrX9Hp+v4WstCdojO1Q+tFd0QWae1kMRjqLZGYDTvah4NMuUMhHk0
-# VESJ47MKd18r7F9/6udgX507WCuEbPJgNFRIoOYSBHFKgpXo4TyA0noNs9XTKCnb
-# I/Qy7rQHPXG9InVaPmoTGvcMyvOlJ3icAJGdRbRIu+qddrOGrlQvj+jfHiWGSDXW
-# 79Jq7xSdNnMImFM=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg983dNys7LbM3yqfpYY4HmFiZSRUv2TzB
+# 0PwW0H4gR+AwDQYJKoZIhvcNAQEBBQAEggIA3BZIWL0UhlPsjjohtgyV7wvDnVaD
+# s/grNU3useBLYf8ux5QC46b4hDMvveCWVydplPLJX+ZPzdo4iE8FLWDS5RAbpO/H
+# 6dEG4Rvb8VlylqtBj8tqNObIQXWZ0wHBDZVqfIpYJw38EuFHELUI8dpTzQXYV9ez
+# gqALFEfI3N9tB/t+KkScNV3ScbEd0dMglPeGCWTiwzo0npIUdhtWWyJ3qb4HHip2
+# 95BY48QJ6klJ43bLniUn3vVx1oiLiHkZvdZ+TROXPwlmX34jwZmL2nBpZkRN8SYd
+# 8hSMHcqpFKH5NZHRIZXIRECM431LY6/vIarDonmWAq+5ih4XT8dP4xDU/SeX1S9V
+# T8CB1PzlXMn2uwMipj+L/CTmb2bixBeKJiegC7BvByZCWwgrpX2YH68kJMDa1cd7
+# G/VZ6XCind7B2HSMIdhYcQXm7zE9197o7zdead+448+MObB4gxh0WhxITzwA+Xig
+# QGBOVY9l22x281PSKYCkrKqmg8RAvkW1ZL60V79ORlV/qBC93DjRiiRHwCkILePp
+# EVxrZAVnsVih0ZqcK4UrO1biJlcYMniAESdf9MW0bJr0PhghB6xd7C6wXLBXTEDo
+# T9HekSa/zbOmCVEaHrJDIx9xwqnZ+0utR0sGACFSB4oCH9G38dKQp0AULfgxjRhz
+# 4/R7uHhWRO2mWcI=
 # SIG # End signature block

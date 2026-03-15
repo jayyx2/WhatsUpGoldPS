@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Downloads and imports all community device role templates from the
     progress/WhatsUp-Gold-Device-Templates GitHub repository.
@@ -51,7 +51,7 @@ param(
 
 $repoApiUrl = "https://api.github.com/repos/progress/WhatsUp-Gold-Device-Templates/contents"
 
-# ── Pre-flight ────────────────────────────────────────────────────────────────
+# -- Pre-flight ----------------------------------------------------------------
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
 
 if ($WUGServer) {
@@ -66,7 +66,7 @@ if (-not $ListOnly -and -not $global:WhatsUpServerBaseURI) {
     return
 }
 
-# ── Enumerate templates from GitHub ──────────────────────────────────────────
+# -- Enumerate templates from GitHub ------------------------------------------
 Write-Host "`nFetching template list from GitHub..." -ForegroundColor Cyan
 try {
     $repoContents = Invoke-RestMethod -Uri $repoApiUrl -Method Get -Headers @{ 'User-Agent' = 'WhatsUpGoldPS' }
@@ -102,7 +102,7 @@ if ($TemplateNames) {
     }
 }
 
-# ── List mode ────────────────────────────────────────────────────────────────
+# -- List mode ----------------------------------------------------------------
 if ($ListOnly) {
     Write-Host "`nAvailable device role templates ($($jsonFiles.Count)):" -ForegroundColor Green
     $jsonFiles | ForEach-Object {
@@ -113,7 +113,7 @@ if ($ListOnly) {
     return
 }
 
-# ── Download & Import ────────────────────────────────────────────────────────
+# -- Download & Import --------------------------------------------------------
 Write-Host "Found $($jsonFiles.Count) template(s) to import.`n" -ForegroundColor Green
 
 $imported = 0
@@ -144,8 +144,8 @@ foreach ($file in $jsonFiles) {
     }
 }
 
-# ── Summary ──────────────────────────────────────────────────────────────────
-Write-Host "`n── Import Summary ──" -ForegroundColor Cyan
+# -- Summary ------------------------------------------------------------------
+Write-Host "`n-- Import Summary --" -ForegroundColor Cyan
 Write-Host "  Total:    $($jsonFiles.Count)"
 Write-Host "  Imported: $imported" -ForegroundColor Green
 if ($failed -gt 0) {
@@ -157,8 +157,8 @@ $results | Format-Table -AutoSize
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIO69LB9NhbNXE
-# c192cL/G4Y6iyGqGJkl0okc9QH0dEKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFw8r2lLqpIRps
+# DRJkrIr24k3PAJscSoB4550b58h346CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -258,17 +258,17 @@ $results | Format-Table -AutoSize
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgp87aSv1odr0bOGZlFecVd+KHhPFS+4Tk
-# MLx+JeiJrpUwDQYJKoZIhvcNAQEBBQAEggIAiCfwoiLgQm1lcZyQuh/QBttfC7kP
-# PvF/IZqb8lmLgWMoehl+kZmFsnT34+mRhMI+vVBE9Q4uhgg3eqaIBNVvDaSmUP/9
-# Sb89YbH24hdLCaaarMa4nn/qcoIO866/OIfu0olZkJZaOG+oYfF9xz8AkNdPJLVX
-# H9MZySpPDipdhXir8f6vLtcnPntRGEKT792eSk5UO7jhSj358zlTZMO23OEl+ZJ5
-# 2ltOM5nndjXoUFhmMYs+aUPmuUywYUaL8HacoFhPLZr15CWRSo+7ftAMgyPeZvVS
-# 1o13Pj7tV2sfrAuQ56qUn07kwlrusujtuGBpQwkv55WPs9pdOk71TdSIaEz3Ijta
-# YDPsyykxI5hgJLpzZ21gS3Y/s1n4xeb74Z4Qo+1vXuHXFfjys6u2Oymu/sQDl9bW
-# f3nPo1f8cAstb3Shf3HeGRamrd5GYMFzMQKQngCy/x5PPG/S2N/qx2On9o/aTUbK
-# Bi9lTiwBLV07cYXUQpsPoB1TteNZI5Eu3Rb0uBpR+XxNJ4F14LgEEx8FkM3BcqPy
-# XPZKnQgNmInCwGytzPK8NZACjOW3J18duG28aX/EL6bsX0XzbIhdVzDs9evtHjad
-# wzS71NreMLx/rwt1ecgcRg+m3BRv7AeqqhdmczcIx65+9sQvsYVWH+6WUHb/4BZx
-# QGATgPVyqv44cbs=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgadjF/VepQgHVWNIE7rkV8ve1xG0sysEY
+# sxNO2+LBEu4wDQYJKoZIhvcNAQEBBQAEggIAkwquGePhHau7F3jxFZMeAu7oexrg
+# RRTllmSda3antMEGCTBfCKJM63wHV5ym1Q3Eub2Ux2zHIjWfYS3WMbqR/DrqAxOQ
+# hskv1IALTQIE8KwEdS05kDY8+xqom0xwVEcJNqNRDiCYqXlI7wdoEweXdmDKsAdO
+# oBldfvJu1eeQdIGDdyAEHECGpQyuSQEONCJGNJtGZfpz8aoC3ppThnd53wvwes3E
+# tsilFMkcR34rK/iw7NRzJK8GB3MF3oDP4Cy107aYkTEtCBK+szvLG2t4YMUrmbg/
+# kI+uzWJt+UGO2As++qqczMNj8lIFqIxROM1CF8TgwC4pmz97B7UrwaHuT3+uZrgJ
+# naqrrCD4T785l5UhcIsU8F/WHAhzmwA/cndZnpdaMC5Rnuc49x/cTjDm8825rVjB
+# 9np/xu3duwlTA54qlEKjbFoPFW+iEzmkOBgP1r7ms8Y7MRX5hRbOh9XXGS5hZ2Y3
+# 5F9VZ6fBU6JPjRsJOUSrH0SU/+QyX/EEjKQqskiAJycFApph1QxNmZtqHWm6aNut
+# MAN8wu3nN21bpfMQyOu2CE9K6pu1qysNNbeInapjYacWaAotuFUt05GBWZOuu4n1
+# Kh8OOtrYlrFp3PD+53EtCRylB9bZUnf+Lsd/FXEH+TLtBYF/o6IXfzy7jTGQ11UW
+# 3oE+gJWncfuLFwI=
 # SIG # End signature block

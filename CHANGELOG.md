@@ -1,5 +1,5 @@
 # WhatsUpGoldPS Release History
-## 0.1.19 - 2026-03-15 [not going to PSGallery release yet, need more testing]
+## 0.1.19/20 - 2026-03-15 [Released to PowerShell Gallery]
 * Added — New Functions (85 total exports; psm1 and psd1 in sync)
   * `Get-WUGRole` — Browse the device role library: by ID, list all, assignments, templates, percent variables (`/device-role/` endpoints)
   * `Set-WUGRole` — Manage the device role library: delete, enable, disable, restore roles; apply templates via PATCH
@@ -88,6 +88,7 @@
   * Changed `Remove-WUGDevices -DeleteDiscoveredDevices` from `[bool]` to `[switch]`
 
 * Bugfixes
+  * UTF-8 BOM added to all files for max compatibility
   * Fixed `Set-WUGActiveMonitor` using `/api/v1/monitor/{id}` (singular) — changed to `/api/v1/monitors/{id}` (plural)
   * Fixed `Invoke-WUGDevicePollNow` using incorrect paths — changed to `PUT /poll-now` (single) and `PATCH /-/poll-now` (batch)
   * Fixed `Invoke-WUGDeviceRefresh` batch path `PATCH /devices/refresh` — changed to `PATCH /devices/-/refresh`

@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # AWS Helpers for WhatsUpGoldPS
 # Requires the AWS.Tools PowerShell modules. Install them first:
 #   Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force
@@ -649,8 +649,8 @@ function Export-AWSDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGZGQ0/xS0F5og
-# ZZvMTPn/ClYDSCRPQTB079hzVzgXUKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA+JRiCgIUhFf/z
+# Hbt1vS8bMCMV1eTmoBLC3zOg18gxY6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -750,17 +750,17 @@ function Export-AWSDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg2qf7mShePtzlEkXnzXigmtGEc/Ro0eAo
-# 0+YRXirdX+4wDQYJKoZIhvcNAQEBBQAEggIAbQ34VsUEgEUGf9ZJ4He5Dx9Oy2vv
-# T+Nv/i34Nf7KtuGuXCLRJZcRXRrUnE3AULBcNSkgLzCYEnZ+E7oCShxVZRTrmuFT
-# vJQw6xR4ucdX70q4CPe5Koze6G4tTD/vPjsFzXU456kDI7jhe1g/o6LyHLDQ+Uke
-# Gn+JABoMKbthjLhpvUQsVWXmoqfwcm6CHVJVWe0E43peZfklbfq9A3CmSbnAU1kO
-# F2WGGHAkBHhtHkDe8FaIYGsWBQwAvgWPfbE2t+2PG6S28aeVg3CssX5JShUfN8PC
-# aElPm5fm4v1U2/BQFSKUP8G33jK4K/B81gqQhkCesqBsO3HQ+za1B299JYmTME3e
-# RfnA8pkffrFDZrVJXJ/Fu1Gt1Mjr0DyaotjQfcUWy4lMZSQyuhjLNFC9k/eoDd2a
-# unn/Jimgam4OdFrcl+q2FYmwOvNQHwMQjYCYHVghj/He4lcH+qZpJYK4zy2FiyY6
-# kb0VW3pQGNbw9epSE2aRq+ucOxM/Vh3HHwDf2tsPH0cqYnnk6wAEPi5FfrNZemhc
-# NEOe9XnjvXNe//HndFyTc3ZAt3a9Crv0it0CHvEb0pPYcHU9t4y0Apc+8DixtS9l
-# bunZRVSNt+rPGJi9jZjWgT/mjhu8N63jlYKSMaTWC4igH1X8mTwAn8BthImt0QKx
-# 8guCVt0qpBdrC0I=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgOZ3aQlhc+hRRD4u3nbMUeQUvC8KV/eL0
+# sCd5dZZbz5owDQYJKoZIhvcNAQEBBQAEggIAKChHwjy4mJoNZt82bRvDPwC9oIrL
+# kUJjp6BWHwRJWBt/tnHwvNSdf/eflEuySfOggYm3Y0ySOQ5+y8cQQ3YbDPwMO8K4
+# 2URlauNukJChb/nKMsocAG4Rcze2ffwuUW8fwR6RQyQYutaua8gJFsIa+a/Teqfb
+# 1UQ5zabzqioPB3usKvghq/iHguxE+u0vW3hZYt7SBmFRY5bRtoJs+17SUrl5X3Cb
+# K/HRlbixxqec087rx5RpivFJclirbugemj79EZPJ/dC8lQvOaZKKZ+B7usiJ2ltk
+# 21aKOPZ342tgkTJMdbcJwTaTVGI7poJSXvLuvswBdOaI7lbGrSwhjD6CFtNMQfe8
+# j2ZNUJ3m1QUoq+J+sB+ZzGUpnE3/uoL3aRHdk0ibw2wtHlzrenfrhi8AIlkxPIYU
+# HMJI204jmdGYzTJMOvcIyNrmxQTAw2MNIl4X8N+NDDZcSgzTUAAQeHT3BIhabNkJ
+# kp63vUGPk3jjrQFARuAfwK0K+zvr1w8XJkEvIl0fD35qMXFpkpE8kClyQ5ebwb8Z
+# 6pHlE51l8p8B5s9N+7OcjYrL1M8SGKEIHBVmmbsuWIM89HFh4zU9d+dIL5slyrcX
+# sBuF1QdWxhKBQ83+xbgw5vYFNsowwRtWrcbxdoia3rT+aw0X+nJUzAsdrNRtA/sj
+# mx/5ccUq2k59EwY=
 # SIG # End signature block

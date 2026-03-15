@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # OCI (Oracle Cloud Infrastructure) Helpers for WhatsUpGoldPS
 # Requires the OCI PowerShell modules. Install them:
 #   Install-Module -Name OCI.PSModules -Scope CurrentUser -Force
@@ -19,7 +19,7 @@ function Connect-OCIProfile {
     .DESCRIPTION
         Checks that the OCI config file exists and validates connectivity
         by listing available OCI regions. Authentication is handled by the
-        config file — this function only verifies it works.
+        config file - this function only verifies it works.
     .PARAMETER ConfigFile
         Path to the OCI config file. Defaults to ~/.oci/config.
     .PARAMETER Profile
@@ -462,7 +462,7 @@ function Get-OCIMonitoringMetrics {
     )
 
     if (-not (Get-Command oci -ErrorAction SilentlyContinue)) {
-        Write-Verbose "OCI CLI not available — skipping metrics collection"
+        Write-Verbose "OCI CLI not available - skipping metrics collection"
         return @()
     }
 
@@ -886,8 +886,8 @@ function Export-OCIDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCpmhZiQvBfQUML
-# sDYyTd4S2+ExYoAXQ7nslrNbvk3uFaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAk7hyYsGC4GjGT
+# pV8UX+8M1GrGCbX3iZ3BzaNyGRqEtqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -987,17 +987,17 @@ function Export-OCIDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgegVXOIeyLTOqqkXtbnsgUF6CUamlWqIj
-# p4MRdAYIJSUwDQYJKoZIhvcNAQEBBQAEggIAxtBQp7/MyvD139Qiw38J7id1qWJr
-# kd99/5GCZOP6ahLg8VB67/VA2vB+Sn1URpq/kwqRAxt5wu/aKXBY2r/QSZWRDmf/
-# f6XnxdVtyBdLURrMc7zT477BB/mh8YHeMR9n8MPrkO0hYFzDfbA08RhclQQpqzBz
-# e5RC2WegHcZdLvvEeeOrgqAlEjuWeOIDPQjK1khEoDTPIt0XG5fDZkxG4F1HC/Cg
-# RukYp7sWI3+ssLcgeN543hTiaO5XW/RjITDlPvEKnC4NSPJmdizS1J3PSDP+Fk4q
-# MDp3VBJYhBseHdW4hPO7BLRJbyNvO/RzbmoH5DYGj/J6Jz5sCXaWROuGBJYPXggT
-# rJaJXaHr60yVJtQsZ6omb6eJsroCrzOJowPcc++KTCJemf1sebqRWd6cFZAWv92h
-# +rvJbFZQEVZcdUEWKWUlGP88D2Djsr9XzkdebXTJwvLBJ8Pltx1OjXjQ1sGUXHXY
-# GlX+J7tGvFaTcn2ezCNfWRWZc16Ae4NZKmH7I9oY68KeUKIFil0BUGmhZy4P+GLa
-# GiPhYtL41mFltMjwrQweIEZpc/wB/SpYRH05mZZCemu2KK/u7HlaRSNK91D2d0fk
-# onJJcE67apV7vgmuhlzAtgdmol9ZaHLEVcn7TWVH7VKfhznMBQUfBxt75j5I2PeN
-# bf0w19IH+uOemas=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgs7JO8QmC75lzCXGRS56XChuPMns7fdfF
+# /yKlPvZxyU0wDQYJKoZIhvcNAQEBBQAEggIAALI/467cyMavnlQ+z9dwXL9NvYPN
+# oevERN4lf1XWsUWqO2zXooVHbDsBRK0YkyFmbXLE/bGEqsGsGtBvjl/CPO4ihC+H
+# RQTI5Yb9g3IjGo8Gsgzzfdm8yj5TaXH7IZEms9yh5vdaCHFB8VslNh98Skfiq4dc
+# dTPGwgT6yBxcyOrcYTN6hRfvQvcXcd8GFjeIszktpnxS8zpBd2QHKZhvFH7O8wTe
+# XCDOJdTBU8xLn/4EPV8KjUSoAlTeO2+zfcpQe8kMHShSr5hfFRj39W8mW0VhGdik
+# m4OtuQPTi0lluo5DA5/rwQ3lPZaOOGrCcE0nDvrQZdcRA+wa7AyYzfhrdvU6HEXo
+# Zly2qQlVQ38HjJCEXjbzp5CvMsPw6qo8YFqasBUT67fAnMizW6Fc7lveEaGPajAs
+# Yp+IIBGCT51xnSEANG6sL1x8zrXH17qbBz+FDJu6jW6ugfpoqo5HKP74b1oh8mhv
+# KBDxJ+iIkKZtB3q5+OlDLmjaaI+fnoOgxYpxy7W+4iFK4vM7xjszTzcbsOVvKkgL
+# WMNLEr03NFeD+wWycPpdqw1Xh79AkIUwAWq14OSZMOnlsvQJrOVX3/lr30Isb9CC
+# Q/F4mavnSk07eexsMZ8DeLelfS6jzOpfXa2qoohLI7QaxjySIwjHnsnAMdwxpCs1
+# B9z5CEJEBe2KpcQ=
 # SIG # End signature block

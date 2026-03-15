@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-Updates device group settings in WhatsUp Gold — the write counterpart to Get-WUGDeviceGroup.
+Updates device group settings in WhatsUp Gold - the write counterpart to Get-WUGDeviceGroup.
 
 .DESCRIPTION
 The Set-WUGDeviceGroup function modifies one or more device groups via the REST API.
@@ -107,7 +107,7 @@ function Set-WUGDeviceGroup {
         [Alias('id', 'ConfigGroupId')]
         [int[]]$GroupId,
 
-        # ── Properties set (definition) ──
+        # -- Properties set (definition) --
         [Parameter(ParameterSetName = 'Properties')]
         [string]$Name,
 
@@ -117,7 +117,7 @@ function Set-WUGDeviceGroup {
         [Parameter(ParameterSetName = 'Properties')]
         [string]$NewParentGroupId,
 
-        # ── Role set ──
+        # -- Role set --
         [Parameter(Mandatory = $true, ParameterSetName = 'Role')]
         [switch]$Role,
 
@@ -128,14 +128,14 @@ function Set-WUGDeviceGroup {
         [Parameter(Mandatory = $true, ParameterSetName = 'Role')]
         [string]$Body,
 
-        # ── PollNow set ──
+        # -- PollNow set --
         [Parameter(Mandatory = $true, ParameterSetName = 'PollNow')]
         [switch]$PollNow,
 
         [Parameter(ParameterSetName = 'PollNow')]
         [int]$PollNowLimit,
 
-        # ── PollNow / Refresh shared params ──
+        # -- PollNow / Refresh shared params --
         [Parameter(ParameterSetName = 'PollNow')]
         [Parameter(ParameterSetName = 'Refresh')]
         [switch]$ImmediateChildren,
@@ -144,7 +144,7 @@ function Set-WUGDeviceGroup {
         [Parameter(ParameterSetName = 'Refresh')]
         [string]$Search,
 
-        # ── Refresh set ──
+        # -- Refresh set --
         [Parameter(Mandatory = $true, ParameterSetName = 'Refresh')]
         [switch]$Refresh,
 
@@ -161,7 +161,7 @@ function Set-WUGDeviceGroup {
         [Parameter(ParameterSetName = 'Refresh')]
         [int]$RefreshLimit,
 
-        # ── ListDeviceIds set ──
+        # -- ListDeviceIds set --
         [Parameter(Mandatory = $true, ParameterSetName = 'ListDeviceIds')]
         [switch]$ListDeviceIds
     )
@@ -191,7 +191,7 @@ function Set-WUGDeviceGroup {
         $total = $allGroupIds.Count
         $current = 0
 
-        # ── ListDeviceIds: collect and deduplicate device IDs across groups ──
+        # -- ListDeviceIds: collect and deduplicate device IDs across groups --
         if ($PSCmdlet.ParameterSetName -eq 'ListDeviceIds') {
             $deviceIdSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             foreach ($gid in $allGroupIds) {
@@ -215,7 +215,7 @@ function Set-WUGDeviceGroup {
             return @($deviceIdSet)
         }
 
-        # ── Write operations: loop through groups ──
+        # -- Write operations: loop through groups --
         foreach ($gid in $allGroupIds) {
             $current++
             $pct = [Math]::Round(($current / $total) * 100)
@@ -303,8 +303,8 @@ function Set-WUGDeviceGroup {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0/L4LY+Rcl9R2
-# w2J3a6E8sz3xEU+ungUg78iQsvuvKqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBtbZnikwsGxqEs
+# xWpFkqvhPDnks8EQYKGg5ITbQy2yoaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -404,17 +404,17 @@ function Set-WUGDeviceGroup {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgmE5qBux75vzNcyaRnMc7Duq1K8Wu8age
-# 4Fi4/PqohiYwDQYJKoZIhvcNAQEBBQAEggIAqsOdfSaNO701m/JVO1XWOXU/npWT
-# WutRBdsLB9K77SjXXQReeofn6Yeah9iZ8Scvfey1Heyq/nQnOhALw+hhcbP/6pJn
-# ravKN42GdDZc6/coIcCgOTTdFr2sBbe5oabyaWFFtE+/+5QMjun4UxiAe9uOsgDc
-# NGrlm2pWDpW2s7mPS7lyJESaqh60lYAWPh+lQKlwvsizMPXfOVXxNVbMEwBhQ0IU
-# hKpZ1v4QUCpeH9x1LM4GTooVNyZMLObTAnGAqYgDfl3WjrNj4bNp04UyhP574mTW
-# UvFJ4JRe9PkGIDKK64a3hJQ2RQgydjgfyVRhQ38boeRZYk3bWXogZbpkQndpqorn
-# ZPBRXmdeEwmFE/L0DKx4YXd7AKUJVpVTS0kns2Pd2KrY03mV06MtG46nVcc8vi1T
-# ymxl8/JycGLa/H92ZvbQPBEivMsh8zF18+Rsl6ZZT7PtuRImBF/m7WbJ7jM7NRFi
-# LMEuynfZXaaT1WKPiE/DytKTPT5eAKvfNFI96dUT9iSQji9q6MEUvRC39Ss4NJh9
-# Dp0qAIM6pv5/vV8nt8HHsuCIwUFFYQ+5RCqR/Hu6mjLbYMrNRUbZwNlfwAfZthFG
-# Gf6OKZbnVscSa0Z468xUGJwuISKfw4YCNDwWpXVJ2A3JRC7L2sG2PJr1PIpgBcwr
-# 8dOPyNwYkFcBjPM=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgKLIY8lDvcEQirRM4vJSwyHs/CJ+Q4xDL
+# GK+wo+bVrQgwDQYJKoZIhvcNAQEBBQAEggIASc0EQYqtAYo69FsNyoxelq2eewpb
+# lkbJy18ARha+DYuHuDtMvaLN1G2SMts98onY4Pe81HzH4Gs//Ghjvk41sDl3rTyf
+# sGRWYgLWe3jgl6RJboDAGk3QqUvx4Y8X3UclQqv0Gt5NBxxYB+g+488hZ/Ix60l+
+# J1Zqs9VNGGg6DXGSYxNN3rcSDP9e5X6QDxwU/sib4PrDTzebe5nhhn92qqQeHEu5
+# L2aBHoC/bLL7aJOr3EsAmbW8qczZPyzZWqK/fS70KhYREtFtV3wWxGZbRxGfIlgx
+# qgxaX3i9BDzwygAR2LjklcQ2E6rfqL7v2N4gY83nvj8lJeYtDegVU9bLJYr4tX5x
+# BQVV+KmK6pfqmLNl6KvjzekXo8hX+c1//atA4KnkB3Zek37ZNkZ1lzirGHiVjA04
+# FTuyqSWTmt1gXLnfIp1c/R9KF/BUSksPBBoWhGUDVzVx4qras6zwj1DfApNlAU4V
+# sLnmiSauXkoCR6DAyKmKVlVGS01F58gdu6fhxIfY0SD6nXvnXEcDzIHhVYjJ4KbH
+# /LIPdW+gM3HO7GN9oFMpTPRTIFcxnfynG85V8yD/wCm42+Uh9hPm133iM0qtHMHn
+# OVY7NsYFk7HhLVcTFlC3NVf0nFgaDkYU0xJgqHh4aWORxM87K7dnmur79EclT2Df
+# gMy4aBQ0oM0/w9I=
 # SIG # End signature block

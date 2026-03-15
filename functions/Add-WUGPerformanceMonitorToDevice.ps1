@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Assigns a performance monitor to one or more devices in WhatsUp Gold.
 
@@ -76,7 +76,7 @@ function Add-WUGPerformanceMonitorToDevice {
         Write-Debug "Enabled: $Enabled"
         Write-Debug "PollingIntervalMinutes: $PollingIntervalMinutes"
 
-        # Build the performance params sub-object once — identical for every device/monitor pair
+        # Build the performance params sub-object once - identical for every device/monitor pair
         $performanceParams = @{
             pollingIntervalMinutes = $PollingIntervalMinutes
         }
@@ -134,8 +134,8 @@ function Add-WUGPerformanceMonitorToDevice {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGrWjpmUxUJWLq
-# kTFw4JlIwShSs9w2CbEwn4SWlMzbTKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAb909rMeGJ5ugm
+# 29Mm0Trf9KRk3xG5bF86UmayFWBWZqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -235,17 +235,17 @@ function Add-WUGPerformanceMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgc/rjk2v6VYJfTmPujbGfFMeL0icudAlI
-# VnmiPHkTGH4wDQYJKoZIhvcNAQEBBQAEggIAEKH3g/xy1CBTQqHLD5vHpiBwI7I+
-# p+6sa+L9eG8AjUBKqSg0YjUBJwqeWzkrwj6K8fi/Ki3VDZJB1uEBr20GCyXbYHAk
-# bYHsQwOp+zsZBPzeut5tu5M7Vz1jC89LBjhe81xlZ/6pvtIKwjMqttoE80r8tP+R
-# BrSm1n0Zfa4VW+sECcRlrwCgYth5jU+8U7VMwMpqFLtGKW6j0NXoaM+iIlzlFeNE
-# bG36onKTOHbGB9KxE5xLdjyEAlBGVcJ+qfL8KEYvvcwqz2/0sDYbJ/B9N9AM/ptq
-# 9ghOyrDWwDCj6gyeA23bRJxa1qWCJQks8q2uYe/VisnXJCve6FR51VnjM0UOdE9O
-# VmoSHZoV/qLuMSY6CgvtLZiGVvVo04umxx9lHgLG1h/rS5D8tdivgSQTds5CX+yy
-# LF+uF4qhsT51duRoCKR5OOFF1YQaXm/EQry/3M/y1n62r1Y4YFEqtGt3bhKuuSra
-# 6x3uWmnnUZw2SJ1O7v5pFTQ1wZ6sKuQSDn+XyK7IMF6TQ9CbX7evY9oyHRkm/CF5
-# SnbRMqdxU+m58c0oSmy7nkz4Yiwr0rbTAKLld2dntNoB3c6t35qmzSJ8zhfS5AFI
-# 9Pt6gnrDZB62rsr1tRlgQeb4ZUjR13QPWOVSIpDHCwOo8gfZE4ivEcr7lspYBlRp
-# G5xewZAOROPQCzU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgWHO/vlbRkNWf8FloyQoDIVtGdALogYjj
+# P2EtPmkBe1EwDQYJKoZIhvcNAQEBBQAEggIA8Yp4YQ1FE4tWjCKtd1jVIsegWPOI
+# 9U7bz6Fq95wyaT3phaDQbQHiDxMx0S1jT5pxEp51zWQOLUnIKM79bgyW+qIIK6la
+# Wwm/Xm4Q4E2JOwjtGuybxFO/kL+lg1BDuI742kwW9Mmu/sc6d6nL+Eqe7siWMP4K
+# VTnPri94Ge7g8e0DG2WOAGrOk5BqXhicMFj12jzu2pwHSRAjfgpjqdMQDLL1rP6c
+# Wt/ybJQLwpUP9AS52lDf6u6xOO1rIJ9dv9bEgrjDxjOGCx5Cian7HJe81zNpbtgO
+# iM48cyAZZLHEWOGf99DlXEmYnDR8qqI3Pci17MHYZAbNzzWWYynC5C7RUCeAjQzu
+# NTYMEhlo6ohtu5FMxIllIw7tJSD0RfUXHuSqOB+/0p/p3+zutatSCauj8BS1mlCC
+# Lrpu3qwA2ealMpLibVy/9WTeOB56MhBc3VVH97yh3EYL2qyiTyaf1pf9R2mO0GW0
+# hbztxRepw9wdYELkYnMCJ0Mt53YZbDTjxa/KP+t8mRSNu2Vbh0GGyAtNbjnsgG5k
+# BpkHx2i4w+jOOw0Tzw5VTeBnW+lA+WztytWI6I+4C8mcZfCNaMMjk5ysFzkXlSz0
+# tixvxudUjCf/YiSwhUAuJZOL6BEBNzPJsd2A3wODor+3snTc5X92tAVMFAIFIEng
+# EsSAw9873CfDkdw=
 # SIG # End signature block

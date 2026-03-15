@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Certificate Dashboard Report Generator
 # Uses CertificateHelpers.ps1 to scan one or more IP addresses across multiple
 # TCP ports, discover TLS certificates, and produce an interactive HTML
@@ -167,8 +167,8 @@ Write-Host "`nDone." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGkglaFgd4eQu3
-# pdmRWOSiZDGmX8Kkw9oGfthNYlnxtaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLxDLaIzA4yZ4B
+# BdkoVdKmYNnBvI1dk8gHTxnXjv52nKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -268,17 +268,17 @@ Write-Host "`nDone." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgEIbgqMRKiCv0QoZWTdzCXCS3Aw7cn+NR
-# iyC6P3GL/JwwDQYJKoZIhvcNAQEBBQAEggIAy1MiP/jybBVoZKsQ7wKUPh/L1XNO
-# 1LkDkR0UG7UvrKJne9ZLMz2WNhgBCTFmv4o/2LrCzb+pBI7QXUyFFfZaJVHIUxn7
-# CXUVlVb+YXay8N49pBJ2FC75guFsrf+X5Eva24X++VBfHmzU8flyAy55sAq0JMac
-# 6TTDxqTWwK7I0w8Uzy8lvpR4gikKBEznZZRTdAIjC2bluaOy8YeFJ1RdGTEg2lpx
-# y+DTKrRhSNTzmYiB+WWmclO1c+/f9fFl78W4JL+751qVzuEfXXiLf/Leqkijq8Jb
-# fCy+yz9q34w1+f/0Vz5e10k60Fz3jtwTvGuM2U/D9RJRjepAfjvkeoyjNAqV9ShY
-# 9StVlIXMDm7WDe1aSD7uDc6Fygyh6H3njEjMDn9e+lqr+wzktsFRJrf05Nsd/LpJ
-# 07iuDSCTfJEZbr/MDuyF8ErYcbU34YBNdkrXvCmHHtDTkes2t9h6v56YnfEX8D0n
-# LBVWoJ43DkJZtmqBeU+7p3CPAcCF6zvJWpM+ACbQxjxm3C7sxp0feYc/K5DNO2Tp
-# HGvGLwteg4jvh0NNtQDtWi1lF1HdZRl+2CfGx+4WMAOQcYB3iQqRSPV4IH2N0xUO
-# wQmT71/zvsw4gb4HZq12Fsw8bVmJPA56YIbkmLsJd1ePZs11hzpMkVD9tULAYP74
-# iHtiw222J0ssXpw=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgJtQoj4a5Q2xKHBK+mK4Y+2A19IkPeXa2
+# lVNNzxATyvswDQYJKoZIhvcNAQEBBQAEggIAi+ZtMqidrcQ25dr+j0ki5R0MIqUu
+# F9egt/+jcA6GzWAgxN8rfQaPqxdOvOMJx/JMpaOOjXFOYCqXrNxxw7h5ecelVhVJ
+# dVoynnxrhTc8g8yRpg+4b1lwwTbvnTHqanxy9jB4BrIJkaEeXrKz/xMUsC2HWrDu
+# SQJKf7x5K7Gpdyp5GCFXiR8B9tYVropsMqztiV0uf2u0Dnnbuof6wQkOjk+9itxa
+# PlmwN+lK8uMHRosMXex3Y8JC68EEYnE97PywKqcmMLrcbcByl7QyZfNgP4nvSgz8
+# Wd4Pu7c6jkm0x91ZAS9lAYOC7XqKDzMbMI/pNSkjGAzEJHW/7v1BPoetNmLn5lzT
+# si3uJJaop0T+dYtoN0+1lvMiEGEfJqq8HhzM0ttvyDG0QQuxOYO5z4YdtM3LNS4p
+# ye/Dg6QMoB/1D01sK02pOSYDAqwrPm/9pg69RBaVD1rc+tCOBXT4YKPj1iIobdRV
+# xFpO9rZZ3IEpX8AORsNr85IAS03wgWwxU7z7SPIMvlcqjTyMggvaIlI9Up5TFUNC
+# 12oS+JOdLbggECGgPqvkfyo5rT9BRLwJjFw1glLjOGM+nRIrcjBbTDID+Z/2lq1D
+# kiWLCNiLmolsja0XxNZT7I9d1phXteKySeJjHYIBLWkx0Bq+3zL0MSwzg3IoyweT
+# z1pLN+b2tL2Hvx4=
 # SIG # End signature block

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Assigns an active monitor to one or more devices in WhatsUp Gold.
 
@@ -97,7 +97,7 @@ function Add-WUGActiveMonitorToDevice {
         Write-Debug "ActionPolicyId: $ActionPolicyId"
         Write-Debug "ActionPolicyName: $ActionPolicyName"
 
-        # Build the active params sub-object once — identical for every device/monitor pair
+        # Build the active params sub-object once - identical for every device/monitor pair
         $activeParams = @{}
         if ($Comment) {$activeParams.comment = $Comment}
         if ($Argument) {$activeParams.argument = $Argument}
@@ -159,8 +159,8 @@ function Add-WUGActiveMonitorToDevice {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1tivrvPOvYzOj
-# 40ScpIb6CBGed76xKhC1/SqEd3nGr6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4ui0gT7fl9n/V
+# dVFKOkzDqTwUanvvTAQCqEMvvyzLdqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -260,17 +260,17 @@ function Add-WUGActiveMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg7dUWlcouokFMOvNjO0HcacA2QdC2NuQk
-# He962FRc8qYwDQYJKoZIhvcNAQEBBQAEggIAO2igFRFz580LQB0rPHLIjJ0apcPK
-# DYli6MPEgvtiN0RcjslO05DDhanTe4Jd4jlBQo8jjdPgaVaJKWTrAkt7O6byx+KJ
-# gNdtVvpSDWdBQslLmtM7pnxSDGkNtpj4JoGToU/emagqYuQXlobX7wWxx8fA0CQI
-# LT6GSwqo4f2RdbrcLZi3leT4Z0gD+8SqDS7ZIBRGeafI45vRtFepfPuzjQ7Slqmc
-# 1S0oJkfm3rRlY2uLFskwOLsh2xyrbDVzIeiQtI+s/q8jYE+z1Nrih3dr6XUimhAD
-# 5CrOibiwHOUXgQFrMJ+xZ7XnkPHNOk92VONAjOLTG7u4iDeBYgj8ifoDzPAzjx3O
-# TcEBNtkiDvZKbGwz+7/7QGHdr+Hb0zgQRr1m2ypblyXHoVLn8Bvt/psWihemSiqA
-# pgEMK5XbGFvSc59UGvkj1J+dsfqupPstDHJ1yF8y0iZaTSo4Yj83Xv0wREiS0+qE
-# 8HXDodJmLSzjB7psqKUjwns0LuSa/8E7XdaeT/drBQteE0HeL18G/beevy2hK8sQ
-# 5fVEHbMVyOy7lRdDi63eUn0AY7aTcTEHXEeLJQo2ZIwa6r4Yf5QCeHeuIUrXnhYV
-# mhRWH6MpqCarwmoVmY0BnJgJf08+n4oS/SHZdpfv0gJSjNChDuRe+6dsJTTBw2Xr
-# R557pb5WYGCd010=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgTR/SIwzEmOh+dP7Wr8t5Ztv8nLX5na5k
+# Ns2rBHDPyYUwDQYJKoZIhvcNAQEBBQAEggIALLseOdMqGKt2A2Yppip6Fs9fC0bX
+# 9R4n6elKvHR/ytLvY+DX+abelDiU49p2ihX2eKWGXBGgM8hdM1+zSQStP7j1lY7L
+# oHNneE2xCida5wwBAgaWIFpAVjKaRPI/rNYPJGYZr6ggSM0eb5Nym56vJzCSWcIN
+# 9TjPYme7W6HxTOqBqMbv47Md9JYtImsC6QIan+ebvnPS3tTZHixmxxfaEBY3bZ/I
+# bLOa8DW5t3WhvTt8l5A/pj9P4sbNYMervmOMyNPHr72DVWgKL7WGwaXdGLd/ukIv
+# GBOL6Lp6+s/fk9ciijM/J9yrKxjrMMRwXPitu9XCfImbpfA0rSvnKl/XdqLS2Qe2
+# bVSn3/b+RIQ36/2/sEUeV250A1g7IoxO+3Ll2OUgWO+jmTV4I5GoQ6+KEHIIoTVl
+# 0MPU6YwTeWyan3ZONyF+jFl4HXSLgTWYYubrqgtZdCqMrOC4VlQyPfrW9yVBFaY3
+# H3xPKPUX3vtbl/GsWYYd+i95Xb+WHUh7gzBl7X0BsPGp6rJwuVFTpBn6DeiVLkbh
+# gxDElfgdp86jLZYdxpllphg/sOqZ9MizanLXCMy2QTLB2J2xh3XOxiBhB11YxMEu
+# Cbz3TQmvaDxva+VVNXR1IKY52TOhObZfvR2rFqxD/ck6tgKNGxPQxUhmmWXwR2uD
+# wDohPDiekJfYF1A=
 # SIG # End signature block

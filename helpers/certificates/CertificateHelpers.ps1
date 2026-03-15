@@ -1,9 +1,9 @@
-# =============================================================================
+﻿# =============================================================================
 # Certificate Discovery Helpers for WhatsUpGoldPS
 # Scans IP addresses across multiple TCP ports to discover TLS certificates
-# and produce dashboard-ready data — similar to the F5 BIG-IP helpers.
+# and produce dashboard-ready data - similar to the F5 BIG-IP helpers.
 #
-# No additional modules required — uses .NET TcpClient + SslStream directly.
+# No additional modules required - uses .NET TcpClient + SslStream directly.
 #
 # Typical workflow:
 #   1. Get-CertificateInfo     (discovers certs across IPs + ports)
@@ -171,7 +171,7 @@ function Get-CertificateDashboard {
         $dashboard | Where-Object { $_.Status -eq 'Critical' } | Format-Table IPAddress, Port, DaysUntilExpiry, Subject
         # Filter to only critical certificates and display as a table.
     .EXAMPLE
-        # Full pipeline: scan → enrich → group by status
+        # Full pipeline: scan -> enrich -> group by status
         $certs = Get-CertificateInfo -IPAddresses "10.0.0.1","10.0.0.2" -TcpPorts 443,8443
         $dashboard = Get-CertificateDashboard -CertificateData $certs
         $dashboard | Group-Object Status | Select-Object Name, Count
@@ -314,7 +314,7 @@ function Export-CertificateDashboardHtml {
         Export-CertificateDashboardHtml -DashboardData $dashboard -OutputPath "$env:TEMP\certs.html" -ReportTitle "Prod Certificate Audit"
         # Custom report title.
     .EXAMPLE
-        # Full end-to-end: scan → enrich → HTML report → open in browser
+        # Full end-to-end: scan -> enrich -> HTML report -> open in browser
         $certs = Get-CertificateInfo -IPAddresses (Get-Content .\hosts.txt) -TcpPorts 443,8443
         $dashboard = Get-CertificateDashboard -CertificateData $certs
         $outPath = "$env:TEMP\Certificate-Dashboard.html"
@@ -380,8 +380,8 @@ function Export-CertificateDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCwtaOmZyGPAozz
-# u1HUiRAPxcqjWsBibKCYH80LKJdRh6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDq+lPZnKo1RRAA
+# kJLWd3mhcg7Ilr6BadrzTpuMIFN4YaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -481,17 +481,17 @@ function Export-CertificateDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgElNfTcFCu4y9r6f5HNYoobTQzMrhRRKi
-# zle1trlrbEQwDQYJKoZIhvcNAQEBBQAEggIAyNbBvqI4PP2rV1IJT4M1JfySWz7G
-# mzV7+FK/ICj5yHRz8JD7Pp+pMtgSJ5xawZ50uFVZRBQ7d4j0BG/4Xov4lPR+LL24
-# ErxQtA7RvJfOYRQh/E88wJFvBkLnokawWkNgHR1RhHIcveovBF6mpNqNJWbKnVLm
-# vjvRaaG7xBUqKPD9bVoUxX08Ibgwfr9eX0Kt4TzB12DuegHCLtY6Iaj0Bgog4XGA
-# aF8ALYuoQ93u5/65hoA63TLuZDU2rlX6kNEsetNx0lulgbruc8yQH3mL58bC6NL4
-# Ajp+s9zpwGDHoX5NCSJ00SUISHEhiUYlIknPMLyac3dwDbCtnqKex7X5K4LkdMQI
-# TiTa8rhOR9onQVvOM/8JOuPVrMvXTSv04SLnHVjPSU9VQpsGHnkYtpJilQtRpDud
-# sabXbtzrwiakb00vFCqiOcJH4MmKsMAC0W/94maZ4FLKF+O18eBT7AY4DYq0spuh
-# FQFiWgwYVE91Qlazclg4X5VKI8UyG9bhM5z4uXYxWcPfMRENV1Bk6McBMTnhOpGV
-# Yme9mBibcHa52DmD0bgtCeN2XOhXZsXz0Hzo4vn1zI90zcrQrBGnNrX8G/dmVgZS
-# E+q6x01vlpum39LVHdezJfRJIKYDGXIJOVloZMIcPDycurlHIrIRtKuHxe1ua0Oy
-# L8GQwD6hagG0PMw=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgbNNqEWWC/ueT8sLRURyPKNmGgVzRt6Dt
+# cPUo4ihPxRQwDQYJKoZIhvcNAQEBBQAEggIAmtZZvf22uxWdyxJKJ2B2LgOoC9wf
+# s/HizsOJw2X1MY/1yzZQaB5HSOB/CXtmKB0zikpUS2m+ri3Fi0t6716YWtfTmINE
+# yg1BnSP8TZymnTmLqGJkV3jupMQxL40k91ewP5zb6wrkM3DqcxAUgDEGeEG8Z5xb
+# I0JsUa086p4MIAJm9Sc3v6UPNt8u9jrbWrLMOpeSO129KiBmJHfBzGvo1RRzcoFM
+# UGpLas6DcTAyIcUxjDSmqriMdJDTC2E17o9DkCpDsNqNZ8SYqi3s/PYcMy4ph5Tp
+# DfV7uNWJZjljL4Af9DqU6jFbtYWIArXZ2ozphQawzBwk9V+4b+tbWSucsEVTrTAS
+# vOGm5DdtLtKeXnNzu5IUsL3KHW5FXBOOvw/ssVfzsDBW6DulBKoHAlRF36PHo9qj
+# 7qlAQlUQBQCQonXmoTDv729SeIBE8HhrmKjpG/M/jlV4wJu3sCjPTj415Q0i+46N
+# CwNaex5g/38aEnygks1VXzWwDfN7bryLlvZ7fW/k82E+FxMxYCmvMdQG01ZWcyAI
+# 2pqVOl7U+vjBKfAT1iTISWNIupxFSl7fZgQHDRB+5A6Pk6nKd59lgodpxdbfBUJj
+# +W7/notSaPO9FrNYmMXED6u2KfqUb56yzlRanRrpO5WpkWJNn51MOuDYLGmXWJvM
+# dJIAtfnQVmsyNnQ=
 # SIG # End signature block

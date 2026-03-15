@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Get active monitor templates, global assignments, or device-specific assignments from WhatsUp Gold.
 
@@ -58,10 +58,10 @@ Return all monitors (deprecated API parameter). Valid values: "true", "false".
 Maximum number of results per page. Valid range: 0-250.
 
 .PARAMETER activeObj
-Internal use — the active monitor object being processed.
+Internal use - the active monitor object being processed.
 
 .PARAMETER active
-Internal use — the active monitor entry being processed.
+Internal use - the active monitor entry being processed.
 
 .EXAMPLE
 Get-WUGActiveMonitor -IncludeAssignments -Search "Ping"
@@ -390,8 +390,8 @@ function Get-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1xneqwfd7+1qv
-# c1ACGOjnOHShyitx+KbkPmhANllsgqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCT/a0pSVz6gMM9
+# 8REVYWpq1XFAmTS34lu7cEmQ8SXAnaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -491,17 +491,17 @@ function Get-WUGActiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgXg86XC2XmhYgC5Pgj6yvZVpMkWw3tC17
-# naTJ5qI3y/AwDQYJKoZIhvcNAQEBBQAEggIAGEuZrGhUlNOictbFu9y1mPr8aO3A
-# oUz5bTSR0tltTgKU2+qjotZXLp23CCnSra91/Zcb2QSsEsc213BY/VfYzhs1T42Z
-# 8UW8Vvn13JaxrnE3w1uuW24f2X2ri4EzCD+oY5nchhy+WhJBRhIEt5BSPjoxMsUZ
-# du/vq4nrUDn0t/L98YBqu+0ipQMTI+yFHqCsVykTAxu/XhaXCkW8blB+Jepegzzv
-# di2ydDeGUf6R7bdpI7fyUeEzjT577c/IDQb7FwFD1SJqca3CspY8EKiWe3yR4lVs
-# wvxy1FBMz72EyG4cSYnpVOPyJlYHdERfTBr0fwkUaVSTySzNnmjYXnSYsDpZy5VL
-# 7+tat5NHF6iW2SwAl7bi+c2Ksv+6Vc2q6YFInhcR07xyGTMTZsaoQXH/Wp8ytqO7
-# qNpj1Tbpe5NkM7PBilAZI9AdQIQ+iLEwDsMTTp/qNNZ2O4cB/j6hVq+aoKxGpoCo
-# IdXFm/03o5EtIB+9OBn4rB79kfztWAldNCGJbWjCoSujHbsC7JGpQ1bD0t45MAfZ
-# uVccTH3vmbLAgjBwW25zaCmoBA7fnO49XrQUWTZvU8CrvEkxp7Y17+yaCR4FErnj
-# /0UgF0gzWCnDETQ0c+d3/KMEyHB7NSNuDV4T3+4HO1OlgP6l1PamgsWnCwgbYDLu
-# yXsxTNqNRA9U93Y=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQghH/zTe4vbYTM+nG9kyHJQVbRy1F6vsaK
+# 7COibDAmoh0wDQYJKoZIhvcNAQEBBQAEggIAxf/fA6dPAdiQ20qw/5xy8GQmO7e4
+# ugPA6TrnMv7M03L4Il7xf9mrUVLbNdhBVQfBbXHFiHbo++aDzFnLpRKVhfD2lLHB
+# j2tj0jKJRhRv5luzvF4XTVj29i3ilr/SBudqDAQm0KMU9ttfmAfkH87k3oSmGTrP
+# y/PKbxZ90gWsYlaVTBeXXUd4EIDD4iBUVaYAs4fE0M3g419oQ346n2wjepIIGdo4
+# jXUCjVG6kR9wLELFWwTmZ57k4WgIJ9JBEceEwLSNNxAGYjMz4vfXZyNf0HATVUP0
+# lMVFdb5cfb2I2e1vfLdcJTA1Dy0JA+0ocKjzAlQI1tYELzNfUiA0P7moe9xqQEzq
+# v3QITdE6sTsG02DsiZ/Ooat6QoKfbvkqGeYpMqI9M3WPp+GIcBNuleGfT/mQ3qx/
+# v61E05pZJ0a7O6wDZuYeXa2WGQmAbnoDTaMucRTqCQ0t96bWnELkb7Xb779xwQS/
+# hDgD/UjcWXk8ibUFHdBjg1R+yX3WkjSA2l1IQ/Ih/eWMv2K5zNWKhSN03t8qhNhz
+# qErXCm4Al1tVJkkUB4D31XLgKv5A3q/uJlHDTCikCX3OwJYav3XYK8KeG7mTyYKF
+# ak2Ff1C9Dwj1nn63716FofccJdFK2Qjaos6AReU5Zvb5jC+cqtbxJyU3DtaSMQ8U
+# B0vk6GHJUq8Jb3g=
 # SIG # End signature block

@@ -1,9 +1,9 @@
-<#
+﻿<#
 .SYNOPSIS
     End-to-end integration test harness for WhatsUpGoldPS cloud and infrastructure helpers.
 .DESCRIPTION
     Tests every function in the helpers directory (AWS, Azure, GCP, OCI, Proxmox,
-    Hyper-V, Nutanix) against live APIs. Prompts for credentials at runtime —
+    Hyper-V, Nutanix) against live APIs. Prompts for credentials at runtime -
     nothing is stored on disk. Produces a unified pass/fail/skip summary and
     interactive HTML reports.
 .PARAMETER TestAWS
@@ -54,7 +54,7 @@ param(
     [string]$OutputHtmlPath
 )
 
-#region ── Helpers ────────────────────────────────────────────────────────────
+#region -- Helpers ------------------------------------------------------------
 $script:TestResults = [System.Collections.Generic.List[PSCustomObject]]::new()
 
 function Record-Test {
@@ -118,7 +118,7 @@ function Export-TestResultsHtml {
         [string]$ReportTitle = 'WhatsUpGoldPS Helper Test Results'
     )
     if (-not (Test-Path $TemplatePath)) {
-        Write-Warning "Report template not found at $TemplatePath — skipping HTML report."
+        Write-Warning "Report template not found at $TemplatePath - skipping HTML report."
         return $false
     }
     $columns = @(
@@ -174,7 +174,7 @@ function Install-RequiredModule {
 }
 #endregion
 
-#region ── Cmdlet Lists ───────────────────────────────────────────────────────
+#region -- Cmdlet Lists -------------------------------------------------------
 $script:AWSCmdletList = @(
     'Connect-AWSProfile','Get-AWSRegionList',
     'Get-AWSEC2Instances','Get-AWSEC2Instances (filtered)',
@@ -229,7 +229,7 @@ $script:NutanixCmdletList = @(
 )
 #endregion
 
-#region ── Helper File Import ─────────────────────────────────────────────────
+#region -- Helper File Import -------------------------------------------------
 $helpersRoot = Split-Path -Parent $PSScriptRoot
 
 $helperFiles = @{
@@ -254,15 +254,15 @@ foreach ($provider in $helperFiles.Keys) {
         if (Test-Path $path) {
             . $path
         } else {
-            Write-Warning "$provider helper not found at $path — tests will be skipped."
+            Write-Warning "$provider helper not found at $path - tests will be skipped."
             $toggle.Value = $false
         }
     }
 }
 #endregion
 
-#region ── Dependency Checks + Auto-Install ───────────────────────────────────
-Write-Host "`n─── Checking module dependencies ───" -ForegroundColor Cyan
+#region -- Dependency Checks + Auto-Install -----------------------------------
+Write-Host "`n--- Checking module dependencies ---" -ForegroundColor Cyan
 
 if ($TestAWS) {
     if (-not (Install-RequiredModule -ModuleName 'AWS.Tools.EC2' -Provider 'AWS' `
@@ -345,14 +345,14 @@ $sectionCount = $activeProviders.Count + 1
 $currentSection = 0
 
 ###############################################################################
-#region ── AWS ────────────────────────────────────────────────────────────────
+#region -- AWS ----------------------------------------------------------------
 ###############################################################################
 $script:AWSAuthMethod = $null
 $script:AWSHtmlOutPath = $null
 $script:AWSDashboardData = $null
 
 if ($TestAWS) {
-    Write-Host "AWS Authentication — choose a method:" -ForegroundColor Cyan
+    Write-Host "AWS Authentication - choose a method:" -ForegroundColor Cyan
     Write-Host "  [1] Access Key + Secret Key"
     Write-Host "  [2] Named AWS credential profile"
     Write-Host "  [S] Skip AWS tests"
@@ -476,12 +476,12 @@ if ($TestAWS) {
 #endregion
 
 ###############################################################################
-#region ── Azure ──────────────────────────────────────────────────────────────
+#region -- Azure --------------------------------------------------------------
 ###############################################################################
 $script:AzureAuthMethod = $null; $script:AzureHtmlOutPath = $null; $script:AzureDashboardData = $null
 
 if ($TestAzure) {
-    Write-Host "`nAzure Authentication — choose a method:" -ForegroundColor Cyan
+    Write-Host "`nAzure Authentication - choose a method:" -ForegroundColor Cyan
     Write-Host "  [1] Service Principal  [2] Interactive browser  [3] Current Az context  [S] Skip"
     $azChoice = Read-Host "Selection"
     switch ($azChoice.Trim().ToUpper()) {
@@ -562,7 +562,7 @@ if ($TestAzure) {
         # Cycle through selected resource group(s)
         foreach ($currentRG in $script:AzureTestRGList) {
             $rgLabel = $currentRG
-            Write-Host "    ── Resource Group: $rgLabel ──" -ForegroundColor DarkCyan
+            Write-Host "    -- Resource Group: $rgLabel --" -ForegroundColor DarkCyan
 
             $rgResource = $null
             Invoke-Test -Cmdlet "Get-AzureResources ($rgLabel)" -Endpoint "Azure / Resources / $rgLabel" -Test {
@@ -626,7 +626,7 @@ if ($TestAzure) {
 #endregion
 
 ###############################################################################
-#region ── GCP ────────────────────────────────────────────────────────────────
+#region -- GCP ----------------------------------------------------------------
 ###############################################################################
 $script:GCPHtmlOutPath = $null; $script:GCPDashboardData = $null
 
@@ -701,7 +701,7 @@ if ($TestGCP) {
 #endregion
 
 ###############################################################################
-#region ── OCI ────────────────────────────────────────────────────────────────
+#region -- OCI ----------------------------------------------------------------
 ###############################################################################
 $script:OCIHtmlOutPath = $null; $script:OCIDashboardData = $null
 
@@ -799,7 +799,7 @@ if ($TestOCI) {
 #endregion
 
 ###############################################################################
-#region ── Proxmox ────────────────────────────────────────────────────────────
+#region -- Proxmox ------------------------------------------------------------
 ###############################################################################
 $script:ProxmoxHtmlOutPath = $null; $script:ProxmoxDashboardData = $null; $script:ProxmoxCookie = $null
 
@@ -881,7 +881,7 @@ if ($TestProxmox) {
 #endregion
 
 ###############################################################################
-#region ── Hyper-V ────────────────────────────────────────────────────────────
+#region -- Hyper-V ------------------------------------------------------------
 ###############################################################################
 $script:HyperVHtmlOutPath = $null; $script:HyperVDashboardData = $null; $script:HyperVSession = $null
 
@@ -941,7 +941,7 @@ if ($TestHyperV) {
 #endregion
 
 ###############################################################################
-#region ── Nutanix ────────────────────────────────────────────────────────────
+#region -- Nutanix ------------------------------------------------------------
 ###############################################################################
 $script:NutanixHtmlOutPath = $null; $script:NutanixDashboardData = $null; $script:NutanixHeaders = $null
 
@@ -1011,7 +1011,7 @@ if ($TestNutanix) {
 #endregion
 
 ###############################################################################
-#region ── Cleanup ────────────────────────────────────────────────────────────
+#region -- Cleanup ------------------------------------------------------------
 ###############################################################################
 $currentSection++
 Write-Host "`n[$currentSection/$sectionCount] Cleaning up and disconnecting ..." -ForegroundColor Cyan
@@ -1021,7 +1021,7 @@ if ($script:AWSAuthMethod -eq 'Keys') {
         Clear-AWSCredential -StoredCredentials 'WhatsUpGoldPS_Session' -ErrorAction SilentlyContinue
     }
 } elseif ($script:AWSAuthMethod -eq 'Profile') {
-    Record-Test -Cmdlet 'AWS Session Cleanup' -Endpoint 'AWS / Auth / Clear-AWSCredential' -Status 'Pass' -Detail 'Profile auth — no stored creds to clear'
+    Record-Test -Cmdlet 'AWS Session Cleanup' -Endpoint 'AWS / Auth / Clear-AWSCredential' -Status 'Pass' -Detail 'Profile auth - no stored creds to clear'
 }
 
 if ($script:AzureAuthMethod) {
@@ -1048,7 +1048,7 @@ $script:HyperVCred = $null; $script:GCPKeyFilePath = $null
 #endregion
 
 ###############################################################################
-#region ── Summary ────────────────────────────────────────────────────────────
+#region -- Summary ------------------------------------------------------------
 ###############################################################################
 Write-Host "`n============================================================" -ForegroundColor Cyan
 Write-Host " TEST RESULTS SUMMARY" -ForegroundColor Cyan
@@ -1097,12 +1097,11 @@ if ($reportFiles.Count -gt 0) {
 
 $script:TestResults
 #endregion
-
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDa3II18LxxZsqT
-# gDbs8I4MzSpKS+Vdu4BPcjyvX+kcaKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD92OfLKsVO9ZOA
+# kPBBi0KI0SorlqOSv0XIcNqG5ClKqKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1202,17 +1201,17 @@ $script:TestResults
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgEmzTgl/5ufoalbbwEpHwHVQG8yGUg6y+
-# k5jTn/XPKg0wDQYJKoZIhvcNAQEBBQAEggIAlFgasCrzex53sFmffF4gtt+Xusih
-# oo27a1VUS1EG/KzflrpE9oU0DuGhKpq1rUCfvPm3xoVtRTWM/rLhXv0igGGp+zQo
-# IXz1Oxk5na+u33GuFDszTcIU5iVwCzaJY1bYey5k6/z0wLH5SCONHiEcSWZbwhst
-# 5Y2u11XVjMTgalWR+YFsf8VLW03TZ6jXSoYX8+XNK4xU4dPlOJ/4PA41VjUO8Juu
-# NLNymrbnUk9bP9IpkmmcUpJkVUS0P+OtAid4/XZUgByhwdhDq09gZw7DqDwAAjSi
-# kKPuU5sjVZ2D8cWsPunLawjCjIae6ssux1eN5rTMRHrfvzJL9BjExWUQ9k5ou2yp
-# he7ePnQglVt2AaKHZxQHlmrE0Cl+n/ZAAZyQDH2v9K68TpWWTCtKoompL8axHuG9
-# GWqTkSmk09jAquncGLu3OJelmPDPUWnxsy3/cONsoSiyExvf4tE7W10foZoE1+6F
-# B07bKuUQKxl8RMDzYrDMoSYTyOrKwxJ+YBUe6nBTGba8XFm4X8QF4QXp07A2xj81
-# nfRxPCi3pQ+jE8FytQ6WBO7KFGGFUUkd1wWvgQB7yKCi/Oc92bHKqTuechP3OfHp
-# 6hJ2GBAUJV7oBYTPUXhAC9vqQnYlULwVVakTdbti5xtW99Ha3tsTSuep5ye+Ivtv
-# oegEJtptaQVK/R4=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg3hBupN9XrxPFxepDQ22QCSG6dFfrc4CW
+# p9Lo84ByOHYwDQYJKoZIhvcNAQEBBQAEggIA6ojbhrX9d+TPZPzqyLtWPA3F8x4J
+# l4tHfVAqfARrhd9vyjHVesVMAi3Sc7AqyBk6FA+Js8nSOmCwRJBMwBE+RuQOv4nf
+# LMKsSX12966d6zVW6t91DVqCX457jJ0Sr0+iTfAIStt8tn+apFlKM2nQ75Klv+Lp
+# idyjXJq8R5N9GYbh4EKT7U5mzSP2sE/Jqq6ZN4idT9tq/qNirzKJsNdEtYS0R01i
+# mcbJ16TUGivCEPtNbFlpAofYf0xH34TFH/08Qq+i2U+UhKoHTpo1xFcfmUSLMl9k
+# dol1GThFMQk7zI8UpWHd07rG7OuOhVyIQrIOqeVJRQGU/DEoW6BQFjQUfSzCHZQ4
+# b58u8eVY3egOOsqmljTWab05cwkCCz04R+NnOff34N1Ktq7dIKQNzG6lGfhc8KVT
+# GMiK49T6GROyuZPbWOfruB1pwspEa4hUSPHZE1fWRLrz/GqWc7TzDWggb8xQsP0a
+# 06u+VZu9wybTgGQix89eH4A1Y3d0PnxVl1jLUqUtVoHgHBbIqJMd3EZxJaK67wbs
+# yEuBAWdO8/ldNP/wddT0F4umv2bDypXQ4VFjvSE9gj81+iwO3Ay0lferd9MZrEUD
+# M7nObv5uMUQ/MLriSDW3/zyhtc2vu4EmXQ1bTQcHCojreMclxq9Y4n5xYACjqDsy
+# ZA3HyMjtRz1fj1g=
 # SIG # End signature block

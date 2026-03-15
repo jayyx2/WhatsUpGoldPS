@@ -1,68 +1,84 @@
 <#
 .SYNOPSIS
-Updates the device template for a given device in WhatsUp Gold.
+Imports monitor templates into WhatsUp Gold.
 
 .DESCRIPTION
-The Set-WUGDeviceTemplate function allows you to update the template of a device in WhatsUp Gold by specifying the device ID and the new template object. This is typically used to apply changes to an existing device's configuration using a template previously retrieved or modified.
+The Import-WUGMonitorTemplate function imports monitor templates via
+PATCH /api/v1/monitors/-/config/template. Accepts a JSON body containing
+the template definitions to import.
 
-.PARAMETER DeviceId
-The ID of the device to update.
+Use Get-WUGMonitorTemplate -AllMonitorTemplates to export templates,
+then feed the output (or modified version) to this function for import.
 
-.PARAMETER Template
-The template object to apply to the device. This should match the format returned by Get-WUGDeviceTemplate.
+.PARAMETER Body
+A JSON string containing the monitor template definitions to import.
+
+.PARAMETER Options
+Import options. Valid values: all, clone, transfer, update.
 
 .EXAMPLE
-$template = Get-WUGDeviceTemplate -DeviceId 20
-# ...modify $template as needed...
-Set-WUGDeviceTemplate -DeviceId 20 -Template $template
+# Export templates and re-import them
+$templates = Get-WUGMonitorTemplate -AllMonitorTemplates
+Import-WUGMonitorTemplate -Body ($templates | ConvertTo-Json -Depth 20)
+
+.EXAMPLE
+# Import from a file
+$json = Get-Content ".\monitor-templates.json" -Raw
+Import-WUGMonitorTemplate -Body $json
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
-Last modified: 2024-06-15
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/Monitor-Templates
 #>
-function Set-WUGDeviceTemplate {
+function Import-WUGMonitorTemplate {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int]$DeviceId,
-        [Parameter(Mandatory = $true)]$Template
+        [Parameter(Mandatory = $true)]
+        [string]$Body,
+
+        [Parameter()]
+        [ValidateSet('all', 'clone', 'transfer', 'update')]
+        [string]$Options
     )
 
     begin {
-        Write-Debug "Starting Set-WUGDeviceTemplate for DeviceId: $DeviceId"
+        Write-Debug "Starting Import-WUGMonitorTemplate function."
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/monitors/-/config/template"
     }
 
     process {
-        if (-not $PSCmdlet.ShouldProcess("Device ${DeviceId}", 'Set device template')) { return }
-        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/config/template"
+        $queryParams = @()
+        if ($Options) { $queryParams += "options=$Options" }
+        $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+        $uri = "${baseUri}${query}"
+
+        Write-Debug "PATCH URI: $uri"
+
+        if (-not $PSCmdlet.ShouldProcess("Monitor templates", 'Import')) { return }
+
         try {
-            $jsonBody = $Template | ConvertTo-Json -Depth 10
-            $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $jsonBody
-            return $result.data
+            $result = Get-WUGAPIResponse -Uri $uri -Method 'PATCH' -Body $Body
+            if ($result.data) {
+                Write-Verbose "Successfully imported monitor templates."
+                return $result.data
+            }
+            return $result
         }
         catch {
-            $oError = $_
-            Write-Error "Error updating template for DeviceId ${DeviceId} ${oError}"
+            Write-Error "Error importing monitor templates: $_"
         }
     }
 
     end {
-        Write-Debug "Completed Set-WUGDeviceTemplate for DeviceId: $DeviceId"
+        Write-Debug "Completed Import-WUGMonitorTemplate function."
     }
 }
-# End of Set-WUGDeviceTemplate function
-# End of script
-#------------------------------------------------------------------
-# This script is part of the WhatsUpGoldPS PowerShell module.
-# It is designed to interact with the WhatsUp Gold API for network monitoring.
-# The script is provided as-is and is not officially supported by WhatsUp Gold.
-# Use at your own risk.
-#------------------------------------------------------------------
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxQUTZGx5aN4s/
-# 9JBT3SLJI5kq6ngKI6TuEctDITWkDKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaGx5O8cQrFX4R
+# xBgZT9zB+R4I5DyyK8aGPNpr673Y+KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -162,17 +178,17 @@ function Set-WUGDeviceTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgKtF29n87wqb9SCeNlfzoSK1OpqWBe1d9
-# BH+bflmI0GQwDQYJKoZIhvcNAQEBBQAEggIAN7GvxRhoJsuEZryiZ9WHRGHtzbcb
-# GRq1g8MX6T1Ss3mUcZlciTlr19DYajmFDrViiT34XNK+lCroveu8CG/dDF2B0zhh
-# 6UjlS+Bchpe/svdy0zyAKho2cbYsejhcsRZ1e7bFJz24cFY0rJjvojG5Yz2oKgwk
-# BGcOQEb1mzs738Z4RXUUYCYJ+SJFvNJOYB9WImndUYFr9uWabsDWfpiqkndctaPt
-# 2tL3sQF7ao8M4McARSwp0Dx3W9R7GC3wKcam/ctVJ8J9Jv23rgRKCT72Sc9XKA4U
-# TadFcYuFmEEPHlban6719ifWMrhPDUR53aH9M78VtfOJu/tQ5zUU9iWuZbPLYPtb
-# M2mgKC+r4InS3I8J8vIu92fEHMSHSlAoYwgQVG3xLruBCWl0zQbqsT4ctIjvL6Xq
-# /eDoLRtOArwxhvjIRz1KIl+V7dtgzMC/UGBrsn2Da/lmxAWZV9pAsVQhPA78syLN
-# pvd2F/27/kXg/fLoP7GBwQneaTPzxDbDQ9Grn96kRJ9u+YUH0gWxvOKE2/ROMkv8
-# u2TSC5ncl/3iZWloIjaiNROqmnJjoSx+8BTWM+TWe4nhfak7L+rjft0Tqha/LjSk
-# wa+4YScDJ9EYPu+L3oXtih+7gjDxg6KUWMR0lPVNaqkMoYoyqxV+tPiIAxnMk36N
-# hNBCLFFmQNcs1Rk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgtSP2mwkch/D4JRHVD+sBBVm6fb67qiN/
+# rYLmP38yu/YwDQYJKoZIhvcNAQEBBQAEggIAcCPPyaPynnHvdUDHqm3m68EtWdYs
+# Flr2c4Ay3qsyMb8VFZ0bq52GpGAjZ/EQ43Xg1zgk526J/2v0rgoqTBa0gkjXdcfR
+# ke5UUMktTZ6io5zweAn3yYxSGaQ1FgCDER8/QGGb80pxe0xC9Fvq3ql6AkDwTcjN
+# TBqkEvqIrTDIkV9v5GYp3E7sfrcbpDU/bESfhytyNPAHiKohOzLPb1vJc8g6NTTr
+# Wp0kH74KjD7PAs1bwXbvTfHkvDVuyht14SIrH+NRxkosqj3iBQ52LcVq5KhrRcFz
+# orm8WU1Z3YipkE4dvC2e3HaBJm+jfhgTZr1pWgm4xxPqtIwRFwzB70TAwtbWoU/p
+# mf5At9owFs/yUufSX+dijIF2ZeX8TJQO2yc5P+d5ePw0o2gDa1K/BR1bD++CTDvK
+# MfKlzxvEaHT31TQ2dFl5OcIAHhvRIMV2jOBVO9qOqeto0g80CDSHb8DXtQwJHfxr
+# dePWblFYqlEJ6K4izzwHweB32ja7Rdu4iZK1jOL5M9b0mBk7HNh2iWrARFnbzEUB
+# O9jdBczUO5BftZzj/FmW7bnQuC2+ZjbeQSsoZ6foqx0LRpm+xEV5tIetQ+HTkDoT
+# zQXvv+H8ATwjZ81wRv3Jog9iHPPosd/liqsR7FLW7+zRbbKEfUqOntBJ8wd2oJAv
+# IKtZyFLOTER08Gk=
 # SIG # End signature block

@@ -85,6 +85,7 @@ function Get-WUGMonitorTemplate {
     [CmdletBinding(DefaultParameterSetName = 'Default')]
     param(
         [Parameter(ParameterSetName = 'Default')]
+        [Parameter(ParameterSetName = 'SupportedTypes')]
         [ValidateSet('all', 'active', 'performance', 'passive')]
         [string]$Type,
 
@@ -115,6 +116,9 @@ function Get-WUGMonitorTemplate {
 
         [Parameter(Mandatory = $true, ParameterSetName = 'SupportedTypes')]
         [switch]$SupportedTypes,
+
+        [Parameter(ParameterSetName = 'SupportedTypes')]
+        [switch]$IncludeCoreMonitorTypes,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'MonitorTemplate')]
         [switch]$MonitorTemplate,
@@ -153,7 +157,11 @@ function Get-WUGMonitorTemplate {
     process {
         # Handle SupportedTypes parameter set
         if ($PSCmdlet.ParameterSetName -eq 'SupportedTypes') {
-            $supportedUri = "$($global:WhatsUpServerBaseURI)/api/v1/monitors/-/config/supported-types"
+            $queryParams = @()
+            if ($Type) { $queryParams += "type=$Type" }
+            if ($IncludeCoreMonitorTypes) { $queryParams += "includeCoreMonitorTypes=true" }
+            $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+            $supportedUri = "$($global:WhatsUpServerBaseURI)/api/v1/monitors/-/config/supported-types${query}"
             Write-Verbose "Requesting supported types from URI: $supportedUri"
             try {
                 $result = Get-WUGAPIResponse -Uri $supportedUri -Method GET
@@ -271,14 +279,14 @@ function Get-WUGMonitorTemplate {
     end {
         Write-Debug "Get-WUGMonitorTemplate function completed."
         # Output the final data
-        Write-Output $finalOutput
+        return $finalOutput
     }
 }
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFV41xBgkyLrdq
-# DZ6IQVaR2DALuHtO9USLtOAIb7pPKaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeyJSbodvObtxO
+# SPEHOTpPN8ciGDgXkLlvGAzS4kNHlaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -378,17 +386,17 @@ function Get-WUGMonitorTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgpInKDJYfzFdV8YKNbb/GDVTQjuTh0lpH
-# LsiVDA5I6ZEwDQYJKoZIhvcNAQEBBQAEggIAnFqZRQyqgCMbadDahNU9loHVHBQY
-# BGIc/kCdFgtTXyiDfVYYz7qIVrqNTSCXnGthVbzVeJCE2mgWttGkTB5b8Kig8nU0
-# wkHSqQexLlNUQrcbJLrocb8DvnKMYugu170QFDm5v/bldNzB2MufuOkwlL+ZQLmj
-# eGpSGsPkoWoG2/NtCLTyJDEmF/hAYrcQOGrT95cnjj/2WY/JYg0OgK14PJTNOpbc
-# IKdOLfxQTHJtB9X59jECbc8ygITywNklgxa+wYJ7DtvaHRjmres5p2ZdqRVd9xQ4
-# VVlrrZPvrHX68DqSgg5bW/Pqm9XjtxnA8+HA7Y0BykgLJWC7pIruHmWonP/06fqP
-# dnc8pxm0gI/EP9fgkWpa60aPrwfWkgRi3EanV38ZqppW/ZkOBd7bq3sVXfGfFI2r
-# AC84AVkeaVib7lSvUTZtkuCudDRo/4Dm5Rwkku+fGd/w27MXfm+ZGXz1jB+V78Uf
-# A++cRtbvcIXbkMcp/Yic29T8cf5VWnjet/b7S2YCRO0n/wYvh5MAkIbmrDXC9H6Y
-# G2BvJX/J05xW6ZFmOU6/aeFc0KKlNfXt1T/BlCWl89mmjKDYZT+U6prPg4iESe7m
-# D2pCaM8/JKPjep9ZzhnWaludG0WVXwh70Eu8GmuAZSYmwXDrQrzeSCQhakRebeim
-# /cR2dq0McupVpYU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg9wmukDqA/xKy6wlCnQdQk50MRTbTfJ4d
+# abcuJaIW3+gwDQYJKoZIhvcNAQEBBQAEggIASn2ZqsSJ+tilGMmrMBQ+gEVxGKvD
+# 1dKeKTqWOSyoWzEgo7C4Ru+L2Gsp591z7+ZV1Mj5DO/YFt0CvwufrMv/h67OGtvX
+# DgUM4q41vzE8s/dUrRkg/5yL1N0LqKTc4ELhM3y4ZetSAduYyxwMg9FoWgkMbceK
+# iNsibVxyAhQ8t5tGy8I7axJZKPPQ8bom/ab4j5aSMY21MFOnXuYG7COFNXeAcOcL
+# /rrpGRZD162Xhga6nakFw+4EC+dyVAe+jSmfI8f0MacUkUhRzHPNv8SW+QFnAxUn
+# TYs268sG3vX0a2bAUWXjgbZu7pRHlIqqwcLdl9Qce3MIN+pWS0bjX4kDjSdOtwxt
+# y9jwbXo5+VSFVjv+Q3BiDji1golbg4xVMDt/cbNYIvUxORePqf6JTRrlfVET3cK0
+# AdpI4PQekCtDcOxScif/PFnys1H2SnuAjk+ElF4QeiUbYCqddjtKRFoPSjyXp7rd
+# WG+dROKWFZ9qZF+kCwy+zngzWFygeEHNRjLpYSw9ClM5itpqps3F1em7sMBVYYHt
+# Zy45mwmFZC/gjgtPQswko+Su/Toz/5rYeEGsrwy3zq0cu+KCeiydIb/FqUWufd7n
+# S6VHfDvACJR6j+bKsKQ3iJBUFxtjha8tLANU4vDu1vCsyvel+IS2+zYJhvNlWOif
+# VroXknEyhumKaWk=
 # SIG # End signature block

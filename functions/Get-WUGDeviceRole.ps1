@@ -1,59 +1,18 @@
 <#
 .SYNOPSIS
-Retrieves device role information from WhatsUp Gold.
+Retrieves the roles assigned to a specific device in WhatsUp Gold.
 
 .DESCRIPTION
-The Get-WUGDeviceRole function retrieves device role data from WhatsUp Gold using the REST API.
-It supports multiple operations via parameter sets:
-- Retrieve a specific role by ID
-- List all device roles with filtering
-- Get role assignments for a specific role or all roles
-- Get role templates
-- Get percent variables
-- Get roles assigned to a specific device
+The Get-WUGDeviceRole function retrieves role assignments for a specific device.
+For browsing the role library (list roles, assignments, templates, percent variables),
+use Get-WUGRole instead.
 
 .PARAMETER DeviceId
-The ID of the device to retrieve role assignments for. Used with the DeviceRoles parameter set.
+The ID of the device to retrieve role assignments for.
 Queries GET /api/v1/devices/{deviceId}/roles/-.
 
-.PARAMETER DeviceRoles
-Switch to retrieve roles assigned to a specific device.
-
-.PARAMETER DeviceRoleKind
-Filter device role assignments by kind. Valid values: all, role, brand, os, subRole.
-
-.PARAMETER RoleId
-The ID of the device role. Used with ByRoleId, Assignments, and Template parameter sets.
-
-.PARAMETER View
-Amount of role data to retrieve. Valid values: id, simple, basic, summary. Default: simple.
-
 .PARAMETER Kind
-Return roles of the specified kind. Valid values vary by parameter set.
-
-.PARAMETER Source
-Filter roles by source (e.g., system, systemModified, userDefined).
-
-.PARAMETER Filter
-Optional case-insensitive filter on role name and alternate names.
-
-.PARAMETER Search
-Optional case-insensitive search text.
-
-.PARAMETER DeviceView
-Type of device information to be returned for assignments.
-
-.PARAMETER DeviceFilter
-Optional case-insensitive filter on device address, display and hostnames.
-
-.PARAMETER IncludeUnassignedRoles
-When true, all roles matching the filter are returned even if they have no assignments.
-
-.PARAMETER Options
-Type of template to be created. Valid values: all, clone, transfer, update. Default: transfer.
-
-.PARAMETER Choice
-Type of percent variables requested. Valid values: discoveryDevice, discoverySession, monitoredDevice, discoveredNetwork, device.
+Filter device role assignments by kind. Valid values: all, role, brand, os, subRole.
 
 .PARAMETER PageId
 Page to return for paged results.
@@ -61,346 +20,52 @@ Page to return for paged results.
 .PARAMETER Limit
 Number of items per page.
 
-.PARAMETER AssignmentKind
-Kind filter for the AllAssignments parameter set. Valid values: all, role, brand, os, subRole.
-
-.PARAMETER TemplateKind
-Kind filter for the AllTemplates parameter set. Valid values: any, role, brand, os, subRole, monitor, interfaceFilter, deviceFilter, monitorCriteria.
-
-.PARAMETER Assignments
-Switch to retrieve role assignments for the specified RoleId.
-
-.PARAMETER AllAssignments
-Switch to retrieve all role assignments across all roles.
-
-.PARAMETER Template
-Switch to retrieve a role template for the specified RoleId.
-
-.PARAMETER AllTemplates
-Switch to retrieve all role templates.
-
-.PARAMETER PercentVariables
-Switch to retrieve percent variables for a given choice.
+.EXAMPLE
+Get-WUGDeviceRole -DeviceId "123"
 
 .EXAMPLE
-Get-WUGDeviceRole -RoleId "abc-123"
-
-.EXAMPLE
-Get-WUGDeviceRole -Kind role -View summary
-
-.EXAMPLE
-Get-WUGDeviceRole -Assignments -RoleId "abc-123" -DeviceView basic
-
-.EXAMPLE
-Get-WUGDeviceRole -AllAssignments -Kind role -DeviceView card
-
-.EXAMPLE
-Get-WUGDeviceRole -Template -RoleId "abc-123" -Options transfer
-
-.EXAMPLE
-Get-WUGDeviceRole -AllTemplates -Kind role -Options all
-
-.EXAMPLE
-Get-WUGDeviceRole -PercentVariables -Choice monitoredDevice
-
-.EXAMPLE
-Get-WUGDeviceRole -DeviceRoles -DeviceId "123"
-
-.EXAMPLE
-Get-WUGDeviceRole -DeviceRoles -DeviceId "123" -DeviceRoleKind brand
+Get-WUGDeviceRole -DeviceId "123" -Kind brand
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/DeviceRole
 #>
 function Get-WUGDeviceRole {
-    [CmdletBinding(DefaultParameterSetName = 'ListRoles')]
+    [CmdletBinding()]
     param(
-        # ByRoleId
-        [Parameter(Mandatory = $true, ParameterSetName = 'ByRoleId', Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-        [Parameter(Mandatory = $true, ParameterSetName = 'Assignments')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'Template')]
-        [Alias('id')]
-        [string[]]$RoleId,
-
-        # View for ByRoleId and ListRoles
-        [Parameter(ParameterSetName = 'ByRoleId')]
-        [Parameter(ParameterSetName = 'ListRoles')]
-        [ValidateSet('id', 'simple', 'basic', 'summary')]
-        [string]$View = 'simple',
-
-        # Kind for ListRoles and AllAssignments and AllTemplates
-        [Parameter(ParameterSetName = 'ListRoles')]
-        [ValidateSet('any', 'role', 'brand', 'os', 'subRole', 'monitor', 'interfaceFilter', 'deviceFilter', 'monitorCriteria')]
-        [string]$Kind,
-
-        [Parameter(ParameterSetName = 'AllAssignments')]
-        [ValidateSet('all', 'role', 'brand', 'os', 'subRole')]
-        [string]$AssignmentKind,
-
-        [Parameter(ParameterSetName = 'AllTemplates')]
-        [ValidateSet('any', 'role', 'brand', 'os', 'subRole', 'monitor', 'interfaceFilter', 'deviceFilter', 'monitorCriteria')]
-        [string]$TemplateKind,
-
-        # Source for ListRoles and AllTemplates
-        [Parameter(ParameterSetName = 'ListRoles')]
-        [Parameter(ParameterSetName = 'AllTemplates')]
-        [string]$Source,
-
-        # Filter
-        [Parameter(ParameterSetName = 'ListRoles')]
-        [Parameter(ParameterSetName = 'Assignments')]
-        [Parameter(ParameterSetName = 'AllAssignments')]
-        [Parameter(ParameterSetName = 'AllTemplates')]
-        [string]$Filter,
-
-        # Search
-        [Parameter(ParameterSetName = 'ListRoles')]
-        [Parameter(ParameterSetName = 'AllTemplates')]
-        [string]$Search,
-
-        # Switches for parameter sets
-        [Parameter(Mandatory = $true, ParameterSetName = 'Assignments')]
-        [switch]$Assignments,
-
-        [Parameter(Mandatory = $true, ParameterSetName = 'AllAssignments')]
-        [switch]$AllAssignments,
-
-        [Parameter(Mandatory = $true, ParameterSetName = 'Template')]
-        [switch]$Template,
-
-        [Parameter(Mandatory = $true, ParameterSetName = 'AllTemplates')]
-        [switch]$AllTemplates,
-
-        [Parameter(Mandatory = $true, ParameterSetName = 'PercentVariables')]
-        [switch]$PercentVariables,
-
-        [Parameter(Mandatory = $true, ParameterSetName = 'DeviceRoles')]
-        [switch]$DeviceRoles,
-
-        [Parameter(Mandatory = $true, ParameterSetName = 'DeviceRoles', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [string[]]$DeviceId,
 
-        [Parameter(ParameterSetName = 'DeviceRoles')]
         [ValidateSet('all', 'role', 'brand', 'os', 'subRole')]
-        [string]$DeviceRoleKind,
+        [string]$Kind,
 
-        # DeviceView for Assignments and AllAssignments
-        [Parameter(ParameterSetName = 'Assignments')]
-        [Parameter(ParameterSetName = 'AllAssignments')]
-        [ValidateSet('id', 'basic', 'card', 'overview')]
-        [string]$DeviceView,
-
-        # DeviceFilter for Assignments and AllAssignments
-        [Parameter(ParameterSetName = 'Assignments')]
-        [Parameter(ParameterSetName = 'AllAssignments')]
-        [string]$DeviceFilter,
-
-        # IncludeUnassignedRoles for AllAssignments
-        [Parameter(ParameterSetName = 'AllAssignments')]
-        [bool]$IncludeUnassignedRoles,
-
-        # Options for Template and AllTemplates
-        [Parameter(ParameterSetName = 'Template')]
-        [Parameter(ParameterSetName = 'AllTemplates')]
-        [ValidateSet('all', 'clone', 'transfer', 'update')]
-        [string]$Options,
-
-        # Choice for PercentVariables
-        [Parameter(ParameterSetName = 'PercentVariables')]
-        [ValidateSet('discoveryDevice', 'discoverySession', 'monitoredDevice', 'discoveredNetwork', 'device')]
-        [string]$Choice,
-
-        # Paging
-        [Parameter(ParameterSetName = 'ListRoles')]
-        [Parameter(ParameterSetName = 'Assignments')]
-        [Parameter(ParameterSetName = 'AllAssignments')]
-        [Parameter(ParameterSetName = 'AllTemplates')]
-        [Parameter(ParameterSetName = 'DeviceRoles')]
         [string]$PageId,
 
-        [Parameter(ParameterSetName = 'ListRoles')]
-        [Parameter(ParameterSetName = 'Assignments')]
-        [Parameter(ParameterSetName = 'AllAssignments')]
-        [Parameter(ParameterSetName = 'AllTemplates')]
-        [Parameter(ParameterSetName = 'DeviceRoles')]
         [int]$Limit
     )
 
     begin {
-        Write-Debug "Starting Get-WUGDeviceRole function. ParameterSet: $($PSCmdlet.ParameterSetName)"
-        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-role"
+        Write-Debug "Starting Get-WUGDeviceRole function."
         $finalOutput = @()
     }
 
     process {
-        switch ($PSCmdlet.ParameterSetName) {
+        foreach ($did in $DeviceId) {
+            $queryParams = @()
+            if ($Kind) { $queryParams += "kind=$Kind" }
+            if ($PSBoundParameters.ContainsKey('Limit')) { $queryParams += "limit=$Limit" }
+            if ($PageId) { $queryParams += "pageId=$([uri]::EscapeDataString($PageId))" }
 
-            'ByRoleId' {
-                foreach ($rid in $RoleId) {
-                    $queryParams = @()
-                    if ($View) { $queryParams += "view=$View" }
-                    $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                    $uri = "${baseUri}/${rid}${query}"
+            $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+            $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${did}/roles/-${query}"
 
-                    Write-Debug "Fetching role from URI: $uri"
-                    try {
-                        $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                        if ($result.data) { $finalOutput += $result.data }
-                    }
-                    catch {
-                        Write-Error "Error fetching role ${rid}: $_"
-                    }
-                }
+            Write-Debug "Fetching device roles from URI: $uri"
+            try {
+                $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                if ($result.data) { $finalOutput += $result.data }
             }
-
-            'ListRoles' {
-                $queryParams = @()
-                if ($View) { $queryParams += "view=$View" }
-                if ($Kind) { $queryParams += "kind=$Kind" }
-                if ($Source) { $queryParams += "source=$([uri]::EscapeDataString($Source))" }
-                if ($Filter) { $queryParams += "filter=$([uri]::EscapeDataString($Filter))" }
-                if ($Search) { $queryParams += "search=$([uri]::EscapeDataString($Search))" }
-                if ($PSBoundParameters.ContainsKey('Limit')) { $queryParams += "limit=$Limit" }
-                if ($PageId) { $queryParams += "pageId=$([uri]::EscapeDataString($PageId))" }
-
-                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                $uri = "${baseUri}/-${query}"
-
-                Write-Debug "Listing roles from URI: $uri"
-                try {
-                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                    if ($result.data) { $finalOutput += $result.data }
-                }
-                catch {
-                    Write-Error "Error listing device roles: $_"
-                }
-            }
-
-            'Assignments' {
-                foreach ($rid in $RoleId) {
-                    $queryParams = @()
-                    if ($Filter) { $queryParams += "filter=$([uri]::EscapeDataString($Filter))" }
-                    if ($DeviceView) { $queryParams += "deviceView=$DeviceView" }
-                    if ($DeviceFilter) { $queryParams += "deviceFilter=$([uri]::EscapeDataString($DeviceFilter))" }
-                    if ($PSBoundParameters.ContainsKey('Limit')) { $queryParams += "limit=$Limit" }
-                    if ($PageId) { $queryParams += "pageId=$([uri]::EscapeDataString($PageId))" }
-
-                    $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                    $uri = "${baseUri}/${rid}/assignments/-${query}"
-
-                    Write-Debug "Fetching assignments from URI: $uri"
-                    try {
-                        $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                        if ($result.data) { $finalOutput += $result.data }
-                    }
-                    catch {
-                        Write-Error "Error fetching assignments for role ${rid}: $_"
-                    }
-                }
-            }
-
-            'AllAssignments' {
-                $queryParams = @()
-                if ($AssignmentKind) { $queryParams += "kind=$AssignmentKind" }
-                if ($Filter) { $queryParams += "filter=$([uri]::EscapeDataString($Filter))" }
-                if ($PSBoundParameters.ContainsKey('IncludeUnassignedRoles')) { $queryParams += "includeUnassignedRoles=$($IncludeUnassignedRoles.ToString().ToLower())" }
-                if ($DeviceView) { $queryParams += "deviceView=$DeviceView" }
-                if ($DeviceFilter) { $queryParams += "deviceFilter=$([uri]::EscapeDataString($DeviceFilter))" }
-                if ($PSBoundParameters.ContainsKey('Limit')) { $queryParams += "limit=$Limit" }
-                if ($PageId) { $queryParams += "pageId=$([uri]::EscapeDataString($PageId))" }
-
-                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                $uri = "${baseUri}/-/assignments/-${query}"
-
-                Write-Debug "Fetching all assignments from URI: $uri"
-                try {
-                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                    if ($result.data) { $finalOutput += $result.data }
-                }
-                catch {
-                    Write-Error "Error fetching all role assignments: $_"
-                }
-            }
-
-            'Template' {
-                foreach ($rid in $RoleId) {
-                    $queryParams = @()
-                    if ($Options) { $queryParams += "options=$Options" }
-
-                    $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                    $uri = "${baseUri}/${rid}/config/template${query}"
-
-                    Write-Debug "Fetching template from URI: $uri"
-                    try {
-                        $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                        if ($result.data) { $finalOutput += $result.data }
-                    }
-                    catch {
-                        Write-Error "Error fetching template for role ${rid}: $_"
-                    }
-                }
-            }
-
-            'AllTemplates' {
-                $queryParams = @()
-                if ($Options) { $queryParams += "options=$Options" }
-                if ($TemplateKind) { $queryParams += "kind=$TemplateKind" }
-                if ($Source) { $queryParams += "source=$([uri]::EscapeDataString($Source))" }
-                if ($Filter) { $queryParams += "filter=$([uri]::EscapeDataString($Filter))" }
-                if ($Search) { $queryParams += "search=$([uri]::EscapeDataString($Search))" }
-                if ($PSBoundParameters.ContainsKey('Limit')) { $queryParams += "limit=$Limit" }
-                if ($PageId) { $queryParams += "pageId=$([uri]::EscapeDataString($PageId))" }
-
-                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                $uri = "${baseUri}/-/config/template${query}"
-
-                Write-Debug "Fetching all templates from URI: $uri"
-                try {
-                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                    if ($result.data) { $finalOutput += $result.data }
-                }
-                catch {
-                    Write-Error "Error fetching device role templates: $_"
-                }
-            }
-
-            'PercentVariables' {
-                $queryParams = @()
-                if ($Choice) { $queryParams += "choice=$Choice" }
-
-                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                $uri = "${baseUri}/-/percentVariables${query}"
-
-                Write-Debug "Fetching percent variables from URI: $uri"
-                try {
-                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                    if ($result.data) { $finalOutput += $result.data }
-                }
-                catch {
-                    Write-Error "Error fetching percent variables: $_"
-                }
-            }
-
-            'DeviceRoles' {
-                foreach ($did in $DeviceId) {
-                    $queryParams = @()
-                    if ($DeviceRoleKind) { $queryParams += "kind=$DeviceRoleKind" }
-                    if ($PSBoundParameters.ContainsKey('Limit')) { $queryParams += "limit=$Limit" }
-                    if ($PageId) { $queryParams += "pageId=$([uri]::EscapeDataString($PageId))" }
-
-                    $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                    $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${did}/roles/-${query}"
-
-                    Write-Debug "Fetching device roles from URI: $uri"
-                    try {
-                        $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                        if ($result.data) { $finalOutput += $result.data }
-                    }
-                    catch {
-                        Write-Error "Error fetching roles for device ${did}: $_"
-                    }
-                }
+            catch {
+                Write-Error "Error fetching roles for device ${did}: $_"
             }
         }
     }
@@ -414,8 +79,8 @@ function Get-WUGDeviceRole {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC65cfSl8y2nkI1
-# oYAB3MQdpDsgzrLsvB5FjamQW3rhtKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBh3PQu/MGPoJoW
+# O/+ZK8j6/+EV1VJ/CC9e/JvNr4zDz6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -515,17 +180,17 @@ function Get-WUGDeviceRole {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQguMg6PEUpi5gPg4zBKkM/7APSHw9alWQ+
-# l7jyhxzKUvQwDQYJKoZIhvcNAQEBBQAEggIAKQ50exgq31aMl4M0mxpZvB1eaQ/5
-# OgsiL+6CjJaP/8o2+/SDb97rQM4whgaEu16VnlaMi84mjyIusHUpOtt9VKwxGCg6
-# U6OKpr0/ny8HoKlJ3lRpGkdJ6sbNaVzrMY903jLaLGQUtwwj45bpCIFoQFY+6w7B
-# dTLL3FsBl6x9PhGAYko4AxN0LUVx9+yCforASeVDgXfp9nlGLlTXRSmmv2xH4Nup
-# PzzsALajG4xJN0TWPqa7dp01GE6IXhh1279N7Y7fpL3VE+OLPAPN5P6sT8LuTSLC
-# TDRzFWJhsSQcvD/dU25WvC7Ua1WtqW1gzeOUrrPqP3+F3yXdxMtJ7Ec3TA3i+DaH
-# PMzWixc6Rln+1qwu7bxTKBnK09SKtv0NAqdOZ26JDlIrZmLUFOA96t7TWqs2nIWB
-# iiiy5xjdt/M6BD6MJhcLAi9WGs2pnjQ/dr0cg4pm/X2prIdQDWPWFrwaHTrJ7KYR
-# shuvr3liW8iYe3TKLbxsyhiLZOykhwZnCCgSlVdL25Ivdccw/SFNB6c5bYTUIJVA
-# RLBk3u6g3ow/dFVxN5wcHF0ixGNjLuYoAnpc9qyn76TyNksB6Vdfh8O/zUIIyvdI
-# LFl063lcxGFLClnOJJHYljt2KuK3ZUNTbmPXmdY2BKrfgfVNbLQB554B5XOXoArm
-# 8aQjOoj6xdRWBjI=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQggmbh2w6AS/qNzUFLCMz8i6hkgAeJV8Xh
+# C78MfW3g99wwDQYJKoZIhvcNAQEBBQAEggIAy7LEw9hiv6y27IcVGuvjTtpDdMY2
+# OAF9D4/RRZ7iwFU14O6UtZcfUm0YOzUm9nsEBrCxOfqF7HHDohhSohNFDjtI5Gq+
+# EXHWs4CwzlJuhlNggd3dJ+Z0pH0w+mdKWqHmQEiMZQMAQnAINbwwL4RKgCun2skJ
+# eQFNlQ+VrDyc2rSuuwJGP76qAmPruDkxb9nMt9yk6pdL6/0gXcPNdaMkauSjGGzR
+# Op9Z5RCQ6qNvDlemi8ay2sZTHrAD0YLTmIxgB1Qi4MkyrZGdOoxxSEwwxZONKAhL
+# MhoOE1UmCyR4gc5gG0C+9raTH70VWwiWO2r5Z03jxryWVb2tkVR8Yk7vjAzv/qG8
+# iEGD0yFUWZV9qqpksOi27By6FaUDUfuGRQRcubC2iKovkm/uWt4NIouu/wdKYHOX
+# xO48dhiYeksWigNMaN5qZFdvYENWa0oPP+HUTrnZcVOFUJGQDHsPws2xp+QUjN//
+# ev2WsD02ru4oEqR+ptjCdf5kybmPgrGwh5cJTl8wpoy07nL2lr10w4aKfSvk/jHa
+# 4C7CafqMsTifhBAfINCxLc4u9Ox+rEgxvhLG8Ik2hR6qvZTMi1obUqhLTiH4iqJs
+# KYnT/VfkqwxVmfW8PS75XIQOxVPHphB0QySkRVCUXxCU5dE65Fl5nHhSH1xIHdlq
+# KFr/O73h6SbBNWc=
 # SIG # End signature block

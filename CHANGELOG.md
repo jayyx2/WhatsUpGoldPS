@@ -1,135 +1,124 @@
 # WhatsUpGoldPS Release History
-## 0.1.19 - 2026-03-09 [not going to PSGallery release yet, need more testing]
-* Changed
-  * Added SNMP Table property bags to Add-WUGActiveMonitor for /api/v1/monitors endpoints
-  * Updated all signatures with new certificate
-  * Reorganized helpers/ into subdirectories: reports/, vmware/, proxmox/
-  * Moved examples/Custom_report.ps1, examples/Bootstrap-Table-Sample.html → helpers/reports/
-  * Moved examples/Rename_and_update_devices_based_on_vCenter_data.ps1 → helpers/vmware/
-  * Moved helpers/ConvertTo-BootstrapTable.ps1, helpers/ConvertTo-HTMLTemplate.ps1 → helpers/reports/
-  * Fixed malformed comment-based help block in Add-WUGDeviceTemplates (corrected EXAMPLES → .EXAMPLE, moved Author into .NOTES)
-  * Removed ghost exports `Add-WUGDevices`, `ConvertTo-BootstrapTable`, `Convert-HTMLTemplate` from psd1 FunctionsToExport and psm1 Export-ModuleMember
-  * Usability: Get-WUGDeviceGroupReport now defaults GroupId to -2 (All Devices) when not specified
-  * Usability: Get-WUGDeviceReport now defaults to all devices via Get-WUGDevice when DeviceId is not specified
-  * Usability: Get-WUGDeviceAttribute DeviceId no longer mandatory; auto-fetches all device IDs when omitted
-  * Usability: Get-WUGDeviceProperties DeviceId no longer mandatory; auto-fetches all device IDs when omitted
-  * Usability: Get-WUGDeviceTemplate DeviceId no longer mandatory; auto-fetches all device IDs when omitted
-  * Usability: Get-WUGDeviceMaintenanceSchedule DeviceId no longer mandatory; auto-fetches all device IDs when omitted
-  * Usability: All 12 Get-WUGDeviceGroupReportXXXX variants now default GroupId to -2 (All Devices) when not specified
-  * Usability: All 11 Get-WUGDeviceReportXXXX variants DeviceId no longer mandatory; auto-fetches all device IDs when omitted
-  * Restructured Get-WUGDeviceReportMemory from process-block iteration to collect-then-iterate pattern (consistent with other report variants)
-  * Added `SupportsShouldProcess` and `ShouldProcess` gates to all state-modifying functions for `-WhatIf` and `-Confirm` support
-  * Module now exports 77 functions
+## 0.1.19 - 2026-03-15 [not going to PSGallery release yet, need more testing]
+* Added — New Functions (85 total exports; psm1 and psd1 in sync)
+  * `Get-WUGRole` — Browse the device role library: by ID, list all, assignments, templates, percent variables (`/device-role/` endpoints)
+  * `Set-WUGRole` — Manage the device role library: delete, enable, disable, restore roles; apply templates via PATCH
+  * `Import-WUGRoleTemplate` — Import and verify device role packages (`POST /device-role/-/config/import[/verify]`)
+  * `Export-WUGRoleTemplate` — Export device role packages and inventory (`POST /device-role/-/config/export[/content]`) *(disabled — API returns 400; not exported until upstream fix)*
+  * `Import-WUGMonitorTemplate` — Import monitor templates via `PATCH /monitors/-/config/template` with `-Options` (all/clone/transfer/update)
+  * `Get-WUGProduct` — Product info + API version (`/api/v1/product`, `/api/v1/product/api`)
+  * `Get-WUGDeviceScan` — Device scan endpoints (`/api/v1/device-scan`)
+  * `Get-WUGDeviceRole` — Device-level role assignment (`GET /devices/{id}/roles/-`)
+  * `Set-WUGDeviceRole` — Device/group role assignment (set kind, assign, remove, batch, group)
+  * `Get-WUGDeviceReport -ReportType` — Umbrella parameter for all `/devices/{id}/reports/` endpoints
+  * `Get-WUGDeviceGroupReport -ReportType` — Umbrella parameter for all `/device-groups/{id}/reports/` endpoints
+  * `Add-WUGPerformanceMonitor` — Create + assign performance monitors (9 types: RestApi, PowerShell, WmiRaw, WmiFormatted, WindowsPerformanceCounter, Ssh, Snmp, AzureMetrics, CloudWatch)
+  * `Add-WUGPerformanceMonitorToDevice` — Assign existing performance monitor templates to devices (bulk support)
+  * `Add-WUGPassiveMonitor` — Create passive monitors (SnmpTrap with full property bags, Syslog, WinEvent)
+  * `Add-WUGPassiveMonitorToDevice` — Assign existing passive monitors to devices (bulk support)
+  * `Get-WUGCredential` — Retrieve credentials, templates, assignments, helpers (`/credentials/` endpoints)
+  * `Add-WUGCredential` — Create new credentials (`POST /credentials`)
+  * `Set-WUGCredential` — Update credentials, apply templates, bulk unassign (`PUT/PATCH/DELETE /credentials/`)
+  * `Get-WUGDeviceInterface` — Retrieve device network interfaces (`GET /devices/{id}/interfaces`)
+  * `Set-WUGDeviceInterface` — Update device interfaces; `-Batch` for bulk (`PUT/PATCH /devices/{id}/interfaces`)
+  * `Add-WUGDeviceInterface` — Add a network interface to a device (`POST /devices/{id}/interfaces/-`)
+  * `Remove-WUGDeviceInterface` — Remove one or all interfaces (`DELETE /devices/{id}/interfaces`)
+  * `Get-WUGDeviceStatus` — Retrieve device status (`GET /devices/{id}/status`)
+  * `Get-WUGDeviceCredential` — Retrieve device credential assignments (`GET /devices/{id}/credentials`)
+  * `Set-WUGDeviceCredential` — Update device credential assignments (`PUT /devices/{id}/credentials`)
+  * `Get-WUGDevicePollingConfig` — Retrieve device polling config (`GET /devices/{id}/config/polling`)
+  * `Set-WUGDevicePollingConfig` — Update polling config; `-Batch` for cross-device bulk (`PUT/PATCH /devices/.../config/polling`)
+  * `Invoke-WUGDevicePollNow` — Trigger immediate poll: single, batch, and device group (`POST/PATCH/PUT /devices/.../poll-now`)
+  * `Get-WUGDeviceGroupMembership` — Retrieve device group membership (`GET /devices/{id}/group-membership`)
+  * `Set-WUGDeviceGroupMembership` — Assign/batch group membership (`PUT/PATCH /devices/{id}/group-membership`)
+  * `Set-WUGDeviceGroup` — Update device group properties, refresh, poll-now (`PUT/PATCH /device-groups/{id}`)
+  * `Add-WUGDeviceGroup` — Create a child device group (`POST /device-groups/{id}/child`)
+  * `Remove-WUGDeviceGroup` — Delete a device group (`DELETE /device-groups/{id}`)
+  * `Add-WUGDeviceGroupMember` — Add devices to a device group (`POST /device-groups/{id}/devices/-`)
+  * `Remove-WUGDeviceGroupMember` — Remove one/all devices from a group; supports device-side removal
+  * `Remove-WUGDeviceAttribute` — Remove one or all custom attributes (`DELETE /devices/{id}/attributes`)
+  * `Remove-WUGDeviceMonitor` — Remove a monitor assignment; `-All` to remove all (`DELETE /devices/{id}/monitors/`)
+  * `Set-WUGMonitorTemplate` — Apply/import monitor templates, batch library ops, remove all assignments (`PATCH/DELETE /monitors/-/`)
+  * `SupportsShouldProcess` / `ShouldProcess` gates on all state-modifying functions for `-WhatIf` and `-Confirm` support
+  * `Remove-WUGDevice` now accepts `[string[]]` DeviceId with pipeline support
+
+* Added — Helpers
+  * helpers/templates/ — Community device role template importer from progress/WhatsUp-Gold-Device-Templates GitHub repo
+  * helpers/vmware/ — VMware vSphere discovery/sync + dashboard (Get-VsphereDashboard, Export-VsphereDashboardHtml)
+  * helpers/proxmox/ — Proxmox VE discovery/sync + dashboard (Get-ProxmoxDashboard, Export-ProxmoxDashboardHtml)
+  * helpers/hyperv/ — Hyper-V discovery/sync + dashboard (Get-HypervDashboard, Export-HypervDashboardHtml)
+  * helpers/nutanix/ — Nutanix Prism discovery/sync + dashboard (Get-NutanixDashboard, Export-NutanixDashboardHtml)
+  * helpers/azure/ — Azure discovery/sync + dashboard (Get-AzureDashboard, Export-AzureDashboardHtml)
+  * helpers/aws/ — AWS discovery/sync + dashboard (Get-AWSDashboard, Export-AWSDashboardHtml)
+  * helpers/gcp/ — GCP discovery/sync + dashboard (Get-GCPDashboard, Export-GCPDashboardHtml)
+  * helpers/oci/ — OCI discovery/sync + dashboard (Get-OCIDashboard, Export-OCIDashboardHtml)
+  * helpers/f5/ — F5 BIG-IP dashboard suite (Connect-F5Server, Get-F5VirtualServers/Stats, Get-F5Pools/Members/Stats, Get-F5Nodes, Get-F5Dashboard, Export-F5DashboardHtml)
+  * helpers/certificates/ — SSL/TLS certificate scanner + dashboard (Get-CertificateInfo, Get-CertificateDashboard, Export-CertificateDashboardHtml) with expiry countdown highlighting
+  * helpers/test/Invoke-WUGModuleTest.ps1 — End-to-end integration test harness for all exported cmdlets
+  * helpers/test/Invoke-WUGHelperTest.ps1 — End-to-end integration test harness for cloud/infra provider helpers
+
+* Changed — Existing Functions Enhanced
+  * Split former `Get-WUGDeviceRole` mega-function: role library queries moved to `Get-WUGRole`; `Get-WUGDeviceRole` now only handles `GET /devices/{id}/roles/-`
+  * Split former `Set-WUGDeviceRole` mega-function: library management moved to `Set-WUGRole`, import/export to `Import-WUGRoleTemplate` / `Export-WUGRoleTemplate`; `Set-WUGDeviceRole` now only handles device/group role assignments
+  * `Add-WUGActiveMonitor` — 11 new PropertyBag monitor types: Dns, FileContent, FileProperties, Folder, Ftp, HttpContent, NetworkStatistics, PingJitter, PowerShell, RestApi, Ssh; plus SNMP Table property bags. Sensible defaults; override via `-PropertyBag` hashtable. Added `-DnsRecordType` convenience parameter.
+  * `Add-WUGActiveMonitorToDevice` — Now supports `[string[]]` for both DeviceId and MonitorId for bulk assignment
+  * `Get-WUGActiveMonitor` — Added `-MonitorId` (GET /monitors/{id}), `-MonitorAssignments` (GET /monitors/{id}/assignments/-), `-AllMonitors` (deprecated API param), `-Limit`
+  * `Remove-WUGActiveMonitor` — Added `ById` (DELETE /monitors/{id}) and `RemoveAssignments` (DELETE /monitors/{id}/assignments/-) parameter sets; added `-Type` and `-FailIfInUse` query params
+  * `Set-WUGActiveMonitor` — Added `BatchDeviceMonitors` mode (PATCH /devices/{id}/monitors/-)
+  * `Get-WUGDeviceGroup` — Added `-Children`, `-GroupStatus`, `-GroupDevices`, `-GroupDeviceTemplates`, `-GroupDeviceCredentials`, `-Definition` parameter sets with full query params and pagination
+  * `Get-WUGDeviceGroupMembership` — Added `-IsMember` / `-TargetGroupId` for `GET /devices/{id}/group/{gid}/is-member`
+  * `Remove-WUGDeviceGroupMember` — Added `-FromDeviceId` / `-FromGroupId` for device-side removal
+  * `Get-WUGMonitorTemplate` — Added `-SupportedTypes`, `-MonitorTemplate`, `-AllMonitorTemplates` parameter sets
+  * `Get-WUGCredential` — Added `-CredentialTemplate`, `-AllCredentialTemplates`, `-Helpers`, `-AllAssignments` parameter sets; query params `-DeviceView`, `-Limit`, `-Key`, `-Type`, `-SearchValue`, `-Input` with pagination
+  * `Get-WUGDevice` — Added `-ReturnHierarchy` and `-State` to search query
+  * `Set-WUGDeviceAttribute` — Added `-Batch` parameter set (PATCH /devices/{id}/attributes/-)
+  * `Set-WUGDeviceGroup -Refresh` — Added `-RefreshOptions`, `-DropDataOlderThanHours`, `-RefreshLimit`, `-ImmediateChildren`, `-Search`, `-UpdateNamesForInterfaceActiveMonitor`
+  * `Set-WUGDeviceGroup -PollNow` — Added `-ImmediateChildren`, `-Search`, `-PollNowLimit`
+  * `Set-WUGDeviceMaintenance` — Auto-routes single-device calls to `PUT /devices/{id}/config/maintenance` instead of batch
+  * `Invoke-WUGDeviceRefresh` — Auto-routes single-device calls; added `-GroupId` for group refresh
+  * `Invoke-WUGDevicePollNow` — Added `-GroupId` for device group poll-now
+  * `Get-WUGProduct` — Added `/api/v1/product/api` endpoint (`apiVersion` property)
+  * Replaced all `Write-Host` calls with `Write-Verbose` (success), `Write-Warning` (skip/caution), or `Write-Debug` (diagnostic) — 34 replacements across 18 files
+  * Usability: `Get-WUGDeviceGroupReport` defaults GroupId to -2 (All Devices); all 12 report variants follow suit
+  * Usability: `Get-WUGDeviceReport` and all 11 report variants auto-fetch all device IDs when DeviceId omitted
+  * Usability: `Get-WUGDeviceAttribute`, `Get-WUGDeviceProperties`, `Get-WUGDeviceTemplate`, `Get-WUGDeviceMaintenanceSchedule` auto-fetch all devices when DeviceId omitted
+  * Restructured `Get-WUGDeviceReportMemory` to collect-then-iterate pattern
+  * Reorganized helpers/ into subdirectories: reports/, vmware/, proxmox/, etc.
+  * Removed ghost exports `Add-WUGDevices`, `ConvertTo-BootstrapTable`, `Convert-HTMLTemplate`
+  * Changed `Remove-WUGDevices -DeleteDiscoveredDevices` from `[bool]` to `[switch]`
 
 * Bugfixes
-  * Fixed Remove-WUGDevice using undefined `$id` variable instead of `$DeviceId` in output/warning/error messages
-  * Fixed Set-WUGActiveMonitor inverted boolean logic: `!$Enabled` and `!$UseInDiscovery` checks were only including API properties when values were falsy; replaced with `$PSBoundParameters.ContainsKey()` checks (4 locations)
-  * Fixed Set-WUGDeviceProperties duplicate API call after batch loop that overwrote accumulated `$finalresult` with only last batch's data
-  * Restored `AllMonitors` (deprecated API param) in Get-WUGActiveMonitor — added as a proper parameter with query string support
-  * Fixed stray backtick in Set-WUGDeviceMaintenance API call
-  * Fixed `$ReturnHierarchy` param declared but never appended to query string in all 12 Get-WUGDeviceGroupReport variants (Cpu, Disk, DiskSpaceFree, Interface, InterfaceDiscards, InterfaceErrors, InterfaceTraffic, Maintenance, Memory, PingAvailability, PingResponseTime, StateChange)
-  * Fixed Get-WUGDeviceGroupReportPingAvailability SortBy/GroupBy ValidateSet using memory report fields instead of ping availability fields
-  * Fixed Get-WUGDeviceGroupReportMaintenance query builder referencing `$ApplyThreshold`/`$OverThreshold`/`$ThresholdValue` not declared in param block (API does not support thresholds for maintenance) — removed ghost refs
-  * Fixed Get-WUGDeviceGroupReportStateChange and Get-WUGDeviceReportStateChange query builders referencing threshold params not in param block — added `$ApplyThreshold`, `$OverThreshold`, `$ThresholdValue` to param blocks
-  * Fixed Get-WUGDeviceReportInterfaceErrors `[bool]` types for `$ApplyThreshold`, `$OverThreshold`, `$RollupByDevice` (sends True/False not true/false) — changed to `[ValidateSet("true","false")][string]`; fixed `[int]$PageId` to `[string]$PageId`
-  * Fixed Get-WUGDeviceGroupReportDisk abbreviated GroupBy values (`mi`, `ma`, `av`) — replaced with full field names (`minUsed`, `maxUsed`, `avgUsed`, etc.)
-  * Fixed Get-WUGDeviceGroupReportMaintenance GroupBy ValidateSet starting with `defaultColumn` instead of `noGrouping`
-  * Fixed Get-WUGDeviceGroupReportPingResponseTime and Get-WUGDeviceReportPingResponseTime lowercase threshold param names (`$applyThreshold` etc.) — renamed to PascalCase (`$ApplyThreshold` etc.)
-  * Added missing `$Limit` parameter to Get-WUGActiveMonitor (API supports `limit` on templates, device assignments, and global assignments endpoints)
-  * Added missing `$ReturnHierarchy` and `$State` parameters to Get-WUGDevice search query (GET /device-groups/{groupId}/devices/- endpoint)
-  * Fixed Set-WUGDeviceProperties boolean params (`$isWireless`, `$collectWireless`, `$keepDetailsCurrent`) using `if ($var)` which fails when setting to `$false` — replaced with `$PSBoundParameters.ContainsKey()` (both single and batch code paths)
-  * Fixed Add-WUGDeviceTemplates request body using hardcoded `@("all")` instead of the `$options` variable built from switch parameters (`ApplyL2`, `Update`, `UpdateInterfaceState`, `UpdateInterfaceNames`, `UpdateActiveMonitors`)
-  * Fixed Disconnect-WUGServer `Write-Information` referencing `$global:WhatsUpServerBaseURI` after it was already set to `$null` — moved message before clearing globals, changed wording to "Disconnecting from"
-  * Fixed Invoke-WUGDeviceRefresh `DropDataOlderThanHours` always being sent in the request body — `[int]` defaults to 0 which is `-ne $null`; replaced with `$PSBoundParameters.ContainsKey()` check
-  * Fixed stray `#>` comment terminator after help block in Get-WUGDeviceMaintenanceSchedule
-  * Fixed `!$null -eq $queryString` null-check logic in 13 report functions — expression parsed as `(!$null) -eq $queryString` (always `$true` for non-empty strings by accident); corrected to `$null -ne $queryString`
-  * Changed Remove-WUGDevices `$DeleteDiscoveredDevices` from `[bool]` to `[switch]` for idiomatic PowerShell usage
-
-* Enhancements
-  * Remove-WUGDevice now accepts an array of DeviceIds (`[string[]]`) with pipeline support, loops through each device individually via DELETE endpoint
-
-* Added
-  * Get-WUGDeviceReport (-ReportType parameter) now can be used instead of individual Get-WUGDeviceReportXXXX functions for /api/v1/devices/{id}/reports endpoints (Cpu, Disk, DiskSpaceFree, Interface, InterfaceDiscards, InterfaceErrors, InterfaceTraffic, Memory, PingAvailability, PingResponseTime, StateChange)
-  * Get-WUGDeviceGroupReport (-ReportType parameter) now can be used instead of Get-WUGDeviceGroupReportXXXX functions for /api/v1/device-groups/{id}/reports endpoints (Cpu, Disk, DiskSpaceFree, Interface, InterfaceDiscards, InterfaceErrors, InterfaceTraffic, Memory, PingAvailability, PingResponseTime, StateChange, Maintenance)
-  * Get-WUGProduct for /api/v1/product endpoints
-  * Get-WUGDeviceScan for /api/v1/device-scan endpoints
-  * Get-WUGDeviceRole and Set-WUGDeviceRole for /api/v1/device-role endpoints
-  * helpers/vmware/ - New VMware vSphere discovery and sync scripts (discover-vsphere-immediate-add-with-attributes.ps1, discover-vsphere-nodes-and-guests-discover-then-add.ps1)
-  * helpers/proxmox/ - New Proxmox VE discovery and sync scripts (ProxmoxHelpers.ps1, discover-proxmox-nodes-and-guests scripts, Rename_and_update_devices_based_on_Proxmox_data.ps1)
-  * helpers/hyperv/ - New Hyper-V discovery and sync scripts (HypervHelpers.ps1, discover-hyperv-immediate-add-with-attributes.ps1, discover-hyperv-hosts-and-guests-discover-then-add.ps1)
-  * helpers/nutanix/ - New Nutanix Prism discovery and sync scripts (NutanixHelpers.ps1, discover-nutanix-immediate-add-with-attributes.ps1, discover-nutanix-hosts-and-guests-discover-then-add.ps1)
-  * helpers/azure/ - New Azure discovery and sync scripts (AzureHelpers.ps1, discover-azure-immediate-add-with-attributes.ps1, discover-azure-resources-discover-then-add.ps1) — enumerates subscriptions, resource groups, resources, and metrics via Az modules; stores ResourceId and metric data as device attributes
-  * helpers/aws/ - New AWS discovery and sync scripts (AWSHelpers.ps1, discover-aws-immediate-add-with-attributes.ps1, discover-aws-resources-discover-then-add.ps1) — enumerates EC2 instances, RDS databases, and ELBv2 load balancers across regions via AWS.Tools modules; stores instance IDs, ARNs, and CloudWatch metrics as device attributes
-  * helpers/gcp/ - New GCP discovery and sync scripts (GCPHelpers.ps1, discover-gcp-immediate-add-with-attributes.ps1, discover-gcp-resources-discover-then-add.ps1) — enumerates Compute Engine VMs, Cloud SQL instances, and forwarding rules across projects via GoogleCloud module + gcloud CLI; stores instance IDs and Cloud Monitoring metrics as device attributes
-  * helpers/oci/ - New Oracle Cloud Infrastructure discovery and sync scripts (OCIHelpers.ps1, discover-oci-immediate-add-with-attributes.ps1, discover-oci-resources-discover-then-add.ps1) — enumerates Compute instances, DB Systems, Autonomous Databases, and Load Balancers across compartments and regions via OCI.PSModules + OCI CLI; stores OCIDs and OCI Monitoring metrics as device attributes
-  * helpers/test/Invoke-WUGModuleTest.ps1 — End-to-end integration test harness that exercises every exported cmdlet against a live WUG server (creates test device, group, monitor; runs all CRUD, report, and role endpoints; cleans up artefacts; prints pass/fail summary). Runs non-interactively after initial credential prompt (-Confirm:$false on all write operations). 95/98 endpoints tested and passing.
-  * New Functions:
-    * `Get-WUGCredential` — Retrieve credential definitions (GET /credentials)
-    * `Add-WUGCredential` — Create new credentials (POST /credentials)
-    * `Set-WUGCredential` — Update credentials and bulk unassign device assignments (PUT /credentials, DELETE /credentials/{id}/assignments/-)
-    * `Get-WUGDeviceInterface` — Retrieve device network interfaces (GET /devices/{id}/interfaces)
-    * `Set-WUGDeviceInterface` — Update device network interfaces (PUT /devices/{id}/interfaces)
-    * `Add-WUGDeviceInterface` — Add a network interface to a device (POST /devices/{id}/interfaces/-)
-    * `Remove-WUGDeviceInterface` — Remove one or all interfaces from a device (DELETE /devices/{id}/interfaces)
-    * `Get-WUGDeviceStatus` — Retrieve device status (GET /devices/{id}/status)
-    * `Get-WUGDeviceCredential` — Retrieve device credential assignments (GET /devices/{id}/credentials)
-    * `Set-WUGDeviceCredential` — Update device credential assignments (PUT /devices/{id}/credentials)
-    * `Get-WUGDevicePollingConfig` — Retrieve device polling configuration (GET /devices/{id}/config/polling)
-    * `Set-WUGDevicePollingConfig` — Update device polling configuration (PUT /devices/{id}/config/polling)
-    * `Invoke-WUGDevicePollNow` — Trigger immediate device poll; supports single, batch, and device group poll-now (POST/PATCH /devices/.../poll-now, PUT /device-groups/{id}/poll-now)
-    * `Get-WUGDeviceGroupMembership` — Retrieve device group membership (GET /devices/{id}/group-membership)
-    * `Set-WUGDeviceGroup` — Update device group properties (PUT /device-groups/{id})
-    * `Add-WUGDeviceGroup` — Create a child device group (POST /device-groups/{id}/child)
-    * `Remove-WUGDeviceGroup` — Delete a device group (DELETE /device-groups/{id})
-    * `Add-WUGDeviceGroupMember` — Add devices to a device group (POST /device-groups/{id}/devices/-)
-    * `Remove-WUGDeviceGroupMember` — Remove one or all devices from a device group (DELETE /device-groups/{id}/devices)
-    * `Remove-WUGDeviceAttribute` — Remove one or all custom attributes from a device (DELETE /devices/{id}/attributes)
-    * `Remove-WUGDeviceMonitor` — Remove a monitor assignment from a device (DELETE /devices/{id}/monitors/{assignmentId})
-    * `Set-WUGMonitorTemplate` — Apply/import monitor templates (PATCH /monitors/-/config/template), batch monitor library operations (PATCH /monitors/-), and remove all monitor assignments (DELETE /monitors/-/assignments/-)
-    * `Set-WUGDeviceGroupMembership` — Assign group membership to a device (PUT /devices/{id}/group-membership) and batch group membership operations (PATCH /devices/{id}/group-membership)
-
-* Extended
-  * `Get-WUGActiveMonitor` — Added `-MonitorId` parameter to retrieve a single monitor definition (GET /monitors/{id}) and `-MonitorAssignments` switch to retrieve monitor assignments (GET /monitors/{id}/assignments/-)
-  * `Remove-WUGActiveMonitor` — Added `ById` parameter set to delete a single monitor by ID (DELETE /monitors/{id}) and `RemoveAssignments` parameter set to remove all assignments (DELETE /monitors/{id}/assignments/-)
-  * `Get-WUGDeviceGroup` — Added parameter sets: `-Children` (GET /device-groups/{id}/children), `-GroupStatus` (GET /device-groups/{id}/status), `-GroupDevices` (GET /device-groups/{id}/devices/-), `-GroupDeviceTemplates` (GET /device-groups/{id}/devices/-/config/template), `-GroupDeviceCredentials` (GET /device-groups/{id}/devices/-/credentials)
-  * `Invoke-WUGDevicePollNow` — Added `-GroupId` parameter for device group poll-now (PUT /device-groups/{id}/poll-now)
-  * `Invoke-WUGDeviceRefresh` — Added `-GroupId` parameter for device group refresh (PUT /device-groups/{id}/refresh)
-  * `Set-WUGDeviceRole` — Added `-RemoveRole` (DELETE /device-role/{roleId}), `-EnableRole` (PUT /device-role/{roleId}/enable), and `-DisableRole` (PUT /device-role/{roleId}/disable) parameter sets with pipeline-enabled `-RoleId` parameter
-  * `Get-WUGMonitorTemplate` — Added `-SupportedTypes` parameter set to retrieve supported monitor types (GET /monitors/-/config/supported-types)
-  * `Get-WUGMonitorTemplate` — Added `-MonitorTemplate` parameter set to export a single monitor template (GET /monitors/{monitorId}/config/template) and `-AllMonitorTemplates` to export all (GET /monitors/-/config/template)
-  * `Get-WUGProduct` — Added `/api/v1/product/api` endpoint to the composite product object (`apiVersion` property)
-  * `Get-WUGDeviceRole` — Added `-DeviceRoles` parameter set to retrieve roles assigned to a specific device (GET /devices/{deviceId}/roles/-) with `-DeviceRoleKind` filter
-  * `Set-WUGDeviceRole` — Added `-RestoreRole` (PUT /device-role/{roleId}/restore), `-SetDeviceRoleKind` (PUT /devices/{deviceId}/roles/{kind}), `-AssignDeviceRole` (PUT /devices/{deviceId}/roles/-), `-RemoveDeviceRoles` (DELETE /devices/{deviceId}/roles/-), `-BatchDeviceRole` (PATCH /devices/-/roles/{kind}), `-GroupRole` (PUT /device-groups/{groupId}/roles/{kind}) parameter sets
-  * `Get-WUGCredential` — Added `-CredentialTemplate` (GET /credentials/{credentialId}/config/template), `-AllCredentialTemplates` (GET /credentials/-/config/template), `-Helpers` (GET /credentials/-/helpers), `-AllAssignments` (GET /credentials/-/assignments/-) parameter sets
-  * `Set-WUGCredential` — Added `-ApplyTemplates` parameter set to apply credential templates (PATCH /credentials/-/config/template)
-  * `Set-WUGDeviceAttribute` — Added `-Batch` parameter set for batch attribute operations (PATCH /devices/{deviceId}/attributes/-)
-  * `Set-WUGDeviceInterface` — Added `-Batch` parameter set for batch interface operations (PATCH /devices/{deviceId}/interfaces/-)
-  * `Remove-WUGDeviceMonitor` — Added `-All` switch to remove all monitor assignments from a device (DELETE /devices/{deviceId}/monitors/-)
-  * `Set-WUGActiveMonitor` — Added `BatchDeviceMonitors` mode for batch monitor operations on a device (PATCH /devices/{deviceId}/monitors/-)
-  * `Set-WUGDevicePollingConfig` — Added `-Batch` parameter set for batch polling configuration across devices (PATCH /devices/-/config/polling)
+  * Fixed `Set-WUGActiveMonitor` using `/api/v1/monitor/{id}` (singular) — changed to `/api/v1/monitors/{id}` (plural)
+  * Fixed `Invoke-WUGDevicePollNow` using incorrect paths — changed to `PUT /poll-now` (single) and `PATCH /-/poll-now` (batch)
+  * Fixed `Invoke-WUGDeviceRefresh` batch path `PATCH /devices/refresh` — changed to `PATCH /devices/-/refresh`
+  * Fixed `Add-WUGCredential` sending mixed-case `type` values causing 400 — API requires lowercase; also fixed SSH requiring ConfirmPassword/ConfirmEnablePassword bags, and body always including `description`/`propertyBags`
+  * Fixed `Add-WUGActiveMonitor -Type Ftp` — wrong classId and property bag prefix
+  * Fixed `Add-WUGPassiveMonitor -Type Syslog` and `-Type WinEvent` — were stubbed out; fully implemented
+  * Fixed `Remove-WUGDevice` using undefined `$id` variable instead of `$DeviceId`
+  * Fixed `Set-WUGActiveMonitor` inverted boolean logic — replaced `!$Enabled`/`!$UseInDiscovery` with `$PSBoundParameters.ContainsKey()`
+  * Fixed `Set-WUGDeviceProperties` duplicate API call overwriting accumulated results; also fixed boolean params using `if ($var)` instead of `$PSBoundParameters.ContainsKey()`
+  * Fixed `$ReturnHierarchy` never appended to query string in all 12 `Get-WUGDeviceGroupReport` variants
+  * Fixed `Get-WUGDeviceGroupReportPingAvailability` ValidateSet using memory report fields
+  * Fixed `Get-WUGDeviceGroupReportMaintenance` referencing undeclared threshold params
+  * Fixed `Get-WUGDeviceGroupReportStateChange` and `Get-WUGDeviceReportStateChange` missing threshold params in param block
+  * Fixed `Get-WUGDeviceReportInterfaceErrors` `[bool]` types and `[int]$PageId` — changed to `[ValidateSet][string]`
+  * Fixed `Get-WUGDeviceGroupReportDisk` abbreviated GroupBy values
+  * Fixed `Get-WUGDeviceGroupReportMaintenance` GroupBy starting with `defaultColumn` instead of `noGrouping`
+  * Fixed `Get-WUGDeviceGroupReportPingResponseTime` and `Get-WUGDeviceReportPingResponseTime` lowercase threshold params
+  * Fixed `Add-WUGDeviceTemplates` request body using hardcoded `@("all")` instead of `$options` variable
+  * Fixed `Disconnect-WUGServer` referencing `$global:WhatsUpServerBaseURI` after clearing it
+  * Fixed `Invoke-WUGDeviceRefresh` `DropDataOlderThanHours` always being sent — `[int]` defaults to 0
+  * Fixed `!$null -eq $queryString` null-check in 13 report functions — corrected to `$null -ne $queryString`
+  * Fixed stray backtick in `Set-WUGDeviceMaintenance`, stray `#>` in `Get-WUGDeviceMaintenanceSchedule`
+  * Fixed malformed help block in `Add-WUGDeviceTemplates`
+  * Restored `AllMonitors` (deprecated) in `Get-WUGActiveMonitor`
+  * Added missing `Set-WUGMonitorTemplate`/`Set-WUGDeviceGroupMembership` exports to psm1
 
 * Documentation
-  * Added full comment-based help (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE, .NOTES) to Add-WUGActiveMonitorToDevice, Get-WUGMonitorTemplate, Remove-WUGActiveMonitor, Get-WUGDeviceGroupReport
-  * Added .EXAMPLE sections to Add-WUGDeviceTemplates, Set-WUGDeviceProperties
-  * Added .NOTES to Get-WUGDevice, Get-WUGDeviceReport, Get-WUGDeviceScan
-  * Added missing .PARAMETER help: Get-WUGDevice (ReturnHierarchy, State), Get-WUGDeviceReportPingAvailability (6 threshold params), Get-WUGDeviceReportPingResponseTime (ApplyThreshold, OverThreshold, ThresholdValue), Get-WUGActiveMonitor (AllMonitors, Limit, activeObj, active), Get-WUGDeviceRole (7 switch/kind params), Add-WUGActiveMonitor (UseInDiscovery + 15 SNMPTable params), Set-WUGDeviceProperties (actionPolicyName, actionPolicyId)
-  * Fixed Add-WUGDeviceTemplates .PARAMETER name mismatch (`templates` → `deviceTemplates`)
   * Rewrote README.MD with full function reference table, quick start guide, report parameter reference, and helper script directory listing
-  * Added .EXAMPLE sections to all 63 existing helper functions across all subdirectories (aws, azure, gcp, hyperv, nutanix, oci, proxmox, vmware, reports, test)
-  * Added comment-based help (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE) to ConvertTo-BootstrapTable and ConvertTo-HTMLTemplate in helpers/reports/
-  * Added comprehensive CBH documentation (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE, .OUTPUTS, .NOTES, .LINK) to all 14 dashboard helper functions (Get-*Dashboard, Export-*DashboardHtml) across 7 platforms
-  * Added full CBH documentation (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE, .OUTPUTS, .NOTES, .LINK) to all 9 dashboard orchestration scripts (Get-*Dashboard.ps1), replacing plain comment headers with proper PowerShell help blocks
-
-* Dashboard Suites
-  * helpers/f5/ — New F5 BIG-IP dashboard suite: F5Helpers.ps1 with Connect-F5Server, Invoke-F5RestMethod, Get-F5SystemInfo, Get-F5VirtualServers, Get-F5VirtualServerStats, Get-F5Pools, Get-F5PoolMembers, Get-F5PoolMemberStats, Get-F5Nodes, Get-F5Dashboard, Get-F5StatusIndicator, Format-F5Bytes, Export-F5DashboardHtml; F5-Dashboard-Template.html; Get-F5Dashboard.ps1 orchestration script. Queries F5 BIG-IP REST API for virtual servers, pools, pool members, and nodes with traffic stats, then produces an interactive Bootstrap Table HTML dashboard.
-  * helpers/certificates/ — New SSL/TLS Certificate dashboard suite: CertificateHelpers.ps1 with Get-CertificateInfo, Get-CertificateDashboard, Export-CertificateDashboardHtml; Certificate-Dashboard-Template.html; Get-CertificateDashboard.ps1 orchestration script. Scans hostnames/IPs (with configurable ports) via TCP handshake for SSL certificate details (issuer, subject, SAN, expiry, thumbprint, key size, chain status), then produces an interactive Bootstrap Table HTML dashboard with expiry countdown highlighting.
-  * helpers/hyperv/ — Added Get-HypervDashboard and Export-HypervDashboardHtml functions to HypervHelpers.ps1; added Hyperv-Dashboard-Template.html and Get-HypervDashboard.ps1 orchestration script. Queries Hyper-V hosts via CIM sessions for VM details (CPU, memory, disk, network, snapshots, replication, heartbeat) and produces a searchable HTML dashboard.
-  * helpers/nutanix/ — Added Get-NutanixDashboard and Export-NutanixDashboardHtml functions to NutanixHelpers.ps1; added Nutanix-Dashboard-Template.html and Get-NutanixDashboard.ps1 orchestration script. Queries Nutanix Prism API for cluster, host, and VM details with protection domain and NGT status.
-  * helpers/proxmox/ — Added Get-ProxmoxDashboard and Export-ProxmoxDashboardHtml functions to ProxmoxHelpers.ps1; added Proxmox-Dashboard-Template.html and Get-ProxmoxDashboard.ps1 orchestration script. Queries Proxmox VE API for node and VM details with HA state, network I/O, and tags.
-  * helpers/aws/ — Added Get-AWSDashboard and Export-AWSDashboardHtml functions to AWSHelpers.ps1; added AWS-Dashboard-Template.html and Get-AWSDashboard.ps1 orchestration script. Queries EC2 instances, RDS databases, and ELBv2 load balancers across regions with resolved IPs.
-  * helpers/azure/ — Added Get-AzureDashboard and Export-AzureDashboardHtml functions to AzureHelpers.ps1; added Azure-Dashboard-Template.html and Get-AzureDashboard.ps1 orchestration script. Enumerates resources across subscriptions and resource groups with optional Azure Monitor metrics.
-  * helpers/gcp/ — Added Get-GCPDashboard and Export-GCPDashboardHtml functions to GCPHelpers.ps1; added GCP-Dashboard-Template.html and Get-GCPDashboard.ps1 orchestration script. Queries Compute Engine VMs, Cloud SQL instances, and forwarding rules per project.
-  * helpers/oci/ — Added Get-OCIDashboard and Export-OCIDashboardHtml functions to OCIHelpers.ps1; added OCI-Dashboard-Template.html and Get-OCIDashboard.ps1 orchestration script. Queries Compute instances, DB Systems, Autonomous Databases, and Load Balancers across compartments.
+  * Added full CBH (.SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE, .NOTES) to all new and enhanced functions
+  * Added .EXAMPLE sections to all 63+ existing helper functions across all subdirectories
+  * Added comprehensive CBH to all dashboard helper functions and orchestration scripts across all platforms
 
 
 ## 0.1.17/18 - 2025-12-08

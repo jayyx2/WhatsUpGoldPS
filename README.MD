@@ -88,7 +88,7 @@ This allows administrators to:
 ## Features
 
 - **Native PowerShell cmdlets** for the WhatsUp Gold REST API
-- **75 exported functions** covering devices, monitors, groups, and reports
+- **81 exported functions** covering devices, monitors, groups, reports, performance monitors, passive monitors (SnmpTrap, Syslog, WinEvent), and 20 active monitor types
 - **Infrastructure discovery helpers** for virtualization and cloud platforms
 - **Automation-friendly workflows** for monitoring onboarding and configuration
 - **End-to-end CRUD integration test harness**
@@ -179,7 +179,7 @@ This enables automation scenarios such as:
 | Capability | Description |
 |---|---|
 | PowerShell API wrapper | Native cmdlets for the WhatsUp Gold REST API |
-| Monitoring automation | Automate device onboarding, configuration, polling, reporting |
+| Monitoring automation | Automate device onboarding, configuration, polling, reporting, and performance monitor assignment |
 | Infrastructure discovery | Discover infrastructure across virtualization and cloud |
 | Scriptable reports | Retrieve monitoring reports programmatically |
 | End-to-end testing | CRUD test harness validating API operations |
@@ -187,7 +187,7 @@ This enables automation scenarios such as:
 
 Current module export:
 
-**75 PowerShell functions**
+**81 PowerShell functions**
 
 ---
 

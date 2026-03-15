@@ -348,7 +348,7 @@ function Set-WUGDeviceMaintenanceSchedule {
                 try {
                     $result = Get-WUGAPIResponse -Uri $url -Method "PATCH" -Body $jsonBody
                     # Directly output the 'data' property for better readability
-                    Write-Output $result.data
+                    return $result.data
                 }
                 catch {
                     # Capture detailed error information
@@ -488,7 +488,7 @@ function Set-WUGDeviceMaintenanceSchedule {
                     try {
                         $result = Get-WUGAPIResponse -Uri $url -Method "PUT" -Body $jsonBody
                         # Directly output the 'data' property for better readability
-                        Write-Output $result.data
+                        return $result.data
                     }
                     catch {
                         # Capture detailed error information
@@ -536,8 +536,8 @@ function Set-WUGDeviceMaintenanceSchedule {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0Yh04sraI2NKH
-# LS5M96d0RZkIMS+fEg40vkEwgitG46CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVKlc6gfv1SXbh
+# apUnv+lM8k4anijW8CnyzwXu6koI4KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -637,17 +637,17 @@ function Set-WUGDeviceMaintenanceSchedule {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIJr3gkGTylS93ChRtGZprEULEKWimGHj
-# /5GWgnwHZU8wDQYJKoZIhvcNAQEBBQAEggIANruY2WaKrOS8OOwRu1pYktM6MVMq
-# qKdDi9AryJWQ+axz+eR/Xnv6154nzEqjKgQ78cWA1t33j68SCCQcGhTIkT4yU1li
-# Gp43H+iLJakpoiNs43Ah7mG5HwIm6Yrywy1T8T30UYuKE52+r9t2ORVnKS1Obcew
-# 6n0Opte9nKbtkW0nP4ZhPNH8XPk1bSS87ZCmp+u4d8bNhngKeFOrF+6tHleov9qb
-# 4nYZ5mW6RT/YUbWc7qTw4bZ91ezLpKAjlxN6Uk82C712ofO0Sgl+I9y5foasomSg
-# T4BYag8nwiAktov9L5YGncxXOM/3jVO0GIK9vlDeFaS2ULm3ILEiQjKrXTEn0Vcw
-# fipmLrncYNqJDAqUFw/+kGMG3KdJC40iMr1kkQMKutT4AwppKLozrtEbS2v7EZuP
-# O/S+xClLIEibkWNeMGZNxFR21i2RMNn8oWC5VryK8IrJ7/rOGx1JqTNijGMeAjuz
-# uxZhPrr5wgo6JQfx5/dG73fCiuOFihjtLnb9f1rUJxEdODf7WSziTDZFXA+vW2Zy
-# hAjhB/5ETRiyHyw46PSz6FVw7E6N44GStWwA9FW2G414ZFcM1wmEUXX8yiuVJgyJ
-# EOrkw/wwS8NsVzIN2voTDv6li35kePtoO1DMxDPq42qAUFgAOSq++embgOmHy5mJ
-# CUYssgq+ct44fhA=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgJUyA00v7TQmPKiY5VtHdyUOOhiegeWnR
+# jZsr/zF2g7gwDQYJKoZIhvcNAQEBBQAEggIARoaFJxxvwz0hQEgJbsq0tn8F6Llg
+# A5G3b/6By93wkaJP1Wc8GgkhGNsmyF3VHeAalHy0AicDpMNgV/Gkej5Ghmw39Xov
+# PFE5dF8T9wZtx4lZoEgrccDT+DNgZfQ/s+TmaT2X7Ci+0yr8IKk02I+8mVnZBdBQ
+# lqdF/C9PRCqAtVHcxriMLZUuoxcrWZUBswsDfomZ3AE0cnO1Npfj63uc0yqTXvWW
+# Bv908k02uJCNOswwA5XazgBI+2Sc6WfvEMfsfT9L0hKbjgsYCkjBNnhwwWU4fl1v
+# 76Ad0zDSMQexHiA6hRwhvCmjCqhge0gfR9oebF163RX/3syGwE/wMg/kJ26pZBJW
+# 6Df0CpFccDn0Dmwluj5OsnYXmnUsfGARw8lP2OKDHp7dy8N+eqCo4TUWVkrxi6g7
+# bHgkIS99mcQGSy8bNmwqigqEznCAtrnp3iOeMSdXOOD+f2dSQ/5qjpEoK3gTdRJD
+# SkdL9SGXf63Gn/depy3bW+ymifWNshUkN0BmiDpU+WrG4fxALATxsFNFW5Jh0Q/3
+# n1dRuww1xIJrFv02neSE74ZtI5Z9G6rvxmT10c1PmU/SDWp3wvmihrYZyU+rXb3O
+# LHj+KyQ140FBUx3nCmuXB8GFm5bNsTQSwjORMyLaoMHe/KizBAGlaZFQVEDYdLD+
+# NnFweLskLNmtQnk=
 # SIG # End signature block

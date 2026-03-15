@@ -110,7 +110,7 @@ function Set-WUGCredential {
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
                     if ($result.success) {
-                        Write-Host "Successfully removed credential ${CredentialId}." -ForegroundColor Green
+                        Write-Verbose "Successfully removed credential ${CredentialId}."
                     }
                     return $result
                 }
@@ -125,7 +125,7 @@ function Set-WUGCredential {
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $Body
                     if ($result.success) {
-                        Write-Host "Successfully updated credential ${CredentialId}." -ForegroundColor Green
+                        Write-Verbose "Successfully updated credential ${CredentialId}."
                     }
                     return $result
                 }
@@ -152,7 +152,7 @@ function Set-WUGCredential {
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $Body
                     if ($result.success) {
-                        Write-Host "Successfully updated credential ${CredentialId}." -ForegroundColor Green
+                        Write-Verbose "Successfully updated credential ${CredentialId}."
                     }
                     return $result
                 }
@@ -168,7 +168,7 @@ function Set-WUGCredential {
                 try {
                     $result = Get-WUGAPIResponse -Uri $assignUri -Method 'DELETE'
                     if ($result.data) {
-                        Write-Host "Successfully removed all assignments for credential ${CredentialId}." -ForegroundColor Green
+                        Write-Verbose "Successfully removed all assignments for credential ${CredentialId}."
                         return $result.data
                     }
                     return $result
@@ -203,8 +203,8 @@ function Set-WUGCredential {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQs5RuLYS4nAg7
-# /es/pJ2dYMv9rFw95dYzVd1kSAgbCaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpZzmN/Pdtv7X6
+# RBTVMDA3wMgXZnyHsbGCkFJnjhVQMaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -304,17 +304,17 @@ function Set-WUGCredential {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgzYrZ5Vc9BGXHwFobD5bJMjc9SSAcOm0l
-# NBZ16L1zbykwDQYJKoZIhvcNAQEBBQAEggIA44OuUKV/CUElfCsJvo0Bw2Fsm840
-# dJ0C2yR/1pK0OU3oio9XQzSyWbMazEo7iS6p8RgcsuV6GAKEHLZuyNChTRbW+HcU
-# C/DFli4OvV4eOty8h9iCEUNPykU8y70FgS4Nfg+OuI4hIPCHnWIdtk/lwez6tmPH
-# cnS8QidhOGbid9DYWRRI3jQPwlFeXFGGcCJKhrTAoLwOLUDNoG2C4CNoNrOsvnQc
-# z1fBQuC7J2ZAfv5WZkbkQqNG8WjiPGnWqplb7AClsxbz74emCMJDTI4Z9M3eJMS1
-# 1ZKyzwvwe5InwNFZIyCSM2dbXWol9GequWiX4e6LG2jiMGKNvs0Lr/8Cr9qA0A//
-# 45jy7Js1L/hLdRCLTnIiNHSkhn2uAGhauqpJMoBJ549FGzcjFpoSC75bH1j07uFp
-# GwaVd0yvsFSo+4bYTsEe2suyX0YerF5Qqnf5kNjLUZFwzXod/VoD52eTclSLkF4v
-# An81+rJeUS3KtgurWDr5viojyoazm5/KqkiBOH40GXoJNEL/dpy2HSXbQXhCAvmw
-# 0BuKN1GliL0mkXXbwr8vedlRZXf+4Ll3tmzAtF2uM1oNcuwuV4SQWJdLz9HPBu8s
-# 8UHm2zs3YdAECVCInZk6s5Pm3M59aj6Q3FymsdbJtrpN2vFbDBwo3g+dJ2zRjKun
-# /ysEuhTDo/ORtbs=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgvFFSpYvRy/Frw7uz9V98bWFJizIUwRan
+# OQfiWHUsRi8wDQYJKoZIhvcNAQEBBQAEggIA1yXiCvN2U4Kpm2tP93P9pqDKREKX
+# H6YoMaY1MS0C/uHvHt+pcomIEOc+IANzSzsYIlYtX9fEo1OZplzMtE6BpfwEX9aY
+# PzltdT8kF1z8EQLOGc5LleYqK+kTHxA0r2I2Pz3FB+yNjXjBgE7BHUPC3LKqAgWC
+# iv+m481fnRXPpeBAOYLw4uHgTrdvfv/YCOAv6Vob6he/tgSZVM+l1JekQVMqeK8i
+# 1Ks5dmaV5ytcLEObtkdsEVBwE4etwcJjKoN/Bc1sKXVGX0o+vfYnl5d46oQr1ZjU
+# b8z5HI02NXcLuSpDqzYhYKRTtGW78qybgS3mNlLiEvkXGhJ2MzKuIQeE6kHHAreg
+# Ukta+KHyAD2F9KSInJS8FOEjkS9HOL8zSfCX04pZyySlaKgy4A9ySqEwg9M2LGi2
+# k62ndCFHFgNZ8nNToYIvGLdFvktD7eEVfiqJv4VCIZmKa0hbrtB5LRxi/t0VOP2f
+# h8pS4Dcn4lJq8YvFCcVb+63OwcYm6PxHYwh9rnk4e2LTySKt/PIvRij2ZG0Hj6vk
+# MBa81l36oxPXz5Ia7nNw9PChkItdja/6iDI7AUamJh4lT6boSQD8bymxhHju44iA
+# HocHkbsrhNlXztqyvL2gRKFCbhwClRNB0xOXS/3fSW8vxpVoRewuoJ1l+PNOQ4ge
+# bh3FFNi7QXOiP3s=
 # SIG # End signature block

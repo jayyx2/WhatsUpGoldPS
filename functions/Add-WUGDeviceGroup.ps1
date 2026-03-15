@@ -73,7 +73,7 @@ function Add-WUGDeviceGroup {
         try {
             $result = Get-WUGAPIResponse -Uri $uri -Method 'POST' -Body $requestBody
             if ($result.data) {
-                Write-Host "Successfully created child device group under parent ${ParentGroupId}." -ForegroundColor Green
+                Write-Verbose "Successfully created child device group under parent ${ParentGroupId}."
                 return $result.data
             }
             return $result
@@ -91,8 +91,8 @@ function Add-WUGDeviceGroup {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBaL4KRVSjXMNHY
-# jjtO0xi9QS+n5OSMnRJD0M56Vq9V3KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDnNBd/fEZ7ehTb
+# tWx570O/sWrgiAv/ayNyZSaSH8N8oKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -192,17 +192,17 @@ function Add-WUGDeviceGroup {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg9KEAC4gvlWeYDpVnRmorogA7xpW0i5ov
-# CuQpdrc9neAwDQYJKoZIhvcNAQEBBQAEggIA1Li+zedEBjmITAU4VZgLQf/s2YPy
-# MQl9YYeXFHj9zxIqgRJyNwAh5lcmGymfRwvk2hWjjHOQlan1HpvGdF9JkE4bJE/K
-# eRWOiT0j6w/rV9Swh3X0aZfYFFtu5BUMfv2Yv7w5QdUZzNIIlhPHJQuSn4lQ4TQ8
-# FZgbarOyNj2O6A5WRsHq+f9P03mkV9v05LyGHefSlp5ylT8mOv8LXzfYpnAVWa/H
-# XM4dV/D+B1oXJFMVZgO+zehNcOaMZi+Xwa4zSkX0GdhtzIJputfJX8YgruFwKTHW
-# 81colEIVzBbI3jFDNamWGxQhpOxn1FRPZfQBOpw0Bb6ynb69/ahgxpILXPWlODWX
-# p0jYb4KrHFRAWoWY5v6cRfYt7StyMq+igVV+sGP7f8Wr2CsML1Vtruf0jRQWAVNy
-# MOGqJktaXkA/okhE9JY+E1bQG4pTshZynhYQIHTDkUeoDWEy8H2n78vFPqRDQQQN
-# sbepsEOdNZDeXUSRTXcT2sw062AxMfAxT6nmPZqTe0eLF9ddZdIVBwqC/p5jM556
-# jRTpGiQXrJ55RiFjNJUM8N7jw2NMFQRwkgZGrOCp9waEw9oquMmhEONG+qGvGJDU
-# 535nc0e4V5PhFT5izdoQ0xjqzPcj9ogZZArxfUZKV7TVcwEK5iADnVz8m7LbLCvX
-# +1XsjkAzUEErTzw=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgBINlQIsLSyHPqRDiC/AE7mgS6VWkWZC7
+# Kr0uu+pt9g4wDQYJKoZIhvcNAQEBBQAEggIAUL/sNnlZdfuZU67uw2SECowBBSqb
+# KUV0uIzNyZEXJ/MIW9OmMLQs2MWjc0Kiu6O2TVXAywVD0l1HUVqUWxOuHP4PpzuT
+# RRbHrjzrLQuPLeSbZaR++TFu047xIfpDOGKgqdYztvzA2Vf0iL2/Jw/YdF7bau8/
+# FaYy5RU1jsVspscsPvNrGm5zBjnCATJ3PkryLDuXNPF5CB/FXzuzeDpz+kskkQgN
+# YWL8nG1nf8PCHLR2gpetAuD0ITBrk+uG/6SGJkoiVGHF2gxpdsiG7yPKnof37gOz
+# UjdV6v+VPenFjS6UsQln/GST7XSckd46ZYt20yNnov7VuzoJLgkh5F7fKI0jy/lm
+# mFIWSLJlxslHiXZnJcZlpS5zbyGDIxtCyrPvNgCRymatkn9jZu3RbZ6DsK4UzUEQ
+# snE9LKHeuPAYvfCY5ZBipTOyopp5VHZy5Rj3IQVV/U/ublbIOG5s+ld9jMZJLAOw
+# P0VZ52gzdRWHE7cazcvLrGgtTSXMGVdw2/lBiRRdQtauOd77ZuvjCNF1rKqBx2M8
+# QAmxGqZl31Zw5TWXmC1GJYIKhsIHAKAVA4gbCHyNsPOAnmSjGwvOEixq6QiNGLYU
+# ZQYG03efKRV6I1BsGHmPT8o9jU38f2Gj0WFxYqh3fiNcPpvO4ivlJPYWe+T1elSB
+# UI8USVX+VAq15MA=
 # SIG # End signature block

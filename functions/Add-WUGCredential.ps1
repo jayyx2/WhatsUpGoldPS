@@ -1,64 +1,407 @@
+# ============================================================
+# API Endpoint Reference
+# Source: WhatsUpGold 2024 REST API Spec v0.3
+#
+# Create credential in library:
+#   POST /api/v1/credentials/-
+#   Body schema: CredentialAdd
+#     - name         (string, required)  Display name
+#     - description  (string, optional)  Description
+#     - type         (string, required)  Credential type
+#     - propertyBags (array,  required)  [ { name: string, value: string }, ... ]
+#   Success response: Result[Credential]
+#     - data.idMap.resultId = new credential ID
+#
+# Property bag name prefixes by type:
+#   snmpv1   → CredSnmpV1:ReadCommunity, WriteCommunity
+#   snmpv2   → CredSnmpV2:ReadCommunity, WriteCommunity
+#   snmpv3   → CredSnmpV3:Username, Context, AuthPassword, AuthProtocol, EncryptPassword, EncryptProtocol
+#   windows  → CredWindows:DomainAndUserid, Password
+#   ssh      → CredSSH:Username, Password, ConfirmPassword, EnablePassword, ConfirmEnablePassword, Timeout, Port
+#   ado      → CredADO:Username, Password
+#   aws      → CredAWS:AccessKeyID, SecureAccessKey
+#   azure    → CredAzure:SecureKey, TenantID, ClientID, EnrollmentNumber, EnrollmentAccessKey
+#   redfish  → CredRedfishBmc:Username, Password, Protocol, Port, Timeout, Retries, IgnoreCertificateErrors
+#   restapi  → CredRestAPI:Username, Password, Authtype, GrantType, AuthorizeUrl, TokenUrl,
+#              ClientId, ClientSecret, Scope, OptionalParams, PwdGrantUserName, PwdGrantPassword,
+#              IgnoreCertificateErrorsForOAuth2Token, RefreshToken
+# ============================================================
 <#
 .SYNOPSIS
-Creates a new credential in the WhatsUp Gold credential library.
+    Creates a new credential in the WhatsUp Gold credential library.
 
 .DESCRIPTION
-The Add-WUGCredential function creates a new credential using the WhatsUp Gold REST API
-via POST /api/v1/credentials/-. The credential type and property bags define the credential behavior.
+    Add-WUGCredential creates a credential via POST /api/v1/credentials/-. Each credential
+    type has its own parameter set with named parameters for every property bag field, so
+    users do not need to construct property-bag arrays manually. A -Body parameter set is
+    available for unsupported or custom types.
 
 .PARAMETER Name
-The display name for the new credential. Required.
+    Display name for the credential. Required for all typed parameter sets.
 
 .PARAMETER Description
-An optional description for the credential.
+    Optional description for the credential.
 
 .PARAMETER Type
-The type of credential to create. Required. Valid values: snmpV1, snmpV2, snmpV3, windows, ado, telnet, ssh, vmware, jmx, smis, aws, azure, meraki, restapi, ubiquiti, redfish.
+    The type of credential to create. Required. Each type maps to its own parameter set.
+    Valid values: snmpV1, snmpV2, snmpV3, windows, ado, ssh, aws, azure, redfish, restapi.
+
+.PARAMETER SnmpReadCommunity
+    (snmpV1/snmpV2) SNMP read community string. Required.
+
+.PARAMETER SnmpWriteCommunity
+    (snmpV1/snmpV2) SNMP write community string. Default: empty.
+
+.PARAMETER SnmpV3Username
+    (snmpV3) SNMPv3 username. Required.
+
+.PARAMETER SnmpV3Context
+    (snmpV3) SNMPv3 context. Default: empty.
+
+.PARAMETER SnmpV3AuthPassword
+    (snmpV3) Authentication password. Required.
+
+.PARAMETER SnmpV3AuthProtocol
+    (snmpV3) Authentication protocol. 1=MD5, 3=SHA. Default: 1.
+
+.PARAMETER SnmpV3EncryptPassword
+    (snmpV3) Encryption password. Default: empty.
+
+.PARAMETER SnmpV3EncryptProtocol
+    (snmpV3) Encryption protocol. 1=DES, 3=AES128. Default: 1.
+
+.PARAMETER WindowsUser
+    (windows) Domain\\User or .\\User format. Required.
+
+.PARAMETER WindowsPassword
+    (windows) Password. Required.
+
+.PARAMETER SshUsername
+    (ssh) SSH username. Required.
+
+.PARAMETER SshPassword
+    (ssh) SSH password. Required.
+
+.PARAMETER SshEnablePassword
+    (ssh) Enable/sudo password. Default: empty.
+
+.PARAMETER SshTimeout
+    (ssh) Connection timeout in seconds. Default: 10.
+
+.PARAMETER SshPort
+    (ssh) SSH port. Default: 22.
+
+.PARAMETER AdoUsername
+    (ado) ADO username. Required.
+
+.PARAMETER AdoPassword
+    (ado) ADO password. Required.
+
+.PARAMETER AwsAccessKeyID
+    (aws) AWS access key ID. Required.
+
+.PARAMETER AwsSecureAccessKey
+    (aws) AWS secret access key. Required.
+
+.PARAMETER AzureSecureKey
+    (azure) Azure client secret / secure key. Required.
+
+.PARAMETER AzureTenantID
+    (azure) Azure tenant GUID. Required.
+
+.PARAMETER AzureClientID
+    (azure) Azure client/application GUID. Required.
+
+.PARAMETER AzureEnrollmentNumber
+    (azure) Azure enrollment number. Default: empty.
+
+.PARAMETER AzureEnrollmentAccessKey
+    (azure) Azure enrollment access key. Default: empty.
+
+.PARAMETER RedfishUsername
+    (redfish) Redfish BMC username. Required.
+
+.PARAMETER RedfishPassword
+    (redfish) Redfish BMC password. Required.
+
+.PARAMETER RedfishProtocol
+    (redfish) Protocol. Default: HTTPS.
+
+.PARAMETER RedfishPort
+    (redfish) Port. Default: 443.
+
+.PARAMETER RedfishTimeout
+    (redfish) Timeout in seconds. Default: 15.
+
+.PARAMETER RedfishRetries
+    (redfish) Number of retries. Default: 3.
+
+.PARAMETER RedfishIgnoreCertErrors
+    (redfish) Ignore SSL certificate errors. Default: True.
+
+.PARAMETER RestApiUsername
+    (restapi) REST API username (for basic auth). Default: empty.
+
+.PARAMETER RestApiPassword
+    (restapi) REST API password (for basic auth). Default: empty.
+
+.PARAMETER RestApiAuthType
+    (restapi) Auth type. 0=Basic, 1=OAuth2. Default: 0.
+
+.PARAMETER RestApiGrantType
+    (restapi) OAuth2 grant type. 1=Password, 2=AuthorizationCode. Default: empty.
+
+.PARAMETER RestApiAuthorizeUrl
+    (restapi) OAuth2 authorization URL. Default: empty.
+
+.PARAMETER RestApiTokenUrl
+    (restapi) OAuth2 token URL. Default: empty.
+
+.PARAMETER RestApiClientId
+    (restapi) OAuth2 client ID. Default: empty.
+
+.PARAMETER RestApiClientSecret
+    (restapi) OAuth2 client secret. Default: empty.
+
+.PARAMETER RestApiScope
+    (restapi) OAuth2 scope. Default: empty.
+
+.PARAMETER RestApiOptionalParams
+    (restapi) Optional parameters JSON. Default: empty.
+
+.PARAMETER RestApiPwdGrantUserName
+    (restapi) OAuth2 password grant username. Default: empty.
+
+.PARAMETER RestApiPwdGrantPassword
+    (restapi) OAuth2 password grant password. Default: empty.
+
+.PARAMETER RestApiIgnoreCertErrors
+    (restapi) Ignore OAuth2 token cert errors. Default: empty.
+
+.PARAMETER RestApiRefreshToken
+    (restapi) OAuth2 refresh token. Default: empty.
 
 .PARAMETER PropertyBags
-An array of property bag hashtables defining the credential properties.
-Each property bag should contain a 'name' and 'value' key, or follow the API's property bag structure.
+    An array of property bag hashtables for unsupported types. Use with -Type.
 
 .PARAMETER Body
-A raw JSON body string for full control over the request payload. Use this instead of individual parameters for advanced scenarios.
+    A raw JSON body string for full control over the request payload.
 
 .EXAMPLE
-# Create an SNMP v2 credential
-$props = @(
-    @{ name = "CommunityString"; value = "public" }
-)
-Add-WUGCredential -Name "SNMP Public" -Type "snmpV2" -PropertyBags $props
+    Add-WUGCredential -Name "SNMP Public" -Type snmpV2 -SnmpReadCommunity "public"
 
 .EXAMPLE
-# Create a Windows credential with raw JSON body
-$body = @{
-    name = "Windows Admin"
-    type = "windows"
-    propertyBags = @(
-        @{ name = "Domain"; value = "MYDOMAIN" }
-        @{ name = "Username"; value = "admin" }
-        @{ name = "Password"; value = "secretpass" }
-    )
-} | ConvertTo-Json -Depth 5
-Add-WUGCredential -Body $body
+    Add-WUGCredential -Name "WinAdmin" -Type windows -WindowsUser ".\\administrator" -WindowsPassword "P@ssw0rd"
+
+.EXAMPLE
+    Add-WUGCredential -Name "Linux SSH" -Type ssh -SshUsername "admin" -SshPassword "secret" -SshPort 2222
+
+.EXAMPLE
+    Add-WUGCredential -Name "SNMPv3 Auth" -Type snmpV3 -SnmpV3Username "monitor" -SnmpV3AuthPassword "authpass" -SnmpV3AuthProtocol 3
+
+.EXAMPLE
+    Add-WUGCredential -Name "Azure SP" -Type azure -AzureSecureKey "key" -AzureTenantID "tid" -AzureClientID "cid"
 
 .NOTES
-Author: Jason Alberino (jason@wug.ninja)
-Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/Credential
+    Author: Jason Alberino (jason@wug.ninja)
+    API Endpoint: POST /api/v1/credentials/-
+    Spec: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/whatsupgold2024-0-3.json
+    Module: WhatsUpGoldPS | https://github.com/jayyx2/WhatsUpGoldPS
 #>
 function Add-WUGCredential {
-    [CmdletBinding(DefaultParameterSetName = 'ByProperties', SupportsShouldProcess = $true)]
+    [CmdletBinding(DefaultParameterSetName = 'snmpV2', SupportsShouldProcess = $true)]
     param(
+        # ── Common parameters (all typed parameter sets) ─────────────────────
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV1')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV2')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV3')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'windows')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ssh')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ado')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'aws')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'azure')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'redfish')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'restapi')]
         [Parameter(Mandatory = $true, ParameterSetName = 'ByProperties')]
         [string]$Name,
 
+        [Parameter(ParameterSetName = 'snmpV1')]
+        [Parameter(ParameterSetName = 'snmpV2')]
+        [Parameter(ParameterSetName = 'snmpV3')]
+        [Parameter(ParameterSetName = 'windows')]
+        [Parameter(ParameterSetName = 'ssh')]
+        [Parameter(ParameterSetName = 'ado')]
+        [Parameter(ParameterSetName = 'aws')]
+        [Parameter(ParameterSetName = 'azure')]
+        [Parameter(ParameterSetName = 'redfish')]
+        [Parameter(ParameterSetName = 'restapi')]
         [Parameter(ParameterSetName = 'ByProperties')]
         [string]$Description,
 
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV1')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV2')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV3')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'windows')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ssh')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ado')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'aws')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'azure')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'redfish')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'restapi')]
         [Parameter(Mandatory = $true, ParameterSetName = 'ByProperties')]
         [ValidateSet('snmpV1', 'snmpV2', 'snmpV3', 'windows', 'ado', 'telnet', 'ssh', 'vmware', 'jmx', 'smis', 'aws', 'azure', 'meraki', 'restapi', 'ubiquiti', 'redfish')]
         [string]$Type,
 
+        # ── SNMP v1 / v2 parameters ─────────────────────────────────────────
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV1')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV2')]
+        [string]$SnmpReadCommunity,
+
+        [Parameter(ParameterSetName = 'snmpV1')]
+        [Parameter(ParameterSetName = 'snmpV2')]
+        [string]$SnmpWriteCommunity = '',
+
+        # ── SNMP v3 parameters ───────────────────────────────────────────────
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV3')]
+        [string]$SnmpV3Username,
+
+        [Parameter(ParameterSetName = 'snmpV3')]
+        [string]$SnmpV3Context = '',
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'snmpV3')]
+        [string]$SnmpV3AuthPassword,
+
+        [Parameter(ParameterSetName = 'snmpV3')]
+        [ValidateSet('1', '3')]
+        [string]$SnmpV3AuthProtocol = '1',
+
+        [Parameter(ParameterSetName = 'snmpV3')]
+        [string]$SnmpV3EncryptPassword = '',
+
+        [Parameter(ParameterSetName = 'snmpV3')]
+        [ValidateSet('1', '3')]
+        [string]$SnmpV3EncryptProtocol = '1',
+
+        # ── Windows parameters ───────────────────────────────────────────────
+        [Parameter(Mandatory = $true, ParameterSetName = 'windows')]
+        [string]$WindowsUser,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'windows')]
+        [string]$WindowsPassword,
+
+        # ── SSH parameters ───────────────────────────────────────────────────
+        [Parameter(Mandatory = $true, ParameterSetName = 'ssh')]
+        [string]$SshUsername,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ssh')]
+        [string]$SshPassword,
+
+        [Parameter(ParameterSetName = 'ssh')]
+        [string]$SshEnablePassword = '',
+
+        [Parameter(ParameterSetName = 'ssh')]
+        [string]$SshTimeout = '10',
+
+        [Parameter(ParameterSetName = 'ssh')]
+        [string]$SshPort = '22',
+
+        # ── ADO parameters ───────────────────────────────────────────────────
+        [Parameter(Mandatory = $true, ParameterSetName = 'ado')]
+        [string]$AdoUsername,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ado')]
+        [string]$AdoPassword,
+
+        # ── AWS parameters ───────────────────────────────────────────────────
+        [Parameter(Mandatory = $true, ParameterSetName = 'aws')]
+        [string]$AwsAccessKeyID,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'aws')]
+        [string]$AwsSecureAccessKey,
+
+        # ── Azure parameters ─────────────────────────────────────────────────
+        [Parameter(Mandatory = $true, ParameterSetName = 'azure')]
+        [string]$AzureSecureKey,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'azure')]
+        [string]$AzureTenantID,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'azure')]
+        [string]$AzureClientID,
+
+        [Parameter(ParameterSetName = 'azure')]
+        [string]$AzureEnrollmentNumber = '',
+
+        [Parameter(ParameterSetName = 'azure')]
+        [string]$AzureEnrollmentAccessKey = '',
+
+        # ── Redfish parameters ───────────────────────────────────────────────
+        [Parameter(Mandatory = $true, ParameterSetName = 'redfish')]
+        [string]$RedfishUsername,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'redfish')]
+        [string]$RedfishPassword,
+
+        [Parameter(ParameterSetName = 'redfish')]
+        [string]$RedfishProtocol = 'HTTPS',
+
+        [Parameter(ParameterSetName = 'redfish')]
+        [string]$RedfishPort = '443',
+
+        [Parameter(ParameterSetName = 'redfish')]
+        [string]$RedfishTimeout = '15',
+
+        [Parameter(ParameterSetName = 'redfish')]
+        [string]$RedfishRetries = '3',
+
+        [Parameter(ParameterSetName = 'redfish')]
+        [string]$RedfishIgnoreCertErrors = 'True',
+
+        # ── REST API parameters ──────────────────────────────────────────────
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiUsername = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiPassword = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [ValidateSet('0', '1')]
+        [string]$RestApiAuthType = '0',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiGrantType = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiAuthorizeUrl = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiTokenUrl = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiClientId = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiClientSecret = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiScope = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiOptionalParams = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiPwdGrantUserName = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiPwdGrantPassword = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiIgnoreCertErrors = '',
+
+        [Parameter(ParameterSetName = 'restapi')]
+        [string]$RestApiRefreshToken = '',
+
+        # ── Generic / ByBody fallback ────────────────────────────────────────
         [Parameter(ParameterSetName = 'ByProperties')]
         [object[]]$PropertyBags,
 
@@ -67,18 +410,139 @@ function Add-WUGCredential {
     )
 
     begin {
-        Write-Debug "Starting Add-WUGCredential function."
+        Write-Debug "Starting Add-WUGCredential function. ParameterSet: $($PSCmdlet.ParameterSetName)"
         $uri = "${global:WhatsUpServerBaseURI}/api/v1/credentials/-"
     }
 
     process {
-        if ($PSCmdlet.ParameterSetName -eq 'ByProperties') {
-            $credentialObject = @{
-                name = $Name
-                type = $Type
+        # Build property bags from typed parameters
+        $bags = $null
+
+        switch ($PSCmdlet.ParameterSetName) {
+
+            'snmpV1' {
+                $bags = @(
+                    @{ name = 'CredSnmpV1:ReadCommunity';  value = "$SnmpReadCommunity" }
+                    @{ name = 'CredSnmpV1:WriteCommunity'; value = "$SnmpWriteCommunity" }
+                )
             }
-            if ($Description) { $credentialObject.description = $Description }
-            if ($PropertyBags) { $credentialObject.propertyBags = $PropertyBags }
+
+            'snmpV2' {
+                $bags = @(
+                    @{ name = 'CredSnmpV2:ReadCommunity';  value = "$SnmpReadCommunity" }
+                    @{ name = 'CredSnmpV2:WriteCommunity'; value = "$SnmpWriteCommunity" }
+                )
+            }
+
+            'snmpV3' {
+                $bags = @(
+                    @{ name = 'CredSnmpV3:Username';        value = "$SnmpV3Username" }
+                    @{ name = 'CredSnmpV3:Context';         value = "$SnmpV3Context" }
+                    @{ name = 'CredSnmpV3:AuthPassword';    value = "$SnmpV3AuthPassword" }
+                    @{ name = 'CredSnmpV3:AuthProtocol';    value = "$SnmpV3AuthProtocol" }
+                    @{ name = 'CredSnmpV3:EncryptPassword'; value = "$SnmpV3EncryptPassword" }
+                    @{ name = 'CredSnmpV3:EncryptProtocol'; value = "$SnmpV3EncryptProtocol" }
+                )
+            }
+
+            'windows' {
+                $bags = @(
+                    @{ name = 'CredWindows:DomainAndUserid'; value = "$WindowsUser" }
+                    @{ name = 'CredWindows:Password';        value = "$WindowsPassword" }
+                )
+            }
+
+            'ssh' {
+                $enablePw = if ($SshEnablePassword) { $SshEnablePassword } else { $SshPassword }
+                $bags = @(
+                    @{ name = 'CredSSH:Username';              value = "$SshUsername" }
+                    @{ name = 'CredSSH:Password';              value = "$SshPassword" }
+                    @{ name = 'CredSSH:ConfirmPassword';       value = "$SshPassword" }
+                    @{ name = 'CredSSH:EnablePassword';        value = "$enablePw" }
+                    @{ name = 'CredSSH:ConfirmEnablePassword'; value = "$enablePw" }
+                    @{ name = 'CredSSH:Timeout';               value = "$SshTimeout" }
+                    @{ name = 'CredSSH:Port';                  value = "$SshPort" }
+                )
+            }
+
+            'ado' {
+                $bags = @(
+                    @{ name = 'CredADO:Username'; value = "$AdoUsername" }
+                    @{ name = 'CredADO:Password'; value = "$AdoPassword" }
+                )
+            }
+
+            'aws' {
+                $bags = @(
+                    @{ name = 'CredAWS:AccessKeyID';     value = "$AwsAccessKeyID" }
+                    @{ name = 'CredAWS:SecureAccessKey'; value = "$AwsSecureAccessKey" }
+                )
+            }
+
+            'azure' {
+                $bags = @(
+                    @{ name = 'CredAzure:SecureKey';            value = "$AzureSecureKey" }
+                    @{ name = 'CredAzure:TenantID';             value = "$AzureTenantID" }
+                    @{ name = 'CredAzure:ClientID';             value = "$AzureClientID" }
+                    @{ name = 'CredAzure:EnrollmentNumber';     value = "$AzureEnrollmentNumber" }
+                    @{ name = 'CredAzure:EnrollmentAccessKey'; value = "$AzureEnrollmentAccessKey" }
+                )
+            }
+
+            'redfish' {
+                $bags = @(
+                    @{ name = 'CredRedfishBmc:Username';              value = "$RedfishUsername" }
+                    @{ name = 'CredRedfishBmc:Password';              value = "$RedfishPassword" }
+                    @{ name = 'CredRedfishBmc:Protocol';              value = "$RedfishProtocol" }
+                    @{ name = 'CredRedfishBmc:Port';                  value = "$RedfishPort" }
+                    @{ name = 'CredRedfishBmc:Timeout';               value = "$RedfishTimeout" }
+                    @{ name = 'CredRedfishBmc:Retries';               value = "$RedfishRetries" }
+                    @{ name = 'CredRedfishBmc:IgnoreCertificateErrors'; value = "$RedfishIgnoreCertErrors" }
+                )
+            }
+
+            'restapi' {
+                $bags = @(
+                    @{ name = 'CredRestAPI:Username';                              value = "$RestApiUsername" }
+                    @{ name = 'CredRestAPI:Password';                              value = "$RestApiPassword" }
+                    @{ name = 'CredRestAPI:Authtype';                              value = "$RestApiAuthType" }
+                    @{ name = 'CredRestAPI:GrantType';                             value = "$RestApiGrantType" }
+                    @{ name = 'CredRestAPI:AuthorizeUrl';                          value = "$RestApiAuthorizeUrl" }
+                    @{ name = 'CredRestAPI:TokenUrl';                              value = "$RestApiTokenUrl" }
+                    @{ name = 'CredRestAPI:ClientId';                              value = "$RestApiClientId" }
+                    @{ name = 'CredRestAPI:ClientSecret';                          value = "$RestApiClientSecret" }
+                    @{ name = 'CredRestAPI:Scope';                                 value = "$RestApiScope" }
+                    @{ name = 'CredRestAPI:OptionalParams';                        value = "$RestApiOptionalParams" }
+                    @{ name = 'CredRestAPI:PwdGrantUserName';                      value = "$RestApiPwdGrantUserName" }
+                    @{ name = 'CredRestAPI:PwdGrantPassword';                      value = "$RestApiPwdGrantPassword" }
+                    @{ name = 'CredRestAPI:IgnoreCertificateErrorsForOAuth2Token'; value = "$RestApiIgnoreCertErrors" }
+                    @{ name = 'CredRestAPI:RefreshToken';                          value = "$RestApiRefreshToken" }
+                )
+            }
+
+            'ByProperties' {
+                $bags = $PropertyBags
+            }
+
+            'ByBody' {
+                # Body is already set — skip property-bag build
+            }
+        }
+
+        # Build JSON body from typed parameters
+        if ($PSCmdlet.ParameterSetName -ne 'ByBody') {
+            $credentialObject = @{
+                name        = $Name
+                description = if ($Description) { $Description } else { '' }
+                type        = switch ($PSCmdlet.ParameterSetName) {
+                    'snmpV1'       { 'snmpv1'  }
+                    'snmpV2'       { 'snmpv2'  }
+                    'snmpV3'       { 'snmpv3'  }
+                    'ByProperties' { $Type     }
+                    default        { $PSCmdlet.ParameterSetName }
+                }
+                propertyBags = if ($bags) { $bags } else { @() }
+            }
             $Body = $credentialObject | ConvertTo-Json -Depth 5
         }
 
@@ -90,7 +554,7 @@ function Add-WUGCredential {
         try {
             $result = Get-WUGAPIResponse -Uri $uri -Method 'POST' -Body $Body
             if ($result.data) {
-                Write-Host "Successfully created credential." -ForegroundColor Green
+                Write-Verbose "Successfully created credential."
                 return $result.data
             }
             else {
@@ -110,8 +574,8 @@ function Add-WUGCredential {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAG5PkRTyl7krIU
-# f1lAJml1C+k/soTCJ+sxaknm8SkB8qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAEi69z8ktEz8YL
+# 8w1hk6t47UJG3oKH8P2vMHUn/JeavKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -211,17 +675,17 @@ function Add-WUGCredential {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgB5yn3QjnPgfaZkV8rdknj6kxxBOmX2sr
-# 4y5iS/Xt0FEwDQYJKoZIhvcNAQEBBQAEggIAOuyenJVW6+z/vmO9uQ6H2ROIvDLX
-# zc2alj6yas0Fcg/PtD95yE5b9lbC3WRySBs0FPyNadTihdf8pNb/bFvhNHi6rffl
-# WrUwS5fWFiT8dtYOvG898FUmmqZqbn4Bc09svVJoJbvUvEK+guPx1gkMLa7yU6pA
-# dEcgfZErJhODZlqULpQS40tKkgL/xkB3Zdah+DVfPJZ9HsWRikPL/pZgZU/cNeiP
-# 87sj2iuD6ENDIlKcSRiv1HXCuRMmTG0d2Fi6jfU1m4JoHa33Cq95lDeHoMXArI7A
-# JfcoAW9RKhWCHDePFCmahnasitvPDtLflsnPE6/BEZcNaZOUF4GZqbszY2FHe1Oo
-# t4rtls2Hye3JatiSOQCFyE7MpRwn5t24ahCCTIuy1WT5f0QUR1fkUwI6s16VbpMF
-# g3qXKD0ItI52xTPLWLkdqhECIcQq40knNkMwwvZSv0rNNxLjx2vow7FL3DLIiQJY
-# eQceg4evDUjijA09Ys6slOJXOKmyd068HyXKfx+wapMsWbZzX0MlZipi+OMbMEoo
-# GROP1TH4jUMtmBVxjnXw2MK45mUp9ZgatCPogV6ps1BN58+z3qMYt7Bk1u0Qa5FB
-# VIEMiDdm3CqJiN1uH1SOm4MyRFbRdUXCgLVz5dp0ufnFV9PD1Zl0jHUiMsQ4zSBF
-# 4D+SUueYWGUNs8E=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgti/gDPJ2SFCJJ8tuvP6if6uXhwm/HRvR
+# 8pQsJYPcFoUwDQYJKoZIhvcNAQEBBQAEggIAZzIIokfrJRBtwlW53UO4X9ucx3hF
+# yj7oSlLh2nksjUbFNT0Tko7DStGAC02MPy7cwccadR8TJvdlK61o7VQWA12EE9nz
+# xOGH9ZgIugBwVuVYw3niB7gb31LY7RefdcOfp9ZP2pCAKh92um8xMQ1/pFcgNA9k
+# sU8wLEVnDCbp24q2lUlUqy56STX9gZS+leVxBIfs7y+AFy69nBGb3b577asat/nS
+# i1DjETSz2gqmrfUjZqiKMG6VATaP2JIhaOr2w6U8TIAaukwXEh+idnUxrHo2DRW1
+# GDInw5CpFP2AD9BQit4CfguQ3Xt1HyyH+o/uMGYxFs2W5uOiRczzHiqq4lVfpVrl
+# w3fZlX08W5hPWdQ0tbN3BaOaAsZAh/ODrJ2z2U1WOtBcTkZ2y3dCVcrfa/WeF2Lf
+# n/atpoW39BE3/9b6SlNaWHkjFeJn9ieboXyy6Ne7QLBo11DEsmu4e/N5YZH1zYzP
+# W+L27EJ7m+iYOqOjpgl0bUNuspGGsnQLl3eErFC1fC84F/dcHqYTstQMoQI5buvM
+# 4LvPVsWvdhfnxECdpfsKoHACrv8Tk/RY+SSPmZhwW/J/SL4hCvYFRn3GIY6n8IwW
+# sah/IrI939J9jTMHV8BR4mTFyvnpp7U0rf1+709VDBEVtVzQtMUoSw7Xop7n/GX4
+# xZCbGbFpvXvijpE=
 # SIG # End signature block

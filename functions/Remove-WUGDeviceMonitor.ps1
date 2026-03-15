@@ -64,7 +64,7 @@ function Remove-WUGDeviceMonitor {
             try {
                 $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
                 if ($result.data) {
-                    Write-Host "Successfully removed ${target}." -ForegroundColor Green
+                    Write-Verbose "Successfully removed ${target}."
                     return $result.data
                 }
                 return $result
@@ -84,7 +84,7 @@ function Remove-WUGDeviceMonitor {
         try {
             $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
             if ($result.data) {
-                Write-Host "Successfully removed ${target}." -ForegroundColor Green
+                Write-Verbose "Successfully removed ${target}."
                 return $result.data
             }
             return $result
@@ -102,8 +102,8 @@ function Remove-WUGDeviceMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAEh4ofshQnXTpI
-# gek940jLzBUrCMxIjxTEAamRrMvrRaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjU1EfrkDbU2pE
+# 9nclKnxgzefPAnJ3kakl8FFEuvxXa6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -203,17 +203,17 @@ function Remove-WUGDeviceMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgX1LXLPK4DEe9l7s1IGTDmXG8VndWzPxJ
-# lZLTzr+YgsYwDQYJKoZIhvcNAQEBBQAEggIAuk+2S+mp2pCjdpSgfvrmMV1Vh1fR
-# dN3JAtkmGCY7DZAYEZ0akxVgGfkPm8j3eywqxEBPIs4Xo/EVuXuHyalDzp7XdXb2
-# abZmaaOgnRlax4lSycolTotrWIrTxstU4knZmgqr800YRGaoJAoJp9fYO9aYlFWk
-# jbkxqKxjz1n2aLqDgAI/mWcm9owp2lZX2sh0ZibQRlsuRO0kOyZQXH8aFJ11KRK1
-# x0EHsmdF30Dw5MPnuQxaxvnnj94USUNgKKD5k5umvE5uUOCQmGb/RAuhy0FzBlxi
-# dNffx/wOfRwzBBXhR0G4NOw4ypAjewseZrQeAa6HAG5utLilw/DRbk7BlR2QxC9Z
-# Au+lW8ZHrCiu1XF36us+nzsIaBP1Gz3b3En5H/7gA7X4H34RFr9bfC/WoR9EUEiM
-# BPrjC7+139cThBb2QPjNDulHEC6KctaIcLHBMMsx0hPFdvFE3HM6Ak4neaLHQ7jF
-# 7/KmtktaSikyBfpgWsj7y9uU0lkoRxspdgC4AOVF2iNL0GlvAjZOwULNusKGpKOZ
-# kaeXvZxL7okFY/IHw5O7D6XOVspMf0pdGktcn25NjQIIMBBXrvGXuWYWk69IZBWz
-# AMLXyOvDjaWgaTqnej0cvNHCm5Qnx/gr1h/i/4ZiR08CtrdHKz2Zy4Q9XLxZUfXx
-# BzrYjpeEf1tavY4=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg+y4aiYavoJd5bNzr+XZVqVCEIUGhB7ip
+# adgSy0hp0a8wDQYJKoZIhvcNAQEBBQAEggIAK8kZtK6mUWtPNXMztid8t0AiQFFL
+# TckE9oo7V8VRc6Tsee+Pc7MeRNRWlT1qAoUHi1uWc34R2LX6uN/2fYzAv9UWYv8o
+# E2oXm23BKnkNPKQGT8kQdWaf6Oe9qWLOLAJNSSPy0AhILo5Xienvoup7oGtfiom5
+# tXU9H1ImtgVvqxwpNE6/g5WXGe6080Rn00fB6HbJ+42bARl69JRsTcXHluUeKkpy
+# ml/8aVwDY6AFQkpo7Je0db1dhUMTeHVmchIwYq+MGLPz4spfZ20fF6hY1US+OFed
+# olXsz8lS9T2KgDuxEitJ4fi3xRl5YTdXZ+hafiRCtAb+j7qLWfI56sjAGPR4/527
+# FXEGxxzpE00xuC0rCB/OzjzdphkTZU1KkWlJEVXED9FYcF1loulRxdhHx76dvn1E
+# a/EwQWIkuF6FS+jaZM60wxTYf412xkxWnizwwGpouowBZsyQZ01TNqffhZUH57nI
+# zr/pOmq+vD6DupuehVk4yq+xyV3N4qtNUycBY9gD7FTPU0p3Q8cJLRDPpCM6FXSn
+# dnqoE6ZDvBTI234XHPgw4HvwdaeLOO9R2t8KOWF7GoeinCrP7GypYf1XxKz++qiU
+# tVnvZDA/wI8rdCvATtKl7nVGo5cR4woTncmHauRrfVJCuHstuIvQVH95s94k4AW7
+# y9o2jG3dM/E2HPY=
 # SIG # End signature block

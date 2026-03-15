@@ -1,68 +1,164 @@
 <#
 .SYNOPSIS
-Updates the device template for a given device in WhatsUp Gold.
+    Downloads and imports all community device role templates from the
+    progress/WhatsUp-Gold-Device-Templates GitHub repository.
 
 .DESCRIPTION
-The Set-WUGDeviceTemplate function allows you to update the template of a device in WhatsUp Gold by specifying the device ID and the new template object. This is typically used to apply changes to an existing device's configuration using a template previously retrieved or modified.
+    This script uses the GitHub API to enumerate .json files in the
+    progress/WhatsUp-Gold-Device-Templates repository, downloads each
+    raw template, and imports it into WhatsUp Gold via
+    Set-WUGDeviceRole -ImportPackage.
 
-.PARAMETER DeviceId
-The ID of the device to update.
+    Requires an active WhatsUpGoldPS session (Connect-WUGServer).
 
-.PARAMETER Template
-The template object to apply to the device. This should match the format returned by Get-WUGDeviceTemplate.
+.PARAMETER WUGServer
+    The WhatsUp Gold server address (e.g. "192.168.1.250" or "wug.example.com:9644").
+    If omitted, you must already be connected via Connect-WUGServer.
+
+.PARAMETER TemplateNames
+    Optional array of template names to import (without .json extension).
+    If omitted, all templates in the repository are imported.
+    Example: @("FortiOS Monitors", "Cisco ASA Monitors")
+
+.PARAMETER ListOnly
+    Switch to list available templates without importing them.
 
 .EXAMPLE
-$template = Get-WUGDeviceTemplate -DeviceId 20
-# ...modify $template as needed...
-Set-WUGDeviceTemplate -DeviceId 20 -Template $template
+    # Import all community templates (already connected)
+    .\Import-CommunityDeviceRoleTemplates.ps1
+
+.EXAMPLE
+    # Connect and import all templates
+    .\Import-CommunityDeviceRoleTemplates.ps1 -WUGServer "192.168.1.250"
+
+.EXAMPLE
+    # Import only specific templates
+    .\Import-CommunityDeviceRoleTemplates.ps1 -TemplateNames "FortiOS Monitors", "Cisco ASA Monitors"
+
+.EXAMPLE
+    # List available templates without importing
+    .\Import-CommunityDeviceRoleTemplates.ps1 -ListOnly
 
 .NOTES
-Author: Jason Alberino (jason@wug.ninja)
-Last modified: 2024-06-15
+    Author: Jason Alberino (jason@wug.ninja)
+    Source: https://github.com/progress/WhatsUp-Gold-Device-Templates
 #>
-function Set-WUGDeviceTemplate {
-    [CmdletBinding(SupportsShouldProcess = $true)]
-    param(
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int]$DeviceId,
-        [Parameter(Mandatory = $true)]$Template
-    )
+param(
+    [string]$WUGServer,
+    [string[]]$TemplateNames,
+    [switch]$ListOnly
+)
 
-    begin {
-        Write-Debug "Starting Set-WUGDeviceTemplate for DeviceId: $DeviceId"
-    }
+$repoApiUrl = "https://api.github.com/repos/progress/WhatsUp-Gold-Device-Templates/contents"
 
-    process {
-        if (-not $PSCmdlet.ShouldProcess("Device ${DeviceId}", 'Set device template')) { return }
-        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/config/template"
-        try {
-            $jsonBody = $Template | ConvertTo-Json -Depth 10
-            $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $jsonBody
-            return $result.data
-        }
-        catch {
-            $oError = $_
-            Write-Error "Error updating template for DeviceId ${DeviceId} ${oError}"
-        }
-    }
+# ── Pre-flight ────────────────────────────────────────────────────────────────
+if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
 
-    end {
-        Write-Debug "Completed Set-WUGDeviceTemplate for DeviceId: $DeviceId"
+if ($WUGServer) {
+    if (-not $global:WhatsUpServerBaseURI) {
+        $cred = Get-Credential -Message "Enter WhatsUp Gold credentials for $WUGServer"
+        Connect-WUGServer -Server $WUGServer -Credential $cred
     }
 }
-# End of Set-WUGDeviceTemplate function
-# End of script
-#------------------------------------------------------------------
-# This script is part of the WhatsUpGoldPS PowerShell module.
-# It is designed to interact with the WhatsUp Gold API for network monitoring.
-# The script is provided as-is and is not officially supported by WhatsUp Gold.
-# Use at your own risk.
-#------------------------------------------------------------------
+
+if (-not $ListOnly -and -not $global:WhatsUpServerBaseURI) {
+    Write-Error "Not connected to a WhatsUp Gold server. Run Connect-WUGServer first or pass -WUGServer."
+    return
+}
+
+# ── Enumerate templates from GitHub ──────────────────────────────────────────
+Write-Host "`nFetching template list from GitHub..." -ForegroundColor Cyan
+try {
+    $repoContents = Invoke-RestMethod -Uri $repoApiUrl -Method Get -Headers @{ 'User-Agent' = 'WhatsUpGoldPS' }
+}
+catch {
+    Write-Error "Failed to query GitHub API: $_"
+    return
+}
+
+$jsonFiles = $repoContents | Where-Object { $_.type -eq 'file' -and $_.name -like '*.json' }
+
+if (-not $jsonFiles -or $jsonFiles.Count -eq 0) {
+    Write-Warning "No .json template files found in the repository."
+    return
+}
+
+# Filter by name if requested
+if ($TemplateNames) {
+    $filtered = @()
+    foreach ($name in $TemplateNames) {
+        $match = $jsonFiles | Where-Object { $_.name -eq "$name.json" -or $_.name -eq $name }
+        if ($match) {
+            $filtered += $match
+        }
+        else {
+            Write-Warning "Template not found in repository: $name"
+        }
+    }
+    $jsonFiles = $filtered
+    if (-not $jsonFiles -or $jsonFiles.Count -eq 0) {
+        Write-Warning "No matching templates found."
+        return
+    }
+}
+
+# ── List mode ────────────────────────────────────────────────────────────────
+if ($ListOnly) {
+    Write-Host "`nAvailable device role templates ($($jsonFiles.Count)):" -ForegroundColor Green
+    $jsonFiles | ForEach-Object {
+        $name = $_.name -replace '\.json$', ''
+        $sizeKB = [math]::Round($_.size / 1024, 1)
+        Write-Host "  - $name ($sizeKB KB)"
+    }
+    return
+}
+
+# ── Download & Import ────────────────────────────────────────────────────────
+Write-Host "Found $($jsonFiles.Count) template(s) to import.`n" -ForegroundColor Green
+
+$imported = 0
+$failed   = 0
+$results  = @()
+
+foreach ($file in $jsonFiles) {
+    $templateName = $file.name -replace '\.json$', ''
+    $downloadUrl  = $file.download_url
+
+    Write-Host "[$($imported + $failed + 1)/$($jsonFiles.Count)] Importing: $templateName ... " -NoNewline
+
+    try {
+        # Download raw JSON from GitHub
+        $json = Invoke-RestMethod -Uri $downloadUrl -Method Get -Headers @{ 'User-Agent' = 'WhatsUpGoldPS' } | ConvertTo-Json -Depth 100 -Compress
+
+        # Import into WUG via Import-WUGRoleTemplate
+        $result = Import-WUGRoleTemplate -Body $json -Confirm:$false -ErrorAction Stop
+        Write-Host "OK" -ForegroundColor Green
+        $imported++
+        $results += [PSCustomObject]@{ Template = $templateName; Status = 'Imported'; Detail = '' }
+    }
+    catch {
+        Write-Host "FAILED" -ForegroundColor Red
+        Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Yellow
+        $failed++
+        $results += [PSCustomObject]@{ Template = $templateName; Status = 'Failed'; Detail = $_.Exception.Message }
+    }
+}
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+Write-Host "`n── Import Summary ──" -ForegroundColor Cyan
+Write-Host "  Total:    $($jsonFiles.Count)"
+Write-Host "  Imported: $imported" -ForegroundColor Green
+if ($failed -gt 0) {
+    Write-Host "  Failed:   $failed" -ForegroundColor Red
+}
+
+$results | Format-Table -AutoSize
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxQUTZGx5aN4s/
-# 9JBT3SLJI5kq6ngKI6TuEctDITWkDKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIO69LB9NhbNXE
+# c192cL/G4Y6iyGqGJkl0okc9QH0dEKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -162,17 +258,17 @@ function Set-WUGDeviceTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgKtF29n87wqb9SCeNlfzoSK1OpqWBe1d9
-# BH+bflmI0GQwDQYJKoZIhvcNAQEBBQAEggIAN7GvxRhoJsuEZryiZ9WHRGHtzbcb
-# GRq1g8MX6T1Ss3mUcZlciTlr19DYajmFDrViiT34XNK+lCroveu8CG/dDF2B0zhh
-# 6UjlS+Bchpe/svdy0zyAKho2cbYsejhcsRZ1e7bFJz24cFY0rJjvojG5Yz2oKgwk
-# BGcOQEb1mzs738Z4RXUUYCYJ+SJFvNJOYB9WImndUYFr9uWabsDWfpiqkndctaPt
-# 2tL3sQF7ao8M4McARSwp0Dx3W9R7GC3wKcam/ctVJ8J9Jv23rgRKCT72Sc9XKA4U
-# TadFcYuFmEEPHlban6719ifWMrhPDUR53aH9M78VtfOJu/tQ5zUU9iWuZbPLYPtb
-# M2mgKC+r4InS3I8J8vIu92fEHMSHSlAoYwgQVG3xLruBCWl0zQbqsT4ctIjvL6Xq
-# /eDoLRtOArwxhvjIRz1KIl+V7dtgzMC/UGBrsn2Da/lmxAWZV9pAsVQhPA78syLN
-# pvd2F/27/kXg/fLoP7GBwQneaTPzxDbDQ9Grn96kRJ9u+YUH0gWxvOKE2/ROMkv8
-# u2TSC5ncl/3iZWloIjaiNROqmnJjoSx+8BTWM+TWe4nhfak7L+rjft0Tqha/LjSk
-# wa+4YScDJ9EYPu+L3oXtih+7gjDxg6KUWMR0lPVNaqkMoYoyqxV+tPiIAxnMk36N
-# hNBCLFFmQNcs1Rk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgp87aSv1odr0bOGZlFecVd+KHhPFS+4Tk
+# MLx+JeiJrpUwDQYJKoZIhvcNAQEBBQAEggIAiCfwoiLgQm1lcZyQuh/QBttfC7kP
+# PvF/IZqb8lmLgWMoehl+kZmFsnT34+mRhMI+vVBE9Q4uhgg3eqaIBNVvDaSmUP/9
+# Sb89YbH24hdLCaaarMa4nn/qcoIO866/OIfu0olZkJZaOG+oYfF9xz8AkNdPJLVX
+# H9MZySpPDipdhXir8f6vLtcnPntRGEKT792eSk5UO7jhSj358zlTZMO23OEl+ZJ5
+# 2ltOM5nndjXoUFhmMYs+aUPmuUywYUaL8HacoFhPLZr15CWRSo+7ftAMgyPeZvVS
+# 1o13Pj7tV2sfrAuQ56qUn07kwlrusujtuGBpQwkv55WPs9pdOk71TdSIaEz3Ijta
+# YDPsyykxI5hgJLpzZ21gS3Y/s1n4xeb74Z4Qo+1vXuHXFfjys6u2Oymu/sQDl9bW
+# f3nPo1f8cAstb3Shf3HeGRamrd5GYMFzMQKQngCy/x5PPG/S2N/qx2On9o/aTUbK
+# Bi9lTiwBLV07cYXUQpsPoB1TteNZI5Eu3Rb0uBpR+XxNJ4F14LgEEx8FkM3BcqPy
+# XPZKnQgNmInCwGytzPK8NZACjOW3J18duG28aX/EL6bsX0XzbIhdVzDs9evtHjad
+# wzS71NreMLx/rwt1ecgcRg+m3BRv7AeqqhdmczcIx65+9sQvsYVWH+6WUHb/4BZx
+# QGATgPVyqv44cbs=
 # SIG # End signature block

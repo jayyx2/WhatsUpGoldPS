@@ -6,6 +6,7 @@ Removes one or more devices from a WhatsUp Gold device group, or removes all dev
 The Remove-WUGDeviceGroupMember function removes devices from a device group:
 - By device ID: DELETE /api/v1/device-groups/{groupId}/devices/{deviceId}
 - All devices: DELETE /api/v1/device-groups/{groupId}/devices/-
+- From device side: DELETE /api/v1/devices/{deviceId}/group/{groupId}
 
 .PARAMETER GroupId
 The ID of the device group to remove devices from.
@@ -22,6 +23,10 @@ Remove-WUGDeviceGroupMember -GroupId 101 -DeviceId 1, 2, 3
 .EXAMPLE
 Remove-WUGDeviceGroupMember -GroupId 101 -All
 
+.EXAMPLE
+# Remove group membership from the device side
+Remove-WUGDeviceGroupMember -FromDeviceId 3304 -FromGroupId 101
+
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/DeviceGroup
@@ -29,7 +34,8 @@ Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index
 function Remove-WUGDeviceGroupMember {
     [CmdletBinding(DefaultParameterSetName = 'ById', SupportsShouldProcess = $true)]
     param(
-        [Parameter(Mandatory = $true, Position = 0)]
+        [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ById')]
+        [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'All')]
         [int]$GroupId,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'ById', Position = 1, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
@@ -37,12 +43,20 @@ function Remove-WUGDeviceGroupMember {
         [string[]]$DeviceId,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'All')]
-        [switch]$All
+        [switch]$All,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'FromDevice')]
+        [string]$FromDeviceId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'FromDevice')]
+        [int]$FromGroupId
     )
 
     begin {
         Write-Debug "Starting Remove-WUGDeviceGroupMember function."
-        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups/${GroupId}/devices"
+        if ($PSCmdlet.ParameterSetName -ne 'FromDevice') {
+            $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups/${GroupId}/devices"
+        }
         $allDeviceIds = @()
     }
 
@@ -53,13 +67,28 @@ function Remove-WUGDeviceGroupMember {
     }
 
     end {
+        if ($PSCmdlet.ParameterSetName -eq 'FromDevice') {
+            $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${FromDeviceId}/group/${FromGroupId}"
+            Write-Debug "DELETE URI (from device): $uri"
+            if (-not $PSCmdlet.ShouldProcess("Device ${FromDeviceId} from Group ${FromGroupId}", 'Remove group membership')) { return }
+            try {
+                $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
+                Write-Verbose "Successfully removed device ${FromDeviceId} from group ${FromGroupId} (device-side)."
+                return $result
+            }
+            catch {
+                Write-Error "Error removing device ${FromDeviceId} from group ${FromGroupId}: $_"
+            }
+            return
+        }
+
         if ($PSCmdlet.ParameterSetName -eq 'All') {
             $uri = "${baseUri}/-"
             Write-Debug "DELETE URI (all): $uri"
             if (-not $PSCmdlet.ShouldProcess("Group ${GroupId}", 'Remove all devices')) { return }
             try {
                 $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
-                Write-Host "Successfully removed all devices from group ${GroupId}." -ForegroundColor Green
+                Write-Verbose "Successfully removed all devices from group ${GroupId}."
                 return $result
             }
             catch {
@@ -73,7 +102,7 @@ function Remove-WUGDeviceGroupMember {
                 if (-not $PSCmdlet.ShouldProcess("Device ${did} in Group ${GroupId}", 'Remove device from group')) { continue }
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
-                    Write-Host "Successfully removed device ${did} from group ${GroupId}." -ForegroundColor Green
+                    Write-Verbose "Successfully removed device ${did} from group ${GroupId}."
                 }
                 catch {
                     Write-Error "Error removing device ${did} from group ${GroupId}: $_"
@@ -88,8 +117,8 @@ function Remove-WUGDeviceGroupMember {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDuEMbzfT6ge+XP
-# 9OhROrRGeNjaeae1/0MsZ720vNg+kaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYt+oQ+oMfjdQl
+# JF+Ibl/CdJ0fmCJAh3H5N+2zXiPIT6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -189,17 +218,17 @@ function Remove-WUGDeviceGroupMember {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg83YOUOxW4R7OPF2aMv25ZWhLo690KenX
-# 7zwBBsPb9MUwDQYJKoZIhvcNAQEBBQAEggIAc3Plbpk8UE7bS1W80dT2OuCU/vOE
-# jkl5ufVej0O6c251QaAy1czX5jMGeBoqsY3RI//iBEoZVx+be3S20sRK7AQ1Om8K
-# f4KheUMyJftS1W7JhEclv3YH3h1/U4zoW9xBkA4k+HUwYXd5kawvynfItePi58q8
-# hQTWwkn68vdxgzEABG3NdpmUVb/lIo8kpVQ1qjp2hRag/aefgG52cKrqNATHZwaO
-# vWxNO5R4wIsIaotlNrHcjNvtQ/92bxmGcN94BDh5mkFlg5fd58RxCHWw0/Sjcmyu
-# sIE76rBNjlddtht+ISP2ZlXPf8HGxGbi48hp8PFjJqe64vxFmgntUahw3G3TEzFQ
-# 1Q47frd95ZuDbbsfq/ybZPUQP+we/57cKGSQufJtcbq7BYi2/ikokqQFUKBt+Ftk
-# NWrI+/4fWN1DBM8Z+IFxp8fPBkUKrcJrFfrsN/dj7K3jfgCrH1VjdCl+G24C4TQI
-# LUEJWVYbMGt/53ADgXHGsx/vP0nNqkt8aYobdeLN+4mZbdqtNMlN4himQbmuObsN
-# sTebwt1jhB3DrmuUVUeM29ey7tOBjakvRuyJr0cU3Rc1WPWThDLFnGVHAPkV/j9q
-# b+pQQy/YTn0AP+RtkChSik0SnBkEAF+6W4IQ9q/IcQFu/Tb9zFFhcbxzv8Bp569p
-# W0HYMD4XhfIIYHo=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgRcTPYUP18AIym8SXVd9Kud/sQjrWeq4z
+# 1jqYVogRdXYwDQYJKoZIhvcNAQEBBQAEggIA5ggEMY3FKQd0839vYYR/QgZOOlcx
+# +dW26vpXBBr7Ivkq0Z7e6VQud+s49/5yd6FS07tLoTmVPqxOBstaM03om5j5aWJb
+# XwRwfSHf9cvGymQeaP7VzEjeLIVzIIJV0ij172DIaYSULRCArNJFzdd3n1LIf5/4
+# YLjT8+pYMbyFye0mM4rGvGelCX65iujYUrHGg3Fq0ECemo48g5/9zlzgQcH85zUX
+# 2w6Hc3v9YLrTotYsF2Jl42YNZEv29ZgMS3yvDBTIhbUQA8/qtExedqBLWDiDu5gk
+# nZrOB/ouCOO3NoHOMeC/a3U87Orfc0Lj7EH7c7XS67sfTffAM/myCgABIWROf6ya
+# iMmbjiENTZfPgZqhgHntbOWsNgdh+9KYoLmF7UwJu3OLjeNAG4lbmwkjQD5P06lS
+# jDMV4r4bE01BddmxZKGa0QDCzEX+lL7W/P8bPBWlR0B7H6acs3q/NkyCGCr1fiTK
+# YEx6jMLKz26701nV8AQ/1ov3SoqfNZoRqEo7wsJdkO1m8zN5eiZSisCQ60zraDM2
+# KqMZ7UqY9p/S7be8u4a08HHrsdehnqVPmcPe4CgpI0L0FJjNsIfLVluyPDixMyPE
+# G7ionKaDurn1uTBxTf+4lbEM2sH0nO1PK6RBI37g7toJoAcfPcXfHlQ31lDIVX7V
+# EcocZ235tEhH7BM=
 # SIG # End signature block

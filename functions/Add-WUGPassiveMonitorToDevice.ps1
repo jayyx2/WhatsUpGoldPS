@@ -1,68 +1,125 @@
 <#
 .SYNOPSIS
-Updates the device template for a given device in WhatsUp Gold.
+    Assigns a passive monitor to one or more devices in WhatsUp Gold.
 
 .DESCRIPTION
-The Set-WUGDeviceTemplate function allows you to update the template of a device in WhatsUp Gold by specifying the device ID and the new template object. This is typically used to apply changes to an existing device's configuration using a template previously retrieved or modified.
+    Add-WUGPassiveMonitorToDevice assigns a specified passive monitor template to one or
+    more devices via the WhatsUp Gold REST API (POST /api/v1/devices/{deviceId}/monitors/-).
+    When multiple DeviceIds or MonitorIds are supplied, the function loops through each
+    combination, issuing one POST per pair.
 
 .PARAMETER DeviceId
-The ID of the device to update.
+    One or more device IDs to assign the monitor to. Required. Accepts pipeline input.
 
-.PARAMETER Template
-The template object to apply to the device. This should match the format returned by Get-WUGDeviceTemplate.
+.PARAMETER MonitorId
+    One or more passive monitor template IDs (monitorTypeId) to assign. Required.
+
+.PARAMETER Enabled
+    Whether the monitor should be enabled. Valid values: true, false. Default: true.
 
 .EXAMPLE
-$template = Get-WUGDeviceTemplate -DeviceId 20
-# ...modify $template as needed...
-Set-WUGDeviceTemplate -DeviceId 20 -Template $template
+    Add-WUGPassiveMonitorToDevice -DeviceId 42 -MonitorId 22
+
+    Assigns passive monitor template 22 to device 42 with default settings.
+
+.EXAMPLE
+    Add-WUGPassiveMonitorToDevice -DeviceId @(100,101,102) -MonitorId 22
+
+    Assigns passive monitor 22 to devices 100, 101, and 102.
+
+.EXAMPLE
+    Add-WUGPassiveMonitorToDevice -DeviceId 42 -MonitorId @(22,23,24)
+
+    Assigns passive monitors 22, 23, and 24 to device 42.
+
+.EXAMPLE
+    Add-WUGPassiveMonitorToDevice -DeviceId @(100,101) -MonitorId @(22,23) -Enabled false
+
+    Assigns monitors 22 and 23 to devices 100 and 101 (4 total assignments) in a disabled state.
+
+.EXAMPLE
+    @(100,101,102) | Add-WUGPassiveMonitorToDevice -MonitorId 22
+
+    Pipes three device IDs and assigns passive monitor 22 to each.
 
 .NOTES
-Author: Jason Alberino (jason@wug.ninja)
-Last modified: 2024-06-15
+    Author: Jason Alberino (jason@wug.ninja)
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Monitors
+
+    The WUG REST API has no bulk endpoint for assigning a monitor to multiple devices.
+    This function iterates each DeviceId x MonitorId combination, one POST per pair.
 #>
-function Set-WUGDeviceTemplate {
-    [CmdletBinding(SupportsShouldProcess = $true)]
+function Add-WUGPassiveMonitorToDevice {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int]$DeviceId,
-        [Parameter(Mandatory = $true)]$Template
+        [Parameter(Position = 0, Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('id')]
+        [int[]]$DeviceId,
+        [Parameter(Position = 1, Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
+        [int[]]$MonitorId,
+        [ValidateSet("true", "false")][string]$Enabled = "true"
     )
 
     begin {
-        Write-Debug "Starting Set-WUGDeviceTemplate for DeviceId: $DeviceId"
+        Write-Debug "Initializing Add-WUGPassiveMonitorToDevice function."
+        Write-Debug "DeviceId: $DeviceId"
+        Write-Debug "MonitorId: $MonitorId"
+        Write-Debug "Enabled: $Enabled"
     }
 
     process {
-        if (-not $PSCmdlet.ShouldProcess("Device ${DeviceId}", 'Set device template')) { return }
-        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/config/template"
-        try {
-            $jsonBody = $Template | ConvertTo-Json -Depth 10
-            $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $jsonBody
-            return $result.data
-        }
-        catch {
-            $oError = $_
-            Write-Error "Error updating template for DeviceId ${DeviceId} ${oError}"
+        $totalDevices = $DeviceId.Count
+        $currentDeviceIndex = 0
+
+        foreach ($dId in $DeviceId) {
+            $currentDeviceIndex++
+
+            foreach ($mId in $MonitorId) {
+                $percentComplete = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100)
+                Write-Progress -Activity "Assigning passive monitor(s) to device(s)" -Status "Processing Device ID $dId ($currentDeviceIndex of $totalDevices)" -PercentComplete $percentComplete
+
+                $uri  = "$($global:WhatsUpServerBaseURI)/api/v1/devices/${dId}/monitors/-"
+                $body = @{
+                    type          = "passive"
+                    monitorTypeId = $mId
+                    enabled       = $Enabled
+                    isGlobal      = "true"
+                } | ConvertTo-Json -Depth 5
+
+                Write-Debug "Assigning passive monitor $mId to device $dId"
+                Write-Debug "URI: $uri"
+                Write-Debug "Body: $body"
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method "POST" -Body $body
+
+                    if ($result.data.successful -eq 1) {
+                        Write-Output "Successfully assigned passive monitor $mId to device $dId."
+                        Write-Debug "Result from Get-WUGAPIResponse for Device ID ${dId}: $result"
+                    }
+                    else {
+                        Write-Warning "Failed to assign passive monitor $mId to device $dId."
+                        Write-Debug "Result from Get-WUGAPIResponse for Device ID ${dId}: $result"
+                    }
+                }
+                catch {
+                    Write-Error "Error assigning passive monitor $mId to device ${dId}: $_"
+                }
+            }
         }
     }
 
     end {
-        Write-Debug "Completed Set-WUGDeviceTemplate for DeviceId: $DeviceId"
+        Write-Progress -Activity "Assigning passive monitor(s) to device(s)" -Completed
+        Write-Debug "Completed Add-WUGPassiveMonitorToDevice function."
     }
 }
-# End of Set-WUGDeviceTemplate function
-# End of script
-#------------------------------------------------------------------
-# This script is part of the WhatsUpGoldPS PowerShell module.
-# It is designed to interact with the WhatsUp Gold API for network monitoring.
-# The script is provided as-is and is not officially supported by WhatsUp Gold.
-# Use at your own risk.
-#------------------------------------------------------------------
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxQUTZGx5aN4s/
-# 9JBT3SLJI5kq6ngKI6TuEctDITWkDKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUba9YYnfkqBtx
+# PkFDz91mHRXdWL9VHgHU9SwG2kgLZaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -162,17 +219,17 @@ function Set-WUGDeviceTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgKtF29n87wqb9SCeNlfzoSK1OpqWBe1d9
-# BH+bflmI0GQwDQYJKoZIhvcNAQEBBQAEggIAN7GvxRhoJsuEZryiZ9WHRGHtzbcb
-# GRq1g8MX6T1Ss3mUcZlciTlr19DYajmFDrViiT34XNK+lCroveu8CG/dDF2B0zhh
-# 6UjlS+Bchpe/svdy0zyAKho2cbYsejhcsRZ1e7bFJz24cFY0rJjvojG5Yz2oKgwk
-# BGcOQEb1mzs738Z4RXUUYCYJ+SJFvNJOYB9WImndUYFr9uWabsDWfpiqkndctaPt
-# 2tL3sQF7ao8M4McARSwp0Dx3W9R7GC3wKcam/ctVJ8J9Jv23rgRKCT72Sc9XKA4U
-# TadFcYuFmEEPHlban6719ifWMrhPDUR53aH9M78VtfOJu/tQ5zUU9iWuZbPLYPtb
-# M2mgKC+r4InS3I8J8vIu92fEHMSHSlAoYwgQVG3xLruBCWl0zQbqsT4ctIjvL6Xq
-# /eDoLRtOArwxhvjIRz1KIl+V7dtgzMC/UGBrsn2Da/lmxAWZV9pAsVQhPA78syLN
-# pvd2F/27/kXg/fLoP7GBwQneaTPzxDbDQ9Grn96kRJ9u+YUH0gWxvOKE2/ROMkv8
-# u2TSC5ncl/3iZWloIjaiNROqmnJjoSx+8BTWM+TWe4nhfak7L+rjft0Tqha/LjSk
-# wa+4YScDJ9EYPu+L3oXtih+7gjDxg6KUWMR0lPVNaqkMoYoyqxV+tPiIAxnMk36N
-# hNBCLFFmQNcs1Rk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg5YxNTchPO+LO0zslCwWNZU4GImvqGQMS
+# WuRL4MNAyGMwDQYJKoZIhvcNAQEBBQAEggIA7qww21YBZM0vnmEwWxssglznp1Cv
+# Oom1MwdHzefCiz4a8OqnkoYFgkiIS44GpgULcqMRNO+W8xmZTInsGRDLCi0xoGTz
+# 5fWFEWMP59ulhSIvqTO/h98tPtnRA06ipOgRiF0COS4B11Hx5xDcgaFzWHRVhuIN
+# wUqly4UUSHHrk1ALkt5ByEoK5BV4Y5PF4uq1SweCU234vDqhh2Gti/R0jDNOq4xA
+# xmbDM6tfOVACUddZkgMeInU67obSgmXfgOdPn1vemnz7t5PNFZPjex41x8Fur836
+# uRgevfeO5iPeGBkK1Xxa6FC4cLf9VrjRj+eTuiDsSpT++WX/FlcG8ulzb/AJx7w0
+# KiG+ZP9vFplBnpQuBj+Is02zdvgkRGJP15wqzUoWrZgBl08ImYS0tH4vgTnXjriG
+# E2Qxj7+z+mTCCUg6jLooV1/MltiidZfh6GnDb11O4aFwnH2RbkdznktByx2niVel
+# iAKBOcaTQIUNYBZ1qRiLR/faQkz/UVjDNZ0Fbyow85/K3x1jOtlByMsJ7wQR4GGZ
+# 0tlfrJIAPEU20b/6m4qwBbG1VNPLELh5hP3zXjTxtpWZSVo0IeoPEkdlFbDgaKlu
+# SWLf3WVMRTVyIQNG4Zr62jsZMrVCHBkeQShY7d7LU7PpEJ8Ildby0O/ww6G9TbiP
+# DNcVtzAd8vpsdtM=
 # SIG # End signature block

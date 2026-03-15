@@ -122,6 +122,37 @@ function Set-WUGDeviceMaintenance {
         $devicesProcessed = 0
         $percentComplete = 0
 
+        # Single-device optimised path: PUT /devices/{id}/config/maintenance
+        if ($totalDevices -eq 1) {
+            $singleId = $collectedDeviceIds[0]
+            $body = @{ enabled = $Enabled }
+            if ($Reason) { $body.reason = $Reason }
+            if ($EndUTC) { $body.endUtc = $EndUTC }
+            $bodyJson = $body | ConvertTo-Json -Depth 5
+            Write-Debug "Single-device API Request Body: $bodyJson"
+
+            if (-not $PSCmdlet.ShouldProcess("Device $singleId", "Set maintenance mode to $Enabled")) {
+                return @{ successfulOperations = 0; errors = 0; success = $true }
+            }
+
+            try {
+                $result = Get-WUGAPIResponse -uri "$global:WhatsUpServerBaseURI/api/v1/devices/$singleId/config/maintenance" -Method "PUT" -Body $bodyJson
+                $successes = 1
+            }
+            catch {
+                Write-Error "Error updating maintenance mode for DeviceID ${singleId}: $($_.Exception.Message)"
+                $errors = 1
+            }
+
+            $resultData = @{
+                successfulOperations = $successes
+                errors               = $errors
+                success              = ($errors -eq 0)
+            }
+            return $resultData
+        }
+
+        # Batch path: PATCH /devices/-/config/maintenance
         while ($devicesProcessed -lt $totalDevices) {
             $remainingDevices = $totalDevices - $devicesProcessed
             $currentBatchSize = [Math]::Min($batchSize, $remainingDevices)
@@ -175,7 +206,7 @@ function Set-WUGDeviceMaintenance {
             success              = ($errors -eq 0)
         }
 
-        Write-Output $resultData
+        return $resultData
     }
 }
 # End of Set-WUGDeviceMaintenance function
@@ -190,8 +221,8 @@ function Set-WUGDeviceMaintenance {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6y8RxvZt0XQwt
-# SsVcFIMM8+b+rFxeo2etP29rYpn7J6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAyU3lVYccCgdwd
+# L0TADIq0vItjL7/aODep1EFAH67dN6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -291,17 +322,17 @@ function Set-WUGDeviceMaintenance {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQghECqBp4fUfb+cVX3yFnIMZ20BuMlruDQ
-# MRolZu1t6RswDQYJKoZIhvcNAQEBBQAEggIAZ0sOEk8ZzR6iMkTeP5q/MQHO4v9b
-# ysLv7DEqQUWoGl3fQqT8CyUSr00B1JFzJvx6ERBATa1kHzaP4D8qu8PDbAqYhLYN
-# RR3K6jupOEzt18kgdRrAajO+sUNhI8bntuLVUZVbK9nGXD7Nvbd2WCtxbVYHoHZr
-# 5YM6IqFkoygvn3H5XyiSyis2qt6rmkfO8Pui/QJEGeh5LCRuNuFG9Be8/ze2prP4
-# HEC1cq8ndYflczzfzCScvjiQEQsOKfnXkjZSqUC9yyUU6/AvqcjtG1bJhuKQS5uu
-# mb6HgV7Fo8az8YSSHXj+QzRhlAaKLzvAZRAqKZ2dxCBnetFsfGQC+X4U75g8dAUs
-# CV5ZCJAG5b1N8oVU9Pr5Jefe4onC7AhcuYjTWN2s4j21ryVXwYoNnSqEQI5oGqQY
-# O1OunkdNNS1WvtBWK2rNDCoitGltcHDQFmHURVK5An92zEWG9PEG5POcdvl+6GDP
-# f5xC1wBfHnFhgyf0vKn3JbUCoUPBr+PXclUGNaPmiOn0s7ePFHNBqhSH30raYlT4
-# lEOk0DKCJnhUPximJZKphDIq+YSf66YCEQdQnuPs4UXoru/aT3VhdfgoZZ7VPD+U
-# N3H5T0NHACjGDhQS74VkRbYevJDHAArsGmAWX4qFLRLMdqPYIl/2r3z7z/wE16u4
-# iZ4+MSNhvqH9x3I=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg5te/1D0a+faUUZ3gRzFwP0qWK9apw00B
+# 9/5S9Q47bJUwDQYJKoZIhvcNAQEBBQAEggIA2SYYNU0xgo7h2fSqalFD/shm5fvp
+# PYMHj9UhwAFE0TkeBgX40lBoC3iZ9cLfiYZjD+W1Czg8gQjiyC6+wL98c9Y4PI1b
+# 0tbcrsNUX5A3Q06iKDqDpZ7OfMvDuAYSiBMDhcy+8XWA4EST5rdV2Erlga48EzhI
+# eOxJTPCmQwWCNkxb3L2DweKUgUqBeFgkRQi2KVSdrg7linAXp1Xquzhbux/D2bI8
+# PqBEcFD8S+mSM0WGi/SXNXwaqEKMHE3unK6p5Vqn4wPg8xLS3zKwvA74Okwk7AyN
+# puryJrnBY4A+qdz4c+othf3G7muBeM2+f8N16cilS0ONt1BAU7higladw7wDX/5O
+# Yk/OpOfKK9ZuKVit/LBP7UcFrkopt2Tum9a7sWpwJNqFG9hABC6BmZEMYj+2NUcL
+# HZHjgzcK7ahvcKvPTc6n9qAM2g3Eo9RFSLqIWDfcF2ek+hxp+9V2hfFcohdnFDOn
+# L7YQJo/GvUOequuOxLo+I5C9AUHi/r2zwYWwgzVQZTWs3r4Bp1YmNldaUjz3zbMD
+# /7xxgdCx3SffFksdrplOLt+7wss+3lXJ2FTc99Xru0qPDBwA6kpc1nkaueIovXgD
+# Jf5Yw2nT1xkEzgTdIQ+HZ8XgAxDYG1KonapauGlWYQrYf5kZs2tBABoynGkFvrq0
+# lvUmDoka0kKBi5Y=
 # SIG # End signature block

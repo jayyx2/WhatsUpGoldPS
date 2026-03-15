@@ -1,68 +1,141 @@
 <#
 .SYNOPSIS
-Updates the device template for a given device in WhatsUp Gold.
+    Assigns a performance monitor to one or more devices in WhatsUp Gold.
 
 .DESCRIPTION
-The Set-WUGDeviceTemplate function allows you to update the template of a device in WhatsUp Gold by specifying the device ID and the new template object. This is typically used to apply changes to an existing device's configuration using a template previously retrieved or modified.
+    Add-WUGPerformanceMonitorToDevice assigns a specified performance monitor template to one or
+    more devices via the WhatsUp Gold REST API (POST /api/v1/devices/{deviceId}/monitors/-).
+    When multiple DeviceIds or MonitorIds are supplied, the function loops through each
+    combination, issuing one POST per pair. An optional parameter controls the polling interval.
 
 .PARAMETER DeviceId
-The ID of the device to update.
+    One or more device IDs to assign the monitor to. Required. Accepts pipeline input.
 
-.PARAMETER Template
-The template object to apply to the device. This should match the format returned by Get-WUGDeviceTemplate.
+.PARAMETER MonitorId
+    One or more performance monitor template IDs (monitorTypeId) to assign. Required.
+
+.PARAMETER Enabled
+    Whether the monitor should be enabled. Valid values: true, false. Default: true.
+
+.PARAMETER PollingIntervalMinutes
+    The polling interval in minutes for the performance monitor. Default: 5.
 
 .EXAMPLE
-$template = Get-WUGDeviceTemplate -DeviceId 20
-# ...modify $template as needed...
-Set-WUGDeviceTemplate -DeviceId 20 -Template $template
+    Add-WUGPerformanceMonitorToDevice -DeviceId 42 -MonitorId 5
+
+    Assigns performance monitor template 5 to device 42 with default settings.
+
+.EXAMPLE
+    Add-WUGPerformanceMonitorToDevice -DeviceId 42 -MonitorId 5 -PollingIntervalMinutes 10
+
+    Assigns performance monitor 5 to device 42 with a 10-minute polling interval.
+
+.EXAMPLE
+    Add-WUGPerformanceMonitorToDevice -DeviceId @(100,101,102) -MonitorId 12
+
+    Assigns performance monitor 12 to devices 100, 101, and 102.
+
+.EXAMPLE
+    Add-WUGPerformanceMonitorToDevice -DeviceId 42 -MonitorId @(5,6,7)
+
+    Assigns performance monitors 5, 6, and 7 to device 42.
+
+.EXAMPLE
+    Add-WUGPerformanceMonitorToDevice -DeviceId @(100,101) -MonitorId @(5,6) -Enabled false
+
+    Assigns monitors 5 and 6 to devices 100 and 101 (4 total assignments) in a disabled state.
+
+.EXAMPLE
+    @(100,101,102) | Add-WUGPerformanceMonitorToDevice -MonitorId 5
+
+    Pipes three device IDs and assigns performance monitor 5 to each.
 
 .NOTES
-Author: Jason Alberino (jason@wug.ninja)
-Last modified: 2024-06-15
+    Author: Jason Alberino (jason@wug.ninja)
+    Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/#tag/Device-Monitors
+
+    The WUG REST API has no bulk endpoint for assigning a monitor to multiple devices.
+    This function iterates each DeviceId x MonitorId combination, one POST per pair.
 #>
-function Set-WUGDeviceTemplate {
-    [CmdletBinding(SupportsShouldProcess = $true)]
+function Add-WUGPerformanceMonitorToDevice {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int]$DeviceId,
-        [Parameter(Mandatory = $true)]$Template
+        [Parameter(Position = 0, Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('id')]
+        [int[]]$DeviceId,
+        [Parameter(Position = 1, Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
+        [int[]]$MonitorId,
+        [ValidateSet("true", "false")][string]$Enabled = "true",
+        [int]$PollingIntervalMinutes = 10
     )
 
     begin {
-        Write-Debug "Starting Set-WUGDeviceTemplate for DeviceId: $DeviceId"
+        Write-Debug "Initializing Add-WUGPerformanceMonitorToDevice function."
+        Write-Debug "DeviceId: $DeviceId"
+        Write-Debug "MonitorId: $MonitorId"
+        Write-Debug "Enabled: $Enabled"
+        Write-Debug "PollingIntervalMinutes: $PollingIntervalMinutes"
+
+        # Build the performance params sub-object once — identical for every device/monitor pair
+        $performanceParams = @{
+            pollingIntervalMinutes = $PollingIntervalMinutes
+        }
     }
 
     process {
-        if (-not $PSCmdlet.ShouldProcess("Device ${DeviceId}", 'Set device template')) { return }
-        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/config/template"
-        try {
-            $jsonBody = $Template | ConvertTo-Json -Depth 10
-            $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $jsonBody
-            return $result.data
-        }
-        catch {
-            $oError = $_
-            Write-Error "Error updating template for DeviceId ${DeviceId} ${oError}"
+        $totalDevices = $DeviceId.Count
+        $currentDeviceIndex = 0
+
+        foreach ($dId in $DeviceId) {
+            $currentDeviceIndex++
+
+            foreach ($mId in $MonitorId) {
+                $percentComplete = [Math]::Round(($currentDeviceIndex / $totalDevices) * 100)
+                Write-Progress -Activity "Assigning performance monitor(s) to device(s)" -Status "Processing Device ID $dId ($currentDeviceIndex of $totalDevices)" -PercentComplete $percentComplete
+
+                $uri  = "$($global:WhatsUpServerBaseURI)/api/v1/devices/${dId}/monitors/-"
+                $body = @{
+                    type          = "performance"
+                    monitorTypeId = $mId
+                    enabled       = $Enabled
+                    isGlobal      = "true"
+                    performance   = $performanceParams
+                } | ConvertTo-Json -Depth 5
+
+                Write-Debug "Assigning performance monitor $mId to device $dId"
+                Write-Debug "URI: $uri"
+                Write-Debug "Body: $body"
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method "POST" -Body $body
+
+                    if ($result.data.successful -eq 1) {
+                        Write-Output "Successfully assigned performance monitor $mId to device $dId."
+                        Write-Debug "Result from Get-WUGAPIResponse for Device ID ${dId}: $result"
+                    }
+                    else {
+                        Write-Warning "Failed to assign performance monitor $mId to device $dId."
+                        Write-Debug "Result from Get-WUGAPIResponse for Device ID ${dId}: $result"
+                    }
+                }
+                catch {
+                    Write-Error "Error assigning performance monitor $mId to device ${dId}: $_"
+                }
+            }
         }
     }
 
     end {
-        Write-Debug "Completed Set-WUGDeviceTemplate for DeviceId: $DeviceId"
+        Write-Progress -Activity "Assigning performance monitor(s) to device(s)" -Completed
+        Write-Debug "Completed Add-WUGPerformanceMonitorToDevice function."
     }
 }
-# End of Set-WUGDeviceTemplate function
-# End of script
-#------------------------------------------------------------------
-# This script is part of the WhatsUpGoldPS PowerShell module.
-# It is designed to interact with the WhatsUp Gold API for network monitoring.
-# The script is provided as-is and is not officially supported by WhatsUp Gold.
-# Use at your own risk.
-#------------------------------------------------------------------
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxQUTZGx5aN4s/
-# 9JBT3SLJI5kq6ngKI6TuEctDITWkDKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGrWjpmUxUJWLq
+# kTFw4JlIwShSs9w2CbEwn4SWlMzbTKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -162,17 +235,17 @@ function Set-WUGDeviceTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgKtF29n87wqb9SCeNlfzoSK1OpqWBe1d9
-# BH+bflmI0GQwDQYJKoZIhvcNAQEBBQAEggIAN7GvxRhoJsuEZryiZ9WHRGHtzbcb
-# GRq1g8MX6T1Ss3mUcZlciTlr19DYajmFDrViiT34XNK+lCroveu8CG/dDF2B0zhh
-# 6UjlS+Bchpe/svdy0zyAKho2cbYsejhcsRZ1e7bFJz24cFY0rJjvojG5Yz2oKgwk
-# BGcOQEb1mzs738Z4RXUUYCYJ+SJFvNJOYB9WImndUYFr9uWabsDWfpiqkndctaPt
-# 2tL3sQF7ao8M4McARSwp0Dx3W9R7GC3wKcam/ctVJ8J9Jv23rgRKCT72Sc9XKA4U
-# TadFcYuFmEEPHlban6719ifWMrhPDUR53aH9M78VtfOJu/tQ5zUU9iWuZbPLYPtb
-# M2mgKC+r4InS3I8J8vIu92fEHMSHSlAoYwgQVG3xLruBCWl0zQbqsT4ctIjvL6Xq
-# /eDoLRtOArwxhvjIRz1KIl+V7dtgzMC/UGBrsn2Da/lmxAWZV9pAsVQhPA78syLN
-# pvd2F/27/kXg/fLoP7GBwQneaTPzxDbDQ9Grn96kRJ9u+YUH0gWxvOKE2/ROMkv8
-# u2TSC5ncl/3iZWloIjaiNROqmnJjoSx+8BTWM+TWe4nhfak7L+rjft0Tqha/LjSk
-# wa+4YScDJ9EYPu+L3oXtih+7gjDxg6KUWMR0lPVNaqkMoYoyqxV+tPiIAxnMk36N
-# hNBCLFFmQNcs1Rk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgc/rjk2v6VYJfTmPujbGfFMeL0icudAlI
+# VnmiPHkTGH4wDQYJKoZIhvcNAQEBBQAEggIAEKH3g/xy1CBTQqHLD5vHpiBwI7I+
+# p+6sa+L9eG8AjUBKqSg0YjUBJwqeWzkrwj6K8fi/Ki3VDZJB1uEBr20GCyXbYHAk
+# bYHsQwOp+zsZBPzeut5tu5M7Vz1jC89LBjhe81xlZ/6pvtIKwjMqttoE80r8tP+R
+# BrSm1n0Zfa4VW+sECcRlrwCgYth5jU+8U7VMwMpqFLtGKW6j0NXoaM+iIlzlFeNE
+# bG36onKTOHbGB9KxE5xLdjyEAlBGVcJ+qfL8KEYvvcwqz2/0sDYbJ/B9N9AM/ptq
+# 9ghOyrDWwDCj6gyeA23bRJxa1qWCJQks8q2uYe/VisnXJCve6FR51VnjM0UOdE9O
+# VmoSHZoV/qLuMSY6CgvtLZiGVvVo04umxx9lHgLG1h/rS5D8tdivgSQTds5CX+yy
+# LF+uF4qhsT51duRoCKR5OOFF1YQaXm/EQry/3M/y1n62r1Y4YFEqtGt3bhKuuSra
+# 6x3uWmnnUZw2SJ1O7v5pFTQ1wZ6sKuQSDn+XyK7IMF6TQ9CbX7evY9oyHRkm/CF5
+# SnbRMqdxU+m58c0oSmy7nkz4Yiwr0rbTAKLld2dntNoB3c6t35qmzSJ8zhfS5AFI
+# 9Pt6gnrDZB62rsr1tRlgQeb4ZUjR13QPWOVSIpDHCwOo8gfZE4ivEcr7lspYBlRp
+# G5xewZAOROPQCzU=
 # SIG # End signature block

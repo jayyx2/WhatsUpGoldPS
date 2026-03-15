@@ -1,68 +1,96 @@
 <#
 .SYNOPSIS
-Updates the device template for a given device in WhatsUp Gold.
+Imports (applies) a device role template package into WhatsUp Gold.
 
 .DESCRIPTION
-The Set-WUGDeviceTemplate function allows you to update the template of a device in WhatsUp Gold by specifying the device ID and the new template object. This is typically used to apply changes to an existing device's configuration using a template previously retrieved or modified.
+The Import-WUGRoleTemplate function imports a signed device role package into WhatsUp Gold.
+It supports two operations:
+- Verify a package before importing (POST /device-role/-/config/import/verify)
+- Apply/import a package (POST /device-role/-/config/import)
 
-.PARAMETER DeviceId
-The ID of the device to update.
+When -Verify is used, the package is validated without being applied.
+When neither switch is used, the package is imported directly.
 
-.PARAMETER Template
-The template object to apply to the device. This should match the format returned by Get-WUGDeviceTemplate.
+.PARAMETER Body
+The JSON body containing the PackageApply object with the signed package and apply options.
+
+.PARAMETER Verify
+Switch to verify the contents of a package without importing it.
+Endpoint: POST /api/v1/device-role/-/config/import/verify
 
 .EXAMPLE
-$template = Get-WUGDeviceTemplate -DeviceId 20
-# ...modify $template as needed...
-Set-WUGDeviceTemplate -DeviceId 20 -Template $template
+# Import a device role package
+$pkg = Get-Content "package.json" -Raw
+Import-WUGRoleTemplate -Body $pkg
+
+.EXAMPLE
+# Verify a package before importing
+Import-WUGRoleTemplate -Body $pkg -Verify
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
-Last modified: 2024-06-15
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/DeviceRole
 #>
-function Set-WUGDeviceTemplate {
+function Import-WUGRoleTemplate {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][Alias('id')][int]$DeviceId,
-        [Parameter(Mandatory = $true)]$Template
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$Body,
+
+        [Parameter(ParameterSetName = 'Verify')]
+        [switch]$Verify
     )
 
     begin {
-        Write-Debug "Starting Set-WUGDeviceTemplate for DeviceId: $DeviceId"
+        Write-Debug "Starting Import-WUGRoleTemplate function."
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-role"
     }
 
     process {
-        if (-not $PSCmdlet.ShouldProcess("Device ${DeviceId}", 'Set device template')) { return }
-        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/config/template"
-        try {
-            $jsonBody = $Template | ConvertTo-Json -Depth 10
-            $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $jsonBody
-            return $result.data
+        if ($Verify) {
+            $uri = "${baseUri}/-/config/import/verify"
+            Write-Debug "Verifying device role package. URI: $uri"
+
+            if (-not $PSCmdlet.ShouldProcess("Device role package", "Verify")) { return }
+
+            try {
+                $result = Get-WUGAPIResponse -Uri $uri -Method 'POST' -Body $Body
+                if ($result.data) { return $result.data }
+                return $result
+            }
+            catch {
+                Write-Error "Error verifying device role package: $_"
+                return
+            }
         }
-        catch {
-            $oError = $_
-            Write-Error "Error updating template for DeviceId ${DeviceId} ${oError}"
+        else {
+            $uri = "${baseUri}/-/config/import"
+            Write-Debug "Importing device role package. URI: $uri"
+
+            if (-not $PSCmdlet.ShouldProcess("Device role package", "Import")) { return }
+
+            try {
+                $result = Get-WUGAPIResponse -Uri $uri -Method 'POST' -Body $Body
+                if ($result.data) { return $result.data }
+                return $result
+            }
+            catch {
+                Write-Error "Error importing device role package: $_"
+                return
+            }
         }
     }
 
     end {
-        Write-Debug "Completed Set-WUGDeviceTemplate for DeviceId: $DeviceId"
+        Write-Debug "Completed Import-WUGRoleTemplate function."
     }
 }
-# End of Set-WUGDeviceTemplate function
-# End of script
-#------------------------------------------------------------------
-# This script is part of the WhatsUpGoldPS PowerShell module.
-# It is designed to interact with the WhatsUp Gold API for network monitoring.
-# The script is provided as-is and is not officially supported by WhatsUp Gold.
-# Use at your own risk.
-#------------------------------------------------------------------
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxQUTZGx5aN4s/
-# 9JBT3SLJI5kq6ngKI6TuEctDITWkDKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCDwE/54C8Ogv7j
+# VjPtCZQ+1JQ9hP2gzpdA0f/sFJnRqaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -162,17 +190,17 @@ function Set-WUGDeviceTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgKtF29n87wqb9SCeNlfzoSK1OpqWBe1d9
-# BH+bflmI0GQwDQYJKoZIhvcNAQEBBQAEggIAN7GvxRhoJsuEZryiZ9WHRGHtzbcb
-# GRq1g8MX6T1Ss3mUcZlciTlr19DYajmFDrViiT34XNK+lCroveu8CG/dDF2B0zhh
-# 6UjlS+Bchpe/svdy0zyAKho2cbYsejhcsRZ1e7bFJz24cFY0rJjvojG5Yz2oKgwk
-# BGcOQEb1mzs738Z4RXUUYCYJ+SJFvNJOYB9WImndUYFr9uWabsDWfpiqkndctaPt
-# 2tL3sQF7ao8M4McARSwp0Dx3W9R7GC3wKcam/ctVJ8J9Jv23rgRKCT72Sc9XKA4U
-# TadFcYuFmEEPHlban6719ifWMrhPDUR53aH9M78VtfOJu/tQ5zUU9iWuZbPLYPtb
-# M2mgKC+r4InS3I8J8vIu92fEHMSHSlAoYwgQVG3xLruBCWl0zQbqsT4ctIjvL6Xq
-# /eDoLRtOArwxhvjIRz1KIl+V7dtgzMC/UGBrsn2Da/lmxAWZV9pAsVQhPA78syLN
-# pvd2F/27/kXg/fLoP7GBwQneaTPzxDbDQ9Grn96kRJ9u+YUH0gWxvOKE2/ROMkv8
-# u2TSC5ncl/3iZWloIjaiNROqmnJjoSx+8BTWM+TWe4nhfak7L+rjft0Tqha/LjSk
-# wa+4YScDJ9EYPu+L3oXtih+7gjDxg6KUWMR0lPVNaqkMoYoyqxV+tPiIAxnMk36N
-# hNBCLFFmQNcs1Rk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgOC9R0p2t8ArjHpN7+pdpdwBa8VudzD0V
+# uzozInEkWLswDQYJKoZIhvcNAQEBBQAEggIA2Eo3Qq0/WgEyNELnuS87BBvmRLDR
+# ZttgYSOGx4UAiCnQepi6jXQtpJLgGgOAHz2PaOmiSGyrqwu/riTVkpWHCRgrDTLw
+# TzWHVxfm8JiUAUxLW2R2miW44ILzFF9/H6Gsw1uUe8b3Luk4frtv7LDEUzYWzKTH
+# VGoSw+l8CGE50mJO8EQJ48rF221oqjW5lDlegAbHT1fS6Ogl1ee8DF2GXiy5Ose/
+# 5QOG0vR64DRgRv6VgCSk6YdSbcQXH9hR3Az9me76vIQGxw1IxktPMXdKfyyjJVGR
+# swHaWbjuYCyEQt9KAtSf/49EwY0XsadPokcr9HxFHc9Yfdd9kiOqCx6WNalNfuBn
+# 2lA246rCWmOZ9/ycVbkUQNa0Xk5M4Of0gzX4MAL125OGVv6dvWHzXryeaXJVfb2C
+# PdV3CEM1IwUHJEppxDymCaD/Sl61mdZEclD9iJiJTszfuukGNGhwjPmVW4F4DfMP
+# 7Ch/LCpkWsEPFNBl2dEQsmQv5WZMEdVEjHiq/RoxeELSXHyP7lpGF/TxRTblJSCH
+# UXfs82W2gazvif9kOb9TnukSA4lu7BshWUFfAkWsJPw3p6MZOgykFu0DD7LJG+Sj
+# TNou0e6F2M3xN5hOBwHziWhBjmm59vllX1l4YZVqBKqxAPsu6cZBWJ4mX8KAMq0Y
+# efNNHo5xbFAACos=
 # SIG # End signature block

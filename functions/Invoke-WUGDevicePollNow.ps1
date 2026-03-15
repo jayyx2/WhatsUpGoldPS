@@ -4,8 +4,8 @@ Manages device polling configuration and triggers poll-now operations in WhatsUp
 
 .DESCRIPTION
 The Invoke-WUGDevicePollNow function triggers an immediate poll on one or more devices:
-- Single device: POST /api/v1/devices/{deviceId}/config/poll-now
-- Batch devices: PATCH /api/v1/devices/-/config/poll-now
+- Single device: PUT /api/v1/devices/{deviceId}/poll-now
+- Batch devices: PATCH /api/v1/devices/-/poll-now
 - Device group: PUT /api/v1/device-groups/{groupId}/poll-now
 
 .PARAMETER DeviceId
@@ -66,7 +66,7 @@ function Invoke-WUGDevicePollNow {
             if (-not $PSCmdlet.ShouldProcess("Device group ${GroupId}", 'Poll now')) { return }
             try {
                 $output = Get-WUGAPIResponse -Uri $uri -Method 'PUT'
-                Write-Host "Successfully triggered poll for device group ${GroupId}." -ForegroundColor Green
+                Write-Verbose "Successfully triggered poll for device group ${GroupId}."
             }
             catch {
                 Write-Error "Error triggering poll for device group ${GroupId}: $_"
@@ -77,12 +77,12 @@ function Invoke-WUGDevicePollNow {
 
             if ($allDeviceIds.Count -eq 1) {
                 # Single device poll-now
-                $uri = "${baseUri}/devices/$($allDeviceIds[0])/config/poll-now"
-                Write-Debug "POST URI: $uri"
+                $uri = "${baseUri}/devices/$($allDeviceIds[0])/poll-now"
+                Write-Debug "PUT URI: $uri"
                 try {
-                    $output = Get-WUGAPIResponse -Uri $uri -Method 'POST'
+                    $output = Get-WUGAPIResponse -Uri $uri -Method 'PUT'
                     if ($output.data.success -or $output.success) {
-                        Write-Host "Successfully triggered poll for device $($allDeviceIds[0])." -ForegroundColor Green
+                        Write-Verbose "Successfully triggered poll for device $($allDeviceIds[0])."
                     }
                 }
                 catch {
@@ -91,7 +91,7 @@ function Invoke-WUGDevicePollNow {
             }
             else {
                 # Batch poll-now
-                $uri = "${baseUri}/devices/-/config/poll-now"
+                $uri = "${baseUri}/devices/-/poll-now"
                 $body = @{
                     devices = @($allDeviceIds | ForEach-Object { "$_" })
                 } | ConvertTo-Json -Depth 4
@@ -99,7 +99,7 @@ function Invoke-WUGDevicePollNow {
                 try {
                     $output = Get-WUGAPIResponse -Uri $uri -Method 'PATCH' -Body $body
                     if ($output.data) {
-                        Write-Host "Triggered poll for $($allDeviceIds.Count) devices. Successful: $($output.data.successfulOperations)" -ForegroundColor Green
+                        Write-Verbose "Triggered poll for $($allDeviceIds.Count) devices. Successful: $($output.data.successfulOperations)"
                     }
                 }
                 catch {
@@ -116,8 +116,8 @@ function Invoke-WUGDevicePollNow {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhQQARjkj7/2P8
-# S2QBuhtNhrFG8FORp5Akc1DFc7C5GaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmA9i+1d7z31OO
+# TA4W8p/sdfVowcwWhmusNvE6eaTnKKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -217,17 +217,17 @@ function Invoke-WUGDevicePollNow {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgSN5TafBk0F6MB0Q98nS6E8pEE4AEGvPD
-# TWwRZnFliqAwDQYJKoZIhvcNAQEBBQAEggIAVufbmCRqG8FOLLYBLn+C7gUYBJK+
-# LsaKeupVan/AKeOLZb85iHcLx/KYmzmQPIzun303siH2R4rvW/yDLNu+XtPnhMvO
-# AAFXU10Ld3SKB6t4UyT4n/C4ugIjwDlGVAd0LEghUa1bjE5ZbLe/cvUD8pJkxPZq
-# Xt1Re6xg0hJ3t9Eavf6OP25q2hLpg8aN99wnMlez+GrOiQiqXAh6e+k3M8MoenWq
-# 7RiiRgdA+SJ742QD9Z3M12DdDf6r3R1KrjxUoIsRDKbp76c0qt3pz+F02XCeuGQC
-# umDnJts5XpnYtPuYp85gjDxIcRTcAvX1NyzlKd+t6XOkFluhQ8PXDXPLYwu7NZjG
-# Hh8xwOVPS/tnOeJtgupoxdeuY1ZHJHqlqi/5IIHJjozqrtdG7NPEiU4UfNCuCtKT
-# 66gwyG6oTANa9SBVGp9sl1DozxH/ERAU8E18mNq6G0Ro++0sChMfo6aU+pe8xMl+
-# yMJ7wHqDzj8VtuEXzUkPcmmd5sluhQ6uuaOXHXKNDweYfpfsa1Kz25chgsF2WjHZ
-# N5n2zaIIipKwAxg9lUVzt/bqYJVl1b4y0+WLyW0setSooofJ0htMXA+afyVGJ1VZ
-# TYfYoz+eKl+ObUh6/BtfwlxLWYyTwdT34ivXRSvzOOZUtEeCdia0fh21PM2iGb/q
-# RTt8LQYi8J6/82c=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg0uEGFO4393NSOl0VjMZ4BhcBpvWYiZoW
+# R+b4rJ7EtekwDQYJKoZIhvcNAQEBBQAEggIAc3XVPFfaj95GHIMaPg4EBkdPyxms
+# ah8VsBUs+5qCcnIeuMGdE54kGCIt2SxhdBB4gZzTjHucaWStRHES+shdsVEpdoPH
+# JN8T2O9JtVjM0qw4cjuEiX4W79Bylwf4L7xtmdJ+iFS+s0YTddfhf89WSipB9lIJ
+# k8wBdHjcAht2/iXITfBYDEp/oLzBeTxXTH16OymHrNpB1w4zcwmUaOr8YUzHRMn+
+# GxK7MzOuHWc2bT93MH/0c0sAgU61PAvInnHcnuKfMlZrPYLJLQFEYdtpsBdk/CPp
+# OOlsKdNtLA56tc6EWjB5jyvtahSnzeHpnth3xZUeoAxsFBkycvFF+xbvpfqy2fG9
+# qDb/84DpW0hIuXf2vsKwrpJX39ZwKFs2jCzzORc8/VExHa7AHQZ1522iLG9+WgPL
+# eo9qqgD73V7Qr3YYQnl5M+ATwGvBJBgn0CSo98aNDckIftpBdc2z+Xwpcxx4S7nr
+# HqbgwK8mw7qm3Aq3m1Po1ix2pBFWobYtdqQt9iyTPnX2l+nBl15wwRVc4ww7Z+aZ
+# sHHRqw9heQoLEdmg7/iYVIjkpuyMd4ndeFUkROsPaXenxIs3vVBSbV/j6iAfExav
+# m+idFGik/ApYM78Bj4e9ywYTH0aR3AkvyImSvoHIk/QWvShCvGwOBrZFgThQCTPa
+# QejQ8ND9B1OZV9Y=
 # SIG # End signature block

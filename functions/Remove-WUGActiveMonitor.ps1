@@ -76,6 +76,7 @@ function Remove-WUGActiveMonitor {
 
         # Type of monitor to delete
         [Parameter(ParameterSetName = 'BySearch')]
+        [Parameter(ParameterSetName = 'ById')]
         [ValidateSet('all', 'active', 'performance', 'passive')]
         [string]$Type = 'active',
 
@@ -93,6 +94,7 @@ function Remove-WUGActiveMonitor {
 
         # Whether the operation should fail if a matching monitor is in use
         [Parameter(ParameterSetName = 'BySearch')]
+        [Parameter(ParameterSetName = 'ById')]
         [bool]$FailIfInUse = $true
     )
 
@@ -120,11 +122,11 @@ function Remove-WUGActiveMonitor {
 
                 if (-not $PSCmdlet.ShouldProcess("Monitors matching '${Search}'", "Delete")) { return }
 
-                Write-Host "Deleting monitors matching the search query: ${Search}" -ForegroundColor Cyan
+                Write-Debug "Deleting monitors matching the search query: ${Search}"
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method DELETE
                     if ($result.data.successful -gt 0) {
-                        Write-Host "Successfully deleted $($result.data.successful) monitor(s)." -ForegroundColor Green
+                        Write-Verbose "Successfully deleted $($result.data.successful) monitor(s)."
                     }
                     elseif ($result.data.errors) {
                         Write-Warning "Errors occurred while deleting monitors:"
@@ -133,7 +135,7 @@ function Remove-WUGActiveMonitor {
                         }
                     }
                     else {
-                        Write-Host "No monitors were deleted." -ForegroundColor Yellow
+                        Write-Warning "No monitors were deleted."
                     }
                     return $result
                 }
@@ -143,14 +145,18 @@ function Remove-WUGActiveMonitor {
             }
 
             'ById' {
-                $uri = "${monitorsBaseUri}/${MonitorId}"
+                $queryParams = @()
+                if ($Type) { $queryParams += "type=$Type" }
+                if (-not $FailIfInUse) { $queryParams += "failIfInUse=false" }
+                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                $uri = "${monitorsBaseUri}/${MonitorId}${query}"
                 if (-not $PSCmdlet.ShouldProcess("Monitor ${MonitorId}", "Delete")) { return }
 
                 Write-Debug "DELETE URI: $uri"
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method DELETE
                     if ($result.data) {
-                        Write-Host "Successfully deleted monitor ${MonitorId}." -ForegroundColor Green
+                        Write-Verbose "Successfully deleted monitor ${MonitorId}."
                         return $result.data
                     }
                     return $result
@@ -168,7 +174,7 @@ function Remove-WUGActiveMonitor {
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method DELETE
                     if ($result.data) {
-                        Write-Host "Successfully removed all assignments for monitor ${MonitorId}." -ForegroundColor Green
+                        Write-Verbose "Successfully removed all assignments for monitor ${MonitorId}."
                         return $result.data
                     }
                     return $result
@@ -190,8 +196,8 @@ function Remove-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqEFBw40pfYbsT
-# ysdVeNpKUi21bgrTpFiKmiNkMEHEy6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhrZSZ6h/tCjVQ
+# w7kQ2oasJ1LXLp8oEoM53+rGSy+tBKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -291,17 +297,17 @@ function Remove-WUGActiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCJZsXHKPBUKlcX3HOjM9NAsZoc40l0m6
-# MUlgPAYPtPswDQYJKoZIhvcNAQEBBQAEggIAVmwGUpcQE1yzPEBRp+gNotZXS5f4
-# 0ymNQT4nVSWwH2C7aN1AFD3h6Xoj0Pxs0OWrqHaB37Z9YB6uesoguo8ycqBvMW5L
-# RFC8WgQyc6IArHldB67QjnKi2yH3q6PzEPA9Vlysbj9ZietyE+ChvwVeaMCnhWqF
-# ssvILrWQYdSpr8EF4UVBwl6yrTUCmn/RtzyrVfmm4F5zBWazh04yxJDkGXs9zZU+
-# pVpw2s2univF796fUSR0giw28gkzYSXMtoMmn+ph8WH4ipQlVhvWwzLQKs7olvkz
-# BX29st+Gkn2SlMfIaBBTn5X58UMGvVU8GVcWflLc7WERJwWHzy9xWhCmY3eKDbwB
-# oIqGUQ9kez2s7/iAgBfsv2zaQOs0un7swDnw40J80njEO+mehkRGH6apATKpV8nq
-# B1BhOUMYPxe/7BdDcsuUg3fLuYwYu9O0IN+c/VtyjpaxzLSD1WshLLqtEfXdAdqH
-# BL4Z+vIZS1k23oQJjQC4PpDXjetGnccXwa1zzApV8qlvozBNghfZwxY2pd2KMJoK
-# f6Y1FLVhJP/O5izvG14ezsouWCmD64s1dQ/ntaY2uknufX7+kLyvg2JXPFfkGsPd
-# 5+/wMG1nobYoiWdGG1YSt55RXw8tUSUYacKnfFJQmiM0It6nka5M/wsvVJq/3aww
-# cA3HBJx7hzEEgEg=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgEYHhEQ9p48NDhjgEERMO4zg7WEK3P7hc
+# TrLd86oG4MgwDQYJKoZIhvcNAQEBBQAEggIA22xi6JYpKiSo+Qe79DdEhT5PyXWX
+# XctF2gcJPzBmfyky83QQEdwy8EKMrotCmP7JolZ/tsokyKs/i+jyPYaQ4WX8CeQa
+# DhVEuxiHqEnJyreh1/kNfMY9HgHCYmKySJzNNFxIEXXxWA07Y75s8ISTdxWrD8Jc
+# huLhVZ3330hSMV097E4p9Z1OEs07XLpLU3uJkW8juaYjoJryMvirSHF6E1cqahhb
+# wR8jmGrh6hSpMGNcPbMxDHeumhcgZiuQn8tzkEzP9xunWtzpJw/XyWKPnu0LXnoh
+# 23RN3B7xHV0+/1bHlR1v25v2qVGdihyarhP7hxppk7XRDS0uDWUd917zy87FRdEh
+# /2kBOdBDGEbrs/K4gIJsnOAD6TABL4W6uMjrYdm43QPpvZxUsl8OYhvfoJv7oI3O
+# j1yGCty/Aaozr7cIzD7jvJhwmEstrdjDOOxdfaUX0s9Xxtrv+U0qGwCeUH9hGA5p
+# rFwIVmwFiWucOR+I31/cgtRnsBS9j4zdk+Pabv28BKSOV9g3XsTQxe97jvogvTau
+# KM9fi7EQoCVuvVg+NWlp01pksk3cuM+vGngYv8wGWwFvm4jBDlzfAD7NL4EQmbWP
+# jGaZJ/SO7QK5AFHjvUyKZ++LplZnc55awYO337YL9MMkaNr4Kta63AW3kyd5+4Xl
+# T78p3EDbvKzYPz8=
 # SIG # End signature block

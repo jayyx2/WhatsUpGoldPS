@@ -1,99 +1,301 @@
 <#
 .SYNOPSIS
-Updates device group configuration in WhatsUp Gold including credentials and role assignments.
+Updates device group settings in WhatsUp Gold — the write counterpart to Get-WUGDeviceGroup.
 
 .DESCRIPTION
-The Set-WUGDeviceGroup function handles write operations for device groups:
-- Assign credentials to a device group
-- Assign a role to a device group
+The Set-WUGDeviceGroup function modifies one or more device groups via the REST API.
+It supports updating group definitions (name, description, parent), assigning roles
+(brand, OS, primary, sub-role), triggering poll-now or discovery refresh, and
+retrieving a deduplicated list of device IDs across selected groups.
+
+Accepts an array of GroupIds and automatically cycles through each one.
+Pipeline input is supported for easy chaining with Get-WUGDeviceGroup.
+
+Parameter sets:
+  Properties   PUT  /device-groups/{id}/definition    (rename, reparent, update description)
+  Role         PUT  /device-groups/{id}/roles/{type}  (assign brand, os, primary, or sub-role)
+  PollNow      PUT  /device-groups/{id}/poll-now      (trigger polling for all devices)
+  Refresh      PUT  /device-groups/{id}/refresh        (trigger discovery refresh)
+  ListDeviceIds GET /device-groups/{id}/devices/-      (deduplicated device list)
 
 .PARAMETER GroupId
-The ID of the device group to update.
+One or more device group IDs to update. Accepts pipeline input.
 
-.PARAMETER Credentials
-Switch to assign credentials to the device group.
-Endpoint: PUT /api/v1/device-groups/{groupId}/config/credentials
+.PARAMETER Name
+New name for the device group. (Properties set)
+
+.PARAMETER Description
+New description for the device group. (Properties set)
+
+.PARAMETER NewParentGroupId
+Move the group under a different parent group. Leave blank to keep current parent. (Properties set)
 
 .PARAMETER Role
-Switch to assign a role to the device group.
-Endpoint: PUT /api/v1/device-groups/{groupId}/config/role
+Switch to assign a role to devices in the group. Requires -RoleType and -Body. (Role set)
+
+.PARAMETER RoleType
+The type of role to assign. Valid values: brand, os, primary, sub-role.
+
+.PARAMETER PollNow
+Switch to request the polling service to poll all devices in the group immediately.
+
+.PARAMETER Refresh
+Switch to request the discovery service to refresh all devices in the group immediately.
+
+.PARAMETER RefreshOptions
+Array of refresh options. Valid values: brand, os, inventory, history, credentials, allAttributes.
+Controls what data is reset using newly collected info. Default: empty (disabled).
+
+.PARAMETER DropDataOlderThanHours
+Remove data discovered prior to x hours ago. Min value 1, less than 0 ignored, 0 uses system default. Default: -1.
+
+.PARAMETER RefreshLimit
+Number of devices to refresh. Zero or empty gives the server maximum. Default: 0.
+
+.PARAMETER ListDeviceIds
+Switch to collect and return a deduplicated list of device IDs across all specified groups.
 
 .PARAMETER Body
-A JSON string containing the configuration to apply. Required for Credentials and Role operations.
+A raw JSON string for custom payloads (Role and Properties sets).
 
 .EXAMPLE
-# Assign credentials to a device group
-$creds = @{ credentialIds = @("cred-1", "cred-2") } | ConvertTo-Json
-Set-WUGDeviceGroup -GroupId 101 -Credentials -Body $creds
+# Rename a device group
+Set-WUGDeviceGroup -GroupId 101 -Name "Production Servers"
 
 .EXAMPLE
-# Assign a role to a device group
-$role = @{ roleId = "role-abc-123" } | ConvertTo-Json
-Set-WUGDeviceGroup -GroupId 101 -Role -Body $role
+# Update name and description across multiple groups
+Set-WUGDeviceGroup -GroupId 101, 102 -Description "Managed by automation"
+
+.EXAMPLE
+# Move a group under a new parent
+Set-WUGDeviceGroup -GroupId 101 -NewParentGroupId 50
+
+.EXAMPLE
+# Assign a primary role to devices in a group
+$body = @{ roleId = "role-abc-123" } | ConvertTo-Json
+Set-WUGDeviceGroup -GroupId 101 -Role -RoleType primary -Body $body
+
+.EXAMPLE
+# Assign a brand role to devices across multiple groups
+$body = @{ roleId = "brand-xyz" } | ConvertTo-Json
+Set-WUGDeviceGroup -GroupId 101, 102, 103 -Role -RoleType brand -Body $body
+
+.EXAMPLE
+# Poll all devices in a group immediately
+Set-WUGDeviceGroup -GroupId 101 -PollNow
+
+.EXAMPLE
+# Trigger discovery refresh for multiple groups
+Set-WUGDeviceGroup -GroupId 101, 102 -Refresh
+
+.EXAMPLE
+# Get a deduplicated list of device IDs across groups (useful for piping)
+$deviceIds = Set-WUGDeviceGroup -GroupId 101, 102, 103 -ListDeviceIds
+
+.EXAMPLE
+# Pipeline: rename all groups matching a search
+Get-WUGDeviceGroup -SearchValue "Old" | Set-WUGDeviceGroup -Name "Updated"
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/DeviceGroup
 #>
 function Set-WUGDeviceGroup {
-    [CmdletBinding(SupportsShouldProcess = $true)]
+    [CmdletBinding(DefaultParameterSetName = 'Properties', SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-        [Alias('id')]
+        [Alias('id', 'ConfigGroupId')]
         [int[]]$GroupId,
 
-        [Parameter(Mandatory = $true, ParameterSetName = 'Credentials')]
-        [switch]$Credentials,
+        # ── Properties set (definition) ──
+        [Parameter(ParameterSetName = 'Properties')]
+        [string]$Name,
 
+        [Parameter(ParameterSetName = 'Properties')]
+        [string]$Description,
+
+        [Parameter(ParameterSetName = 'Properties')]
+        [string]$NewParentGroupId,
+
+        # ── Role set ──
         [Parameter(Mandatory = $true, ParameterSetName = 'Role')]
         [switch]$Role,
 
-        [Parameter(Mandatory = $true)]
-        [string]$Body
+        [Parameter(Mandatory = $true, ParameterSetName = 'Role')]
+        [ValidateSet('brand', 'os', 'primary', 'sub-role')]
+        [string]$RoleType,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Role')]
+        [string]$Body,
+
+        # ── PollNow set ──
+        [Parameter(Mandatory = $true, ParameterSetName = 'PollNow')]
+        [switch]$PollNow,
+
+        [Parameter(ParameterSetName = 'PollNow')]
+        [int]$PollNowLimit,
+
+        # ── PollNow / Refresh shared params ──
+        [Parameter(ParameterSetName = 'PollNow')]
+        [Parameter(ParameterSetName = 'Refresh')]
+        [switch]$ImmediateChildren,
+
+        [Parameter(ParameterSetName = 'PollNow')]
+        [Parameter(ParameterSetName = 'Refresh')]
+        [string]$Search,
+
+        # ── Refresh set ──
+        [Parameter(Mandatory = $true, ParameterSetName = 'Refresh')]
+        [switch]$Refresh,
+
+        [Parameter(ParameterSetName = 'Refresh')]
+        [switch]$UpdateNamesForInterfaceActiveMonitor,
+
+        [Parameter(ParameterSetName = 'Refresh')]
+        [ValidateSet('brand', 'os', 'inventory', 'history', 'credentials', 'allAttributes')]
+        [string[]]$RefreshOptions,
+
+        [Parameter(ParameterSetName = 'Refresh')]
+        [int]$DropDataOlderThanHours,
+
+        [Parameter(ParameterSetName = 'Refresh')]
+        [int]$RefreshLimit,
+
+        # ── ListDeviceIds set ──
+        [Parameter(Mandatory = $true, ParameterSetName = 'ListDeviceIds')]
+        [switch]$ListDeviceIds
     )
 
     begin {
-        Write-Debug "Starting Set-WUGDeviceGroup function. ParameterSet: $($PSCmdlet.ParameterSetName)"
-        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-groups"
-        $finalOutput = @()
+        Write-Debug "Starting Set-WUGDeviceGroup [$($PSCmdlet.ParameterSetName)]"
+        $baseUri  = "${global:WhatsUpServerBaseURI}/api/v1/device-groups"
+        $allGroupIds  = [System.Collections.Generic.List[int]]::new()
+        $finalOutput  = [System.Collections.Generic.List[object]]::new()
     }
 
     process {
-        foreach ($gid in $GroupId) {
+        foreach ($gid in $GroupId) { $allGroupIds.Add($gid) }
+    }
+
+    end {
+        # Validate Properties set has at least one property to change
+        if ($PSCmdlet.ParameterSetName -eq 'Properties') {
+            if (-not $PSBoundParameters.ContainsKey('Name') -and
+                -not $PSBoundParameters.ContainsKey('Description') -and
+                -not $PSBoundParameters.ContainsKey('NewParentGroupId')) {
+                Write-Error "Specify at least one of -Name, -Description, or -NewParentGroupId."
+                return
+            }
+        }
+
+        $total = $allGroupIds.Count
+        $current = 0
+
+        # ── ListDeviceIds: collect and deduplicate device IDs across groups ──
+        if ($PSCmdlet.ParameterSetName -eq 'ListDeviceIds') {
+            $deviceIdSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($gid in $allGroupIds) {
+                $current++
+                Write-Progress -Activity 'Collecting device IDs' -Status "Group $gid ($current of $total)" -PercentComplete (($current / $total) * 100)
+                try {
+                    $uri    = "${baseUri}/${gid}/devices/-"
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    $devices = if ($result.data.devices) { $result.data.devices } elseif ($result.data) { $result.data } else { @() }
+                    foreach ($d in $devices) {
+                        $did = if ($d.id) { "$($d.id)" } else { "$d" }
+                        [void]$deviceIdSet.Add($did)
+                    }
+                }
+                catch {
+                    Write-Error "Error fetching devices for group ${gid}: $_"
+                }
+            }
+            Write-Progress -Activity 'Collecting device IDs' -Completed
+            Write-Verbose "Resolved $($deviceIdSet.Count) unique device(s) across $total group(s)."
+            return @($deviceIdSet)
+        }
+
+        # ── Write operations: loop through groups ──
+        foreach ($gid in $allGroupIds) {
+            $current++
+            $pct = [Math]::Round(($current / $total) * 100)
+
             switch ($PSCmdlet.ParameterSetName) {
 
-                'Credentials' {
-                    $uri = "${baseUri}/${gid}/config/credentials"
-                    $action = "Assign credentials"
-                    Write-Debug "Assigning credentials to group ${gid}. URI: $uri"
+                'Properties' {
+                    $uri     = "${baseUri}/${gid}/definition"
+                    $method  = 'PUT'
+                    $action  = 'Update group definition'
+                    $bodyHash = @{}
+                    if ($PSBoundParameters.ContainsKey('Name'))             { $bodyHash.name          = $Name }
+                    if ($PSBoundParameters.ContainsKey('Description'))      { $bodyHash.description   = $Description }
+                    if ($PSBoundParameters.ContainsKey('NewParentGroupId')) { $bodyHash.parentGroupId = "$NewParentGroupId" }
+                    $requestBody = $bodyHash | ConvertTo-Json -Depth 5
                 }
 
                 'Role' {
-                    $uri = "${baseUri}/${gid}/config/role"
-                    $action = "Assign role"
-                    Write-Debug "Assigning role to group ${gid}. URI: $uri"
+                    $uri     = "${baseUri}/${gid}/roles/${RoleType}"
+                    $method  = 'PUT'
+                    $action  = "Assign role ($RoleType)"
+                    $requestBody = $Body
+                }
+
+                'PollNow' {
+                    $pollQueryParams = @()
+                    if ($ImmediateChildren) { $pollQueryParams += "immediateChildren=true" }
+                    if ($Search) { $pollQueryParams += "search=$([uri]::EscapeDataString($Search))" }
+                    if ($PSBoundParameters.ContainsKey('PollNowLimit')) { $pollQueryParams += "limit=$PollNowLimit" }
+                    $pollQs = if ($pollQueryParams.Count) { '?' + ($pollQueryParams -join '&') } else { '' }
+                    $uri     = "${baseUri}/${gid}/poll-now${pollQs}"
+                    $method  = 'PUT'
+                    $action  = 'Poll now'
+                    $requestBody = $null
+                }
+
+                'Refresh' {
+                    $refreshQueryParams = @()
+                    if ($ImmediateChildren) { $refreshQueryParams += "immediateChildren=true" }
+                    if ($Search) { $refreshQueryParams += "search=$([uri]::EscapeDataString($Search))" }
+                    if ($UpdateNamesForInterfaceActiveMonitor) { $refreshQueryParams += "updateNamesForInterfaceActiveMonitor=true" }
+                    if ($PSBoundParameters.ContainsKey('RefreshOptions')) {
+                        foreach ($opt in $RefreshOptions) { $refreshQueryParams += "options=$opt" }
+                    }
+                    if ($PSBoundParameters.ContainsKey('DropDataOlderThanHours')) {
+                        $refreshQueryParams += "dropDataOlderThanHours=$DropDataOlderThanHours"
+                    }
+                    if ($PSBoundParameters.ContainsKey('RefreshLimit')) {
+                        $refreshQueryParams += "limit=$RefreshLimit"
+                    }
+                    $refreshQs = if ($refreshQueryParams.Count) { '?' + ($refreshQueryParams -join '&') } else { '' }
+                    $uri     = "${baseUri}/${gid}/refresh${refreshQs}"
+                    $method  = 'PUT'
+                    $action  = 'Discovery refresh'
+                    $requestBody = $null
                 }
             }
+
+            Write-Debug "${action} on group ${gid}. URI: $uri"
+            Write-Progress -Activity $action -Status "Group $gid ($current of $total)" -PercentComplete $pct
 
             if (-not $PSCmdlet.ShouldProcess("Group $gid", $action)) { continue }
 
             try {
-                $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $Body
-                if ($result.data) {
-                    $finalOutput += $result.data
+                if ($requestBody) {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method -Body $requestBody
                 }
                 else {
-                    $finalOutput += $result
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
                 }
+                $data   = if ($result.data) { $result.data } else { $result }
+                $finalOutput.Add($data)
             }
             catch {
                 Write-Error "Error in Set-WUGDeviceGroup (${action}) for group ${gid}: $_"
             }
         }
-    }
 
-    end {
-        Write-Debug "Completed Set-WUGDeviceGroup function. Results: $($finalOutput.Count)"
+        Write-Progress -Activity 'Set-WUGDeviceGroup' -Completed
+        Write-Debug "Completed Set-WUGDeviceGroup. Results: $($finalOutput.Count)"
         return $finalOutput
     }
 }
@@ -101,8 +303,8 @@ function Set-WUGDeviceGroup {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBC1wNSTtQR9v+7
-# NZAcd/7sjK+a+Ftul5GbAwwC8MZjKqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0/L4LY+Rcl9R2
+# w2J3a6E8sz3xEU+ungUg78iQsvuvKqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -202,17 +404,17 @@ function Set-WUGDeviceGroup {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgkDsmgqpX9MCUyKOMvVqB5ufHJlc2R5Uz
-# NgGeY/afTWAwDQYJKoZIhvcNAQEBBQAEggIAGN904kzDMoSyoNIK9+4smW06kY/6
-# zpEn6YlYY2/GpUDcC1EYnZQHwBsspJBk0JCia+3LCVxNl3PSQzsmVgrwL7X94kXV
-# sF4cWCFo173euglMTUVq5cSOy9OSSOXXkkCa6nRIS8LWQ8mDss0x2lLL/AYwTV0P
-# KE1qqijfCWMrZdUd2/8fr88Ul28fsM8isEhKDPvQfFZNfcp+WmGdm5jYREHxX3Oq
-# tjxi7iRHtBVKNxM9ltfP3hghrMFHzOLFLv4v96Mjw2z9xp5eXtfhPtokdvxIR8wO
-# egXUB0ioibvqixrJrHhCoDnxjr3k8lLQjadTpOy19/CLu8jMAfmhO83luoo4yYV3
-# qo3GYRLjSGJgMhZGTG7BnnTH+g1JMBPWXf6yxHeW7Q33spQIZ8Rl/0M9fJbUwSFY
-# ZlkbN3KWybXq/U6cUzjmkj+1ouFMnRnGsH7ph8dbSSnUoYpbr9pYaHVxhZHSqjbN
-# xFCQUH7NprNJZmujNrKuC3TMr9IT4jqsV6yM03MRs0GcJYiHL/14TIG7M5Q2FJNE
-# /opecbt3zpoRd5vbrktadHgmHlSWGf6I3MnGQnKeU/jiVFY0XIJIYxcrRLkm3cDB
-# 9Z/u1a+VqyfiBiZGO7XLldl66gIHzNt5TMvu5UHqlb6bEhBPXZeJGGkeb5a9I5Vu
-# n8o+X+2nNwPlDuo=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgmE5qBux75vzNcyaRnMc7Duq1K8Wu8age
+# 4Fi4/PqohiYwDQYJKoZIhvcNAQEBBQAEggIAqsOdfSaNO701m/JVO1XWOXU/npWT
+# WutRBdsLB9K77SjXXQReeofn6Yeah9iZ8Scvfey1Heyq/nQnOhALw+hhcbP/6pJn
+# ravKN42GdDZc6/coIcCgOTTdFr2sBbe5oabyaWFFtE+/+5QMjun4UxiAe9uOsgDc
+# NGrlm2pWDpW2s7mPS7lyJESaqh60lYAWPh+lQKlwvsizMPXfOVXxNVbMEwBhQ0IU
+# hKpZ1v4QUCpeH9x1LM4GTooVNyZMLObTAnGAqYgDfl3WjrNj4bNp04UyhP574mTW
+# UvFJ4JRe9PkGIDKK64a3hJQ2RQgydjgfyVRhQ38boeRZYk3bWXogZbpkQndpqorn
+# ZPBRXmdeEwmFE/L0DKx4YXd7AKUJVpVTS0kns2Pd2KrY03mV06MtG46nVcc8vi1T
+# ymxl8/JycGLa/H92ZvbQPBEivMsh8zF18+Rsl6ZZT7PtuRImBF/m7WbJ7jM7NRFi
+# LMEuynfZXaaT1WKPiE/DytKTPT5eAKvfNFI96dUT9iSQji9q6MEUvRC39Ss4NJh9
+# Dp0qAIM6pv5/vV8nt8HHsuCIwUFFYQ+5RCqR/Hu6mjLbYMrNRUbZwNlfwAfZthFG
+# Gf6OKZbnVscSa0Z468xUGJwuISKfw4YCNDwWpXVJ2A3JRC7L2sG2PJr1PIpgBcwr
+# 8dOPyNwYkFcBjPM=
 # SIG # End signature block

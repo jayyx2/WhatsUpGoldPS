@@ -241,6 +241,8 @@ function Get-ProxmoxVMDetail {
         Uptime     = "$($status.data.uptime)"
         CPUPercent = "{0:N1}%" -f ($status.data.cpu * 100)
         CPUs       = "$($status.data.cpus)"
+        CPUSockets = if ($config.data.sockets) { "$($config.data.sockets)" } else { "1" }
+        CPUCores   = if ($config.data.cores) { "$($config.data.cores)" } else { "$($status.data.cpus)" }
         RAM_Used   = "$([math]::Round($status.data.mem / 1MB)) MB"
         RAM_Total  = "$([math]::Round($status.data.maxmem / 1MB)) MB"
         Disk_Used  = "$([math]::Round($status.data.disk / 1MB)) MB"
@@ -288,10 +290,11 @@ function Get-ProxmoxDashboard {
         End-to-end: authenticate, gather data, export HTML, and open in browser.
     .OUTPUTS
         PSCustomObject[]
-        Each object contains VM details enriched with node context: VMID, VMName, Status,
-        IPAddress, Node, NodeIP, NodeCPU, NodeRAM_Used, NodeRAM_Total, PVEVersion, CPUs,
-        CPUPercent, RAM_Used, RAM_Total, Disk_Used, Disk_Total, NetIn_KB, NetOut_KB,
-        Uptime, Tags, HAState, HAManaged.
+        Each object contains: Type (Host or VM), Name, Status, IPAddress, Node,
+        CPU (combined percent + core/vCPU count), RAM (used / total),
+        Disk (used / total for hosts, total size for VMs),
+        NetworkIn, NetworkOut, Uptime, Tags, HAState.
+        Nodes appear as Type="Host" rows; VMs appear as Type="VM (VMID)" rows.
     .NOTES
         Author  : jason@wug.ninja
         Version : 1.0.0
@@ -311,34 +314,49 @@ function Get-ProxmoxDashboard {
     foreach ($node in $nodes) {
         $nodeName = $node.node
         $nodeDetail = Get-ProxmoxNodeDetail -Server $Server -Cookie $Cookie -Node $nodeName
+
+        # Add the node itself as a row
+        $nodeRamUsed  = [double]($nodeDetail.RAM_Used -replace '[^\d.]')
+        $nodeRamTotal = [double]($nodeDetail.RAM_Total -replace '[^\d.]')
+        $nodeRamPct   = if ($nodeRamTotal -gt 0) { '{0:N1}%' -f ($nodeRamUsed / $nodeRamTotal * 100) } else { '0.0%' }
+        $results += [PSCustomObject]@{
+            Type       = "Host"
+            Name       = $nodeName
+            Status     = $nodeDetail.Status
+            IPAddress  = $nodeDetail.IPAddress
+            Node       = $nodeName
+            CPU        = "$($nodeDetail.CPUPercent) ($($nodeDetail.CPUSockets)s/$($nodeDetail.CPUCores)c/$($nodeDetail.CPUThreads)t)"
+            RAM        = "$nodeRamPct ($($nodeDetail.RAM_Used) / $($nodeDetail.RAM_Total))"
+            Disk       = "$($nodeDetail.RootFS_Used) / $($nodeDetail.RootFS_Total)"
+            NetworkIn  = "N/A"
+            NetworkOut = "N/A"
+            Uptime     = $nodeDetail.Uptime
+            Tags       = "N/A"
+            HAState    = "N/A"
+        }
+
         $vms = Get-ProxmoxVMs -Server $Server -Cookie $Cookie -Node $nodeName
 
         foreach ($vm in $vms) {
             $vmDetail = Get-ProxmoxVMDetail -Server $Server -Cookie $Cookie -Node $nodeName -VMID $vm.vmid
 
+            $vmRamUsed  = [double]($vmDetail.RAM_Used -replace '[^\d.]')
+            $vmRamTotal = [double]($vmDetail.RAM_Total -replace '[^\d.]')
+            $vmRamPct   = if ($vmRamTotal -gt 0) { '{0:N1}%' -f ($vmRamUsed / $vmRamTotal * 100) } else { '0.0%' }
             $results += [PSCustomObject]@{
-                VMID          = $vmDetail.VMID
-                VMName        = $vmDetail.Name
-                Status        = $vmDetail.Status
-                IPAddress     = $vmDetail.IPAddress
-                Node          = $nodeName
-                NodeIP        = $nodeDetail.IPAddress
-                NodeCPU       = $nodeDetail.CPUPercent
-                NodeRAM_Used  = $nodeDetail.RAM_Used
-                NodeRAM_Total = $nodeDetail.RAM_Total
-                PVEVersion    = $nodeDetail.PVEVersion
-                CPUs          = $vmDetail.CPUs
-                CPUPercent    = $vmDetail.CPUPercent
-                RAM_Used      = $vmDetail.RAM_Used
-                RAM_Total     = $vmDetail.RAM_Total
-                Disk_Used     = $vmDetail.Disk_Used
-                Disk_Total    = $vmDetail.Disk_Total
-                NetIn_KB      = $vmDetail.NetIn_KB
-                NetOut_KB     = $vmDetail.NetOut_KB
-                Uptime        = $vmDetail.Uptime
-                Tags          = $vmDetail.Tags
-                HAState       = $vmDetail.HAState
-                HAManaged     = $vmDetail.HAManaged
+                Type       = "VM ($($vmDetail.VMID))"
+                Name       = $vmDetail.Name
+                Status     = $vmDetail.Status
+                IPAddress  = $vmDetail.IPAddress
+                Node       = $nodeName
+                CPU        = "$($vmDetail.CPUPercent) ($($vmDetail.CPUSockets)s/$($vmDetail.CPUCores)c)"
+                RAM        = "$vmRamPct ($($vmDetail.RAM_Used) / $($vmDetail.RAM_Total))"
+                Disk       = $vmDetail.Disk_Total
+                NetworkIn  = "$($vmDetail.NetIn_KB)"
+                NetworkOut = "$($vmDetail.NetOut_KB)"
+                Uptime     = $vmDetail.Uptime
+                Tags       = $vmDetail.Tags
+                HAState    = $vmDetail.HAState
             }
         }
     }
@@ -407,17 +425,37 @@ function Export-ProxmoxDashboardHtml {
         throw "HTML template not found at $TemplatePath"
     }
 
+    $titleMap = @{
+        'Type'       = 'Type'
+        'Name'       = 'Name'
+        'Status'     = 'Status'
+        'IPAddress'  = 'IP Address'
+        'Node'       = 'Node'
+        'CPU'        = 'CPU'
+        'RAM'        = 'RAM'
+        'Disk'       = 'Disk'
+        'NetworkIn'  = 'Network In'
+        'NetworkOut' = 'Network Out'
+        'Uptime'     = 'Uptime'
+        'Tags'       = 'Tags'
+        'HAState'    = 'HA State'
+    }
+
     $firstObj = $DashboardData | Select-Object -First 1
     $columns = @()
     foreach ($prop in $firstObj.PSObject.Properties) {
+        $title = if ($titleMap.ContainsKey($prop.Name)) { $titleMap[$prop.Name] } else { ($prop.Name -creplace '(?<=[a-z])([A-Z])', ' $1').Trim() }
         $col = @{
             field      = $prop.Name
-            title      = ($prop.Name -creplace '([A-Z])', ' $1').Trim()
+            title      = $title
             sortable   = $true
             searchable = $true
         }
         if ($prop.Name -eq 'Status') {
             $col.formatter = 'formatStatus'
+        }
+        if ($prop.Name -eq 'Type') {
+            $col.formatter = 'formatType'
         }
         $columns += $col
     }
@@ -442,8 +480,8 @@ function Export-ProxmoxDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA6n7AJ37ogt+OF
-# YX5W32mhNfy0R/fcvNekmvwbLJdbR6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsB6yn5QuFJB8k
+# wO7qKiJ29ojHIJW/xg6UezuBBiN9oKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -543,17 +581,17 @@ function Export-ProxmoxDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgqkqH4TvX3npCbGku7HklaISdAYOkTrPm
-# S4QnjzeTffYwDQYJKoZIhvcNAQEBBQAEggIAXtE5Ti9338Gm0oH7xr2vRA0lZKDy
-# droEhhrAFOVlHlPCxHocUN9cqchbA8NcSfeIx9TQYNq9ueONkk/Yw8sJEp9BCgt+
-# DfO2e97S924Mx3YSjSaJ5DpMsZqRJsXJ/KpkGgO7UoyFUwICoZtRdLnAFnqS+XXE
-# oJ6/OyTzigBqUy8sbsHlZHeHhRZunox6vMcVb9XEwuhc9Z+Smdq328zeASMD1/C3
-# zInNqSnYpdOP6Y+wrb3OwhRpaSUHB+w10AsGz4dMdL41uAIYg++XF6cqVOsmrtg2
-# rnOMUNwVlAUuM8P7zS/nRG1sxwJhwIQU71gCLz4r07a9prk9bvEd84NOlEIErcH9
-# /rDzlN9Fom8Oq1TBBMZr244Wu98etYCkhDAyX4ELY/6VTQ2t01VO4y2vO3YAq1Sb
-# lHSUwLG4EI8bPCYR9lZWm51e9PddUTMWhCir1icMjHP2hIXJhMFJdEmncN1rq8Wb
-# RiCRXet+OOqAelVsO7SLbq0UAQd9wpH8tdnZzbt0Z1PxcsSE2gsvwQmnB1noaP9U
-# DgXKJOJ6mN8NtPd3RTjHhic2NJtsDXrVAL61iXdkphC9ddQTZRVpGb8uu/FyLKp8
-# BuKh6AR/nENnTyv5M1XiLgNra3q24hU5tIqInh5URKhU9qxd11QQz8UMkZ+caSjI
-# ypjD8kNTfVULSKk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgvG2P4d3ImwWuUhhqmv/4U2znfodUu8CR
+# r838mXdDqekwDQYJKoZIhvcNAQEBBQAEggIAJRZ4jRsTrM+V4Tm0UVWT/3Nlz+02
+# dtlSh0fcRwu4QG5kPl8SMBEK5GvV8ITmS2JU3+7G7U0E2EjsANKa8vpS8EvboV28
+# gcT54dJpbBnxvbv274ahxx8840JkMIyzDSe86zQCOhOvLTL4YGMKHHhSKXbBCUIf
+# wM2Px3iQWntOr3NfgifGz8VGSAdP6mJRe8AY9le7A4cGoLh0S73PMvBJbKbu8uBL
+# VEhO02JwNi1tfDIDXwbpxa2+/HHcnbp5d5Re3LL3t6icVzG5FjkjlwwwfIRiuFKT
+# 0QBi9TL9wc2GUAib0Vz9RiQloZsPdGZIqtmQCA0SMsTD6zY5Xw9Z3nyeALWfobCo
+# z/nBBu/tQWJmHMWcgQtCNd1Bygc0XcIU1H5J8hjFm2e4ul6YhT3RbSU/PtqNo5BJ
+# 4InXk+reh9swuf9Q9xSvmoiyqHz8w6XfnDrQT5R7tAf0w/n5CELyWuTnutRvV6XY
+# M19KmouA/lsEHQnHTGC2UCfoloX91Fg/dSvGL1TlUuWdWrwI4FHs9ifnGAVNCxUe
+# YkgqsjKk8J7BvZPstyWEeUcnbKPtIEPxW5x1S2Al9GepzjiIY9bCpy9Esb1mbcsL
+# JHgqZ4sF7Gntv37inWcQg2d3EfruzLmSD9h6bpVRVPpOiBsccjD1MmE2Yg3Kdcvr
+# 5zG+jv3dDEoIjFA=
 # SIG # End signature block

@@ -4,7 +4,7 @@ Retrieves device group memberships for a specific device from WhatsUp Gold.
 
 .DESCRIPTION
 The Get-WUGDeviceGroupMembership function retrieves the device groups a device belongs to
-using GET /api/v1/devices/{deviceId}/device-groups/-.
+using GET /api/v1/devices/{deviceId}/group/-.
 
 .PARAMETER DeviceId
 One or more device IDs to retrieve group memberships for. Required.
@@ -30,6 +30,10 @@ Get-WUGDeviceGroupMembership -DeviceId "123"
 Get-WUGDeviceGroupMembership -DeviceId "123" -GroupType static_group
 
 .EXAMPLE
+# Check if a device is a member of a specific group
+Get-WUGDeviceGroupMembership -DeviceId "123" -IsMember -TargetGroupId 101
+
+.EXAMPLE
 # Pipeline from Get-WUGDevice
 Get-WUGDevice -SearchValue "Server01" | Get-WUGDeviceGroupMembership
 
@@ -38,24 +42,30 @@ Author: Jason Alberino (jason@wug.ninja)
 Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/Device
 #>
 function Get-WUGDeviceGroupMembership {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'List')]
     param(
         [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [Alias('id')]
         [string[]]$DeviceId,
 
-        [Parameter()]
+        [Parameter(Mandatory = $true, ParameterSetName = 'IsMember')]
+        [switch]$IsMember,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'IsMember')]
+        [int]$TargetGroupId,
+
+        [Parameter(ParameterSetName = 'List')]
         [ValidateSet('id', 'summary', 'detail')]
         [string]$View = 'summary',
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'List')]
         [ValidateSet('all', 'static_group', 'dynamic_group', 'layer2')]
         [string]$GroupType = 'all',
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'List')]
         [string]$Search,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'List')]
         [ValidateRange(1, 250)]
         [int]$Limit = 250
     )
@@ -68,6 +78,19 @@ function Get-WUGDeviceGroupMembership {
 
     process {
         foreach ($did in $DeviceId) {
+            if ($PSCmdlet.ParameterSetName -eq 'IsMember') {
+                $uri = "${baseUri}/${did}/group/${TargetGroupId}/is-member"
+                Write-Debug "Checking is-member from URI: $uri"
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                    $finalOutput += $result.data
+                }
+                catch {
+                    Write-Error "Error checking membership for device ${did} in group ${TargetGroupId}: $_"
+                }
+                continue
+            }
+
             $allData = @()
             $currentPageId = $null
             $pageCount = 0
@@ -81,7 +104,7 @@ function Get-WUGDeviceGroupMembership {
                 if ($currentPageId) { $queryParams += "pageId=$([uri]::EscapeDataString($currentPageId))" }
 
                 $query = "?" + ($queryParams -join "&")
-                $uri = "${baseUri}/${did}/device-groups/-${query}"
+                $uri = "${baseUri}/${did}/group/-${query}"
 
                 Write-Debug "Listing group memberships from URI: $uri"
                 $pageCount++
@@ -110,8 +133,8 @@ function Get-WUGDeviceGroupMembership {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDlB31pErJoyZBU
-# HOX+PasE2d6nTLNLCtpPcpHkJN1YV6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrF2C5PhkOXDkW
+# 1+NC0oknnHK2Z+hPjURPIGo0fF4zmaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -211,17 +234,17 @@ function Get-WUGDeviceGroupMembership {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgviLbPBw42zeMwJ/Qj8C7tyo5YzBNV8Yy
-# rEjYmP3zuSwwDQYJKoZIhvcNAQEBBQAEggIAKR6epQDssjpu8IIFnZC58x9/1qUR
-# 02FpcclaAfKPQpI/ik5Bt5mGVb04COln3LGa3/wekAqmNX+jvCE8DWqCwuVdVed/
-# 3vDKLjBvy+gEt5KJFLiwJPBbQCQlPvlts8Dmbbndhrjc0yv7+bgd2JtGZejqeb48
-# xvXKzBDBvCA/6HpQgEwogmKt9cZIE3EFqpHfNh3gHc0yyJcGUEnQalQ5witZsmRL
-# tKqEdQNF90yh4nGqpmLOziFXDFG2WJv/ZQbfEPts1kbZGaPExmZV0dIDf6ID/rkL
-# ylLO460wXjbnUxDxh/Nd+DFs4efJP0j1yB7Sb7rvVSKWbgHnaU2Vh9wQH44m4N55
-# vSEfFNgTXyV1OG+8T/ZkwnskAu9lMU1gLFVgb22j4RE6nxbGHbtoj620pLTz6+d1
-# vZSjP7AsrWcgKEk5Wxx099n3+gNffRqUxz/4r3R0dqApEKh4M/dmXqFCV73V1Jdp
-# TM1JRJe0G0piD8XoPLVurBP0rvaXfQ7rEYON18YxYIGJ0bO+vA1k1dRLGMTqxALB
-# sBPA1xpnWeIVteLZKHScv84AIJOC9xivvFJew6nQnKPjCdasQ3+6yP8FhmRSQBcJ
-# KfJt4vKIzCPuZ28VWo+2eNYlMb6vzbZCN6q6WAOLhAowlT0Hx5WZe6y1lMw7BPZR
-# LnWV0BkO/byc1tQ=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgImuqn4V2T/594ed0pbIaNHoAYoQIy5/r
+# oQ+t+L42whEwDQYJKoZIhvcNAQEBBQAEggIA6r3UkuDQH3fAyWFhgtQI1gJfyfvM
+# urDRNGGV94HYKGwJ0wD1LmoY4bY0falTXvBXVYAJbq9PuaU7Gz+kAHx+ibjdidLo
+# nPt9zLUw7ZaOmp4iYC5kb4UH9lF/LIH/HoGZ7ZUsNEDz3rwvkT9D8uSg9pxw5BYj
+# Uih1FFDiElPAY4hi2A/nFIXY5hnNtbUVA6cwaNFjMCdDakT/P3TdpLNEt69hwlHQ
+# eMe+ec9HCKgUMqKDFJsIU2NgFm0pSI7F3qJjCHQRLtNdvEIAE+3fSCHbOFzlJ+Up
+# efIIJnx9afpOidO4aJQFtS46P9omC+S5CP9WS3rdAX3lIHuFzo4zb4LC6bnQ0rk7
+# m4yDqIRLXRt20VC2hCXrrQIezdIB+nAxrhGeeti9G6K7llTwS4o219SgN+8MIv4Z
+# 84mj6WS24q35oS4Hxc+9r9Gz+YwB5rsEJR6/enAc9NIcvF6OrepXX2pNFQAlzcdu
+# sIb2jC2SwLfcTc/HhM2Q1vTGQBgmtrG+kyTlxBkqG6yfTO+dtFgdk/rSbzoJ8f2P
+# IAcr4q+i2TmZk2vflHptJD0gd8xGV1GnKc2IgKohn5uiKmuK+1LGCNAUoyN5NN2u
+# nqTJ4gs1+acXv/PODdQC/0s+mEJnx+bf8WAmZAAhBB2XStjcXJQm6jx/vm4Cz2vw
+# 3zO8jBaeZinshU0=
 # SIG # End signature block

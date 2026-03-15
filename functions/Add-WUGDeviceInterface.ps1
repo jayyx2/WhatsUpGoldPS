@@ -78,7 +78,7 @@ function Add-WUGDeviceInterface {
         try {
             $result = Get-WUGAPIResponse -Uri $uri -Method 'POST' -Body $requestBody
             if ($result.data) {
-                Write-Host "Successfully added interface to device ${DeviceId}." -ForegroundColor Green
+                Write-Verbose "Successfully added interface to device ${DeviceId}."
                 return $result.data
             }
             return $result
@@ -96,8 +96,8 @@ function Add-WUGDeviceInterface {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCxoPTXDCv4cjh
-# XGzDOEZtbw9B2X9dCsLQqvAVBYtRH6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCByrPowae9LniX1
+# UEVcmVa/lgetaVAeYp/ykC0e9VxwjKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -197,17 +197,17 @@ function Add-WUGDeviceInterface {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgsk+GKSef4TMUOJ0FvFcnIuMEMwdNGMKe
-# DkOn2NDgnkowDQYJKoZIhvcNAQEBBQAEggIAYYvuqeY4y9vC6BVHFG8pAxDyYnwB
-# Yen/E+Uw+96cjb0icu/p7mFAGMW4O6dN8dSyLX/Ip6gOKtmH0BzqydM5SmUrZ05T
-# leq8XIlvaTTQG7/28S+uVTc3mHx7bpM+RU41sf/5Z6q8hB2/AIm89kNtBW4KuGFM
-# F5M5VbEhD1VShZZcD8zMBOUNb3mTLs1iTRVZkOLRDT3GSs9GRX/j9PqSS9gxjor8
-# 5A7sc5pm+BifM7lSBUYbK7o4qINey3QjA3/kEoe1Iqeyxb+ILhvKp9OpoxRoyEcj
-# Hi8Ixc9FJ3gCx9jfZNNGCSb7JQ+HsVmEobQqMk21+p9/24dsMQ+7UHBjqLbQbGg2
-# vFylk3BpzdsI9kq9uTdGnLONtzD15tHq7aS+tuGq61Komaa7S7ZvuNqWUmZOJ5jF
-# ZubooNg0JP+0OSJ8lt6sUes1hjxGYqQaD1EjxN2cy3PObwWo/uM0zc2QKGHbCnVi
-# YAazJudupgYC2+/zgqU1HnYav9iBwHeT7MJS2w2PsrbLmbczmzVfOdR+k9I0M64a
-# tGUsvLL2+xvq3FqDOs8e3QW2hvcgJ9VW1JqN5HELR3kfhtAqkjHZNMfWkTLcLKO7
-# 8ASjMl0Whk2S44sRTlYlCNrNwzvDzo/47aApCuRp9KIc7+tp7zRD1SrJEcZ/fgd2
-# EVl2RRRsSFan0pk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgYZT/PGOKA5cbHzeXT7OmZZjHjJdsTli/
+# 9cuEQWQEatswDQYJKoZIhvcNAQEBBQAEggIARsJ+jxN6c77VecYsnZmouwyCC6ga
+# 3qrishFWeNvdEw+x9lsd5bght3hSayk8PTz4x+2HJWdrHNtFxpZfW9LK5N7fKmht
+# q6QWIVaPXsg9qz1ZFfJmrVpp3Z9oHSpt1c6JQpiZ8hYmPNkh+sX2ftpM4QAgw1ue
+# ZqhPnHTprOJIaSFG61bYkXPjkppNXJUV0nWGEiePeGJgfm0CTQ2ousUzjMtSgXqU
+# doWGqtKZH02Y8LLp7LNqCLztmm6P453TUVP/ZPNyokW1yegPtyxLsuxCvobuc49y
+# foXZzPPPCbhxSc7THMD5zDnbdOlN6q4e7Kz0Q9YOmplFHL5B9DdDqluYdqcbe674
+# iAD1gDRDoX1GTY8iAh551sc301PgAbpjmQpBpcEcZvNb++w939PBvgHdTUqDjWy7
+# cJn2NE5n1TZYMes9U5N6UK5uPdPkwQM/MJPmxp7Ivpjz2hkvSbnfnPt5akxF6rrS
+# y+eYHwGmVIKaQhng09qyv8kONauWfH6mccQMYf0hih7PiX9LVO34RxIriyZtPE66
+# 5jUsDD6ST1Z4mG9ApIYZOeWFsdqzt1JkjaxxaxVrD2/VG9oQ5JPVw5ihZ9D04Qm6
+# zLfFSL9OFD3IJtdt3K2sRxMwETBW1n8fKNnRdYGPig1FnWL0voPMtN43lrw3i3RT
+# FQ7SUDYacOEGOoU=
 # SIG # End signature block

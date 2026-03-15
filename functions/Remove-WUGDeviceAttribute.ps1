@@ -61,7 +61,7 @@ function Remove-WUGDeviceAttribute {
         try {
             $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
             if ($result.data) {
-                Write-Host "Successfully removed ${target}." -ForegroundColor Green
+                Write-Verbose "Successfully removed ${target}."
                 return $result.data
             }
             return $result
@@ -79,8 +79,8 @@ function Remove-WUGDeviceAttribute {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDkEKGfFCOAKIIJ
-# XILp9uYthzAruIWwW6Vhuor9uzpINaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDcr9mk5UUqrwH
+# 6iquEFq4Ya93g0C186d4hF080F0Zy6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -180,17 +180,17 @@ function Remove-WUGDeviceAttribute {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgRkepkNxBEzuUg8TyvB/a85HT3BwD29sK
-# ZNDhUT0ZuuowDQYJKoZIhvcNAQEBBQAEggIAvLfJwRt6yZ01Wv0f9HYDU5qkvo56
-# fMmVY1860m3w4xqtr94tTLONw3XaRLGSixBgrlbX5YyV1Tlw0S9MUjKzzlz61rnz
-# 6y5iLFwPC9NSYzBxHkpnNIzKuSoMySA/6ofmzYeUg62UJ/BygOfmll4cvwMpLTjg
-# dlGB1QcKUW0Qgbnj0aYi4LfzEoUe+6Ss3DrvwYUyJsrwrt3EdLYRazCdiTbeyIeM
-# b99tKNte/3NHOU/1+/hLTIH98iFy9OJ6aNv8I3amMGtzoqek4JEDWjEeV+yyeDSi
-# qQk336nSXBZKYYyiG3cRyHJ25TwIlaT3/sHUuhNs7emZJ6fhE+7viwwUmVFVGUJ0
-# VB/2RUElENL48ufgP9cU9u6vcmmKcEYnOomSIFOMNSXmAod/lg3bsqU0X6uOMtfb
-# BnF1G/yEtJxRA3MwJl/QBNMY2d47hsdk86tKu2Q+xG1hvPTkv/BwLODKAcyzl9BL
-# 8/ix9j9CXH9z1nuFQ8Ev8OjFepPdjG7sPG64ziYiR5EMbj1qk13Wku5OykGebZQA
-# +EKnmQXeJC8egJGSTzfQRZNRngGawg3FKoNT6MAB2zyrxa/lQIosG+kHt4oYVEaE
-# DzFsLFacJly9W43PBnhtASFSvA8r2TD6abOTkz9eflwh1H7JbSlTgTDGbMVsMmkk
-# xVJrohMO0FhNvXg=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg42SwhcnMD8i8abH0296A45ElcYsgVlLP
+# r3jru+SlKBQwDQYJKoZIhvcNAQEBBQAEggIAsNWr9TuyGZ9prcN3ixDqfgUjSeZK
+# Sjxe0vn5LzizW7YvC1sg+DYKHrqwBWqKvJo7k3F8QTqf7Rf+3jRSOSloB1lazKgH
+# WbMuO7yMRMsbcy16F7mAMT/0UTCJ1mg6CwFsSCqkOB5kRpvDL2m34s9wtKSvlRRT
+# QHCXpj0I2RD+HLwK72IvrTa5JFKA9Vi18a5x2sn8kebjjSl9k+qofJJRU+S4LM0P
+# yR+Gx+mIP3bjVq5nMoLb2X+YpJvDZj0XdER3VCRxpXcyQX7EjeDLCEgzGhykvR8d
+# 9rx0bes/U2vlpCYCLFe5cRqyftA6GksEZr52kKzJ1FkZPLMRnZKQKvF/oK9AOR63
+# dVjXzFJrRDyzfZ4GWM9dsYku0uZd/9jZzHj8+SaO+wDQDdaPJ0dy9S5al7H4Ygtz
+# MQrJgomghuQKgrLisPiqqQiYKfS3xPzeBci55InD5ePjJRg0EZRZEZ/sNkAGQl2U
+# YCsympdcjjfOPbenRq92MbOOCVCXBNSEbywrBgyYJHM2EEXi64iFI2LpzvAlYa2d
+# VZHf81OuxkkT4W6Kc5yBpsf6Gp/OaujnNJ9Dba8FOnkTqeUekuhNRqzSYQZd/Kbp
+# FCMeo171wdYQ8YXRrWaF2Pc3BseP4rnCq5S2CnL8cBnFgd/LVChZXqAweLcBdFLV
+# BsPB8Jc4g5lVON8=
 # SIG # End signature block

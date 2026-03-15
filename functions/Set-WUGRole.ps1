@@ -1,156 +1,199 @@
 <#
 .SYNOPSIS
-Manages credential assignments on a device in WhatsUp Gold.
+Manages device roles in the WhatsUp Gold role library.
 
 .DESCRIPTION
-The Set-WUGDeviceCredential function assigns, unassigns, or removes credentials from a device:
-- Assign credential: POST /api/v1/devices/{deviceId}/credentials/-
-- Unassign specific credential: DELETE /api/v1/devices/{deviceId}/credentials/{credentialId}
-- Remove all credentials by type: DELETE /api/v1/devices/{deviceId}/credentials/-
+The Set-WUGRole function performs write operations on the device role library including:
+- Delete a device role
+- Enable or disable a device role
+- Restore a system device role to defaults
+- Apply multiple device role templates (PATCH)
 
-.PARAMETER DeviceId
-The ID of the device to manage credentials for. Required.
+.PARAMETER RemoveRole
+Switch to delete a device role by RoleId.
+Endpoint: DELETE /api/v1/device-role/{roleId}
 
-.PARAMETER CredentialId
-The ID of the credential to assign or unassign. Required for Assign and Unassign parameter sets.
+.PARAMETER EnableRole
+Switch to enable a device role by RoleId.
+Endpoint: PUT /api/v1/device-role/{roleId}/enable
 
-.PARAMETER Assign
-Switch to assign a credential to the device.
+.PARAMETER DisableRole
+Switch to disable a device role by RoleId.
+Endpoint: PUT /api/v1/device-role/{roleId}/disable
 
-.PARAMETER Unassign
-Switch to unassign a specific credential from the device.
+.PARAMETER RestoreRole
+Switch to restore a system device role to its default state.
+Endpoint: PUT /api/v1/device-role/{roleId}/restore
 
-.PARAMETER RemoveByType
-Switch to remove all credentials of a specific type from the device.
+.PARAMETER ApplyTemplates
+Switch to apply multiple device role templates.
+Endpoint: PATCH /api/v1/device-role/-/config/template
 
-.PARAMETER Type
-The type of credentials to remove when using RemoveByType. Valid values: all, snmp, windows, ado, telnet, ssh, vmware, jmx, smis, aws, azure, meraki, restapi, ubiquiti, redfish. Default: all.
+.PARAMETER RoleId
+The ID of the device role. Required for RemoveRole, EnableRole, DisableRole, and RestoreRole.
 
-.PARAMETER PreventOrphanActiveMonitors
-Prevent the operation if an active monitor would be orphaned. Default: true.
-
-.EXAMPLE
-# Assign a credential to a device
-Set-WUGDeviceCredential -DeviceId "123" -CredentialId "abc-456" -Assign
-
-.EXAMPLE
-# Unassign a credential from a device
-Set-WUGDeviceCredential -DeviceId "123" -CredentialId "abc-456" -Unassign
+.PARAMETER Body
+The JSON body for ApplyTemplates (DeviceRoleTemplateBatch object).
 
 .EXAMPLE
-# Remove all SNMP credentials from a device
-Set-WUGDeviceCredential -DeviceId "123" -RemoveByType -Type snmp
+Set-WUGRole -RemoveRole -RoleId "abc-123"
+
+.EXAMPLE
+Set-WUGRole -EnableRole -RoleId "abc-123"
+
+.EXAMPLE
+Set-WUGRole -DisableRole -RoleId "abc-123"
+
+.EXAMPLE
+Set-WUGRole -RestoreRole -RoleId "abc-123"
+
+.EXAMPLE
+$templateBatch = @{ options = @("all"); templates = @($t1, $t2) } | ConvertTo-Json -Depth 10
+Set-WUGRole -ApplyTemplates -Body $templateBatch
 
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
-Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/Device
+Reference: https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#tag/DeviceRole
 #>
-function Set-WUGDeviceCredential {
+function Set-WUGRole {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
-        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveRole')]
+        [switch]$RemoveRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'EnableRole')]
+        [switch]$EnableRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'DisableRole')]
+        [switch]$DisableRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'RestoreRole')]
+        [switch]$RestoreRole,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ApplyTemplates')]
+        [switch]$ApplyTemplates,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveRole', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'EnableRole', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'DisableRole', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'RestoreRole', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [Alias('id')]
-        [string]$DeviceId,
+        [string]$RoleId,
 
-        [Parameter(Mandatory = $true, ParameterSetName = 'Assign')]
-        [Parameter(Mandatory = $true, ParameterSetName = 'Unassign')]
-        [string]$CredentialId,
-
-        [Parameter(Mandatory = $true, ParameterSetName = 'Assign')]
-        [switch]$Assign,
-
-        [Parameter(Mandatory = $true, ParameterSetName = 'Unassign')]
-        [switch]$Unassign,
-
-        [Parameter(Mandatory = $true, ParameterSetName = 'RemoveByType')]
-        [switch]$RemoveByType,
-
-        [Parameter(ParameterSetName = 'RemoveByType')]
-        [ValidateSet('all', 'snmp', 'windows', 'ado', 'telnet', 'ssh', 'vmware', 'jmx', 'smis', 'aws', 'azure', 'meraki', 'restapi', 'ubiquiti', 'redfish')]
-        [string]$Type = 'all',
-
-        [Parameter(ParameterSetName = 'Unassign')]
-        [Parameter(ParameterSetName = 'RemoveByType')]
-        [bool]$PreventOrphanActiveMonitors = $true
+        [Parameter(Mandatory = $true, ParameterSetName = 'ApplyTemplates')]
+        [string]$Body
     )
 
     begin {
-        Write-Debug "Starting Set-WUGDeviceCredential function. ParameterSet: $($PSCmdlet.ParameterSetName)"
-        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
+        Write-Debug "Starting Set-WUGRole function. ParameterSet: $($PSCmdlet.ParameterSetName)"
+        $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/device-role"
     }
 
     process {
         switch ($PSCmdlet.ParameterSetName) {
 
-            'Assign' {
-                $uri = "${baseUri}/${DeviceId}/credentials/-"
-                $body = "`"${CredentialId}`""
-                Write-Debug "PUT URI: $uri, Body: $body"
+            'RemoveRole' {
+                $uri = "${baseUri}/${RoleId}"
+                $method = 'DELETE'
+                Write-Debug "Deleting device role ${RoleId}. URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess("Role $RoleId", "Delete")) { return }
+
                 try {
-                    $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $body
-                    if ($result.success) {
-                        Write-Verbose "Successfully assigned credential ${CredentialId} to device ${DeviceId}."
-                    }
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
+                    if ($result.data) { return $result.data }
                     return $result
                 }
                 catch {
-                    Write-Error "Error assigning credential to device ${DeviceId}: $_"
+                    Write-Error "Error deleting device role ${RoleId}: $_"
+                    return
                 }
             }
 
-            'Unassign' {
-                if (-not $PSCmdlet.ShouldProcess("Credential ${CredentialId} on device ${DeviceId}", 'Unassign credential')) { return }
-                $queryParams = @()
-                if (-not $PreventOrphanActiveMonitors) { $queryParams += "preventOrphanActiveMonitors=false" }
-                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                $uri = "${baseUri}/${DeviceId}/credentials/${CredentialId}${query}"
+            'EnableRole' {
+                $uri = "${baseUri}/${RoleId}/enable"
+                $method = 'PUT'
+                Write-Debug "Enabling device role ${RoleId}. URI: $uri"
 
-                Write-Debug "DELETE URI: $uri"
+                if (-not $PSCmdlet.ShouldProcess("Role $RoleId", "Enable")) { return }
+
                 try {
-                    $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
-                    if ($result.success) {
-                        Write-Verbose "Successfully unassigned credential ${CredentialId} from device ${DeviceId}."
-                    }
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
+                    if ($result.data) { return $result.data }
                     return $result
                 }
                 catch {
-                    Write-Error "Error unassigning credential from device ${DeviceId}: $_"
+                    Write-Error "Error enabling device role ${RoleId}: $_"
+                    return
                 }
             }
 
-            'RemoveByType' {
-                if (-not $PSCmdlet.ShouldProcess("${Type} credentials on device ${DeviceId}", 'Remove credentials by type')) { return }
-                $queryParams = @()
-                if ($Type) { $queryParams += "type=$Type" }
-                if (-not $PreventOrphanActiveMonitors) { $queryParams += "preventOrphanActiveMonitors=false" }
-                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                $uri = "${baseUri}/${DeviceId}/credentials/-${query}"
+            'DisableRole' {
+                $uri = "${baseUri}/${RoleId}/disable"
+                $method = 'PUT'
+                Write-Debug "Disabling device role ${RoleId}. URI: $uri"
 
-                Write-Debug "DELETE URI: $uri"
+                if (-not $PSCmdlet.ShouldProcess("Role $RoleId", "Disable")) { return }
+
                 try {
-                    $result = Get-WUGAPIResponse -Uri $uri -Method 'DELETE'
-                    if ($result.success) {
-                        Write-Verbose "Successfully removed ${Type} credentials from device ${DeviceId}."
-                    }
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
+                    if ($result.data) { return $result.data }
                     return $result
                 }
                 catch {
-                    Write-Error "Error removing credentials from device ${DeviceId}: $_"
+                    Write-Error "Error disabling device role ${RoleId}: $_"
+                    return
+                }
+            }
+
+            'RestoreRole' {
+                $uri = "${baseUri}/${RoleId}/restore"
+                $method = 'PUT'
+                Write-Debug "Restoring device role ${RoleId}. URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess("Role $RoleId", "Restore")) { return }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error restoring device role ${RoleId}: $_"
+                    return
+                }
+            }
+
+            'ApplyTemplates' {
+                $uri = "${baseUri}/-/config/template"
+                $method = 'PATCH'
+                Write-Debug "Applying device role templates. URI: $uri"
+
+                if (-not $PSCmdlet.ShouldProcess("Device role templates", "Apply")) { return }
+
+                try {
+                    $result = Get-WUGAPIResponse -Uri $uri -Method $method -Body $Body
+                    if ($result.data) { return $result.data }
+                    return $result
+                }
+                catch {
+                    Write-Error "Error applying device role templates: $_"
+                    return
                 }
             }
         }
     }
 
     end {
-        Write-Debug "Completed Set-WUGDeviceCredential function."
+        Write-Debug "Completed Set-WUGRole function."
     }
 }
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANDPNTe4eMcNgA
-# Vwi9L1nIc9M9IhNyYzxDa7ZXKn29xqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDPtd9ipVgfTRm+
+# EPdq4ImUnGMQMEesS88jW7PVt0n8uqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -250,17 +293,17 @@ function Set-WUGDeviceCredential {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgtIzQTHjIv+zuYlwbwA2W1dmqlxvABKdu
-# jA5WCN2IYCEwDQYJKoZIhvcNAQEBBQAEggIAP+5P6/YBk4tpexzm2nWlLcPfMBmv
-# diF/0QZID5gLyoNKsdza+41zotvteuvQdFFCSzJ0gREp2LGWhqt2YWFG9NuXOrao
-# JA8DMuk6+ja7ClX6QvPuvlFyN1zIBr8zaAMynQonu5rr+RMN9MtrIY+Dm3ZIBG7Q
-# O5xrB0/0n8Um4v76TzuEwDhbze1oBP8vKMrsUTLWCd7yx6m5e7jGFr3B20XF1Zcn
-# ipDoH3R3wbFrITeQTnhmelnKkPy/iiGYgDnEPGTlsxH/4/3+/pRi2QuF0eB2mWT3
-# xmLlWbFDwyNPfIo/tHshnY1RL/LqCnVKt4C3Mir51KLWMAklyiDB4UzeqfWNrtOi
-# fEXHXH61hXfbxBLIPdMqrgde8J7n0LaHXQAWzB7WvT0zCLod6juqUDEGR78U6U24
-# zB2VfrB3qdrM+6sL0dx4axseB73e7Nd9kKqBOq6XROlzrIdbDd6wcf9KjIkdoA3X
-# TRnVJiU80mPSGBpiPSmDhBnC5ufucJ5JkBHZ7M1lFYW/tTxcTHB/obxCQCmfl295
-# B8Ru152dV++NqePXCZXT9IpUl+263Qdzyh/jv34kRThdU8ApGfRItLy2NAwD8y6k
-# ZJ+bWafkDemUpx4rN6L5tCJdCElCycc8ehlgn4yusEx+o3CT/wVnza3ai0SzmLkG
-# WmxkY1h1gOsEnoI=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg2iH9aJ0bnsS6m/sZvRShdi6a/ZJdJuN/
+# ZS0P144znUMwDQYJKoZIhvcNAQEBBQAEggIAiBilcKDndvhXXKS3vSh+N4JdGvO7
+# Xf4UuEJvFcLgIHvLxBqPXLjcx96QawoYTxODojY7a6skSpaRL50lGpQVK9IOdPwa
+# 9PLDPPg14B+n9BW/AqreAc90sOEtByJNiY6nK35Xy0eUn1KadReHht9f9HAdaQN/
+# BydL95C5aYP3hwrQVeYXbtO0g8CW6OiQx+GO9me1SiZraME0rkfwOL8SEWjWjn+P
+# adhSS8q5jP1edVCm8SJap1fPfqlLP4noP2AGKzvXQujGbd1rwLl0WEdcsN7t1nzT
+# RahTxnuk/mm8a+vOdtJa7V6GBHM1qnPX1MHhW0Yw0orjGGGJRJVqS7fa92F9ZgAt
+# YzgYA52z1WnrowA7KxUH6NbhAkLmZV1qeGmZZxfCNm5kAZmzfGtoRCHExchMDQRU
+# eDSNmlMSzwRVc0kz5A4NYc3m6Zd4JZuGI6ajDI9FFjCB2nPosWRwn3LoCWTl93lr
+# lnRB8lbwjDZtRMPlORvmjdTuG7IidF0lPxo30CfYO7rxg/Ms12oNQ2/eL35U4NXi
+# r7S2ODumN+gpMZSPX4kVFa3E9RNCZ2UbB/FocEZSIvnLbx2g5FQ8i3pkIrgztJkj
+# ueQuoqoGFp6j3WAkb+NtS2UovH6JkYqf7EFj1GDaZoEsFK0dXSKLpsD1oXc8L/dg
+# ZlerKtPqjF2karM=
 # SIG # End signature block

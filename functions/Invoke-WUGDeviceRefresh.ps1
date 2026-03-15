@@ -75,8 +75,8 @@ function Invoke-WUGDeviceRefresh {
             if (-not $PSCmdlet.ShouldProcess("Device group ${GroupId}", 'Refresh device group')) { return }
             try {
                 $response = Get-WUGAPIResponse -Uri $uri -Method 'PUT'
-                Write-Host "Successfully triggered refresh for device group ${GroupId}." -ForegroundColor Green
-                Write-Output $response
+                Write-Verbose "Successfully triggered refresh for device group ${GroupId}."
+                return $response
             }
             catch {
                 Write-Error "Failed to refresh device group ${GroupId}: $_"
@@ -84,35 +84,56 @@ function Invoke-WUGDeviceRefresh {
         }
         else {
             $baseUri = "${global:WhatsUpServerBaseURI}/api/v1/devices"
-            $uri = "$baseUri/refresh"
-            Write-Verbose "PATCH $uri"
-
-            $body = @{ deviceIds = $DeviceId }
 
             if (-not $PSCmdlet.ShouldProcess("Device(s) $($DeviceId -join ', ')", 'Refresh device configuration')) { return }
 
-            if ($UpdateNamesForTableActiveMonitor)      { $body.updateNamesForTableActiveMonitor = $UpdateNamesForTableActiveMonitor }
-            if ($UpdateEnableSettingsForTableActiveMonitor) { $body.updateEnableSettingsForTableActiveMonitor = $UpdateEnableSettingsForTableActiveMonitor }
-            if ($AddUseInRescanActiveMonitor)           { $body.addUseInRescanActiveMonitor = $AddUseInRescanActiveMonitor }
-            if ($IncludeAssignedRoles)                  { $body.includeAssignedRoles = $IncludeAssignedRoles }
-            if ($ResetOptions)                          { $body.resetOptions = $ResetOptions }
-            if ($PSBoundParameters.ContainsKey('DropDataOlderThanHours')) { $body.dropDataOlderThanHours = $DropDataOlderThanHours }
-
-            $jsonBody = $body | ConvertTo-Json -Depth 4
-
-            try {
-                Write-Information -Message "Sending refresh request for DeviceIds: $($DeviceId -join ', ')"
-                $response = Get-WUGAPIResponse -Uri $uri -Method PATCH -Body $jsonBody
-
-                if ($response.data.success -eq $true) {
-                    Write-Information -Message "Refresh request accepted successfully. Scan ID: $($response.data.id)"
-                    Write-Output $response.data.id
-                } else {
-                    Write-Warning "Refresh request returned success = false."
-                    Write-Output $response.data
+            if ($DeviceId.Count -eq 1) {
+                # Single-device optimised path: PUT /devices/{id}/refresh
+                $uri = "$baseUri/$($DeviceId[0])/refresh"
+                Write-Verbose "PUT $uri"
+                try {
+                    $response = Get-WUGAPIResponse -Uri $uri -Method 'PUT'
+                    if ($response.data.success -eq $true) {
+                        Write-Information -Message "Refresh request accepted for device $($DeviceId[0]). Scan ID: $($response.data.id)"
+                        return $response.data.id
+                    } else {
+                        return $response.data
+                    }
                 }
-            } catch {
-                Write-Error "Failed to refresh device config(s): $_"
+                catch {
+                    Write-Error "Failed to refresh device $($DeviceId[0]): $_"
+                }
+            }
+            else {
+                # Batch path: PATCH /devices/-/refresh
+                $uri = "$baseUri/-/refresh"
+                Write-Verbose "PATCH $uri"
+
+                $body = @{ deviceIds = $DeviceId }
+
+                if ($UpdateNamesForTableActiveMonitor)      { $body.updateNamesForTableActiveMonitor = $UpdateNamesForTableActiveMonitor }
+                if ($UpdateEnableSettingsForTableActiveMonitor) { $body.updateEnableSettingsForTableActiveMonitor = $UpdateEnableSettingsForTableActiveMonitor }
+                if ($AddUseInRescanActiveMonitor)           { $body.addUseInRescanActiveMonitor = $AddUseInRescanActiveMonitor }
+                if ($IncludeAssignedRoles)                  { $body.includeAssignedRoles = $IncludeAssignedRoles }
+                if ($ResetOptions)                          { $body.resetOptions = $ResetOptions }
+                if ($PSBoundParameters.ContainsKey('DropDataOlderThanHours')) { $body.dropDataOlderThanHours = $DropDataOlderThanHours }
+
+                $jsonBody = $body | ConvertTo-Json -Depth 4
+
+                try {
+                    Write-Information -Message "Sending refresh request for DeviceIds: $($DeviceId -join ', ')"
+                    $response = Get-WUGAPIResponse -Uri $uri -Method PATCH -Body $jsonBody
+
+                    if ($response.data.success -eq $true) {
+                        Write-Information -Message "Refresh request accepted successfully. Scan ID: $($response.data.id)"
+                        return $response.data.id
+                    } else {
+                        Write-Warning "Refresh request returned success = false."
+                        return $response.data
+                    }
+                } catch {
+                    Write-Error "Failed to refresh device config(s): $_"
+                }
             }
         }
     }
@@ -133,8 +154,8 @@ function Invoke-WUGDeviceRefresh {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAcgGquiuSjQsQ
-# FPMzlDz2BdALffVRTPhz6QQGf666E6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGj/tKc3bw0vrn
+# GOgkISDA2Ul7KUlIg3+9Q/TMWUoZIqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -234,17 +255,17 @@ function Invoke-WUGDeviceRefresh {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgKyyCCHOF9VGnEVnUuMsxAOE/T2ZCG+sl
-# iRvOrjuXwbQwDQYJKoZIhvcNAQEBBQAEggIAkQ0hlUptNag2L+N9jUOCvnab3ffC
-# vvFMIi2WhkuQwZ1tdVgbn4KDT1Ddr2GqQFVky2itFjSID4mGLJ/KfpEXDgtt1Sz7
-# pzEGZP/r92AQufwGB9vbf31nYh8CbaFebbIiAYKbzfXkXOkD1G0eEycBzxOncBoq
-# xeKONwveWpWr46/l8iTiEhEj+eiX3oPzUU0FnVNVP5+egH4VUeWOMvbn3BMuwjg3
-# G3YQfaswL6uNP9bD1NFogWei4ga0XVvehb0qcaFSMqQvuk5bc5MHzJpRoEJ2Vxlm
-# GS9cx6cKYcyc8tpJqNichMmqkVwHnoHsYWEKxSTe6lDWxmWL4SLdBPqzPziumHdb
-# MvKpXZsGll6Ak4jtA2mfFzR4gJ1I8PQ4U20TYxAPLHpi6HUeu1pfUgCd8hMgNdfB
-# g2JhOhY5S3tOMofJDkv6hJTy/agZGXtSwSEyLO8cG3Mn/hb9EU3kG5ju8LgBzPAx
-# hsmSo2rJivoPTqu9MHfshEohuHvhz1rlSaZ9kwFKcOWwpCGq06io0bN+X5gLmZXV
-# KVprIbuhiATHDdce3/e2qn61WQwPHSXpP6m902ji5vLC/izwRPh/Y0jtiZTbkFtB
-# omf7wASF/X9CyusWjqzIaE2VyGCXToeiaJ45n3mY9D8LWu59O/k0z3uztodsBl2O
-# CAwNPPOteBEkynA=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgouuYX8UJxRGKhKTtjKbc/g6qQywFQnA/
+# wCkjTNb1HeEwDQYJKoZIhvcNAQEBBQAEggIAOiBMkJo0KPqUE7FlQIGhmcNWzrEn
+# Sr08Lm7YxykFQqIIcak5f+3FEyM6C6MLqf1U8WuQPJ6ltKU3Vk5TUaCQo134Sw/u
+# BaUL0bjvNT3gctvND6gv41nnV7LHb9C74NgThF+M/PWD4yAjTJJ/40pNAtX3ifar
+# WkV26z8TW6E4lu8ZmDsSsXWq71nfsZZLl4jegWqTucrUiMz+CM17uTesKF3QrEuh
+# C6EEh0GGHLUjQvIDZL6b9m3Mj3k6DeMGydMNL0ITbZC8HaBNQ6EvD8EGukrIQcPF
+# /69wnz8hDX67LLbzAMKIvU34xqvlEUBHDrpRz+iywp97Mt+MFKgltUv1ZawXH+zU
+# +qFC/MoeEhkqDlo8Q6/ArrrNNR9L6YgrG94dkkRUGJIbTNiaIupaAxGMp6CJk8wx
+# nVHNimI2nXxDc0brTIZMNER3sTNGd7Mlwcsb4clzFixb7/EDhyEDaHAqs/HQzrLB
+# dGDGfyuIKadnt0Uks0hN3nUDGTqY+HNyEFp1OVeVPomX++D/mxC+hRvBM8yYUeSD
+# SWUhxINaYTQ9pkA0DJjmitIHwwMZ95kd013VZXd/cOD1CLnUiZ2Mcbp5QPno5XBt
+# oRGtiecu+IdubpSR79sCJLHM3L01ejhFX42uVhTCLLZ2+4LKBDqEsD2XYMjxWahn
+# aEnyVEqLAXo/SiI=
 # SIG # End signature block

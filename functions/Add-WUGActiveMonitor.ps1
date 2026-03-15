@@ -8,9 +8,15 @@
     The function handles the creation of the monitor by checking if it already exists and then making the appropriate API call to create the monitor with the specified settings.
 
 .PARAMETER Type
-    The type of the monitor to be created. Valid values are 'Ping', 'TcpIp', 'SNMP', 'SNMPTable', 'Process', 'Certificate', 'Service', 'WMIFormatted'.
-    This parameter is mandatory and determines the set of additional parameters required.
-    TBD: 
+    The type of the monitor to be created. This parameter is mandatory and determines the set of additional parameters required.
+    Supported types: Ping, TcpIp, SNMP, SNMPTable, Process, Certificate, Service, WMIFormatted,
+    Dns, FileContent, FileProperties, Folder, Ftp, HttpContent, NetworkStatistics, PingJitter, PowerShell, RestApi, Ssh.
+
+.PARAMETER DnsDomain
+    The domain name to resolve. Required for the Dns monitor type.
+
+.PARAMETER DnsRecordType
+    The DNS record type to query. Valid values: ptr, a, ns, cname, soa, mx, txt, aaaa. Default is 'a'. Specific to the 'Dns' parameter set.
 
 .PARAMETER Name
     The name of the monitor to be created. This parameter is mandatory.
@@ -231,6 +237,41 @@ Description
     This command adds a WMIFormatted active monitor named "AD LDAP Bind Time RangeCheck" with the relative path "Win32_PerfFormattedData_NTDS_NTDS",
     performance counter "LDAP Bind Time (msec)", performance instance "NULL", check type "range", low value "0", high value "200", property name 
     "LDAPBindTime", and computer name "localhost".
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type Dns -Name "DNS A-Record Check" -DnsDomain 'example.com' -DnsRecordType a
+
+Description
+-----------
+    Creates a DNS active monitor that resolves example.com with an A-record lookup.
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type HttpContent -Name "Homepage Health" -HttpContentUrl 'https://intranet.corp.local' -HttpContentContent 'Welcome'
+
+Description
+-----------
+    Creates an HTTP Content monitor that checks https://intranet.corp.local for the text "Welcome".
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type Ssh -Name "Disk Check via SSH" -SshCommand 'df -h /' -SshExpectedOutput '/dev/sda1'
+
+Description
+-----------
+    Creates an SSH active monitor that runs 'df -h /' and expects '/dev/sda1' in the output.
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type PowerShell -Name "PS Script Monitor" -PowerShellScriptText 'if (Test-Connection 8.8.8.8 -Count 1 -Quiet) { $context.SetResult(0, "OK") } else { $context.SetResult(1, "Fail") }'
+
+Description
+-----------
+    Creates a PowerShell script active monitor that pings 8.8.8.8.
+
+.EXAMPLE
+    Add-WUGActiveMonitor -Type RestApi -Name "API Health Check" -RestApiUrl 'https://api.example.com/health'
+
+Description
+-----------
+    Creates a REST API active monitor that GETs the specified health endpoint.
 #>
 
 function Add-WUGActiveMonitor {
@@ -246,7 +287,20 @@ function Add-WUGActiveMonitor {
         [Parameter(Mandatory = $true, ParameterSetName = 'Service')]
         [Parameter(Mandatory = $true, ParameterSetName = 'WMIFormatted')]
         [Parameter(Mandatory = $true, ParameterSetName = 'SNMPTable')]
-        [ValidateSet('Ping', 'TcpIp', 'SNMP', 'SNMPTable', 'Process', 'Certificate', 'Service', 'WMIFormatted')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Dns')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'FileContent')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'FileProperties')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Folder')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Ftp')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'HttpContent')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'NetworkStatistics')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'PingJitter')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'PowerShell')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'RestApi')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Ssh')]
+        [ValidateSet('Ping', 'TcpIp', 'SNMP', 'SNMPTable', 'Process', 'Certificate', 'Service', 'WMIFormatted',
+                     'Dns', 'FileContent', 'FileProperties', 'Folder', 'Ftp', 'HttpContent',
+                     'NetworkStatistics', 'PingJitter', 'PowerShell', 'RestApi', 'Ssh')]
         [string]$Type,
 
         [Parameter(Mandatory = $true)]
@@ -408,7 +462,244 @@ function Add-WUGActiveMonitor {
         [int]$SnmpTableMonitorRangeHigh = 0,
         [Parameter(ParameterSetName = 'SNMPTable')]
         [ValidateSet('upifmatch', 'downifmatch')]
-        [string]$SnmpTableMonitorUpIfMatch = 'upifmatch'
+        [string]$SnmpTableMonitorUpIfMatch = 'upifmatch',
+
+        # DNS Monitor Parameters
+        [Parameter(Mandatory = $true, ParameterSetName = 'Dns')]
+        [string]$DnsDomain,
+        [Parameter(ParameterSetName = 'Dns')]
+        [ValidateSet('ptr', 'a', 'ns', 'cname', 'soa', 'mx', 'txt', 'aaaa')]
+        [string]$DnsRecordType = 'a',
+        [Parameter(ParameterSetName = 'Dns')]
+        [string]$DnsServer = '',
+        [Parameter(ParameterSetName = 'Dns')]
+        [string]$DnsTimeout = '2',
+        [Parameter(ParameterSetName = 'Dns')]
+        [string]$DnsValidation = 'name',
+
+        # FileContent Monitor Parameters
+        [Parameter(Mandatory = $true, ParameterSetName = 'FileContent')]
+        [string]$FileContentFolderPath,
+        [Parameter(Mandatory = $true, ParameterSetName = 'FileContent')]
+        [string]$FileContentPattern,
+        [Parameter(ParameterSetName = 'FileContent')]
+        [string]$FileContentResultState = 'up',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [string]$FileContentFileFilter = '',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [string]$FileContentFilterType = 'wildcard',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [ValidateSet("True", "False")][string]$FileContentIncludeAllFiles = 'False',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [ValidateSet("True", "False")][string]$FileContentIncludeFilteredFiles = 'True',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [ValidateSet("True", "False")][string]$FileContentCheckSubFolders = 'False',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [ValidateSet("True", "False")][string]$FileContentLiteralPattern = 'True',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [ValidateSet("True", "False")][string]$FileContentCaseSensitive = 'False',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [ValidateSet("True", "False")][string]$FileContentScanEntireFile = 'True',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [ValidateSet("True", "False")][string]$FileContentScanOnlyNew = 'False',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [int]$FileContentOccurrences = 1,
+        [Parameter(ParameterSetName = 'FileContent')]
+        [ValidateSet("True", "False")][string]$FileContentIgnoreTimeout = 'False',
+        [Parameter(ParameterSetName = 'FileContent')]
+        [int]$FileContentTimeout = 3,
+
+        # FileProperties Monitor Parameters
+        [Parameter(Mandatory = $true, ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesPath,
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [ValidateSet("True", "False")][string]$FilePropertiesFailIfExists = 'True',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [ValidateSet("True", "False")][string]$FilePropertiesCheckSize = 'False',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesSizeOperator = 'less than',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesSizeThreshold = '0',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesSizeUnit = 'bytes',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [ValidateSet("True", "False")][string]$FilePropertiesCheckModDate = 'False',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesModDateOperator = 'exactly on',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesModDateThreshold = '',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [ValidateSet("True", "False")][string]$FilePropertiesCheckRelModDate = 'False',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesRelModDateQuantity = '1',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesRelModDateUnit = '0',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesModStateIndicator = '0',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [ValidateSet("True", "False")][string]$FilePropertiesCheckChecksum = 'False',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesChecksumAlgorithm = 'SHA1',
+        [Parameter(ParameterSetName = 'FileProperties')]
+        [string]$FilePropertiesChecksumThreshold = '',
+
+        # Folder Monitor Parameters
+        [Parameter(Mandatory = $true, ParameterSetName = 'Folder')]
+        [string]$FolderPath,
+        [Parameter(ParameterSetName = 'Folder')]
+        [ValidateSet("True", "False")][string]$FolderFailIfExists = 'False',
+        [Parameter(ParameterSetName = 'Folder')]
+        [ValidateSet("True", "False")][string]$FolderCheckSubFolders = 'True',
+        [Parameter(ParameterSetName = 'Folder')]
+        [ValidateSet("True", "False")][string]$FolderIncludeAllFiles = 'True',
+        [Parameter(ParameterSetName = 'Folder')]
+        [ValidateSet("True", "False")][string]$FolderIncludeFilteredFiles = 'False',
+        [Parameter(ParameterSetName = 'Folder')]
+        [string]$FolderFileFilter = '',
+        [Parameter(ParameterSetName = 'Folder')]
+        [ValidateSet("True", "False")][string]$FolderCheckActualSize = 'True',
+        [Parameter(ParameterSetName = 'Folder')]
+        [string]$FolderActualSizeOperator = 'less than',
+        [Parameter(ParameterSetName = 'Folder')]
+        [string]$FolderActualSizeThreshold = '0',
+        [Parameter(ParameterSetName = 'Folder')]
+        [string]$FolderActualSizeUnit = 'bytes',
+        [Parameter(ParameterSetName = 'Folder')]
+        [ValidateSet("True", "False")][string]$FolderCheckSizeOnDisk = 'True',
+        [Parameter(ParameterSetName = 'Folder')]
+        [string]$FolderSizeOnDiskOperator = 'less than',
+        [Parameter(ParameterSetName = 'Folder')]
+        [string]$FolderSizeOnDiskThreshold = '0',
+        [Parameter(ParameterSetName = 'Folder')]
+        [string]$FolderSizeOnDiskUnit = 'bytes',
+        [Parameter(ParameterSetName = 'Folder')]
+        [ValidateSet("True", "False")][string]$FolderCheckFileCount = 'True',
+        [Parameter(ParameterSetName = 'Folder')]
+        [string]$FolderFileCountOperator = 'less than',
+        [Parameter(ParameterSetName = 'Folder')]
+        [string]$FolderFileCountThreshold = '0',
+
+        # Ftp Monitor Parameters
+        [Parameter(ParameterSetName = 'Ftp')]
+        [string]$FtpServer = '%Device.Address',
+        [Parameter(ParameterSetName = 'Ftp')]
+        [int]$FtpPort = 21,
+        [Parameter(Mandatory = $true, ParameterSetName = 'Ftp')]
+        [string]$FtpUsername,
+        [Parameter(Mandatory = $true, ParameterSetName = 'Ftp')]
+        [string]$FtpPassword,
+        [Parameter(ParameterSetName = 'Ftp')]
+        [ValidateSet("True", "False")][string]$FtpPassiveMode = 'True',
+        [Parameter(ParameterSetName = 'Ftp')]
+        [int]$FtpTimeout = 3,
+        [Parameter(ParameterSetName = 'Ftp')]
+        [ValidateSet("True", "False")][string]$FtpTestUpload = 'True',
+        [Parameter(ParameterSetName = 'Ftp')]
+        [ValidateSet("True", "False")][string]$FtpTestDownload = 'True',
+        [Parameter(ParameterSetName = 'Ftp')]
+        [ValidateSet("True", "False")][string]$FtpTestDelete = 'True',
+
+        # HttpContent Monitor Parameters
+        [Parameter(Mandatory = $true, ParameterSetName = 'HttpContent')]
+        [string]$HttpContentUrl,
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [ValidateSet('GET', 'POST', 'PUT', 'DELETE', 'HEAD')]
+        [string]$HttpContentMethod = 'GET',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentContent = '',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [ValidateSet("True", "False")][string]$HttpContentUseRegex = 'False',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentStateIfNotFound = 'Up',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentAuthMechanism = 'None',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentUsername = '',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentPassword = '',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [ValidateSet("True", "False")][string]$HttpContentIgnoreCertErrors = 'False',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [int]$HttpContentTimeoutMs = 10000,
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentProxyServer = '',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [int]$HttpContentProxyPort = 80,
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentCustomHeader = '',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentCustomHeader2 = '',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentCustomHeader3 = '',
+        [Parameter(ParameterSetName = 'HttpContent')]
+        [string]$HttpContentUserAgent = 'Mozilla/5.0 (compatible; MSIE 10.6; Windows NT 6.1; Trident/5.0; InfoPath.2; SLCC1; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30729; .NET CLR 2.0.50727) 3gpp-gba UNTRUSTED/1.0',
+
+        # NetworkStatistics Monitor Parameters
+        [Parameter(ParameterSetName = 'NetworkStatistics')]
+        [int]$NetStatSnmpRetries = 1,
+        [Parameter(ParameterSetName = 'NetworkStatistics')]
+        [int]$NetStatSnmpTimeoutMs = 3000,
+
+        # PingJitter Monitor Parameters
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [string]$PingJitterHostAddress = '%Device.Address',
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [ValidateSet("True", "False")][string]$PingJitterCheckJitter = 'True',
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [int]$PingJitterThresholdMs = 50,
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [ValidateSet("True", "False")][string]$PingJitterCheckIAJitter = 'True',
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [int]$PingJitterIAThresholdMs = 50,
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [ValidateSet("True", "False")][string]$PingJitterIgnoreConnError = 'False',
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [int]$PingJitterPayloadSize = 32,
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [int]$PingJitterRetries = 1,
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [int]$PingJitterTimeoutSec = 1,
+        [Parameter(ParameterSetName = 'PingJitter')]
+        [int]$PingJitterTTL = 128,
+
+        # PowerShell Monitor Parameters
+        [Parameter(Mandatory = $true, ParameterSetName = 'PowerShell')]
+        [string]$PowerShellScriptText,
+        [Parameter(ParameterSetName = 'PowerShell')]
+        [int]$PowerShellScriptTimeout = 60,
+
+        # RestApi Monitor Parameters
+        [Parameter(Mandatory = $true, ParameterSetName = 'RestApi')]
+        [string]$RestApiUrl,
+        [Parameter(ParameterSetName = 'RestApi')]
+        [ValidateSet('GET', 'POST', 'PUT', 'DELETE')]
+        [string]$RestApiMethod = 'GET',
+        [Parameter(ParameterSetName = 'RestApi')]
+        [int]$RestApiTimeoutMs = 10000,
+        [Parameter(ParameterSetName = 'RestApi')]
+        [ValidateSet('0', '1')][string]$RestApiIgnoreCertErrors = '0',
+        [Parameter(ParameterSetName = 'RestApi')]
+        [ValidateSet('0', '1')][string]$RestApiUseAnonymous = '0',
+        [Parameter(ParameterSetName = 'RestApi')]
+        [string]$RestApiCustomHeader = '',
+        [Parameter(ParameterSetName = 'RestApi')]
+        [string]$RestApiDownIfResponseCodeIsIn = '[]',
+        [Parameter(ParameterSetName = 'RestApi')]
+        [string]$RestApiComparisonList = '[]',
+
+        # Ssh Monitor Parameters
+        [Parameter(Mandatory = $true, ParameterSetName = 'Ssh')]
+        [string]$SshCommand,
+        [Parameter(Mandatory = $true, ParameterSetName = 'Ssh')]
+        [string]$SshExpectedOutput,
+        [Parameter(ParameterSetName = 'Ssh')]
+        [ValidateSet('1', '0')][string]$SshContains = '1',
+        [Parameter(ParameterSetName = 'Ssh')]
+        [ValidateSet("True", "False")][string]$SshUseRegex = 'False',
+        [Parameter(ParameterSetName = 'Ssh')]
+        [ValidateSet('None', 'Linefeed', 'Carriage return', 'Carriage return linefeed')][string]$SshEOLChars = 'None',
+        [Parameter(ParameterSetName = 'Ssh')]
+        [int]$SshCredentialID = -1
     )
 
     begin {
@@ -425,14 +716,14 @@ function Add-WUGActiveMonitor {
         try {
             $existingMonitorResult = Get-WUGAPIResponse -Uri $existingMonitorUri -Method GET -ErrorAction Stop
             if ($existingMonitorResult.data.activeMonitors | Where-Object { $_.name -eq $Name }) {
-                Write-Host "Monitor with the name '$Name' already exists. Skipping creation." -ForegroundColor Yellow
+                Write-Warning "Monitor with the name '$Name' already exists. Skipping creation."
                 $skipCreation = $true
                 return
             }
         }
         catch {
             if ($_.Exception.Response.StatusCode -eq 404) {
-                Write-Host "No existing monitor found with the name '$Name'. Proceeding with creation." -ForegroundColor Green
+                Write-Verbose "No existing monitor found with the name '$Name'. Proceeding with creation."
             }
             else {
                 Write-Warning "Failed to check for existing monitors: $($_.Exception.Message)"
@@ -665,14 +956,216 @@ function Add-WUGActiveMonitor {
                 )
             }
 
+            'Dns' {
+                $ClassId = 'b5b564ee-08a9-4126-8653-89d82e52b3fc'
+                $PropertyBags = @(
+                    @{ "name" = "Domain"; "value" = "$DnsDomain" },
+                    @{ "name" = "Type"; "value" = "$DnsRecordType" },
+                    @{ "name" = "Server"; "value" = "$DnsServer" },
+                    @{ "name" = "Timeout"; "value" = "$DnsTimeout" },
+                    @{ "name" = "Validation"; "value" = "$DnsValidation" }
+                )
+            }
 
+            'FileContent' {
+                $ClassId = '61fcda9a-b08d-4556-8f68-b05313eff04b'
+                $PropertyBags = @(
+                    @{ "name" = "MonFileContent:FolderPath"; "value" = "$FileContentFolderPath" },
+                    @{ "name" = "MonFileContent:PatternToScan"; "value" = "$FileContentPattern" },
+                    @{ "name" = "MonFileContent:ResultingMonitorState"; "value" = "$FileContentResultState" },
+                    @{ "name" = "MonFileContent:FileFilter"; "value" = "$FileContentFileFilter" },
+                    @{ "name" = "MonFileContent:FileFilterType"; "value" = "$FileContentFilterType" },
+                    @{ "name" = "MonFileContent:IncludeAllFiles"; "value" = "$FileContentIncludeAllFiles" },
+                    @{ "name" = "MonFileContent:IncludeFilteredFiles"; "value" = "$FileContentIncludeFilteredFiles" },
+                    @{ "name" = "MonFileContent:CheckSubFolders"; "value" = "$FileContentCheckSubFolders" },
+                    @{ "name" = "MonFileContent:PatternIsLiteral"; "value" = "$FileContentLiteralPattern" },
+                    @{ "name" = "MonFileContent:CaseSensitiveComparison"; "value" = "$FileContentCaseSensitive" },
+                    @{ "name" = "MonFileContent:ScanEntireFile"; "value" = "$FileContentScanEntireFile" },
+                    @{ "name" = "MonFileContent:ScanOnlyNewContent"; "value" = "$FileContentScanOnlyNew" },
+                    @{ "name" = "MonFileContent:NumOccurences"; "value" = "$FileContentOccurrences" },
+                    @{ "name" = "MonFileContent:IgnoreTimeoutError"; "value" = "$FileContentIgnoreTimeout" },
+                    @{ "name" = "MonFileContent:TimeOut"; "value" = "$FileContentTimeout" },
+                    @{ "name" = "Cred:Type"; "value" = "8" }
+                )
+            }
+
+            'FileProperties' {
+                $ClassId = '75e3521f-bc87-4f96-8dd0-d2e888d04d86'
+                $PropertyBags = @(
+                    @{ "name" = "MonFileProperties:FilePath"; "value" = "$FilePropertiesPath" },
+                    @{ "name" = "MonFileProperties:FailIfFileExists"; "value" = "$FilePropertiesFailIfExists" },
+                    @{ "name" = "MonFileProperties:CheckFileSize"; "value" = "$FilePropertiesCheckSize" },
+                    @{ "name" = "MonFileProperties:FileSizeOperator"; "value" = "$FilePropertiesSizeOperator" },
+                    @{ "name" = "MonFileProperties:FileSizeThreshold"; "value" = "$FilePropertiesSizeThreshold" },
+                    @{ "name" = "MonFileProperties:FileSizeUnit"; "value" = "$FilePropertiesSizeUnit" },
+                    @{ "name" = "MonFileProperties:CheckLastModifiedDate"; "value" = "$FilePropertiesCheckModDate" },
+                    @{ "name" = "MonFileProperties:LastModifiedDateOperator"; "value" = "$FilePropertiesModDateOperator" },
+                    @{ "name" = "MonFileProperties:LastModifiedDateThreshold"; "value" = "$FilePropertiesModDateThreshold" },
+                    @{ "name" = "MonFileProperties:CheckLastRelativeModifiedDate"; "value" = "$FilePropertiesCheckRelModDate" },
+                    @{ "name" = "MonFileProperties:LastRelativeModifiedDateTimeQuantity"; "value" = "$FilePropertiesRelModDateQuantity" },
+                    @{ "name" = "MonFileProperties:LastRelativeModifiedDateTimeUnit"; "value" = "$FilePropertiesRelModDateUnit" },
+                    @{ "name" = "MonFileProperties:FileModificationStateIndicator"; "value" = "$FilePropertiesModStateIndicator" },
+                    @{ "name" = "MonFileProperties:CheckFileChecksum"; "value" = "$FilePropertiesCheckChecksum" },
+                    @{ "name" = "MonFileProperties:ChecksumAlgorithm"; "value" = "$FilePropertiesChecksumAlgorithm" },
+                    @{ "name" = "MonFileProperties:ChecksumThreshold"; "value" = "$FilePropertiesChecksumThreshold" },
+                    @{ "name" = "Cred:Type"; "value" = "8" }
+                )
+            }
+
+            'Folder' {
+                $ClassId = '2dd54720-7579-4d76-bad0-e9d9f34c916d'
+                $PropertyBags = @(
+                    @{ "name" = "MonFolder:FolderPath"; "value" = "$FolderPath" },
+                    @{ "name" = "MonFolder:FailIfFolderExists"; "value" = "$FolderFailIfExists" },
+                    @{ "name" = "MonFolder:CheckSubFolders"; "value" = "$FolderCheckSubFolders" },
+                    @{ "name" = "MonFolder:IncludeAllFiles"; "value" = "$FolderIncludeAllFiles" },
+                    @{ "name" = "MonFolder:IncludeFilteredFiles"; "value" = "$FolderIncludeFilteredFiles" },
+                    @{ "name" = "MonFolder:FileFilter"; "value" = "$FolderFileFilter" },
+                    @{ "name" = "MonFolder:CheckActualFolderSize"; "value" = "$FolderCheckActualSize" },
+                    @{ "name" = "MonFolder:ActualFolderSizeOperator"; "value" = "$FolderActualSizeOperator" },
+                    @{ "name" = "MonFolder:ActualFolderSizeThreshold"; "value" = "$FolderActualSizeThreshold" },
+                    @{ "name" = "MonFolder:ActualFolderSizeUnit"; "value" = "$FolderActualSizeUnit" },
+                    @{ "name" = "MonFolder:CheckFolderSizeOnDisk"; "value" = "$FolderCheckSizeOnDisk" },
+                    @{ "name" = "MonFolder:FolderSizeOnDiskOperator"; "value" = "$FolderSizeOnDiskOperator" },
+                    @{ "name" = "MonFolder:FolderSizeOnDiskThreshold"; "value" = "$FolderSizeOnDiskThreshold" },
+                    @{ "name" = "MonFolder:FolderSizeOnDiskUnit"; "value" = "$FolderSizeOnDiskUnit" },
+                    @{ "name" = "MonFolder:CheckFileCount"; "value" = "$FolderCheckFileCount" },
+                    @{ "name" = "MonFolder:FileCountOperator"; "value" = "$FolderFileCountOperator" },
+                    @{ "name" = "MonFolder:FileCountThreshold"; "value" = "$FolderFileCountThreshold" },
+                    @{ "name" = "Cred:Type"; "value" = "8" }
+                )
+            }
+
+            'Ftp' {
+                $ClassId = '7e796b86-ba62-4c32-9ff8-6750677115f9'
+                $timeoutMs = $FtpTimeout * 1000
+                $PropertyBags = @(
+                    @{ "name" = "MonFTP:ServerName"; "value" = "$FtpServer" },
+                    @{ "name" = "MonFTP:Port"; "value" = "$FtpPort" },
+                    @{ "name" = "MonFTP:Username"; "value" = "$FtpUsername" },
+                    @{ "name" = "MonFTP:Password"; "value" = "$FtpPassword" },
+                    @{ "name" = "MonFTP:UsePASV"; "value" = "$FtpPassiveMode" },
+                    @{ "name" = "MonFTP:TimeoutMs"; "value" = "$timeoutMs" },
+                    @{ "name" = "MonFTP:Upload"; "value" = "$FtpTestUpload" },
+                    @{ "name" = "MonFTP:Download"; "value" = "$FtpTestDownload" },
+                    @{ "name" = "MonFTP:Delete"; "value" = "$FtpTestDelete" }
+                )
+            }
+
+            'HttpContent' {
+                $ClassId = '7536f6bc-a6c1-4c67-af3e-4d10599e3d4d'
+                $PropertyBags = @(
+                    @{ "name" = "MonHTTP:URL"; "value" = "$HttpContentUrl" },
+                    @{ "name" = "MonHTTP:Method"; "value" = "$HttpContentMethod" },
+                    @{ "name" = "MonHTTP:Content"; "value" = "$HttpContentContent" },
+                    @{ "name" = "MonHTTP:UseRegularExpression"; "value" = "$HttpContentUseRegex" },
+                    @{ "name" = "MonHTTP:MonitorStateIfContentNotFound"; "value" = "$HttpContentStateIfNotFound" },
+                    @{ "name" = "MonHTTP:AuthMechanism"; "value" = "$HttpContentAuthMechanism" },
+                    @{ "name" = "MonHTTP:Username"; "value" = "$HttpContentUsername" },
+                    @{ "name" = "MonHTTP:Password"; "value" = "$HttpContentPassword" },
+                    @{ "name" = "MonHTTP:IgnoreCertErrors"; "value" = "$HttpContentIgnoreCertErrors" },
+                    @{ "name" = "MonHTTP:TimeoutMs"; "value" = "$HttpContentTimeoutMs" },
+                    @{ "name" = "MonHTTP:ProxyServer"; "value" = "$HttpContentProxyServer" },
+                    @{ "name" = "MonHTTP:ProxyPort"; "value" = "$HttpContentProxyPort" },
+                    @{ "name" = "MonHTTP:CustomHeader"; "value" = "$HttpContentCustomHeader" },
+                    @{ "name" = "MonHTTP:CustomHeader2"; "value" = "$HttpContentCustomHeader2" },
+                    @{ "name" = "MonHTTP:CustomHeader3"; "value" = "$HttpContentCustomHeader3" },
+                    @{ "name" = "MonHTTP:UserAgent"; "value" = "$HttpContentUserAgent" }
+                )
+            }
+
+            'NetworkStatistics' {
+                $ClassId = '24c8fa8a-437e-4e3b-9b92-054592a3c3c9'
+                $netStatThresholdsXml = @'
+<?xml version="1.0" encoding="utf-16"?>
+<StatisticalThresholds xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Thresholds>
+    <NetstatThreshold><Name>IP received</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.4.3</OID><Type>Counter</Type><NetStatType>IP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>IP receive errors</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.4.5</OID><Type>Counter</Type><NetStatType>IP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>IP received discarded</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.4.8</OID><Type>Counter</Type><NetStatType>IP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>IP deliveries</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.4.9</OID><Type>Counter</Type><NetStatType>IP</NetStatType><Checked>true</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>IP requests</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.4.10</OID><Type>Counter</Type><NetStatType>IP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>IP transmits discarded</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.4.11</OID><Type>Counter</Type><NetStatType>IP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>TCP connect failures</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.6.7</OID><Type>Counter</Type><NetStatType>TCP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>TCP established</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.6.9</OID><Type>Gauge</Type><NetStatType>TCP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>TCP received Segments</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.6.10</OID><Type>Counter</Type><NetStatType>TCP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>TCP transmitted Segments</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.6.11</OID><Type>Counter</Type><NetStatType>TCP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>UDP deliveries</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.7.1</OID><Type>Counter</Type><NetStatType>UDP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>UDP no ports</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.7.2</OID><Type>Counter</Type><NetStatType>UDP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>UDP errors</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.7.3</OID><Type>Counter</Type><NetStatType>UDP</NetStatType><Checked>false</Checked></NetstatThreshold>
+    <NetstatThreshold><Name>UDP transmitted</Name><Threshold>0</Threshold><OID>1.3.6.1.2.1.7.4</OID><Type>Counter</Type><NetStatType>UDP</NetStatType><Checked>false</Checked></NetstatThreshold>
+  </Thresholds>
+</StatisticalThresholds>
+'@
+                $PropertyBags = @(
+                    @{ "name" = "MonNetstat:Thresholds"; "value" = $netStatThresholdsXml },
+                    @{ "name" = "MonNetstat:SnmpNumRetries"; "value" = "$NetStatSnmpRetries" },
+                    @{ "name" = "MonNetstat:SnmpTimeoutMs"; "value" = "$NetStatSnmpTimeoutMs" },
+                    @{ "name" = "Cred:Type"; "value" = "1,2,4" }
+                )
+            }
+
+            'PingJitter' {
+                $ClassId = '5e8a926e-05f6-492c-b997-2d9bce068a5c'
+                $PropertyBags = @(
+                    @{ "name" = "MonPingIAJitter:HostAddress"; "value" = "$PingJitterHostAddress" },
+                    @{ "name" = "MonPingIAJitter:CheckJitterThreshold"; "value" = "$PingJitterCheckJitter" },
+                    @{ "name" = "MonPingIAJitter:JitterThresholdMSec"; "value" = "$PingJitterThresholdMs" },
+                    @{ "name" = "MonPingIAJitter:CheckIAJitterThreshold"; "value" = "$PingJitterCheckIAJitter" },
+                    @{ "name" = "MonPingIAJitter:IAJitterThresholdMSec"; "value" = "$PingJitterIAThresholdMs" },
+                    @{ "name" = "MonPingIAJitter:IgnoreConnectionError"; "value" = "$PingJitterIgnoreConnError" },
+                    @{ "name" = "MonPingIAJitter:PayloadSize"; "value" = "$PingJitterPayloadSize" },
+                    @{ "name" = "MonPingIAJitter:Retries"; "value" = "$PingJitterRetries" },
+                    @{ "name" = "MonPingIAJitter:TimeoutSec"; "value" = "$PingJitterTimeoutSec" },
+                    @{ "name" = "MonPingIAJitter:TTL"; "value" = "$PingJitterTTL" }
+                )
+            }
+
+            'PowerShell' {
+                $ClassId = 'e4378c13-ba30-43bf-a3aa-8e25d5c8dd87'
+                $PropertyBags = @(
+                    @{ "name" = "PowerShell:ScriptType"; "value" = "2" },
+                    @{ "name" = "PowerShell:ScriptTimeout"; "value" = "$PowerShellScriptTimeout" },
+                    @{ "name" = "PowerShell:ScriptImpersonateFlag"; "value" = "0" },
+                    @{ "name" = "PowerShell:ScriptText"; "value" = "$PowerShellScriptText" },
+                    @{ "name" = "Cred:Type"; "value" = "1,2,4,8,16,32,64,128,32768" }
+                )
+            }
+
+            'RestApi' {
+                $ClassId = 'f0610672-d515-4268-bd21-ac5ebb1476ff'
+                $PropertyBags = @(
+                    @{ "name" = "MonRestApi:RestUrl"; "value" = "$RestApiUrl" },
+                    @{ "name" = "MonRestApi:HttpMethod"; "value" = "$RestApiMethod" },
+                    @{ "name" = "MonRestApi:HttpTimeoutMs"; "value" = "$RestApiTimeoutMs" },
+                    @{ "name" = "MonRestApi:IgnoreCertErrors"; "value" = "$RestApiIgnoreCertErrors" },
+                    @{ "name" = "MonRestApi:UseAnonymousAccess"; "value" = "$RestApiUseAnonymous" },
+                    @{ "name" = "MonRestApi:CustomHeader"; "value" = "$RestApiCustomHeader" },
+                    @{ "name" = "MonRestApi:DownIfResponseCodeIsIn"; "value" = "$RestApiDownIfResponseCodeIsIn" },
+                    @{ "name" = "MonRestApi:ComparisonList"; "value" = "$RestApiComparisonList" },
+                    @{ "name" = "Cred:Type"; "value" = "8192" }
+                )
+            }
+
+            'Ssh' {
+                $ClassId = '02c4e1a2-6ff0-41d8-b1c6-b7d8f5aa5379'
+                $PropertyBags = @(
+                    @{ "name" = "MonSSH:Command"; "value" = "$SshCommand" },
+                    @{ "name" = "MonSSH:Output"; "value" = "$SshExpectedOutput" },
+                    @{ "name" = "MonSSH:Contains"; "value" = "$SshContains" },
+                    @{ "name" = "MonSSH:Regex"; "value" = "$SshUseRegex" },
+                    @{ "name" = "MonSSH:EOLChars"; "value" = "$SshEOLChars" },
+                    @{ "name" = "MonSSH:CredentialID"; "value" = "$SshCredentialID" },
+                    @{ "name" = "Cred:Type"; "value" = "64" }
+                )
+            }
         }
 
     }
 
             process {
                 if ($skipCreation) {
-                    Write-Host "Skipping monitor creation." -ForegroundColor Yellow
+                    Write-Warning "Skipping monitor creation."
                     return
                 }
 
@@ -703,7 +1196,7 @@ function Add-WUGActiveMonitor {
                         # Check if an ID or other helpful data was returned
                         if ($result.data.idMap) {
                             Write-Debug "New Monitor ID: $($result.data.idMap.resultId)"
-                            Write-Output $result.data.idMap.resultId
+                            return $result.data.idMap.resultId
                         }
                     }
                     else {
@@ -726,8 +1219,8 @@ function Add-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBj/ILSR4t0LK29
-# 1oi5fXzlCK9X/vEhzqc0kKrEma3xSKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBiVUUiDs+eU3Lt
+# W6b9cL7sbkCwCfKF8kG6n6EV8UEP1qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -827,17 +1320,17 @@ function Add-WUGActiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg8KqnvlClaFOlMJmWPARzbqkQYfhOdjwB
-# k8MGS5pMxPEwDQYJKoZIhvcNAQEBBQAEggIAJzfagkJAjaCd+sgVeeKZOiozg0Ma
-# eqbSSxnffY3zlvlT394wgeRjvfrcP2vHNFB5Cebf2eFhHVa8m4a4rnY03cZg1kr5
-# kC4iH/qDvLOVztLA1C/vKSQWt/VMomwTINB9jSM0iZC6cj6A/78XaTv6ZmwjxEHA
-# WinkZoWkDqE5idYjATwox+usKrS/G7rbPH4Swmi/QE5h6cr9LZWEdulhC+qwwHP6
-# UTs5AsrZ0m417SdpsAQNeDN/lzj8qjQHJvbvIWhW9oiiE1/cdtrPIBGkFnNjK8bp
-# x/vuBVbuNuv+LkXpTnY2CF+1xkvyYiuSOZUgIuGRZWUC15vZvE0woZ/BW01uK0tV
-# nmbRG/jeDnzqQA4I/tMZ+SVlI287PO44dF7nXOWR06Mq0ESWXw1gSeetSXZi+8KV
-# O57KHRQv44W4hbo/tPiE/O63cys248AL7JHKN0HHFky/fIY+S+YGwLwusGp8g0fv
-# oUgEYSAbW0ZcFgfORrOmEty2AJfd7UQT30mHBeh6cGUVnVkH7PVwMkeu2rRDBtFR
-# jE3wlU1W5h9jjCU9IN+taCw0Xg4weZnpC0WDItGBMf/meKVMoM184J19XtLnKDOY
-# IiDp42GAZb0cxG+HzFPFSClDz3WJFfU6bqV0mQfuteoTB+hodqFXyX3I0Ao1n4/f
-# /V5Bt91gpH055yc=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg66SIH4ZH6MC2gq5Ae6/bFlf+nC9KvtYF
+# e5j+srnmY/owDQYJKoZIhvcNAQEBBQAEggIAeQDERjARHdPC3axnCZBIgpsgrCi1
+# a5vU1izv/qEhaIfc/CALso2VlsCbQZLPpacRM3JAvP7M5tfv3kgqsaqF43QrLYbn
+# qmzxIhXQ3br51dpQSLfBuSo5bwH+Gg6MtOmjCmhY34kv/+1DgN3mWkriXvBj05Cm
+# CsemWgclJpZ1h54kR8Xf/TwNAtHbBBIHiWzm7aYtiEtueC0URrglQ6LN9oD29zoX
+# aqePyzFstuHoy+BjuxA5cDVKkPyvF8YKS33JeBUn9ktJF37OJfh8ScUyVIFXqN/S
+# o1gC/m4IhJEZQhD2EQSrNV6i3sDiVHvNrq1FGep533U8qn4h0kRwXG/duvMp1y/N
+# ckQ1FEWfDAJ1nVIMSc+lrHmanld35hlx5otRC9hNg9FP/drnurLj7L0A2am+S432
+# Zrt4Eejw2FZdC4j7ptkVPSaaorkFQSXNjRYT7c9bmZMIIXvXTMaoA/VvEJ2u83FN
+# S/D0YWFpXs2cKD6x+OTCgdtKHmWoWwveTWYLg7VF0KvOTaLS5RFt5vRpKxirDYFv
+# PrF6lQVij0/IZcJo6RufIyfw7BZNxYCn0/9rY3jQT7zC+wY5cekosAtkj69TAewE
+# SAOx/XDwpjmYIc/JlQzb2vTf1kliFAAyI1drDlr/r5ruAtynESDwP5KujoxG6EOc
+# 6hB4+n430TCbLSE=
 # SIG # End signature block

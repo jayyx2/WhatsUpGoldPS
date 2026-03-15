@@ -116,8 +116,13 @@ function Get-AzureResources {
         [Parameter(Mandatory)][string]$ResourceGroupName
     )
 
-    $resources = Get-AzResource -ResourceGroupName $ResourceGroupName -ErrorAction Stop
+    $resources = Get-AzResource -ResourceGroupName $ResourceGroupName -ExpandProperties -ErrorAction Stop
     foreach ($r in $resources) {
+        $provState = if ($r.Properties -and $r.Properties.provisioningState) {
+            "$($r.Properties.provisioningState)"
+        } elseif ($r.ProvisioningState) {
+            "$($r.ProvisioningState)"
+        } else { "N/A" }
         [PSCustomObject]@{
             ResourceName      = "$($r.Name)"
             ResourceId        = "$($r.ResourceId)"
@@ -125,7 +130,7 @@ function Get-AzureResources {
             Location          = "$($r.Location)"
             Kind              = if ($r.Kind) { "$($r.Kind)" } else { "N/A" }
             Sku               = if ($r.Sku -and $r.Sku.Name) { "$($r.Sku.Name)" } else { "N/A" }
-            ProvisioningState = if ($r.Properties -and $r.Properties.provisioningState) { "$($r.Properties.provisioningState)" } else { "N/A" }
+            ProvisioningState = $provState
             Tags              = if ($r.Tags) { ($r.Tags.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; " } else { "" }
         }
     }
@@ -568,8 +573,8 @@ function Export-AzureDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaNvjHOt0yCQPz
-# VUhYsObcueXm/VvrwB97YuRoEsRfF6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGxHx8Fa+r/ith
+# BW0lJ5zCGKI3kKxuSIMyFCBx1dMj4KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -669,17 +674,17 @@ function Export-AzureDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgPGVm6fzXvThUxelbwD3lnHbGrzotZQWw
-# YhAxegPTN4EwDQYJKoZIhvcNAQEBBQAEggIAOSL2CZKD3f0khMsoEVnY0UEgq1UH
-# kis9QZ5BB5yng7J3063nH69tGO1ArUN5LchC0T5zfhblVoMU9FRVfnrtyQ38L2ho
-# P2masYrvIrk3cc+8b+4ezURC/wP7mkmXhfe3IrRU+z8AglfIeUxoyIPCwKMvjZZ+
-# PpLomSEcSMyrlEX4tm/sLafnhTrqllXg5fXJ98VGwayQ5eprQyzCADzBPNOcIQjm
-# bv1MuRSurg4jstKmbeeOormI5eUjgUluDvKksImDBlh2f7/vvkRgHDzNK0dh2znj
-# NaCZhAVV7NgJzzuZI8Z1bp9SX4kHaofmlZdCxBfQoiDcDhirKgiuL/TUGNEk0gNx
-# Sx5Ghv77OAiPKl4I1LB/G58Zah8UJxtMK/c4C7+/rf7QBw+deehbwqT/UKPe0e9/
-# EXgkKygBC2VChbdni0L1IsibxctZqY+k0rPX/Vb7o0bo0rr4nXT5XpaKdfbF9IUy
-# QbtUcUycMFCKDL7S+4G4d5Sn4Lee5iaBPs7WgMw+Hwt0pLxsvl3BevJ8XyyiX5S8
-# qy8yB99gadCUtH2Z7++dR1XncEMAs2PRvqCYMGGQluFjU+VibTfikeP7MPahe6v5
-# o0EgXVkpRRPOvdj+AWatdseLPAuagM3ib40cpocMiN/SKUd0NrIPnSxmu+U//Snr
-# 02HYjUN44YzHOQ0=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgAhZRZ/eGROCTzMQEAMU1PkwOgR815InG
+# ZzVRAShXFecwDQYJKoZIhvcNAQEBBQAEggIAW4pAc0qPnakBVpic5jyU0Feu4Sye
+# 6yPf69aRf55vD/jdR/H6V+NWGGStVR0wiSFIkCL9t2Q4pauz/UZ8PP1xtJfwHO7g
+# c7wWA6awXmeMrHEqz8o1LWru1DNZRADfEe1BjWHPQSK7g0P0TcbGE6b2i3mVr7l9
+# urLTn7CpB8yFrNq4LANwF0uTvhCaOkOsEiYydmQxAvYr0Gg/lxCh069QvUd8+xxH
+# mYPqpr8+laB8ftRzqqFCQ7ovvG1BLMQj4bEFaBSWt/i8G+Y9LtpRjXxaIFlpBpvI
+# Jq2kjsfEcgl7WpwaJ0E/OaHED3V1bQ5A+8dYh6zmwilejb7LfdRyiEbDhso23fBb
+# XvopoqgQAsR9zBADWFHpFVTEHrq6rf+s/+aQ1OnA7nhE22NoyO1BgjSQTFCibCKL
+# Iuzxso9EiRizuKtneB4Cc1rUMjAeqyXEew786BkULti1ddJ48y14FCelByE7Nz5o
+# naeo7zfxz+KrLUvTOVWR+r00Glz5qhV7i0rRDqbMQU5QD+paz5jKDchVmS1Hwyw5
+# HK1KwVfj8uG++bjSb3ZZSVTf9OvfMEWmkmvfIRtiFEnAmIwSB2EC1wcYnAUrdjKx
+# sNODREeUTjWVjG9RFR609B+3EAPK8Da1X5zCvVKe0l4smUl4CbRYNygl3MmDokjB
+# PMUnt+DL5HMv8bo=
 # SIG # End signature block

@@ -103,21 +103,41 @@ function Get-WUGCredential {
         [switch]$AllAssignments,
 
         [Parameter(ParameterSetName = 'ListCredentials')]
+        [Parameter(ParameterSetName = 'AllCredentialTemplates')]
+        [Parameter(ParameterSetName = 'AllAssignments')]
         [string]$SearchValue,
 
         [Parameter(ParameterSetName = 'ByCredentialId')]
         [Parameter(ParameterSetName = 'ListCredentials')]
         [Parameter(ParameterSetName = 'CredentialAssignments')]
+        [Parameter(ParameterSetName = 'AllAssignments')]
         [ValidateSet('id', 'basic', 'summary', 'details')]
         [string]$View = 'basic',
 
         [Parameter(ParameterSetName = 'ListCredentials')]
+        [Parameter(ParameterSetName = 'AllCredentialTemplates')]
+        [Parameter(ParameterSetName = 'AllAssignments')]
+        [Parameter(ParameterSetName = 'Helpers')]
         [ValidateSet('all', 'snmpV1', 'snmpV2', 'snmpV3', 'windows', 'ado', 'telnet', 'ssh', 'vmware', 'jmx', 'smis', 'aws', 'azure', 'meraki', 'restapi', 'ubiquiti', 'redfish')]
         [string]$Type = 'all',
 
         [Parameter(ParameterSetName = 'ListCredentials')]
+        [Parameter(ParameterSetName = 'CredentialAssignments')]
+        [Parameter(ParameterSetName = 'AllAssignments')]
         [ValidateRange(1, 250)]
-        [int]$Limit = 250
+        [int]$Limit = 250,
+
+        [Parameter(ParameterSetName = 'CredentialAssignments')]
+        [Parameter(ParameterSetName = 'AllAssignments')]
+        [ValidateSet('id', 'basic', 'summary', 'details')]
+        [string]$DeviceView,
+
+        [Parameter(ParameterSetName = 'CredentialTemplate')]
+        [Parameter(ParameterSetName = 'AllCredentialTemplates')]
+        [string]$Key,
+
+        [Parameter(ParameterSetName = 'Helpers')]
+        [string]$Input
     )
 
     begin {
@@ -151,17 +171,33 @@ function Get-WUGCredential {
                 foreach ($cid in $CredentialId) {
                     $queryParams = @()
                     if ($View) { $queryParams += "view=$View" }
+                    if ($DeviceView) { $queryParams += "deviceView=$DeviceView" }
+                    $queryParams += "limit=$Limit"
                     $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
-                    $uri = "${baseUri}/${cid}/assignments/-${query}"
+                    $assignBaseUri = "${baseUri}/${cid}/assignments/-${query}"
 
-                    Write-Debug "Fetching credential assignments from URI: $uri"
-                    try {
-                        $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                        if ($result.data) { $finalOutput += $result.data }
-                    }
-                    catch {
-                        Write-Error "Error fetching assignments for credential ${cid}: $_"
-                    }
+                    Write-Debug "Fetching credential assignments from URI: $assignBaseUri"
+
+                    $currentPageId = $null
+                    $pageNumber = 0
+
+                    do {
+                        $currentUri = if ($null -ne $currentPageId) {
+                            $sep = if ($assignBaseUri -match '\?') { '&' } else { '?' }
+                            "${assignBaseUri}${sep}pageId=$currentPageId"
+                        } else { $assignBaseUri }
+
+                        try {
+                            $result = Get-WUGAPIResponse -Uri $currentUri -Method 'GET'
+                            if ($result.data) { $finalOutput += $result.data }
+                            $currentPageId = $result.paging.nextPageId
+                            $pageNumber++
+                        }
+                        catch {
+                            Write-Error "Error fetching assignments for credential ${cid}: $_"
+                            break
+                        }
+                    } while ($null -ne $currentPageId)
                 }
             }
 
@@ -202,7 +238,10 @@ function Get-WUGCredential {
 
             'CredentialTemplate' {
                 foreach ($cid in $CredentialId) {
-                    $uri = "${baseUri}/${cid}/config/template"
+                    $queryParams = @()
+                    if ($Key) { $queryParams += "key=$([uri]::EscapeDataString($Key))" }
+                    $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                    $uri = "${baseUri}/${cid}/config/template${query}"
 
                     Write-Debug "Fetching credential template from URI: $uri"
                     try {
@@ -216,7 +255,12 @@ function Get-WUGCredential {
             }
 
             'AllCredentialTemplates' {
-                $uri = "${baseUri}/-/config/template"
+                $queryParams = @()
+                if ($Key) { $queryParams += "key=$([uri]::EscapeDataString($Key))" }
+                if ($Type -and $Type -ne 'all') { $queryParams += "type=$Type" }
+                if ($SearchValue) { $queryParams += "search=$([uri]::EscapeDataString($SearchValue))" }
+                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                $uri = "${baseUri}/-/config/template${query}"
 
                 Write-Debug "Fetching all credential templates from URI: $uri"
                 try {
@@ -229,7 +273,11 @@ function Get-WUGCredential {
             }
 
             'Helpers' {
-                $uri = "${baseUri}/-/helpers"
+                $queryParams = @()
+                if ($Input) { $queryParams += "input=$([uri]::EscapeDataString($Input))" }
+                if ($Type -and $Type -ne 'all') { $queryParams += "type=$Type" }
+                $query = if ($queryParams.Count -gt 0) { "?" + ($queryParams -join "&") } else { "" }
+                $uri = "${baseUri}/-/helpers${query}"
 
                 Write-Debug "Fetching credential helpers from URI: $uri"
                 try {
@@ -242,16 +290,39 @@ function Get-WUGCredential {
             }
 
             'AllAssignments' {
-                $uri = "${baseUri}/-/assignments/-"
+                $allData = @()
+                $currentPageId = $null
+                $pageCount = 0
 
-                Write-Debug "Fetching all credential assignments from URI: $uri"
-                try {
-                    $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
-                    if ($result.data) { $finalOutput += $result.data }
-                }
-                catch {
-                    Write-Error "Error fetching all credential assignments: $_"
-                }
+                do {
+                    $queryParams = @()
+                    if ($View) { $queryParams += "view=$View" }
+                    if ($Type -and $Type -ne 'all') { $queryParams += "type=$Type" }
+                    if ($SearchValue) { $queryParams += "search=$([uri]::EscapeDataString($SearchValue))" }
+                    if ($DeviceView) { $queryParams += "deviceView=$DeviceView" }
+                    $queryParams += "limit=$Limit"
+                    if ($currentPageId) { $queryParams += "pageId=$([uri]::EscapeDataString($currentPageId))" }
+
+                    $query = "?" + ($queryParams -join "&")
+                    $uri = "${baseUri}/-/assignments/-${query}"
+
+                    Write-Debug "Fetching all credential assignments from URI: $uri"
+                    $pageCount++
+                    Write-Progress -Activity "Retrieving all credential assignments" -Status "Page $pageCount" -PercentComplete -1
+
+                    try {
+                        $result = Get-WUGAPIResponse -Uri $uri -Method 'GET'
+                        if ($result.data) { $allData += $result.data }
+                        $currentPageId = $result.paging.nextPageId
+                    }
+                    catch {
+                        Write-Error "Error fetching all credential assignments: $_"
+                        break
+                    }
+                } while ($currentPageId)
+
+                Write-Progress -Activity "Retrieving all credential assignments" -Completed
+                $finalOutput = $allData
             }
         }
     }
@@ -265,8 +336,8 @@ function Get-WUGCredential {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQFq0PPZPkXnk2
-# Rqt0HztZLQN8cE3of8PF2B+5jYGvW6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBz0TYo6A/L8waB
+# m7K8fjmMpBdkNvbr555l1Nd5wEF+b6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -366,17 +437,17 @@ function Get-WUGCredential {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgycge1sBSBHIyFSUNIZYrVATaj8jBsYh/
-# 4gTGp0sEi3MwDQYJKoZIhvcNAQEBBQAEggIAle7ur539ZNYWmaIslV3ZJyTKo5Vy
-# KNv3bh/jlJEhGBYYiQSf9zTIb30rttHNqwdz3ROjWVABW/r76nJ0ONUAjEElTupA
-# /r2Edjp91O1UOlN3Ict7gV2SkPnTkyquq/gLiiSJhaSp5cGatBstNfxtrkF/ciTW
-# HlHvaXb9YbrzhtnP8lw5gZGF2H6ZcWwEOaRCjnyrBZEZG32NicTe8xqRa4fkSTnc
-# MME4Wte7jxVthtDDgIzSMdaTIcGzZ8ah2V1PYSaI2dnaozDz0+gU8iYM7AaARz4K
-# Nsh26SYSphtu+5sXoMVibhXE+qdsqkx27dlZgpjfsQQR1kLROWp7qIHn+rR6HDoe
-# 8JeUaIxCF2yjGL6kHQiN9nfY5euSuYnm0y2WHVcB6vlHQgdgny7d56b4diMAzKG1
-# yOnwzR6egD6O2Q64j5EsU6y2pHOPxUYUeP/AvKhLsJq0ADUzZRyiZtVmR7Jk8RDf
-# hMDYsoyJT4HgqWFBH0K3w9bn1NaSc5a0FE1/Qjyl/VPJfEV0+EUtnSwvcM5mo09s
-# JiyofgMHkVvcXyOnHQK8MX/2R2gAb4jwFdRQKixZuDhkV87VJuc8S76088bx8O4F
-# CsHXHkgvEGwnqGR+IBwNS7wFxfXIfifiVKP6aC10o8KgZiNq2XPCFLQaeHMwNICk
-# c6XHzBq7osvhfMU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgV80mOdOqmjQeNlLciUfMKTnzUhQ/a5oD
+# jArfumIPCxQwDQYJKoZIhvcNAQEBBQAEggIAUEmmAYbQsXbxqVGqPYPn1Y3muFGj
+# t9n+B33qW3KzDYpn2rDztd/wi6/MA7nTmqanJtOklHyIxkH9CHfiEj/jzuD2ACqW
+# VaUGGtvLuVipKzO5xmY/WJy+CiTJ2N+BwW0YlvbSxVfCW3/kH/iVYsvdtn6hFaha
+# X/s6VpV2395iOBX5niAlBcuJxs167nYjcCPiWnI9h8T1RQXIZ4fwA9iy9Fn7omIc
+# uLlLXIVi1+OmMFVpv3X7jyTkaJuAZcwVgf7rafe1NfzwkwA9yh0DsAz/V93Wo3p/
+# djtGiZOdXXLtEzkjd4UM/AEmdhhyr+ZP8+FNJYgd39QZGTtdagh2YXUgHWCdLwD3
+# 2sC4e581BNtJ1aheuEE6jmFzTdfbb1kP5XXFA4i1Zg0mR76bdUcMOW163O+MvdHv
+# 2goZegXwkB7rndvqbdwDby2xKDCh1FC87Ep1XElTKE5e2GnNITy2B2PZeROPkdHI
+# RYpGtRUX9A4kq5ooUH9T611EBnq+Uuz8hcJ2yHOdJ2jb5b65WiNCeBTgCm77x135
+# BMtyozJNni3dwyDd93SNwKjzLoH+EWefG+f5xmo5kt9eEpFJ/Z5FzfCr65GU86pP
+# WVGL8BVPzVWUYnWhUt1iKZjyIAhoj1CsexRpXT1XqQOqp/7LCpJWEC+4GMHkRxJx
+# Cec/4hmY2S8XJmQ=
 # SIG # End signature block

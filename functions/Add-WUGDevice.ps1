@@ -133,7 +133,7 @@ function Add-WUGDevice {
             $response = Get-WUGAPIResponse -Method PATCH -Uri $uri -Body $body
             if ($response -and $response.data) {
                 Write-Verbose "Devices added."
-                Write-Output $response.data
+                return $response.data
             } else {
                 Write-Warning "Add-WUGDevice: API call succeeded, but returned no data."
             }
@@ -148,8 +148,8 @@ function Add-WUGDevice {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVFGCZxCAL5Lp5
-# MbLIR+prgJrB/0M58/vxtLeaYKjdUKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAW2SOEUwRDP/6U
+# rUq5t6hpnUv7RrMgBaPqLONQsmqWYqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -249,17 +249,17 @@ function Add-WUGDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIcJdK9VgESD4norjrtixWMAH3Wr5T+gb
-# tRWKIFu24c8wDQYJKoZIhvcNAQEBBQAEggIAEaCSfLwl82KapWAwWb9Q5MGxGceW
-# eIi90FTvBUF59s5uZ2BKA3toTTYn/BRzQMa70st4dHAGlYMOgwbkAvudj9sGAj2x
-# qxgzfosWYEJ2Mh+abkjecdCi1nQCpfnCJqJyJo9MH2r4XjgFbJ+fslgQQG40scJR
-# E/TZFco/i+oWYQ/gQn5nCB79gEPS94sfsVtCgtd5+MRlBZixh2IJ2tmhEFVLDjzz
-# lvfCiF8upIoehJ/Qz70eNott2BZcMHk6SyeG0TAPKDBoJ3y9VAIwcGXu5o/zEKA3
-# w0jhqyGzVSlSNz2SrMnmzhSSpO1Qskmh4rhAnZ8yJVYoc14/RFxx6GG80khX4hV0
-# KOsT40ALibsCrOn+geEkLOIcZPnAh0WRhDWoTvEpme6caq7EV8hhTcFe3v6KEYSm
-# RJ+QO386r2RKeuLPdf1aBr7pUgiUoQs5E/tLDx9QZ1zNrK0TgwSQoiqi8sDGH10q
-# urduAYqmyvYwjoKUMTdw6L6B0kZ5/LxrJubFwKMVwnrBugsIenoOgL9VGq2RtDPz
-# lR0IC+QkSE/p7kqxeVBCEISQJrGjB3BN13OATiXMwY1t0zdNdWtQnZWrq925Vs5J
-# CQF00VxChphbZcTWZnRQZBGXo7mivvmsQ+KAerF7I5xVnbAbFYDym+Ymb9xgs+pJ
-# l7u+Eym/oT/xp1c=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIVf7S7IYY/qjiw75sE3HKhLrcYccdJ28
+# tEo0rr4+OGowDQYJKoZIhvcNAQEBBQAEggIAJ7BAoGxrkkIXKldmtrOp+L8D9eKk
+# ow1V69BSQlctTeTImTU+Yect/BjFUaqiJxrbRC3ilX83yaDh1vnH315+xuu4jYsh
+# 8UtfczlMTd/hd5ImFTkcqoi65+LYPUy1BbCpFi8HT692sbMQJhIWsz5CnzxUqwMb
+# GsV7wB6/td3thKYw2n/NVjZfDuyYH6Ydrx7CWSr+xlkw4cRxT0R/U1mNUcHXN56G
+# 3cYRX2IhS5ShfW+pIHUN3hX/1jsErC+n30QAoY4JNbEp0mC+BTdfzSMojHOOFVX2
+# MKkrwcfaN6meEuzpEJhMbiRAehHgBnxLrUPDmr7EJmtryJYmQqh8+jTGTF0XyGuL
+# 1+xrjYmaakBAcsNsyJXts8PQ6XSsYkojlkQFXIIH1nI8IVlcXIizSFEiAWJR2sxu
+# JNk8fK1jd/YSyPuZ8sln2J4leGPiYyHjcY9WM/JhNPBfDhvz0ozZIpYSn6mxlaH0
+# Bp9XXbkgJN4FGxcovalUrUmeXCfYF5xmU9NtI7XtreIVfRmWfXffrJXzlmsCycIx
+# bPjH6mKW6R5dUc5YZsFz6kIzN2gsDKfCPSV5AOUYiXeUjg1B2zBJU+8Lp2bYuxoS
+# l55iPRbb3zfbDLnQl7eF107gIXCZt6yMifKoiJLlwj8n6rhpYQ0rO8G2D9k9BQxU
+# tzheZqupfeCCRTM=
 # SIG # End signature block

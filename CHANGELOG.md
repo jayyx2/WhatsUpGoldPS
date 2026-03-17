@@ -1,4 +1,35 @@
 # WhatsUpGoldPS Release History
+## 0.1.21 - 2026-03-17 [Unreleased]
+* Added — Helpers
+  * helpers/fortinet/ — Fortinet FortiGate + FortiManager dashboard suite (107 functions in FortinetHelpers.ps1)
+    * Core: `Connect-FortiGate`, `Disconnect-FortiGate`, `Invoke-FortiAPI`, `New-FortinetDashboardHtml`
+    * System: `Get-FortiGateSystemStatus`, `Get-FortiGateSystemResources`, `Get-FortiGateHAStatus`, `Get-FortiGateHAChecksums`, `Get-FortiGateFirmware`, `Get-FortiGateLicenseStatus`, `Get-FortiGateGlobalSettings`, `Get-FortiGateAdmins`, `Get-FortiGateSystemDashboard`, `Export-FortiGateSystemDashboardHtml`
+    * Network: `Get-FortiGateInterfaces`, `Get-FortiGateInterfaceConfig`, `Get-FortiGateZones`, `Get-FortiGateRoutes`, `Get-FortiGateIPv6Routes`, `Get-FortiGateStaticRoutes`, `Get-FortiGateARP`, `Get-FortiGateDHCPLeases`, `Get-FortiGateDHCPServers`, `Get-FortiGateDNS`, `Get-FortiGateNetworkDashboard`, `Export-FortiGateNetworkDashboardHtml`
+    * Firewall: `Get-FortiGateFirewallPolicies`, `Get-FortiGateAddresses`, `Get-FortiGateAddressGroups`, `Get-FortiGateServices`, `Get-FortiGateServiceGroups`, `Get-FortiGateSchedules`, `Get-FortiGateIPPools`, `Get-FortiGateVIPs`, `Get-FortiGateShapingPolicies`, `Get-FortiGateFirewallDashboard`, `Export-FortiGateFirewallDashboardHtml`
+    * VPN: `Get-FortiGateIPSecTunnels`, `Get-FortiGateIPSecPhase1`, `Get-FortiGateIPSecPhase2`, `Get-FortiGateSSLVPNSessions`, `Get-FortiGateSSLVPNSettings`, `Get-FortiGateVPNDashboard`, `Export-FortiGateVPNDashboardHtml`
+    * SD-WAN: `Get-FortiGateSDWANMembers`, `Get-FortiGateSDWANHealthCheck`, `Get-FortiGateSDWANConfig`, `Get-FortiGateSDWANHealthCheckConfig`, `Get-FortiGateSDWANRules`, `Get-FortiGateSDWANZones`, `Get-FortiGateSDWANDashboard`, `Export-FortiGateSDWANDashboardHtml`
+    * Security Profiles: `Get-FortiGateAntivirusProfiles`, `Get-FortiGateIPSSensors`, `Get-FortiGateWebFilterProfiles`, `Get-FortiGateAppControlProfiles`, `Get-FortiGateDLPSensors`, `Get-FortiGateDNSFilterProfiles`, `Get-FortiGateSSLSSHProfiles`, `Get-FortiGateSecurityDashboard`, `Export-FortiGateSecurityDashboardHtml`
+    * User & Auth: `Get-FortiGateLocalUsers`, `Get-FortiGateUserGroups`, `Get-FortiGateLDAPServers`, `Get-FortiGateRADIUSServers`, `Get-FortiGateActiveAuthUsers`, `Get-FortiGateFortiTokens`, `Get-FortiGateSAMLSP`, `Get-FortiGateUserAuthDashboard`, `Export-FortiGateUserAuthDashboardHtml`
+    * Wireless: `Get-FortiGateManagedAPs`, `Get-FortiGateWiFiClients`, `Get-FortiGateRogueAPs`, `Get-FortiGateSSIDs`, `Get-FortiGateWTPProfiles`, `Get-FortiGateWirelessDashboard`, `Export-FortiGateWirelessDashboardHtml`
+    * Switch: `Get-FortiGateManagedSwitches`, `Get-FortiGateSwitchPorts`, `Get-FortiGateSwitchConfig`, `Get-FortiGateSwitchVLANs`, `Get-FortiGateSwitchLLDP`, `Get-FortiGateSwitchDashboard`, `Export-FortiGateSwitchDashboardHtml`
+    * Endpoint: `Get-FortiGateEMSEndpoints`, `Get-FortiGateEMSConfig`, `Get-FortiGateSecurityRating`, `Get-FortiGateEndpointProfiles`, `Get-FortiGateEndpointDashboard`, `Export-FortiGateEndpointDashboardHtml`
+    * Log: `Get-FortiGateTrafficLogs`, `Get-FortiGateEventLogs`, `Get-FortiGateUTMLogs`, `Get-FortiGateLogStats`, `Get-FortiGateFortiGuardStatus`, `Get-FortiGateAlertMessages`, `Get-FortiGateLogDashboard`, `Export-FortiGateLogDashboardHtml`
+    * FortiManager: `Connect-FortiManager`, `Disconnect-FortiManager`, `Invoke-FortiManagerAPI`, `Get-FortiManagerSystemStatus`, `Get-FortiManagerADOMs`, `Get-FortiManagerDevices`, `Get-FortiManagerPolicyPackages`, `Get-FortiManagerDashboard`, `Export-FortiManagerDashboardHtml`
+    * Universal HTML dashboard template (`Fortinet-Dashboard-Template.html`) with dynamic JSON config injection, dark theme, Bootstrap Table 1.22.1
+  * helpers/test/Invoke-WUGHelperTest.ps1 — Added Fortinet provider (12 category test sections + FortiManager, auth prompt, cleanup, per-category HTML report collection)
+
+* Changed
+  * Standardized SSL/TLS self-signed certificate bypass across all on-prem helpers
+    * Fortinet, F5, Nutanix: Replaced fragile `delegate { return true; }` / scriptblock callbacks with Proxmox-style compiled `SSLValidator` C# class
+    * Compiled callback avoids scriptblock delegate marshaling failures under rapid sequential requests in PS 5.1
+    * Sets `SecurityProtocol` (TLS 1.0/1.1/1.2), `Expect100Continue = false`, `DefaultConnectionLimit = 64`
+    * PS 7+/Core: Uses `PSDefaultParameterValues` for `SkipCertificateCheck`
+  * Fortinet dashboard template: Replaced `{{DASHBOARD_CONFIG}}` placeholder (caused VS Code JS validation errors) with `<script type="application/json">` data block parsed via `JSON.parse()`
+  * Standardized HTML dashboard export options across all 11 templates (Azure, AWS, GCP, OCI, Proxmox, Hyper-V, Nutanix, F5, Certificate, Test, Fortinet)
+    * Added XLS, PNG, SQL, TSV exports to match existing CSV, TXT, XLSX, JSON — all dashboards now offer 8 export formats
+    * Fixed TXT export: replaced hardcoded WUG device field names (`id`, `name`, `networkAddress`, `hostName`, `downActiveMonitors`) with dynamic `Object.keys()` — all templates and `Bootstrap-Table-Sample.html` now export actual column data instead of `undefined`
+    * Added full export suite to Fortinet dark-theme dashboard (FileSaver, XLSX, html2canvas libraries + export dropdown in header)
+
 ## 0.1.19/20 - 2026-03-15 [Released to PowerShell Gallery]
 * Added — New Functions (85 total exports; psm1 and psd1 in sync)
   * `Get-WUGRole` — Browse the device role library: by ID, list all, assignments, templates, percent variables (`/device-role/` endpoints)

@@ -3,7 +3,7 @@
     End-to-end integration test harness for WhatsUpGoldPS cloud and infrastructure helpers.
 .DESCRIPTION
     Tests every function in the helpers directory (AWS, Azure, GCP, OCI, Proxmox,
-    Hyper-V, Nutanix) against live APIs. Prompts for credentials at runtime -
+    Hyper-V, Nutanix, Fortinet) against live APIs. Prompts for credentials at runtime -
     nothing is stored on disk. Produces a unified pass/fail/skip summary and
     interactive HTML reports.
 .PARAMETER TestAWS
@@ -28,13 +28,16 @@
     Directory for HTML reports. Defaults to $env:TEMP.
 .EXAMPLE
     .\Invoke-WUGHelperTest.ps1
-    # Prompts for all provider credentials and runs all tests.
+    # Runs ALL provider tests (prompts for credentials at runtime).
 .EXAMPLE
-    .\Invoke-WUGHelperTest.ps1 -TestAWS $false -TestGCP $false -TestOCI $false -TestProxmox $false -TestHyperV $false -TestNutanix $false
-    # Runs only Azure tests.
+    .\Invoke-WUGHelperTest.ps1 -TestAzure 1
+    # Runs only Azure tests; all other providers are automatically skipped.
+.EXAMPLE
+    .\Invoke-WUGHelperTest.ps1 -TestProxmox 1 -TestFortinet 1
+    # Runs only Proxmox and Fortinet tests; everything else is skipped.
 .EXAMPLE
     .\Invoke-WUGHelperTest.ps1 -AWSRegion "us-east-1" -OutputHtmlPath "C:\Reports"
-    # Pre-sets AWS region and HTML output; prompts for secrets only.
+    # Pre-sets AWS region and HTML output; runs all tests, prompts for secrets only.
 .NOTES
     Author  : jason@wug.ninja
     Created : 2026-03-13
@@ -42,17 +45,32 @@
 #>
 [CmdletBinding()]
 param(
-    [bool]$TestAWS     = $true,
-    [bool]$TestAzure   = $true,
-    [bool]$TestGCP     = $true,
-    [bool]$TestOCI     = $true,
-    [bool]$TestProxmox = $true,
-    [bool]$TestHyperV  = $true,
-    [bool]$TestNutanix = $true,
+    [bool]$TestAWS,
+    [bool]$TestAzure,
+    [bool]$TestGCP,
+    [bool]$TestOCI,
+    [bool]$TestProxmox,
+    [bool]$TestHyperV,
+    [bool]$TestNutanix,
+    [bool]$TestFortinet,
+    [switch]$IncludeSkipped,
     [string]$AWSRegion,
     [string]$AzureTenantId,
     [string]$OutputHtmlPath
 )
+
+# If any Test* parameter was explicitly specified, only run those; otherwise run all.
+$testParams = @('TestAWS','TestAzure','TestGCP','TestOCI','TestProxmox','TestHyperV','TestNutanix','TestFortinet')
+$anyExplicit = $testParams | Where-Object { $PSBoundParameters.ContainsKey($_) }
+if ($anyExplicit) {
+    foreach ($p in $testParams) {
+        if (-not $PSBoundParameters.ContainsKey($p)) {
+            Set-Variable -Name $p -Value $false
+        }
+    }
+} else {
+    foreach ($p in $testParams) { Set-Variable -Name $p -Value $true }
+}
 
 #region -- Helpers ------------------------------------------------------------
 $script:TestResults = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -227,6 +245,64 @@ $script:NutanixCmdletList = @(
     'Get-NutanixHostDetail','Get-NutanixVMDetail',
     'Get-NutanixDashboard','Export-NutanixDashboardHtml'
 )
+$script:FortinetCmdletList = @(
+    'Connect-FortiGate',
+    # System
+    'Get-FortiGateSystemStatus','Get-FortiGateSystemResources','Get-FortiGateHAStatus',
+    'Get-FortiGateHAChecksums','Get-FortiGateFirmware','Get-FortiGateLicenseStatus',
+    'Get-FortiGateGlobalSettings','Get-FortiGateAdmins',
+    'Get-FortiGateSystemDashboard','Export-FortiGateSystemDashboardHtml',
+    # Network
+    'Get-FortiGateInterfaces','Get-FortiGateInterfaceConfig','Get-FortiGateZones',
+    'Get-FortiGateRoutes','Get-FortiGateIPv6Routes','Get-FortiGateStaticRoutes',
+    'Get-FortiGateARP','Get-FortiGateDHCPLeases','Get-FortiGateDHCPServers','Get-FortiGateDNS',
+    'Get-FortiGateNetworkDashboard','Export-FortiGateNetworkDashboardHtml',
+    # Firewall
+    'Get-FortiGateFirewallPolicies','Get-FortiGateAddresses','Get-FortiGateAddressGroups',
+    'Get-FortiGateServices','Get-FortiGateServiceGroups','Get-FortiGateSchedules',
+    'Get-FortiGateIPPools','Get-FortiGateVIPs','Get-FortiGateShapingPolicies',
+    'Get-FortiGateFirewallDashboard','Export-FortiGateFirewallDashboardHtml',
+    # VPN
+    'Get-FortiGateIPSecTunnels','Get-FortiGateIPSecPhase1','Get-FortiGateIPSecPhase2',
+    'Get-FortiGateSSLVPNSessions','Get-FortiGateSSLVPNSettings',
+    'Get-FortiGateVPNDashboard','Export-FortiGateVPNDashboardHtml',
+    # SD-WAN
+    'Get-FortiGateSDWANMembers','Get-FortiGateSDWANHealthCheck','Get-FortiGateSDWANConfig',
+    'Get-FortiGateSDWANHealthCheckConfig','Get-FortiGateSDWANRules','Get-FortiGateSDWANZones',
+    'Get-FortiGateSDWANDashboard','Export-FortiGateSDWANDashboardHtml',
+    # Security Profiles
+    'Get-FortiGateAntivirusProfiles','Get-FortiGateIPSSensors','Get-FortiGateWebFilterProfiles',
+    'Get-FortiGateAppControlProfiles','Get-FortiGateDLPSensors','Get-FortiGateDNSFilterProfiles',
+    'Get-FortiGateSSLSSHProfiles',
+    'Get-FortiGateSecurityDashboard','Export-FortiGateSecurityDashboardHtml',
+    # User & Auth
+    'Get-FortiGateLocalUsers','Get-FortiGateUserGroups','Get-FortiGateLDAPServers',
+    'Get-FortiGateRADIUSServers','Get-FortiGateActiveAuthUsers','Get-FortiGateFortiTokens',
+    'Get-FortiGateSAMLSP',
+    'Get-FortiGateUserAuthDashboard','Export-FortiGateUserAuthDashboardHtml',
+    # Wireless
+    'Get-FortiGateManagedAPs','Get-FortiGateWiFiClients','Get-FortiGateRogueAPs',
+    'Get-FortiGateSSIDs','Get-FortiGateWTPProfiles',
+    'Get-FortiGateWirelessDashboard','Export-FortiGateWirelessDashboardHtml',
+    # Switch
+    'Get-FortiGateManagedSwitches','Get-FortiGateSwitchPorts','Get-FortiGateSwitchConfig',
+    'Get-FortiGateSwitchVLANs','Get-FortiGateSwitchLLDP',
+    'Get-FortiGateSwitchDashboard','Export-FortiGateSwitchDashboardHtml',
+    # Endpoint
+    'Get-FortiGateEMSEndpoints','Get-FortiGateEMSConfig','Get-FortiGateSecurityRating',
+    'Get-FortiGateEndpointProfiles',
+    'Get-FortiGateEndpointDashboard','Export-FortiGateEndpointDashboardHtml',
+    # Log
+    'Get-FortiGateTrafficLogs','Get-FortiGateEventLogs','Get-FortiGateUTMLogs',
+    'Get-FortiGateLogStats','Get-FortiGateFortiGuardStatus','Get-FortiGateAlertMessages',
+    'Get-FortiGateLogDashboard','Export-FortiGateLogDashboardHtml',
+    # FortiManager (optional)
+    'Connect-FortiManager','Get-FortiManagerSystemStatus','Get-FortiManagerADOMs',
+    'Get-FortiManagerDevices','Get-FortiManagerPolicyPackages',
+    'Get-FortiManagerDashboard','Export-FortiManagerDashboardHtml',
+    # Cleanup
+    'Disconnect-FortiGate','Disconnect-FortiManager'
+)
 #endregion
 
 #region -- Helper File Import -------------------------------------------------
@@ -239,12 +315,14 @@ $helperFiles = @{
     OCI     = Join-Path $helpersRoot 'oci\OCIHelpers.ps1'
     Proxmox = Join-Path $helpersRoot 'proxmox\ProxmoxHelpers.ps1'
     HyperV  = Join-Path $helpersRoot 'hyperv\HypervHelpers.ps1'
-    Nutanix = Join-Path $helpersRoot 'nutanix\NutanixHelpers.ps1'
+    Nutanix  = Join-Path $helpersRoot 'nutanix\NutanixHelpers.ps1'
+    Fortinet = Join-Path $helpersRoot 'fortinet\FortinetHelpers.ps1'
 }
 
 $providerToggle = @{
     AWS = [ref]$TestAWS;  Azure = [ref]$TestAzure; GCP = [ref]$TestGCP; OCI = [ref]$TestOCI
     Proxmox = [ref]$TestProxmox; HyperV = [ref]$TestHyperV; Nutanix = [ref]$TestNutanix
+    Fortinet = [ref]$TestFortinet
 }
 
 foreach ($provider in $helperFiles.Keys) {
@@ -328,6 +406,7 @@ if ($TestOCI)     { $activeProviders += 'OCI' }
 if ($TestProxmox) { $activeProviders += 'Proxmox' }
 if ($TestHyperV)  { $activeProviders += 'HyperV' }
 if ($TestNutanix) { $activeProviders += 'Nutanix' }
+if ($TestFortinet) { $activeProviders += 'Fortinet' }
 
 if ($activeProviders.Count -eq 0) {
     Write-Error "All providers are disabled or unavailable. Nothing to test."
@@ -842,6 +921,15 @@ if ($TestProxmox) {
     }
 
     if ($TestProxmox) {
+        # Run Dashboard first — it calls Nodes, VMs, NodeDetail, and VMDetail internally.
+        # This avoids PS 5.1 connection-pool exhaustion from running them individually first.
+        Invoke-Test -Cmdlet 'Get-ProxmoxDashboard' -Endpoint 'Proxmox / Dashboard / Get-ProxmoxDashboard' -Test {
+            $script:ProxmoxDashboardData = Get-ProxmoxDashboard -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ErrorAction Stop
+            Assert-NotNull $script:ProxmoxDashboardData
+        }
+        $dashboardPassed = ($script:TestResults | Select-Object -Last 1).Status -eq 'Pass'
+
+        # Validate sub-functions — if Dashboard passed, verify via lightweight individual calls
         Invoke-Test -Cmdlet 'Get-ProxmoxNodes' -Endpoint 'Proxmox / Nodes / Get-ProxmoxNodes' -Test {
             $r = Get-ProxmoxNodes -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ErrorAction Stop
             Assert-NotNull $r; $script:FirstProxmoxNode = @($r)[0].node
@@ -863,10 +951,6 @@ if ($TestProxmox) {
             Record-Test -Cmdlet 'Get-ProxmoxVMs' -Endpoint 'Proxmox / VMs' -Status 'Skipped' -Detail 'No nodes found'
             Record-Test -Cmdlet 'Get-ProxmoxNodeDetail' -Endpoint 'Proxmox / Nodes' -Status 'Skipped' -Detail 'No nodes found'
             Record-Test -Cmdlet 'Get-ProxmoxVMDetail' -Endpoint 'Proxmox / VMs' -Status 'Skipped' -Detail 'No nodes found'
-        }
-        Invoke-Test -Cmdlet 'Get-ProxmoxDashboard' -Endpoint 'Proxmox / Dashboard / Get-ProxmoxDashboard' -Test {
-            $script:ProxmoxDashboardData = Get-ProxmoxDashboard -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ErrorAction Stop
-            Assert-NotNull $script:ProxmoxDashboardData
         }
         $pmxTpl = Join-Path $helpersRoot 'proxmox\Proxmox-Dashboard-Template.html'
         if ($script:ProxmoxDashboardData -and @($script:ProxmoxDashboardData).Count -gt 0 -and (Test-Path $pmxTpl)) {
@@ -1011,14 +1095,484 @@ if ($TestNutanix) {
 #endregion
 
 ###############################################################################
+#region -- Fortinet (FortiGate + FortiManager) --------------------------------
+###############################################################################
+$script:FortinetHtmlOutPaths = @{}
+$script:FortiGateDashboards  = @{}
+$script:TestFortiManager = $false
+
+if ($TestFortinet) {
+    Write-Host "`nFortiGate Authentication:" -ForegroundColor Cyan
+    Write-Host "  [1] API Token  [2] Username + Password  [S] Skip"
+    $fgChoice = Read-Host "Selection"
+    switch ($fgChoice.Trim().ToUpper()) {
+        '1' {
+            $script:FGAuthMethod = 'Token'
+            $script:FGServer = Read-Host "FortiGate host or IP"
+            $fgPort = Read-Host "Port [443]"
+            $script:FGPort = if ([string]::IsNullOrWhiteSpace($fgPort)) { 443 } else { [int]$fgPort }
+            $script:FGTokenSS = Read-Host "API Token" -AsSecureString
+        }
+        '2' {
+            $script:FGAuthMethod = 'Credential'
+            $script:FGServer = Read-Host "FortiGate host or IP"
+            $fgPort = Read-Host "Port [443]"
+            $script:FGPort = if ([string]::IsNullOrWhiteSpace($fgPort)) { 443 } else { [int]$fgPort }
+            $script:FGCred = Get-Credential -Message "FortiGate admin credentials"
+        }
+        default { $TestFortinet = $false }
+    }
+    if ($TestFortinet) {
+        $fmgChoice = Read-Host "Also test FortiManager? [Y/N]"
+        if ($fmgChoice -match '^[Yy]') {
+            $script:TestFortiManager = $true
+            $script:FMGServer = Read-Host "FortiManager host or IP"
+            $script:FMGCred = Get-Credential -Message "FortiManager credentials"
+        }
+    }
+    if (-not $TestFortinet) { Skip-ProviderTests -Provider 'Fortinet' -Reason 'User skipped' -Cmdlets $script:FortinetCmdletList }
+} else { Skip-ProviderTests -Provider 'Fortinet' -Reason 'Disabled' -Cmdlets $script:FortinetCmdletList }
+
+if ($TestFortinet) {
+    $currentSection++
+    Write-Host "`n[$currentSection/$sectionCount] Testing Fortinet ..." -ForegroundColor Cyan
+
+    # -- Auth --
+    Invoke-Test -Cmdlet 'Connect-FortiGate' -Endpoint 'Fortinet / Auth / Connect-FortiGate' -Test {
+        switch ($script:FGAuthMethod) {
+            'Token' {
+                $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($script:FGTokenSS)
+                try {
+                    $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+                    Connect-FortiGate -Server $script:FGServer -Port $script:FGPort -APIToken $plain -IgnoreSSLErrors -ErrorAction Stop
+                } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+            }
+            'Credential' {
+                Connect-FortiGate -Server $script:FGServer -Port $script:FGPort -Credential $script:FGCred -IgnoreSSLErrors -ErrorAction Stop
+            }
+        }
+    }
+    if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        $TestFortinet = $false
+        Skip-ProviderTests -Provider 'Fortinet' -Reason 'Auth failed' -Cmdlets ($script:FortinetCmdletList | Where-Object { $_ -ne 'Connect-FortiGate' })
+    }
+
+    if ($TestFortinet) {
+        # ===== System =====
+        Write-Host "    -- System --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateSystemStatus' -Endpoint 'Fortinet / System / status' -Test {
+            $r = Get-FortiGateSystemStatus -ErrorAction Stop; Assert-NotNull $r; Assert-HasProperty $r @('Hostname','SerialNumber')
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSystemResources' -Endpoint 'Fortinet / System / resource/usage' -Test {
+            $r = Get-FortiGateSystemResources -ErrorAction Stop; Assert-NotNull $r
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateHAStatus' -Endpoint 'Fortinet / System / ha-peer' -Test {
+            Get-FortiGateHAStatus -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateHAChecksums' -Endpoint 'Fortinet / System / ha-checksums' -Test {
+            Get-FortiGateHAChecksums -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateFirmware' -Endpoint 'Fortinet / System / firmware' -Test {
+            Get-FortiGateFirmware -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateLicenseStatus' -Endpoint 'Fortinet / System / license/status' -Test {
+            Get-FortiGateLicenseStatus -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateGlobalSettings' -Endpoint 'Fortinet / System / system/global' -Test {
+            $r = Get-FortiGateGlobalSettings -ErrorAction Stop; Assert-NotNull $r
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateAdmins' -Endpoint 'Fortinet / System / system/admin' -Test {
+            $r = Get-FortiGateAdmins -ErrorAction Stop; Assert-NotNull $r
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSystemDashboard' -Endpoint 'Fortinet / System / Dashboard' -Test {
+            $script:FortiGateDashboards['System'] = Get-FortiGateSystemDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['System']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateSystemDashboardHtml' -Endpoint 'Fortinet / System / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-System-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateSystemDashboardHtml -DashboardData $script:FortiGateDashboards['System'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['System'] = $p
+        }
+
+        # ===== Network =====
+        Write-Host "    -- Network --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateInterfaces' -Endpoint 'Fortinet / Network / interface' -Test {
+            $r = Get-FortiGateInterfaces -ErrorAction Stop; Assert-NotNull $r
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateInterfaceConfig' -Endpoint 'Fortinet / Network / cmdb interface' -Test {
+            $r = Get-FortiGateInterfaceConfig -ErrorAction Stop; Assert-NotNull $r
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateZones' -Endpoint 'Fortinet / Network / zone' -Test {
+            Get-FortiGateZones -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateRoutes' -Endpoint 'Fortinet / Network / router/ipv4' -Test {
+            Get-FortiGateRoutes -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateIPv6Routes' -Endpoint 'Fortinet / Network / router/ipv6' -Test {
+            Get-FortiGateIPv6Routes -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateStaticRoutes' -Endpoint 'Fortinet / Network / router/static' -Test {
+            Get-FortiGateStaticRoutes -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateARP' -Endpoint 'Fortinet / Network / arp' -Test {
+            Get-FortiGateARP -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateDHCPLeases' -Endpoint 'Fortinet / Network / dhcp' -Test {
+            Get-FortiGateDHCPLeases -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateDHCPServers' -Endpoint 'Fortinet / Network / dhcp/server' -Test {
+            Get-FortiGateDHCPServers -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateDNS' -Endpoint 'Fortinet / Network / dns' -Test {
+            $r = Get-FortiGateDNS -ErrorAction Stop; Assert-NotNull $r
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateNetworkDashboard' -Endpoint 'Fortinet / Network / Dashboard' -Test {
+            $script:FortiGateDashboards['Network'] = Get-FortiGateNetworkDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['Network']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateNetworkDashboardHtml' -Endpoint 'Fortinet / Network / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-Network-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateNetworkDashboardHtml -DashboardData $script:FortiGateDashboards['Network'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['Network'] = $p
+        }
+
+        # ===== Firewall =====
+        Write-Host "    -- Firewall --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateFirewallPolicies' -Endpoint 'Fortinet / Firewall / policy' -Test {
+            Get-FortiGateFirewallPolicies -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateAddresses' -Endpoint 'Fortinet / Firewall / address' -Test {
+            Get-FortiGateAddresses -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateAddressGroups' -Endpoint 'Fortinet / Firewall / addrgrp' -Test {
+            Get-FortiGateAddressGroups -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateServices' -Endpoint 'Fortinet / Firewall / service/custom' -Test {
+            Get-FortiGateServices -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateServiceGroups' -Endpoint 'Fortinet / Firewall / service/group' -Test {
+            Get-FortiGateServiceGroups -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSchedules' -Endpoint 'Fortinet / Firewall / schedule' -Test {
+            Get-FortiGateSchedules -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateIPPools' -Endpoint 'Fortinet / Firewall / ippool' -Test {
+            Get-FortiGateIPPools -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateVIPs' -Endpoint 'Fortinet / Firewall / vip' -Test {
+            Get-FortiGateVIPs -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateShapingPolicies' -Endpoint 'Fortinet / Firewall / shaping-policy' -Test {
+            Get-FortiGateShapingPolicies -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateFirewallDashboard' -Endpoint 'Fortinet / Firewall / Dashboard' -Test {
+            $script:FortiGateDashboards['Firewall'] = Get-FortiGateFirewallDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['Firewall']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateFirewallDashboardHtml' -Endpoint 'Fortinet / Firewall / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-Firewall-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateFirewallDashboardHtml -DashboardData $script:FortiGateDashboards['Firewall'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['Firewall'] = $p
+        }
+
+        # ===== VPN =====
+        Write-Host "    -- VPN --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateIPSecTunnels' -Endpoint 'Fortinet / VPN / ipsec' -Test {
+            Get-FortiGateIPSecTunnels -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateIPSecPhase1' -Endpoint 'Fortinet / VPN / phase1-interface' -Test {
+            Get-FortiGateIPSecPhase1 -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateIPSecPhase2' -Endpoint 'Fortinet / VPN / phase2-interface' -Test {
+            Get-FortiGateIPSecPhase2 -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSSLVPNSessions' -Endpoint 'Fortinet / VPN / ssl' -Test {
+            Get-FortiGateSSLVPNSessions -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSSLVPNSettings' -Endpoint 'Fortinet / VPN / ssl/settings' -Test {
+            Get-FortiGateSSLVPNSettings -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateVPNDashboard' -Endpoint 'Fortinet / VPN / Dashboard' -Test {
+            $script:FortiGateDashboards['VPN'] = Get-FortiGateVPNDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['VPN']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateVPNDashboardHtml' -Endpoint 'Fortinet / VPN / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-VPN-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateVPNDashboardHtml -DashboardData $script:FortiGateDashboards['VPN'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['VPN'] = $p
+        }
+
+        # ===== SD-WAN =====
+        Write-Host "    -- SD-WAN --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateSDWANMembers' -Endpoint 'Fortinet / SDWAN / members' -Test {
+            Get-FortiGateSDWANMembers -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSDWANHealthCheck' -Endpoint 'Fortinet / SDWAN / health-check' -Test {
+            Get-FortiGateSDWANHealthCheck -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSDWANConfig' -Endpoint 'Fortinet / SDWAN / cmdb members' -Test {
+            Get-FortiGateSDWANConfig -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSDWANHealthCheckConfig' -Endpoint 'Fortinet / SDWAN / cmdb health-check' -Test {
+            Get-FortiGateSDWANHealthCheckConfig -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSDWANRules' -Endpoint 'Fortinet / SDWAN / service' -Test {
+            Get-FortiGateSDWANRules -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSDWANZones' -Endpoint 'Fortinet / SDWAN / zone' -Test {
+            Get-FortiGateSDWANZones -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSDWANDashboard' -Endpoint 'Fortinet / SDWAN / Dashboard' -Test {
+            $script:FortiGateDashboards['SDWAN'] = Get-FortiGateSDWANDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['SDWAN']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateSDWANDashboardHtml' -Endpoint 'Fortinet / SDWAN / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-SDWAN-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateSDWANDashboardHtml -DashboardData $script:FortiGateDashboards['SDWAN'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['SDWAN'] = $p
+        }
+
+        # ===== Security Profiles =====
+        Write-Host "    -- Security Profiles --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateAntivirusProfiles' -Endpoint 'Fortinet / Security / antivirus' -Test {
+            Get-FortiGateAntivirusProfiles -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateIPSSensors' -Endpoint 'Fortinet / Security / ips' -Test {
+            Get-FortiGateIPSSensors -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateWebFilterProfiles' -Endpoint 'Fortinet / Security / webfilter' -Test {
+            Get-FortiGateWebFilterProfiles -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateAppControlProfiles' -Endpoint 'Fortinet / Security / application' -Test {
+            Get-FortiGateAppControlProfiles -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateDLPSensors' -Endpoint 'Fortinet / Security / dlp' -Test {
+            Get-FortiGateDLPSensors -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateDNSFilterProfiles' -Endpoint 'Fortinet / Security / dnsfilter' -Test {
+            Get-FortiGateDNSFilterProfiles -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSSLSSHProfiles' -Endpoint 'Fortinet / Security / ssl-ssh-profile' -Test {
+            Get-FortiGateSSLSSHProfiles -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSecurityDashboard' -Endpoint 'Fortinet / Security / Dashboard' -Test {
+            $script:FortiGateDashboards['Security'] = Get-FortiGateSecurityDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['Security']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateSecurityDashboardHtml' -Endpoint 'Fortinet / Security / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-Security-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateSecurityDashboardHtml -DashboardData $script:FortiGateDashboards['Security'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['Security'] = $p
+        }
+
+        # ===== User & Auth =====
+        Write-Host "    -- User & Auth --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateLocalUsers' -Endpoint 'Fortinet / UserAuth / user/local' -Test {
+            Get-FortiGateLocalUsers -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateUserGroups' -Endpoint 'Fortinet / UserAuth / user/group' -Test {
+            Get-FortiGateUserGroups -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateLDAPServers' -Endpoint 'Fortinet / UserAuth / user/ldap' -Test {
+            Get-FortiGateLDAPServers -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateRADIUSServers' -Endpoint 'Fortinet / UserAuth / user/radius' -Test {
+            Get-FortiGateRADIUSServers -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateActiveAuthUsers' -Endpoint 'Fortinet / UserAuth / user/firewall' -Test {
+            Get-FortiGateActiveAuthUsers -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateFortiTokens' -Endpoint 'Fortinet / UserAuth / user/fortitoken' -Test {
+            Get-FortiGateFortiTokens -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSAMLSP' -Endpoint 'Fortinet / UserAuth / user/saml' -Test {
+            Get-FortiGateSAMLSP -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateUserAuthDashboard' -Endpoint 'Fortinet / UserAuth / Dashboard' -Test {
+            $script:FortiGateDashboards['UserAuth'] = Get-FortiGateUserAuthDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['UserAuth']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateUserAuthDashboardHtml' -Endpoint 'Fortinet / UserAuth / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-UserAuth-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateUserAuthDashboardHtml -DashboardData $script:FortiGateDashboards['UserAuth'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['UserAuth'] = $p
+        }
+
+        # ===== Wireless =====
+        Write-Host "    -- Wireless --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateManagedAPs' -Endpoint 'Fortinet / Wireless / managed_ap' -Test {
+            Get-FortiGateManagedAPs -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateWiFiClients' -Endpoint 'Fortinet / Wireless / client' -Test {
+            Get-FortiGateWiFiClients -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateRogueAPs' -Endpoint 'Fortinet / Wireless / rogue_ap' -Test {
+            Get-FortiGateRogueAPs -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSSIDs' -Endpoint 'Fortinet / Wireless / vap' -Test {
+            Get-FortiGateSSIDs -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateWTPProfiles' -Endpoint 'Fortinet / Wireless / wtp-profile' -Test {
+            Get-FortiGateWTPProfiles -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateWirelessDashboard' -Endpoint 'Fortinet / Wireless / Dashboard' -Test {
+            $script:FortiGateDashboards['Wireless'] = Get-FortiGateWirelessDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['Wireless']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateWirelessDashboardHtml' -Endpoint 'Fortinet / Wireless / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-Wireless-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateWirelessDashboardHtml -DashboardData $script:FortiGateDashboards['Wireless'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['Wireless'] = $p
+        }
+
+        # ===== Switch Controller =====
+        Write-Host "    -- Switch --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateManagedSwitches' -Endpoint 'Fortinet / Switch / managed-switch' -Test {
+            Get-FortiGateManagedSwitches -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSwitchPorts' -Endpoint 'Fortinet / Switch / port-stats' -Test {
+            Get-FortiGateSwitchPorts -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSwitchConfig' -Endpoint 'Fortinet / Switch / cmdb managed-switch' -Test {
+            Get-FortiGateSwitchConfig -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSwitchVLANs' -Endpoint 'Fortinet / Switch / vlan' -Test {
+            Get-FortiGateSwitchVLANs -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSwitchLLDP' -Endpoint 'Fortinet / Switch / lldp-profile' -Test {
+            Get-FortiGateSwitchLLDP -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSwitchDashboard' -Endpoint 'Fortinet / Switch / Dashboard' -Test {
+            $script:FortiGateDashboards['Switch'] = Get-FortiGateSwitchDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['Switch']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateSwitchDashboardHtml' -Endpoint 'Fortinet / Switch / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-Switch-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateSwitchDashboardHtml -DashboardData $script:FortiGateDashboards['Switch'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['Switch'] = $p
+        }
+
+        # ===== Endpoint Security =====
+        Write-Host "    -- Endpoint --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateEMSEndpoints' -Endpoint 'Fortinet / Endpoint / ems/status' -Test {
+            Get-FortiGateEMSEndpoints -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateEMSConfig' -Endpoint 'Fortinet / Endpoint / fctems' -Test {
+            Get-FortiGateEMSConfig -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateSecurityRating' -Endpoint 'Fortinet / Endpoint / security-rating' -Test {
+            Get-FortiGateSecurityRating -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateEndpointProfiles' -Endpoint 'Fortinet / Endpoint / profile' -Test {
+            Get-FortiGateEndpointProfiles -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateEndpointDashboard' -Endpoint 'Fortinet / Endpoint / Dashboard' -Test {
+            $script:FortiGateDashboards['Endpoint'] = Get-FortiGateEndpointDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['Endpoint']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateEndpointDashboardHtml' -Endpoint 'Fortinet / Endpoint / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-Endpoint-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateEndpointDashboardHtml -DashboardData $script:FortiGateDashboards['Endpoint'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['Endpoint'] = $p
+        }
+
+        # ===== Log & Report =====
+        Write-Host "    -- Log --" -ForegroundColor DarkCyan
+        Invoke-Test -Cmdlet 'Get-FortiGateTrafficLogs' -Endpoint 'Fortinet / Log / traffic' -Test {
+            Get-FortiGateTrafficLogs -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateEventLogs' -Endpoint 'Fortinet / Log / event' -Test {
+            Get-FortiGateEventLogs -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateUTMLogs' -Endpoint 'Fortinet / Log / utm' -Test {
+            Get-FortiGateUTMLogs -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateLogStats' -Endpoint 'Fortinet / Log / stats' -Test {
+            Get-FortiGateLogStats -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateFortiGuardStatus' -Endpoint 'Fortinet / Log / fortiguard' -Test {
+            Get-FortiGateFortiGuardStatus -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateAlertMessages' -Endpoint 'Fortinet / Log / alert-email' -Test {
+            Get-FortiGateAlertMessages -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-FortiGateLogDashboard' -Endpoint 'Fortinet / Log / Dashboard' -Test {
+            $script:FortiGateDashboards['Log'] = Get-FortiGateLogDashboard -ErrorAction Stop
+            Assert-NotNull $script:FortiGateDashboards['Log']
+        }
+        Invoke-Test -Cmdlet 'Export-FortiGateLogDashboardHtml' -Endpoint 'Fortinet / Log / Export' -Test {
+            $p = Join-Path $outDir "FortiGate-Log-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-FortiGateLogDashboardHtml -DashboardData $script:FortiGateDashboards['Log'] -OutputPath $p -ErrorAction Stop
+            if (-not (Test-Path $p)) { throw "File not created" }
+            $script:FortinetHtmlOutPaths['Log'] = $p
+        }
+
+        # ===== FortiManager (optional) =====
+        if ($script:TestFortiManager) {
+            Write-Host "    -- FortiManager --" -ForegroundColor DarkCyan
+            Invoke-Test -Cmdlet 'Connect-FortiManager' -Endpoint 'Fortinet / FMG / Auth' -Test {
+                Connect-FortiManager -Server $script:FMGServer -Credential $script:FMGCred -IgnoreSSLErrors -ErrorAction Stop
+            }
+            $fmgAuth = ($script:TestResults | Select-Object -Last 1).Status -eq 'Pass'
+            if ($fmgAuth) {
+                Invoke-Test -Cmdlet 'Get-FortiManagerSystemStatus' -Endpoint 'Fortinet / FMG / sys/status' -Test {
+                    $r = Get-FortiManagerSystemStatus -ErrorAction Stop; Assert-NotNull $r
+                }
+                Invoke-Test -Cmdlet 'Get-FortiManagerADOMs' -Endpoint 'Fortinet / FMG / adom' -Test {
+                    Get-FortiManagerADOMs -ErrorAction Stop | Out-Null
+                }
+                Invoke-Test -Cmdlet 'Get-FortiManagerDevices' -Endpoint 'Fortinet / FMG / device' -Test {
+                    Get-FortiManagerDevices -ErrorAction Stop | Out-Null
+                }
+                Invoke-Test -Cmdlet 'Get-FortiManagerPolicyPackages' -Endpoint 'Fortinet / FMG / pkg' -Test {
+                    Get-FortiManagerPolicyPackages -ErrorAction Stop | Out-Null
+                }
+                Invoke-Test -Cmdlet 'Get-FortiManagerDashboard' -Endpoint 'Fortinet / FMG / Dashboard' -Test {
+                    $script:FortiGateDashboards['FMG'] = Get-FortiManagerDashboard -ErrorAction Stop
+                    Assert-NotNull $script:FortiGateDashboards['FMG']
+                }
+                Invoke-Test -Cmdlet 'Export-FortiManagerDashboardHtml' -Endpoint 'Fortinet / FMG / Export' -Test {
+                    $p = Join-Path $outDir "FortiManager-$(Get-Date -Format 'yyyy-MM-dd').html"
+                    Export-FortiManagerDashboardHtml -DashboardData $script:FortiGateDashboards['FMG'] -OutputPath $p -ErrorAction Stop
+                    if (-not (Test-Path $p)) { throw "File not created" }
+                    $script:FortinetHtmlOutPaths['FMG'] = $p
+                }
+            } else {
+                foreach ($c in @('Get-FortiManagerSystemStatus','Get-FortiManagerADOMs','Get-FortiManagerDevices',
+                                 'Get-FortiManagerPolicyPackages','Get-FortiManagerDashboard','Export-FortiManagerDashboardHtml')) {
+                    Record-Test -Cmdlet $c -Endpoint 'Fortinet / FMG' -Status 'Skipped' -Detail 'FMG auth failed'
+                }
+            }
+        } else {
+            foreach ($c in @('Connect-FortiManager','Get-FortiManagerSystemStatus','Get-FortiManagerADOMs',
+                             'Get-FortiManagerDevices','Get-FortiManagerPolicyPackages',
+                             'Get-FortiManagerDashboard','Export-FortiManagerDashboardHtml')) {
+                Record-Test -Cmdlet $c -Endpoint 'Fortinet / FMG' -Status 'Skipped' -Detail 'User chose not to test FortiManager'
+            }
+        }
+    }
+}
+#endregion
+
+###############################################################################
 #region -- Cleanup ------------------------------------------------------------
 ###############################################################################
 $currentSection++
 Write-Host "`n[$currentSection/$sectionCount] Cleaning up and disconnecting ..." -ForegroundColor Cyan
 
 if ($script:AWSAuthMethod -eq 'Keys') {
-    Invoke-Test -Cmdlet 'AWS Session Cleanup' -Endpoint 'AWS / Auth / Clear-AWSCredential' -Test {
-        Clear-AWSCredential -StoredCredentials 'WhatsUpGoldPS_Session' -ErrorAction SilentlyContinue
+    Invoke-Test -Cmdlet 'AWS Session Cleanup' -Endpoint 'AWS / Auth / Remove-AWSCredentialProfile' -Test {
+        Remove-AWSCredentialProfile -ProfileName 'WhatsUpGoldPS_Session' -Force -ErrorAction SilentlyContinue
     }
 } elseif ($script:AWSAuthMethod -eq 'Profile') {
     Record-Test -Cmdlet 'AWS Session Cleanup' -Endpoint 'AWS / Auth / Clear-AWSCredential' -Status 'Pass' -Detail 'Profile auth - no stored creds to clear'
@@ -1041,10 +1595,22 @@ if ($script:HyperVSession) {
     }
 }
 
+if ($TestFortinet -and (Get-Command 'Disconnect-FortiGate' -ErrorAction SilentlyContinue)) {
+    Invoke-Test -Cmdlet 'Disconnect-FortiGate' -Endpoint 'Fortinet / Auth / Disconnect' -Test {
+        Disconnect-FortiGate -ErrorAction SilentlyContinue
+    }
+}
+if ($script:TestFortiManager -and (Get-Command 'Disconnect-FortiManager' -ErrorAction SilentlyContinue)) {
+    Invoke-Test -Cmdlet 'Disconnect-FortiManager' -Endpoint 'Fortinet / FMG / Disconnect' -Test {
+        Disconnect-FortiManager -ErrorAction SilentlyContinue
+    }
+}
+
 $script:AWSAccessKey = $null; $script:AWSSecretKeySS = $null; $script:AWSProfileName = $null
 $script:AzureAppId = $null; $script:AzureClientSecretSS = $null
 $script:ProxmoxPassSS = $null; $script:NutanixHeaders = $null; $script:NutanixCred = $null
 $script:HyperVCred = $null; $script:GCPKeyFilePath = $null
+$script:FGTokenSS = $null; $script:FGCred = $null; $script:FMGCred = $null
 #endregion
 
 ###############################################################################
@@ -1053,6 +1619,11 @@ $script:HyperVCred = $null; $script:GCPKeyFilePath = $null
 Write-Host "`n============================================================" -ForegroundColor Cyan
 Write-Host " TEST RESULTS SUMMARY" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
+
+# Filter results for display
+$displayResults = if ($IncludeSkipped) { $script:TestResults } else {
+    @($script:TestResults | Where-Object Status -ne 'Skipped')
+}
 
 $passed  = ($script:TestResults | Where-Object Status -eq 'Pass').Count
 $failed  = ($script:TestResults | Where-Object Status -eq 'Fail').Count
@@ -1073,12 +1644,15 @@ if ($failed -gt 0) {
 }
 
 Write-Host "`n============================================================" -ForegroundColor Cyan
-$script:TestResults | Format-Table -AutoSize -Property Cmdlet, Endpoint, Status, Detail
+if (-not $IncludeSkipped -and $skipped -gt 0) {
+    Write-Host "  ($skipped skipped tests hidden - use -IncludeSkipped to show)" -ForegroundColor DarkGray
+}
+$displayResults | Format-Table -AutoSize -Property Cmdlet, Endpoint, Status, Detail
 
 $reportTemplatePath = Join-Path $helpersRoot 'reports\Bootstrap-Table-Sample.html'
 $script:TestResultsHtmlPath = Join-Path $outDir "Get-HelperTestResult-$(Get-Date -Format 'yyyy-MM-dd').html"
 
-$htmlGenerated = Export-TestResultsHtml -TestResults $script:TestResults `
+$htmlGenerated = Export-TestResultsHtml -TestResults $displayResults `
     -OutputPath $script:TestResultsHtmlPath -TemplatePath $reportTemplatePath
 
 $reportFiles = @()
@@ -1088,6 +1662,11 @@ foreach ($p in @($script:AWSHtmlOutPath, $script:AzureHtmlOutPath, $script:GCPHt
                  $script:NutanixHtmlOutPath)) {
     if ($p -and (Test-Path $p)) { $reportFiles += $p }
 }
+if ($script:FortinetHtmlOutPaths) {
+    foreach ($p in $script:FortinetHtmlOutPaths.Values) {
+        if ($p -and (Test-Path $p)) { $reportFiles += $p }
+    }
+}
 
 if ($reportFiles.Count -gt 0) {
     Write-Host "`n  HTML Reports Generated:" -ForegroundColor Cyan
@@ -1095,7 +1674,7 @@ if ($reportFiles.Count -gt 0) {
     Write-Host ""
 }
 
-$script:TestResults
+$displayResults
 #endregion
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor

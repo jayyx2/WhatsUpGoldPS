@@ -4,9 +4,81 @@
         $PSDefaultParameterValues["Invoke-WebRequest:SkipCertificateCheck"] = $true
     }
     else {
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+        # Compiled callback — avoids scriptblock delegate marshaling failures
+        # under rapid sequential requests in PS 5.1
+        if (-not ([System.Management.Automation.PSTypeName]'SSLValidator').Type) {
+            Add-Type -TypeDefinition @"
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class SSLValidator {
+    private static bool OnValidateCertificate(
+        object sender,
+        X509Certificate certificate,
+        X509Chain chain,
+        SslPolicyErrors sslPolicyErrors) {
+        return true;
+    }
+    public static void OverrideValidation() {
+        ServicePointManager.ServerCertificateValidationCallback =
+            new RemoteCertificateValidationCallback(OnValidateCertificate);
+        ServicePointManager.Expect100Continue = false;
+        ServicePointManager.DefaultConnectionLimit = 64;
+        ServicePointManager.SecurityProtocol =
+            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+    }
+}
+"@
+        }
+        [SSLValidator]::OverrideValidation()
     }
     Write-Warning "Ignoring SSL certificate validation errors. Use this option with caution."
+}
+
+function Invoke-ProxmoxAPI {
+    param(
+        [string]$Uri,
+        [string]$Cookie,
+        [string]$Method = 'Get',
+        [hashtable]$Body
+    )
+    $params = @{ Uri = $Uri; Method = $Method }
+    if ($Body) { $params.Body = $Body }
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        $params.Headers = @{ Cookie = $Cookie }
+    } else {
+        # PS 5.1: Cookie is a restricted header; use a cached WebSession
+        $parsed = [System.Uri]$Uri
+        $hostKey = $parsed.Host
+        if (-not $script:_PmxSessions) { $script:_PmxSessions = @{} }
+        if (-not $script:_PmxSessions[$hostKey] -or $script:_PmxSessionCookie[$hostKey] -ne $Cookie) {
+            $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+            $parts = $Cookie -split '=', 2
+            $session.Cookies.Add((New-Object System.Net.Cookie($parts[0], $parts[1], '/', $hostKey)))
+            if (-not $script:_PmxSessionCookie) { $script:_PmxSessionCookie = @{} }
+            $script:_PmxSessions[$hostKey] = $session
+            $script:_PmxSessionCookie[$hostKey] = $Cookie
+        }
+        $params.WebSession = $script:_PmxSessions[$hostKey]
+    }
+    $maxRetries = if ($PSVersionTable.PSEdition -eq 'Core') { 0 } else { 2 }
+    for ($attempt = 0; $attempt -le $maxRetries; $attempt++) {
+        try {
+            return (Invoke-RestMethod @params)
+        } catch {
+            $isClosed = $_.Exception.Message -match 'underlying connection was closed|unexpected error occurred on a send'
+            if ($isClosed -and $attempt -lt $maxRetries) {
+                # Reset the connection pool for this endpoint and retry
+                try {
+                    $sp = [System.Net.ServicePointManager]::FindServicePoint([System.Uri]$Uri)
+                    $sp.CloseConnectionGroup('')
+                } catch {}
+                Start-Sleep -Milliseconds (300 * ($attempt + 1))
+            } else {
+                throw
+            }
+        }
+    }
 }
 
 function Connect-ProxmoxServer {
@@ -67,7 +139,7 @@ function Get-ProxmoxNodes {
         [string]$Cookie
     )
 
-    (Invoke-RestMethod -Uri "$Server/api2/json/nodes" -Headers @{ Cookie = $Cookie }).data
+    (Invoke-ProxmoxAPI -Uri "$Server/api2/json/nodes" -Cookie $Cookie).data
 }
 
 function Get-ProxmoxVMs {
@@ -93,7 +165,7 @@ function Get-ProxmoxVMs {
         [string]$Node
     )
 
-    (Invoke-RestMethod -Uri "$Server/api2/json/nodes/$Node/qemu" -Headers @{ Cookie = $Cookie }).data
+    (Invoke-ProxmoxAPI -Uri "$Server/api2/json/nodes/$Node/qemu" -Cookie $Cookie).data
 }
 
 function Get-ProxmoxNodeDetail {
@@ -122,11 +194,11 @@ function Get-ProxmoxNodeDetail {
         [string]$Node
     )
 
-    $status = (Invoke-RestMethod -Uri "$Server/api2/json/nodes/$Node/status" -Headers @{ Cookie = $Cookie }).data
+    $status = (Invoke-ProxmoxAPI -Uri "$Server/api2/json/nodes/$Node/status" -Cookie $Cookie).data
 
     # Get the node's IP from its network interfaces
     try {
-        $network = (Invoke-RestMethod -Uri "$Server/api2/json/nodes/$Node/network" -Headers @{ Cookie = $Cookie }).data
+        $network = (Invoke-ProxmoxAPI -Uri "$Server/api2/json/nodes/$Node/network" -Cookie $Cookie).data
         $ip = ($network | Where-Object {
             $_.address -and $_.type -eq 'bridge' -or $_.type -eq 'eth'
         } | Select-Object -First 1).address
@@ -142,7 +214,7 @@ function Get-ProxmoxNodeDetail {
 
     # Get Proxmox version info
     try {
-        $version = (Invoke-RestMethod -Uri "$Server/api2/json/nodes/$Node/version" -Headers @{ Cookie = $Cookie }).data
+        $version = (Invoke-ProxmoxAPI -Uri "$Server/api2/json/nodes/$Node/version" -Cookie $Cookie).data
     }
     catch {
         $version = $null
@@ -206,13 +278,13 @@ function Get-ProxmoxVMDetail {
         [int]$VMID
     )
 
-    $config = Invoke-RestMethod -Uri "$Server/api2/json/nodes/$Node/qemu/$VMID/config" -Headers @{ Cookie = $Cookie }
-    $status = Invoke-RestMethod -Uri "$Server/api2/json/nodes/$Node/qemu/$VMID/status/current" -Headers @{ Cookie = $Cookie }
+    $config = Invoke-ProxmoxAPI -Uri "$Server/api2/json/nodes/$Node/qemu/$VMID/config" -Cookie $Cookie
+    $status = Invoke-ProxmoxAPI -Uri "$Server/api2/json/nodes/$Node/qemu/$VMID/status/current" -Cookie $Cookie
 
     # Try to get IP via guest agent
     try {
-        $netInfo = Invoke-RestMethod -Uri "$Server/api2/json/nodes/$Node/qemu/$VMID/agent/network-get-interfaces" `
-            -Headers @{ Cookie = $Cookie }
+        $netInfo = Invoke-ProxmoxAPI -Uri "$Server/api2/json/nodes/$Node/qemu/$VMID/agent/network-get-interfaces" `
+            -Cookie $Cookie
 
         $ip = $netInfo.data.result |
             ForEach-Object {

@@ -4,9 +4,34 @@
         $PSDefaultParameterValues["Invoke-WebRequest:SkipCertificateCheck"] = $true
     }
     else {
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+        # Compiled callback — avoids scriptblock delegate marshaling failures
+        # under rapid sequential requests in PS 5.1
+        if (-not ([System.Management.Automation.PSTypeName]'SSLValidator').Type) {
+            Add-Type -TypeDefinition @"
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class SSLValidator {
+    private static bool OnValidateCertificate(
+        object sender,
+        X509Certificate certificate,
+        X509Chain chain,
+        SslPolicyErrors sslPolicyErrors) {
+        return true;
     }
-    Write-Warning "Ignoring SSL certificate validation errors. Use this option with caution."
+    public static void OverrideValidation() {
+        ServicePointManager.ServerCertificateValidationCallback =
+            new RemoteCertificateValidationCallback(OnValidateCertificate);
+        ServicePointManager.Expect100Continue = false;
+        ServicePointManager.DefaultConnectionLimit = 64;
+        ServicePointManager.SecurityProtocol =
+            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+    }
+}
+"@
+        }
+        [SSLValidator]::OverrideValidation()
+    }
 }
 
 function Connect-NutanixCluster {

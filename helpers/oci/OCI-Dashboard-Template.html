@@ -110,9 +110,13 @@
             </button>
             <ul class="dropdown-menu dropdown-menu-end export-menu">
                 <li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>
-                <li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>
-                <li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>
                 <li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>
+                <li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>
+                <li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>
+                <li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>
+                <li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>
+                <li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>
+                <li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>
             </ul>
         </div>
 
@@ -163,13 +167,17 @@
     function exportJson(rows) { downloadBlob(JSON.stringify(rows,null,2),'oci_dashboard.json','application/json;charset=utf-8'); }
     function exportTxt(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var c=rows.map(function(r,i){return['--- Row '+(i+1)+' ---'].concat(h.map(function(k){return k+': '+(r[k]==null?'':r[k]);})).join('\r\n');}).join('\r\n\r\n'); downloadBlob(c,'oci_dashboard.txt','text/plain;charset=utf-8'); }
     function exportXlsx(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'OCI'); XLSX.writeFile(wb,'oci_dashboard.xlsx'); }
+    function exportXls(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'OCI'); XLSX.writeFile(wb,'oci_dashboard.xls.xlsx'); }
+    function exportTsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join('\t')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join('\t'));}); downloadBlob(l.join('\r\n'),'oci_dashboard.tsv','text/tab-separated-values;charset=utf-8'); }
+    function exportSql(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var s=rows.map(function(r){var v=h.map(function(k){return"'"+String(r[k]==null?'':r[k]).replace(/'/g,"''")+"'";});return'INSERT INTO dashboard_export ('+h.join(', ')+') VALUES ('+v.join(', ')+');';}).join('\r\n'); downloadBlob(s,'oci_dashboard.sql','text/plain;charset=utf-8'); }
+    function exportPng() { html2canvas(document.querySelector('#table')).then(function(c){c.toBlob(function(b){saveAs(b,'oci_dashboard.png');}); }); }
 
     $(function () {
         $table.bootstrapTable({ replaceThisHere });
         computeSummary($table.bootstrapTable('getData'));
         $('.dropdown-item[data-type]').on('click', function(e) {
             e.preventDefault(); var t=$(this).data('type'), r=getExportRows();
-            switch(t) { case 'csv':exportCsv(r);break; case 'xlsx':exportXlsx(r);break; case 'json':exportJson(r);break; case 'txt':exportTxt(r);break; }
+            switch(t) { case 'csv':exportCsv(r);break; case 'txt':exportTxt(r);break; case 'xlsx':exportXlsx(r);break; case 'xls':exportXls(r);break; case 'json':exportJson(r);break; case 'png':exportPng();break; case 'sql':exportSql(r);break; case 'tsv':exportTsv(r);break; }
         });
     });
     </script>

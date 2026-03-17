@@ -108,18 +108,10 @@
     }
 
     function getExportRows() {
-        const rows = $table.bootstrapTable('getData', {
+        return $table.bootstrapTable('getData', {
             useCurrentPage: false,
             includeHiddenRows: true
         });
-
-        return rows.map(row => ({
-            id: row.id ?? '',
-            name: row.name ?? '',
-            networkAddress: row.networkAddress ?? '',
-            hostName: row.hostName ?? '',
-            downActiveMonitors: row.downActiveMonitors ?? ''
-        }));
     }
 
     function downloadBlob(content, fileName, mimeType) {
@@ -156,17 +148,12 @@
             return;
         }
 
+        const headers = Object.keys(rows[0]);
         const content = rows.map((row, index) => {
-            return [
-                `Row ${index + 1}`,
-                `id: ${row.id}`,
-                `name: ${row.name}`,
-                `networkAddress: ${row.networkAddress}`,
-                `hostName: ${row.hostName}`,
-                `downActiveMonitors: ${row.downActiveMonitors}`,
-                ''
-            ].join('\r\n');
-        }).join('\r\n');
+            return ['--- Row ' + (index + 1) + ' ---'].concat(
+                headers.map(h => h + ': ' + (row[h] == null ? '' : row[h]))
+            ).join('\r\n');
+        }).join('\r\n\r\n');
 
         downloadBlob(content, 'custom_report_export.txt', 'text/plain;charset=utf-8');
     }

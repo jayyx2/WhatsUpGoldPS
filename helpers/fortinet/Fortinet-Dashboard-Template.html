@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fortinet Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+          integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/bootstrap-table.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.min.css" crossorigin="anonymous">
+    <style>
+        body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        .dashboard-header { background: linear-gradient(135deg, #16213e, #0f3460); padding: 20px 30px; border-radius: 10px; margin: 20px 0; }
+        .dashboard-header h1 { color: #e94560; margin: 0; font-size: 1.8rem; }
+        .dashboard-header small { color: #a0a0c0; }
+        .card { background: #16213e; border: 1px solid #0f3460; border-radius: 8px; margin-bottom: 20px; }
+        .card-header { background: #0f3460; color: #e94560; font-weight: 600; border-radius: 8px 8px 0 0 !important; cursor: pointer; }
+        .card-header:hover { background: #133a6e; }
+        .table { color: #e0e0e0; }
+        .table thead th { background: #0f3460; color: #e94560; border-bottom: 2px solid #e94560; position: sticky; top: 0; }
+        .table-striped tbody tr:nth-of-type(odd) { background-color: rgba(15, 52, 96, 0.3); }
+        .table-hover tbody tr:hover { background-color: rgba(233, 69, 96, 0.1); }
+        .badge-up { background-color: #28a745; }
+        .badge-down { background-color: #dc3545; }
+        .badge-warn { background-color: #ffc107; color: #333; }
+        .stat-card { text-align: center; padding: 10px; }
+        .stat-card .stat-value { font-size: 1.6rem; font-weight: 700; color: #e94560; }
+        .stat-card .stat-label { font-size: 0.8rem; color: #a0a0c0; }
+        .fixed-table-toolbar .search input { background: #16213e; color: #e0e0e0; border: 1px solid #0f3460; }
+        .fixed-table-pagination .page-link { background: #16213e; color: #e0e0e0; border-color: #0f3460; }
+        .fixed-table-pagination .active .page-link { background: #e94560; border-color: #e94560; }
+        .section-empty { color: #666; font-style: italic; padding: 20px; text-align: center; }
+        .export-menu { margin-top: 3rem; margin-right: 15px; }
+        button#exportBtn { margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid px-4" id="app"></div>
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+            integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/bootstrap-table.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js" crossorigin="anonymous"></script>
+    <script id="dashboard-config" type="application/json">DASHBOARD_CONFIG_JSON</script>
+    <script>
+        var cfg = JSON.parse(document.getElementById('dashboard-config').textContent);
+        function esc(s) { if (s == null) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        function renderBadge(val) {
+            if (val == null) return '';
+            var v = String(val).toLowerCase();
+            if (v === 'up' || v === 'connected' || v === 'enable' || v === 'pass' || v === 'in-sync' || v === 'authorized' || v === 'compliant')
+                return '<span class="badge badge-up">' + esc(val) + '</span>';
+            if (v === 'down' || v === 'disconnected' || v === 'disable' || v === 'fail' || v === 'out-of-sync' || v === 'non-compliant')
+                return '<span class="badge badge-down">' + esc(val) + '</span>';
+            return esc(val);
+        }
+        $(function() {
+            var $app = $('#app');
+            // Header
+            $app.append('<div class="dashboard-header d-flex justify-content-between align-items-center">' +
+                '<div><h1>' + esc(cfg.title) + '</h1><small>Generated: ' + esc(cfg.generated) + '</small></div>' +
+                '<div class="btn-group" role="group">' +
+                '<button id="exportBtn" type="button" class="btn btn-outline-light dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">' +
+                '<i class="bi bi-download"></i> Export</button>' +
+                '<ul class="dropdown-menu dropdown-menu-end">' +
+                '<li><a class="dropdown-item export-action" href="#" data-type="csv">CSV</a></li>' +
+                '<li><a class="dropdown-item export-action" href="#" data-type="txt">TXT</a></li>' +
+                '<li><a class="dropdown-item export-action" href="#" data-type="xlsx">XLSX</a></li>' +
+                '<li><a class="dropdown-item export-action" href="#" data-type="xls">XLS</a></li>' +
+                '<li><a class="dropdown-item export-action" href="#" data-type="json">JSON</a></li>' +
+                '<li><a class="dropdown-item export-action" href="#" data-type="png">PNG</a></li>' +
+                '<li><a class="dropdown-item export-action" href="#" data-type="sql">SQL</a></li>' +
+                '<li><a class="dropdown-item export-action" href="#" data-type="tsv">TSV</a></li>' +
+                '</ul></div></div>');
+            // Summary cards
+            if (cfg.summaryCards && cfg.summaryCards.length) {
+                var row = '<div class="card"><div class="card-body"><div class="row">';
+                var w = Math.max(1, Math.floor(12 / cfg.summaryCards.length));
+                cfg.summaryCards.forEach(function(c) {
+                    row += '<div class="col-md-' + w + ' stat-card"><div class="stat-label">' + esc(c.Label) +
+                           '</div><div class="stat-value" style="font-size:' + (String(c.Value).length > 15 ? '0.9' : '1.4') + 'rem">' + esc(c.Value) + '</div></div>';
+                });
+                row += '</div></div></div>';
+                $app.append(row);
+            }
+            // Tables
+            if (cfg.tables) {
+                cfg.tables.forEach(function(tbl, idx) {
+                    if (!tbl.Data || !tbl.Data.length) return;
+                    var id = 'tbl_' + idx;
+                    var card = '<div class="card"><div class="card-header" data-bs-toggle="collapse" data-bs-target="#collapse_' + idx + '">' +
+                               esc(tbl.Title) + ' <span class="badge bg-secondary ms-2">' + tbl.Data.length + '</span></div>' +
+                               '<div class="collapse show" id="collapse_' + idx + '"><div class="card-body">' +
+                               '<table id="' + id + '" class="table table-striped table-hover"></table>' +
+                               '</div></div></div>';
+                    $app.append(card);
+                    // Build columns — auto-detect status-like fields for badge rendering
+                    var statusFields = ['Link','Status','State','ConnectionState','SyncStatus','ComplianceStatus',
+                                        'OnlineStatus','PoeStatus','Action','NAT','LogTraffic'];
+                    var cols = tbl.Columns.map(function(c) {
+                        var col = { field: c.field, title: c.title || c.field, sortable: true };
+                        if (statusFields.indexOf(c.field) >= 0) {
+                            col.formatter = function(val) { return renderBadge(val); };
+                        }
+                        return col;
+                    });
+                    $('#' + id).bootstrapTable({ columns: cols, data: tbl.Data, search: true, pagination: true, pageSize: 25, pageList: [10,25,50,100,'All'] });
+                });
+            }
+            // Footer
+            $app.append('<div class="text-center py-3"><small class="text-muted">FortiGate REST API Dashboard &mdash; WhatsUpGoldPS Helpers</small></div>');
+
+            // Export functions
+            function getAllRows() {
+                var allRows = [];
+                if (!cfg.tables) return allRows;
+                cfg.tables.forEach(function(tbl, idx) {
+                    if (!tbl.Data || !tbl.Data.length) return;
+                    var id = 'tbl_' + idx;
+                    var rows = $('#' + id).bootstrapTable('getData', { useCurrentPage: false, includeHiddenRows: true });
+                    rows.forEach(function(r) {
+                        var row = { Section: tbl.Title };
+                        Object.keys(r).forEach(function(k) { row[k] = r[k]; });
+                        allRows.push(row);
+                    });
+                });
+                return allRows;
+            }
+            function downloadBlob(c, f, m) { saveAs(new Blob([c], { type: m }), f); }
+            function escapeCsvValue(v) { var s = String(v == null ? '' : v); return (s.indexOf('"') !== -1 || s.indexOf(',') !== -1 || s.indexOf('\n') !== -1) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+            function exportCsv(rows) { if (!rows.length) return; var h = Object.keys(rows[0]), l = [h.join(',')]; rows.forEach(function(r) { l.push(h.map(function(k) { return escapeCsvValue(r[k]); }).join(',')); }); downloadBlob(l.join('\r\n'), 'fortinet_dashboard.csv', 'text/csv;charset=utf-8'); }
+            function exportJson(rows) { downloadBlob(JSON.stringify(rows, null, 2), 'fortinet_dashboard.json', 'application/json;charset=utf-8'); }
+            function exportTxt(rows) { if (!rows.length) return; var h = Object.keys(rows[0]); var c = rows.map(function(r, i) { return ['--- Row ' + (i + 1) + ' ---'].concat(h.map(function(k) { return k + ': ' + (r[k] == null ? '' : r[k]); })).join('\r\n'); }).join('\r\n\r\n'); downloadBlob(c, 'fortinet_dashboard.txt', 'text/plain;charset=utf-8'); }
+            function exportXlsx(rows) { if (!rows.length) return; var ws = XLSX.utils.json_to_sheet(rows), wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Fortinet'); XLSX.writeFile(wb, 'fortinet_dashboard.xlsx'); }
+            function exportXls(rows) { if (!rows.length) return; var ws = XLSX.utils.json_to_sheet(rows), wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Fortinet'); XLSX.writeFile(wb, 'fortinet_dashboard.xls.xlsx'); }
+            function exportTsv(rows) { if (!rows.length) return; var h = Object.keys(rows[0]), l = [h.join('\t')]; rows.forEach(function(r) { l.push(h.map(function(k) { return escapeCsvValue(r[k]); }).join('\t')); }); downloadBlob(l.join('\r\n'), 'fortinet_dashboard.tsv', 'text/tab-separated-values;charset=utf-8'); }
+            function exportSql(rows) { if (!rows.length) return; var h = Object.keys(rows[0]); var s = rows.map(function(r) { var v = h.map(function(k) { return "'" + String(r[k] == null ? '' : r[k]).replace(/'/g, "''") + "'"; }); return 'INSERT INTO dashboard_export (' + h.join(', ') + ') VALUES (' + v.join(', ') + ');'; }).join('\r\n'); downloadBlob(s, 'fortinet_dashboard.sql', 'text/plain;charset=utf-8'); }
+            function exportPng() { html2canvas(document.querySelector('#app')).then(function(c) { c.toBlob(function(b) { saveAs(b, 'fortinet_dashboard.png'); }); }); }
+
+            $(document).on('click', '.export-action', function(e) {
+                e.preventDefault();
+                var type = $(this).data('type');
+                var rows = getAllRows();
+                switch (type) {
+                    case 'csv': exportCsv(rows); break;
+                    case 'txt': exportTxt(rows); break;
+                    case 'xlsx': exportXlsx(rows); break;
+                    case 'xls': exportXls(rows); break;
+                    case 'json': exportJson(rows); break;
+                    case 'png': exportPng(); break;
+                    case 'sql': exportSql(rows); break;
+                    case 'tsv': exportTsv(rows); break;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

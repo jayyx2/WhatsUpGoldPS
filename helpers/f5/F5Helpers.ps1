@@ -11,6 +11,45 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
+# Initialize-SSLBypass — compiled C# callback for PS 5.1 cert bypass
+# ---------------------------------------------------------------------------
+function Initialize-SSLBypass {
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        $PSDefaultParameterValues["Invoke-RestMethod:SkipCertificateCheck"] = $true
+        $PSDefaultParameterValues["Invoke-WebRequest:SkipCertificateCheck"] = $true
+    }
+    else {
+        # Compiled callback — avoids scriptblock delegate marshaling failures
+        # under rapid sequential requests in PS 5.1
+        if (-not ([System.Management.Automation.PSTypeName]'SSLValidator').Type) {
+            Add-Type -TypeDefinition @"
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class SSLValidator {
+    private static bool OnValidateCertificate(
+        object sender,
+        X509Certificate certificate,
+        X509Chain chain,
+        SslPolicyErrors sslPolicyErrors) {
+        return true;
+    }
+    public static void OverrideValidation() {
+        ServicePointManager.ServerCertificateValidationCallback =
+            new RemoteCertificateValidationCallback(OnValidateCertificate);
+        ServicePointManager.Expect100Continue = false;
+        ServicePointManager.DefaultConnectionLimit = 64;
+        ServicePointManager.SecurityProtocol =
+            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+    }
+}
+"@
+        }
+        [SSLValidator]::OverrideValidation()
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Script-scoped state - keeps auth context between calls
 # ---------------------------------------------------------------------------
 $script:F5Session = @{
@@ -60,30 +99,8 @@ function Connect-F5Server {
     )
 
     if ($IgnoreSSLErrors) {
-        # PowerShell 7+
-        if ($PSVersionTable.PSVersion.Major -ge 7) {
-            $script:F5SkipCert = $true
-        }
-        else {
-            # Windows PowerShell 5.1
-            try {
-                Add-Type @"
-using System.Net;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
-public class TrustAllCerts {
-    public static void Ignore() {
-        ServicePointManager.ServerCertificateValidationCallback =
-            delegate { return true; };
-    }
-}
-"@
-                [TrustAllCerts]::Ignore()
-            }
-            catch {
-                # Type may already be loaded
-            }
-        }
+        Initialize-SSLBypass
+        $script:F5SkipCert = $true
     }
 
     $script:F5Session.BaseUri = "https://${F5Host}:${Port}"

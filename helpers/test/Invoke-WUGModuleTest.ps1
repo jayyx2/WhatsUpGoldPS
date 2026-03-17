@@ -347,8 +347,49 @@ Invoke-Test -Cmdlet 'Get-WUGMonitorTemplate (allTemplates)' -Endpoint 'GET /moni
 }
 
 Invoke-Test -Cmdlet 'Import-WUGMonitorTemplate (clone)' -Endpoint 'PATCH /monitors/-/config/template' -Test {
-    $templates = Get-WUGMonitorTemplate -AllMonitorTemplates -ErrorAction Stop
-    $json = $templates | ConvertTo-Json -Depth 20
+    $allTemplates = Get-WUGMonitorTemplate -AllMonitorTemplates -ErrorAction Stop
+    $suffix = "_test$(Get-Date -Format 'yyyyMMddHHmmss')"
+
+    # Build a minimal clone body with one monitor from each available type, renamed to avoid duplicates
+    $cloneBody = @{}
+
+    if ($allTemplates.activeMonitors) {
+        # Pick the first active monitor that has no sensitive-data error
+        $errorNames = @()
+        if ($allTemplates.errors) {
+            $errorNames = $allTemplates.errors | ForEach-Object {
+                if ($_ -match '^Monitor,\s*(.+?)\s+of type') { $Matches[1] }
+            }
+        }
+        $safeActive = $allTemplates.activeMonitors | Where-Object { $_.name -notin $errorNames } | Select-Object -First 1
+        if ($safeActive) {
+            $safeActive = $safeActive.PSObject.Copy()
+            $safeActive.name = "$($safeActive.name)$suffix"
+            $cloneBody['activeMonitors'] = @($safeActive)
+        }
+    }
+
+    if ($allTemplates.passiveMonitors) {
+        $safePassive = $allTemplates.passiveMonitors | Select-Object -First 1
+        if ($safePassive) {
+            $safePassive = $safePassive.PSObject.Copy()
+            $safePassive.name = "$($safePassive.name)$suffix"
+            $cloneBody['passiveMonitors'] = @($safePassive)
+        }
+    }
+
+    if ($allTemplates.performanceMonitors) {
+        $safePerf = $allTemplates.performanceMonitors | Select-Object -First 1
+        if ($safePerf) {
+            $safePerf = $safePerf.PSObject.Copy()
+            $safePerf.name = "$($safePerf.name)$suffix"
+            $cloneBody['performanceMonitors'] = @($safePerf)
+        }
+    }
+
+    if ($cloneBody.Keys.Count -eq 0) { throw "No monitor templates available for clone test" }
+
+    $json = $cloneBody | ConvertTo-Json -Depth 20
     Import-WUGMonitorTemplate -Body $json -Options clone -Confirm:$false -ErrorAction Stop | Out-Null
 }
 

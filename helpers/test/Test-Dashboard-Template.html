@@ -100,9 +100,13 @@
             </button>
             <ul class="dropdown-menu dropdown-menu-end export-menu">
                 <li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>
-                <li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>
-                <li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>
                 <li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>
+                <li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>
+                <li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>
+                <li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>
+                <li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>
+                <li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>
+                <li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>
             </ul>
         </div>
 
@@ -217,6 +221,42 @@
         XLSX.writeFile(wb, 'test_results_export.xlsx');
     }
 
+    function exportXls(rows) {
+        if (!rows.length) return;
+        var ws = XLSX.utils.json_to_sheet(rows);
+        var wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'TestResults');
+        XLSX.writeFile(wb, 'test_results_export.xls.xlsx');
+    }
+
+    function exportTsv(rows) {
+        if (!rows.length) return;
+        var headers = Object.keys(rows[0]);
+        var lines = [headers.join('\t')];
+        rows.forEach(function(row) {
+            lines.push(headers.map(function(h) { return escapeCsvValue(row[h]); }).join('\t'));
+        });
+        downloadBlob(lines.join('\r\n'), 'test_results_export.tsv', 'text/tab-separated-values;charset=utf-8');
+    }
+
+    function exportSql(rows) {
+        if (!rows.length) return;
+        var headers = Object.keys(rows[0]);
+        var sql = rows.map(function(row) {
+            var values = headers.map(function(h) {
+                return "'" + String(row[h] == null ? '' : row[h]).replace(/'/g, "''") + "'";
+            });
+            return 'INSERT INTO dashboard_export (' + headers.join(', ') + ') VALUES (' + values.join(', ') + ');';
+        }).join('\r\n');
+        downloadBlob(sql, 'test_results_export.sql', 'text/plain;charset=utf-8');
+    }
+
+    function exportPng() {
+        html2canvas(document.querySelector('#table')).then(function(canvas) {
+            canvas.toBlob(function(blob) { saveAs(blob, 'test_results_export.png'); });
+        });
+    }
+
     $(function () {
         $table.bootstrapTable({
             replaceThisHere
@@ -233,9 +273,13 @@
             var rows = getExportRows();
             switch (type) {
                 case 'csv':  exportCsv(rows); break;
-                case 'xlsx': exportXlsx(rows); break;
-                case 'json': exportJson(rows); break;
                 case 'txt':  exportTxt(rows); break;
+                case 'xlsx': exportXlsx(rows); break;
+                case 'xls':  exportXls(rows); break;
+                case 'json': exportJson(rows); break;
+                case 'png':  exportPng(); break;
+                case 'sql':  exportSql(rows); break;
+                case 'tsv':  exportTsv(rows); break;
             }
         });
     });

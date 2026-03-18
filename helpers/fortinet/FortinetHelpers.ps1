@@ -20,7 +20,7 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Initialize-SSLBypass — compiled C# callback for PS 5.1 cert bypass
+# Initialize-SSLBypass -- compiled C# callback for PS 5.1 cert bypass
 # ---------------------------------------------------------------------------
 function Initialize-SSLBypass {
     if ($PSVersionTable.PSEdition -eq 'Core') {
@@ -28,7 +28,7 @@ function Initialize-SSLBypass {
         $PSDefaultParameterValues["Invoke-WebRequest:SkipCertificateCheck"] = $true
     }
     else {
-        # Compiled callback — avoids scriptblock delegate marshaling failures
+        # Compiled callback -- avoids scriptblock delegate marshaling failures
         # under rapid sequential requests in PS 5.1
         if (-not ([System.Management.Automation.PSTypeName]'SSLValidator').Type) {
             Add-Type -TypeDefinition @"

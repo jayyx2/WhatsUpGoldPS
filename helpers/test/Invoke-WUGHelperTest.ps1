@@ -3,7 +3,7 @@
     End-to-end integration test harness for WhatsUpGoldPS cloud and infrastructure helpers.
 .DESCRIPTION
     Tests every function in the helpers directory (AWS, Azure, GCP, OCI, Proxmox,
-    Hyper-V, Nutanix, Fortinet) against live APIs. Prompts for credentials at runtime -
+    Hyper-V, Nutanix, Fortinet, VMware, Certificates, F5, Docker, Geolocation) against live APIs. Prompts for credentials at runtime -
     nothing is stored on disk. Produces a unified pass/fail/skip summary and
     interactive HTML reports.
 .PARAMETER TestAWS
@@ -20,6 +20,16 @@
     Include Hyper-V helper tests. Default $true.
 .PARAMETER TestNutanix
     Include Nutanix helper tests. Default $true.
+.PARAMETER TestVMware
+    Include VMware vSphere helper tests. Default $true.
+.PARAMETER TestCertificates
+    Include Certificate discovery helper tests. Default $true.
+.PARAMETER TestF5
+    Include F5 BIG-IP helper tests. Default $true.
+.PARAMETER TestDocker
+    Include Docker Engine helper tests. Default $true.
+.PARAMETER TestGeolocation
+    Include Geolocation map helper tests. Default $true.
 .PARAMETER AWSRegion
     Default AWS region. Prompted at runtime if omitted.
 .PARAMETER AzureTenantId
@@ -53,6 +63,11 @@ param(
     [bool]$TestHyperV,
     [bool]$TestNutanix,
     [bool]$TestFortinet,
+    [bool]$TestVMware,
+    [bool]$TestCertificates,
+    [bool]$TestF5,
+    [bool]$TestDocker,
+    [bool]$TestGeolocation,
     [switch]$IncludeSkipped,
     [string]$AWSRegion,
     [string]$AzureTenantId,
@@ -60,7 +75,7 @@ param(
 )
 
 # If any Test* parameter was explicitly specified, only run those; otherwise run all.
-$testParams = @('TestAWS','TestAzure','TestGCP','TestOCI','TestProxmox','TestHyperV','TestNutanix','TestFortinet')
+$testParams = @('TestAWS','TestAzure','TestGCP','TestOCI','TestProxmox','TestHyperV','TestNutanix','TestFortinet','TestVMware','TestCertificates','TestF5','TestDocker','TestGeolocation')
 $anyExplicit = $testParams | Where-Object { $PSBoundParameters.ContainsKey($_) }
 if ($anyExplicit) {
     foreach ($p in $testParams) {
@@ -146,7 +161,8 @@ function Export-TestResultsHtml {
         @{ field = 'Detail';   title = 'Detail';   sortable = $true; searchable = $true }
     )
     $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
-    $dataJson = @($TestResults | Select-Object Cmdlet, Endpoint, Status, Detail) | ConvertTo-Json -Depth 5 -Compress
+    $dataRows = @($TestResults | Select-Object Cmdlet, Endpoint, Status, Detail)
+    $dataJson = ConvertTo-Json -InputObject $dataRows -Depth 5 -Compress
     $tableConfig = @"
         columns: $columnsJson,
         data: $dataJson
@@ -245,6 +261,34 @@ $script:NutanixCmdletList = @(
     'Get-NutanixHostDetail','Get-NutanixVMDetail',
     'Get-NutanixDashboard','Export-NutanixDashboardHtml'
 )
+$script:VMwareCmdletList = @(
+    'Connect-VMware','Get-VMwareClusters','Get-VMwareDatastores',
+    'Get-VMwareHosts','Get-VMwareHostDetail',
+    'Get-VMwareVMs','Get-VMwareVMDetail',
+    'Get-VMwareDashboard','Export-VMwareDashboardHtml',
+    'VMware Session Cleanup'
+)
+$script:CertificatesCmdletList = @(
+    'Get-CertificateInfo','Get-CertificateDashboard','Export-CertificateDashboardHtml'
+)
+$script:F5CmdletList = @(
+    'Connect-F5Server','Get-F5SystemInfo',
+    'Get-F5VirtualServers','Get-F5VirtualServerStats',
+    'Get-F5Pools','Get-F5PoolMembers','Get-F5PoolMemberStats',
+    'Get-F5Nodes',
+    'Get-F5Dashboard','Export-F5DashboardHtml',
+    'F5 Session Cleanup'
+)
+$script:DockerCmdletList = @(
+    'Connect-DockerServer','Get-DockerSystemInfo',
+    'Get-DockerContainers','Get-DockerContainerDetail','Get-DockerContainerStats',
+    'Get-DockerNetworks','Get-DockerVolumes','Get-DockerImages',
+    'Get-DockerDashboard','Export-DockerDashboardHtml'
+)
+$script:GeolocationCmdletList = @(
+    'Connect-GeoWUGServer','Get-GeoDevicesWithLocation','Get-GeoGroupsWithLocation',
+    'Get-GeolocationData','Export-GeolocationMapHtml'
+)
 $script:FortinetCmdletList = @(
     'Connect-FortiGate',
     # System
@@ -317,12 +361,22 @@ $helperFiles = @{
     HyperV  = Join-Path $helpersRoot 'hyperv\HypervHelpers.ps1'
     Nutanix  = Join-Path $helpersRoot 'nutanix\NutanixHelpers.ps1'
     Fortinet = Join-Path $helpersRoot 'fortinet\FortinetHelpers.ps1'
+    VMware   = Join-Path $helpersRoot 'vmware\VMwareHelpers.ps1'
+    Certificates = Join-Path $helpersRoot 'certificates\CertificateHelpers.ps1'
+    F5       = Join-Path $helpersRoot 'f5\F5Helpers.ps1'
+    Docker   = Join-Path $helpersRoot 'docker\DockerHelpers.ps1'
+    Geolocation = Join-Path $helpersRoot 'geolocation\GeolocationHelpers.ps1'
 }
 
 $providerToggle = @{
     AWS = [ref]$TestAWS;  Azure = [ref]$TestAzure; GCP = [ref]$TestGCP; OCI = [ref]$TestOCI
     Proxmox = [ref]$TestProxmox; HyperV = [ref]$TestHyperV; Nutanix = [ref]$TestNutanix
     Fortinet = [ref]$TestFortinet
+    VMware   = [ref]$TestVMware
+    Certificates = [ref]$TestCertificates
+    F5       = [ref]$TestF5
+    Docker   = [ref]$TestDocker
+    Geolocation = [ref]$TestGeolocation
 }
 
 foreach ($provider in $helperFiles.Keys) {
@@ -397,6 +451,12 @@ if ($TestHyperV) {
         if (-not $TestHyperV) { Write-Warning "Hyper-V tests will be skipped." }
     }
 }
+if ($TestVMware) {
+    if (-not (Install-RequiredModule -ModuleName 'VMware.VimAutomation.Core' -Provider 'VMware' `
+        -InstallHint 'Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force')) {
+        Write-Warning "VMware tests will be skipped."; $TestVMware = $false
+    }
+}
 
 $activeProviders = @()
 if ($TestAWS)     { $activeProviders += 'AWS' }
@@ -407,6 +467,11 @@ if ($TestProxmox) { $activeProviders += 'Proxmox' }
 if ($TestHyperV)  { $activeProviders += 'HyperV' }
 if ($TestNutanix) { $activeProviders += 'Nutanix' }
 if ($TestFortinet) { $activeProviders += 'Fortinet' }
+if ($TestVMware)  { $activeProviders += 'VMware' }
+if ($TestCertificates) { $activeProviders += 'Certificates' }
+if ($TestF5)      { $activeProviders += 'F5' }
+if ($TestDocker)  { $activeProviders += 'Docker' }
+if ($TestGeolocation) { $activeProviders += 'Geolocation' }
 
 if ($activeProviders.Count -eq 0) {
     Write-Error "All providers are disabled or unavailable. Nothing to test."
@@ -921,7 +986,7 @@ if ($TestProxmox) {
     }
 
     if ($TestProxmox) {
-        # Run Dashboard first — it calls Nodes, VMs, NodeDetail, and VMDetail internally.
+        # Run Dashboard first -- it calls Nodes, VMs, NodeDetail, and VMDetail internally.
         # This avoids PS 5.1 connection-pool exhaustion from running them individually first.
         Invoke-Test -Cmdlet 'Get-ProxmoxDashboard' -Endpoint 'Proxmox / Dashboard / Get-ProxmoxDashboard' -Test {
             $script:ProxmoxDashboardData = Get-ProxmoxDashboard -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ErrorAction Stop
@@ -929,7 +994,7 @@ if ($TestProxmox) {
         }
         $dashboardPassed = ($script:TestResults | Select-Object -Last 1).Status -eq 'Pass'
 
-        # Validate sub-functions — if Dashboard passed, verify via lightweight individual calls
+        # Validate sub-functions -- if Dashboard passed, verify via lightweight individual calls
         Invoke-Test -Cmdlet 'Get-ProxmoxNodes' -Endpoint 'Proxmox / Nodes / Get-ProxmoxNodes' -Test {
             $r = Get-ProxmoxNodes -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ErrorAction Stop
             Assert-NotNull $r; $script:FirstProxmoxNode = @($r)[0].node
@@ -1565,6 +1630,383 @@ if ($TestFortinet) {
 #endregion
 
 ###############################################################################
+#region -- VMware -------------------------------------------------------------
+###############################################################################
+$script:VMwareHtmlOutPath = $null; $script:VMwareDashboardData = $null; $script:VMwareConnection = $null
+
+if ($TestVMware) {
+    Write-Host "`nVMware Authentication:" -ForegroundColor Cyan
+    Write-Host "  [1] vCenter / ESXi credentials  [S] Skip"
+    $vmwChoice = Read-Host "Selection"
+    if ($vmwChoice.Trim().ToUpper() -eq '1') {
+        $script:VMwareServer = Read-Host "vCenter / ESXi host or IP"
+        $script:VMwareCred = Get-Credential -Message "VMware vSphere credentials"
+    } else { $TestVMware = $false }
+    if (-not $TestVMware) { Skip-ProviderTests -Provider 'VMware' -Reason 'User skipped' -Cmdlets $script:VMwareCmdletList }
+} else { Skip-ProviderTests -Provider 'VMware' -Reason 'Disabled or modules unavailable' -Cmdlets $script:VMwareCmdletList }
+
+if ($TestVMware) {
+    $currentSection++
+    Write-Host "`n[$currentSection/$sectionCount] Testing VMware ..." -ForegroundColor Cyan
+
+    $script:FirstVMwareHost = $null; $script:FirstVMwareVM = $null
+
+    Invoke-Test -Cmdlet 'Connect-VMware' -Endpoint 'VMware / Auth / Connect-VMware' -Test {
+        $script:VMwareConnection = Connect-VMware -Server $script:VMwareServer -Credential $script:VMwareCred -IgnoreSSLErrors -ErrorAction Stop
+        if (-not $script:VMwareConnection) { throw "No connection returned" }
+    }
+    if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        $TestVMware = $false
+        Skip-ProviderTests -Provider 'VMware' -Reason 'Auth failed' -Cmdlets ($script:VMwareCmdletList | Where-Object { $_ -ne 'Connect-VMware' })
+    }
+
+    if ($TestVMware) {
+        Invoke-Test -Cmdlet 'Get-VMwareClusters' -Endpoint 'VMware / Clusters / Get-VMwareClusters' -Test {
+            $r = Get-VMwareClusters -ErrorAction Stop
+            if ($r -and @($r).Count -gt 0) { Assert-HasProperty $r[0] @('Name','HAEnabled','DrsEnabled') }
+        }
+        Invoke-Test -Cmdlet 'Get-VMwareDatastores' -Endpoint 'VMware / Datastores / Get-VMwareDatastores' -Test {
+            $r = Get-VMwareDatastores -ErrorAction Stop
+            if ($r -and @($r).Count -gt 0) { Assert-HasProperty $r[0] @('Name','CapacityGB','FreeSpaceGB') }
+        }
+        Invoke-Test -Cmdlet 'Get-VMwareHosts' -Endpoint 'VMware / Hosts / Get-VMwareHosts' -Test {
+            $r = Get-VMwareHosts -ErrorAction Stop
+            Assert-NotNull $r; $script:FirstVMwareHost = @($r)[0]
+        }
+        if ($script:FirstVMwareHost) {
+            Invoke-Test -Cmdlet 'Get-VMwareHostDetail' -Endpoint 'VMware / Hosts / Get-VMwareHostDetail' -Test {
+                $r = Get-VMwareHostDetail -VMHost $script:FirstVMwareHost -ErrorAction Stop
+                Assert-NotNull $r; Assert-HasProperty $r @('Name','IPAddress','Version','CpuCores','MemoryTotalGB')
+            }
+        } else { Record-Test -Cmdlet 'Get-VMwareHostDetail' -Endpoint 'VMware / Hosts' -Status 'Skipped' -Detail 'No ESXi hosts found' }
+        Invoke-Test -Cmdlet 'Get-VMwareVMs' -Endpoint 'VMware / VMs / Get-VMwareVMs' -Test {
+            $r = Get-VMwareVMs -ErrorAction Stop
+            if ($r -and @($r).Count -gt 0) { $script:FirstVMwareVM = @($r)[0] }
+        }
+        if ($script:FirstVMwareVM) {
+            Invoke-Test -Cmdlet 'Get-VMwareVMDetail' -Endpoint 'VMware / VMs / Get-VMwareVMDetail' -Test {
+                $r = Get-VMwareVMDetail -VM $script:FirstVMwareVM -ErrorAction Stop
+                Assert-NotNull $r; Assert-HasProperty $r @('Name','IPAddress','PowerState','NumCPU','MemoryGB')
+            }
+        } else { Record-Test -Cmdlet 'Get-VMwareVMDetail' -Endpoint 'VMware / VMs' -Status 'Skipped' -Detail 'No VMs found' }
+        Invoke-Test -Cmdlet 'Get-VMwareDashboard' -Endpoint 'VMware / Dashboard / Get-VMwareDashboard' -Test {
+            $script:VMwareDashboardData = Get-VMwareDashboard -ErrorAction Stop
+            Assert-NotNull $script:VMwareDashboardData
+        }
+        $vmwTpl = Join-Path $helpersRoot 'vmware\VMware-Dashboard-Template.html'
+        if ($script:VMwareDashboardData -and @($script:VMwareDashboardData).Count -gt 0 -and (Test-Path $vmwTpl)) {
+            Invoke-Test -Cmdlet 'Export-VMwareDashboardHtml' -Endpoint 'VMware / Export / Export-VMwareDashboardHtml' -Test {
+                $script:VMwareHtmlOutPath = Join-Path $outDir "Get-VMwareDashboardResult-$(Get-Date -Format 'yyyy-MM-dd').html"
+                Export-VMwareDashboardHtml -DashboardData $script:VMwareDashboardData -OutputPath $script:VMwareHtmlOutPath -ReportTitle 'WUGHelperTest VMware' -TemplatePath $vmwTpl -ErrorAction Stop
+                if (-not (Test-Path $script:VMwareHtmlOutPath)) { throw "File not created" }
+            }
+        } else { Record-Test -Cmdlet 'Export-VMwareDashboardHtml' -Endpoint 'VMware / Export' -Status 'Skipped' -Detail 'No data or template missing' }
+    }
+}
+#endregion
+
+###############################################################################
+#region -- Certificates -------------------------------------------------------
+###############################################################################
+$script:CertHtmlOutPath = $null; $script:CertDashboardData = $null
+
+if ($TestCertificates) {
+    Write-Host "`nCertificate Scanning:" -ForegroundColor Cyan
+    Write-Host "  [1] Scan IP addresses for TLS certificates  [S] Skip"
+    $certChoice = Read-Host "Selection"
+    if ($certChoice.Trim().ToUpper() -eq '1') {
+        $certInput = Read-Host "IP address(es) to scan (comma-separated)"
+        $script:CertIPs = $certInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+        $certPortInput = Read-Host "TCP port(s) [443,8443]"
+        if ([string]::IsNullOrWhiteSpace($certPortInput)) {
+            $script:CertPorts = @(443, 8443)
+        } else {
+            $script:CertPorts = $certPortInput -split ',' | ForEach-Object { [int]$_.Trim() }
+        }
+    } else { $TestCertificates = $false }
+    if (-not $TestCertificates) { Skip-ProviderTests -Provider 'Certificates' -Reason 'User skipped' -Cmdlets $script:CertificatesCmdletList }
+} else { Skip-ProviderTests -Provider 'Certificates' -Reason 'Disabled' -Cmdlets $script:CertificatesCmdletList }
+
+if ($TestCertificates) {
+    $currentSection++
+    Write-Host "`n[$currentSection/$sectionCount] Testing Certificates ..." -ForegroundColor Cyan
+
+    $script:CertRawData = $null
+
+    Invoke-Test -Cmdlet 'Get-CertificateInfo' -Endpoint 'Certificates / Scan / Get-CertificateInfo' -Test {
+        $script:CertRawData = Get-CertificateInfo -IPAddresses $script:CertIPs -TcpPorts $script:CertPorts -ErrorAction Stop
+        Assert-NotNull $script:CertRawData
+        if (@($script:CertRawData).Count -gt 0) {
+            Assert-HasProperty $script:CertRawData[0] @('IPAddress','Port','Subject','ExpirationDate','Thumbprint')
+        }
+    }
+    if ($script:CertRawData -and @($script:CertRawData).Count -gt 0) {
+        Invoke-Test -Cmdlet 'Get-CertificateDashboard' -Endpoint 'Certificates / Dashboard / Get-CertificateDashboard' -Test {
+            $script:CertDashboardData = Get-CertificateDashboard -CertificateData $script:CertRawData -ErrorAction Stop
+            Assert-NotNull $script:CertDashboardData
+            Assert-HasProperty $script:CertDashboardData[0] @('IPAddress','Port','Status','DaysUntilExpiry','Subject')
+        }
+    } else {
+        Record-Test -Cmdlet 'Get-CertificateDashboard' -Endpoint 'Certificates / Dashboard' -Status 'Skipped' -Detail 'No certificates discovered'
+    }
+    $certTpl = Join-Path $helpersRoot 'certificates\Certificate-Dashboard-Template.html'
+    if ($script:CertDashboardData -and @($script:CertDashboardData).Count -gt 0 -and (Test-Path $certTpl)) {
+        Invoke-Test -Cmdlet 'Export-CertificateDashboardHtml' -Endpoint 'Certificates / Export / Export-CertificateDashboardHtml' -Test {
+            $script:CertHtmlOutPath = Join-Path $outDir "Get-CertificateDashboardResult-$(Get-Date -Format 'yyyy-MM-dd').html"
+            Export-CertificateDashboardHtml -DashboardData $script:CertDashboardData -OutputPath $script:CertHtmlOutPath -ReportTitle 'WUGHelperTest Certificates' -TemplatePath $certTpl -ErrorAction Stop
+            if (-not (Test-Path $script:CertHtmlOutPath)) { throw "File not created" }
+        }
+    } else { Record-Test -Cmdlet 'Export-CertificateDashboardHtml' -Endpoint 'Certificates / Export' -Status 'Skipped' -Detail 'No data or template missing' }
+}
+#endregion
+
+###############################################################################
+#region -- F5 BIG-IP ----------------------------------------------------------
+###############################################################################
+$script:F5HtmlOutPath = $null; $script:F5DashboardData = $null
+
+if ($TestF5) {
+    Write-Host "`nF5 BIG-IP Authentication:" -ForegroundColor Cyan
+    Write-Host "  [1] Username + Password  [S] Skip"
+    $f5Choice = Read-Host "Selection"
+    if ($f5Choice.Trim().ToUpper() -eq '1') {
+        $script:F5Host = Read-Host "F5 BIG-IP hostname or IP"
+        $f5PortInput = Read-Host "Port [443]"
+        $script:F5Port = if ([string]::IsNullOrWhiteSpace($f5PortInput)) { 443 } else { [int]$f5PortInput }
+        $script:F5Cred = Get-Credential -Message "F5 BIG-IP credentials"
+    } else { $TestF5 = $false }
+    if (-not $TestF5) { Skip-ProviderTests -Provider 'F5' -Reason 'User skipped' -Cmdlets $script:F5CmdletList }
+} else { Skip-ProviderTests -Provider 'F5' -Reason 'Disabled' -Cmdlets $script:F5CmdletList }
+
+if ($TestF5) {
+    $currentSection++
+    Write-Host "`n[$currentSection/$sectionCount] Testing F5 BIG-IP ..." -ForegroundColor Cyan
+
+    $script:FirstF5VS = $null; $script:FirstF5Pool = $null
+
+    Invoke-Test -Cmdlet 'Connect-F5Server' -Endpoint 'F5 / Auth / Connect-F5Server' -Test {
+        Connect-F5Server -F5Host $script:F5Host -Port $script:F5Port -Credential $script:F5Cred -IgnoreSSLErrors -ErrorAction Stop
+    }
+    if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        $TestF5 = $false
+        Skip-ProviderTests -Provider 'F5' -Reason 'Auth failed' -Cmdlets ($script:F5CmdletList | Where-Object { $_ -ne 'Connect-F5Server' })
+    }
+
+    if ($TestF5) {
+        Invoke-Test -Cmdlet 'Get-F5SystemInfo' -Endpoint 'F5 / System / Get-F5SystemInfo' -Test {
+            $r = Get-F5SystemInfo -ErrorAction Stop; Assert-NotNull $r
+        }
+        Invoke-Test -Cmdlet 'Get-F5VirtualServers' -Endpoint 'F5 / VS / Get-F5VirtualServers' -Test {
+            $r = Get-F5VirtualServers -ErrorAction Stop
+            if ($r -and @($r).Count -gt 0) { $script:FirstF5VS = @($r)[0] }
+        }
+        if ($script:FirstF5VS) {
+            Invoke-Test -Cmdlet 'Get-F5VirtualServerStats' -Endpoint 'F5 / VS / Get-F5VirtualServerStats' -Test {
+                Get-F5VirtualServerStats -ErrorAction Stop | Out-Null
+            }
+        } else { Record-Test -Cmdlet 'Get-F5VirtualServerStats' -Endpoint 'F5 / VS / Stats' -Status 'Skipped' -Detail 'No virtual servers found' }
+        Invoke-Test -Cmdlet 'Get-F5Pools' -Endpoint 'F5 / Pools / Get-F5Pools' -Test {
+            $r = Get-F5Pools -ErrorAction Stop
+            if ($r -and @($r).Count -gt 0) { $script:FirstF5Pool = @($r)[0] }
+        }
+        if ($script:FirstF5Pool) {
+            Invoke-Test -Cmdlet 'Get-F5PoolMembers' -Endpoint 'F5 / Pools / Get-F5PoolMembers' -Test {
+                Get-F5PoolMembers -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-F5PoolMemberStats' -Endpoint 'F5 / Pools / Get-F5PoolMemberStats' -Test {
+                Get-F5PoolMemberStats -ErrorAction Stop | Out-Null
+            }
+        } else {
+            Record-Test -Cmdlet 'Get-F5PoolMembers' -Endpoint 'F5 / Pools' -Status 'Skipped' -Detail 'No pools found'
+            Record-Test -Cmdlet 'Get-F5PoolMemberStats' -Endpoint 'F5 / Pools' -Status 'Skipped' -Detail 'No pools found'
+        }
+        Invoke-Test -Cmdlet 'Get-F5Nodes' -Endpoint 'F5 / Nodes / Get-F5Nodes' -Test {
+            Get-F5Nodes -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-F5Dashboard' -Endpoint 'F5 / Dashboard / Get-F5Dashboard' -Test {
+            $script:F5DashboardData = Get-F5Dashboard -ErrorAction Stop
+            Assert-NotNull $script:F5DashboardData
+        }
+        $f5Tpl = Join-Path $helpersRoot 'f5\F5-Dashboard-Template.html'
+        if ($script:F5DashboardData -and @($script:F5DashboardData).Count -gt 0 -and (Test-Path $f5Tpl)) {
+            Invoke-Test -Cmdlet 'Export-F5DashboardHtml' -Endpoint 'F5 / Export / Export-F5DashboardHtml' -Test {
+                $script:F5HtmlOutPath = Join-Path $outDir "Get-F5DashboardResult-$(Get-Date -Format 'yyyy-MM-dd').html"
+                Export-F5DashboardHtml -DashboardData $script:F5DashboardData -OutputPath $script:F5HtmlOutPath -ReportTitle 'WUGHelperTest F5' -TemplatePath $f5Tpl -ErrorAction Stop
+                if (-not (Test-Path $script:F5HtmlOutPath)) { throw "File not created" }
+            }
+        } else { Record-Test -Cmdlet 'Export-F5DashboardHtml' -Endpoint 'F5 / Export' -Status 'Skipped' -Detail 'No data or template missing' }
+    }
+}
+#endregion
+
+###############################################################################
+#region -- Geolocation --------------------------------------------------------
+###############################################################################
+$script:GeoHtmlOutPath = $null; $script:GeoData = $null; $script:GeoConfig = $null
+
+if ($TestGeolocation) {
+    Write-Host "`nGeolocation (WhatsUp Gold REST API):" -ForegroundColor Cyan
+    Write-Host "  [1] Connect to WUG server  [S] Skip"
+    $geoChoice = Read-Host "Selection"
+    if ($geoChoice.Trim().ToUpper() -eq '1') {
+        $script:GeoServer = Read-Host "WUG server hostname or IP"
+        $geoProto = Read-Host "Protocol [https]"
+        $script:GeoProtocol = if ([string]::IsNullOrWhiteSpace($geoProto)) { 'https' } else { $geoProto }
+        $geoPort = Read-Host "Port [9644]"
+        $script:GeoPort = if ([string]::IsNullOrWhiteSpace($geoPort)) { 9644 } else { [int]$geoPort }
+        $script:GeoCred = Get-Credential -Message "WUG credentials for geolocation tests"
+        $geoSSL = Read-Host "Ignore SSL errors? [Y/N, default Y]"
+        $script:GeoIgnoreSSL = if ($geoSSL -match '^[Nn]') { $false } else { $true }
+        $geoConsole = Read-Host "WUG web console base URL (e.g. https://wug:443) [press Enter to skip]"
+        $script:GeoConsoleUrl = if ([string]::IsNullOrWhiteSpace($geoConsole)) { '' } else { $geoConsole }
+    } else { $TestGeolocation = $false }
+    if (-not $TestGeolocation) { Skip-ProviderTests -Provider 'Geolocation' -Reason 'User skipped' -Cmdlets $script:GeolocationCmdletList }
+} else { Skip-ProviderTests -Provider 'Geolocation' -Reason 'Disabled' -Cmdlets $script:GeolocationCmdletList }
+
+if ($TestGeolocation) {
+    $currentSection++
+    Write-Host "`n[$currentSection/$sectionCount] Testing Geolocation ..." -ForegroundColor Cyan
+
+    Invoke-Test -Cmdlet 'Connect-GeoWUGServer' -Endpoint 'Geolocation / Auth / Connect-GeoWUGServer' -Test {
+        $splat = @{
+            ServerUri = $script:GeoServer
+            Username  = $script:GeoCred.GetNetworkCredential().UserName
+            Password  = $script:GeoCred.GetNetworkCredential().Password
+            Protocol  = $script:GeoProtocol
+            Port      = $script:GeoPort
+        }
+        if ($script:GeoIgnoreSSL) { $splat.IgnoreSSLErrors = $true }
+        $script:GeoConfig = Connect-GeoWUGServer @splat -ErrorAction Stop
+        if (-not $script:GeoConfig) { throw "No config returned" }
+    }
+    if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        $TestGeolocation = $false
+        Skip-ProviderTests -Provider 'Geolocation' -Reason 'Connection failed' -Cmdlets ($script:GeolocationCmdletList | Where-Object { $_ -ne 'Connect-GeoWUGServer' })
+    }
+
+    if ($TestGeolocation) {
+        Invoke-Test -Cmdlet 'Get-GeoDevicesWithLocation' -Endpoint 'Geolocation / Devices / Get-GeoDevicesWithLocation' -Test {
+            $r = Get-GeoDevicesWithLocation -Config $script:GeoConfig -ErrorAction Stop
+            # Result may be empty if no devices have LatLong attribute - that's OK
+        }
+        Invoke-Test -Cmdlet 'Get-GeoGroupsWithLocation' -Endpoint 'Geolocation / Groups / Get-GeoGroupsWithLocation' -Test {
+            $r = Get-GeoGroupsWithLocation -Config $script:GeoConfig -ErrorAction Stop
+        }
+        Invoke-Test -Cmdlet 'Get-GeolocationData' -Endpoint 'Geolocation / Data / Get-GeolocationData' -Test {
+            $script:GeoData = Get-GeolocationData -Config $script:GeoConfig -ErrorAction Stop
+            Assert-NotNull $script:GeoData
+        }
+        $geoTpl = Join-Path $helpersRoot 'geolocation\Geolocation-Map-Template.html'
+        if ($script:GeoData -and @($script:GeoData).Count -gt 0 -and (Test-Path $geoTpl)) {
+            Invoke-Test -Cmdlet 'Export-GeolocationMapHtml' -Endpoint 'Geolocation / Export / Export-GeolocationMapHtml' -Test {
+                $script:GeoHtmlOutPath = Join-Path $outDir "Geolocation-Map-$(Get-Date -Format 'yyyy-MM-dd').html"
+                $exportSplat = @{
+                    Data         = @($script:GeoData)
+                    OutputPath   = $script:GeoHtmlOutPath
+                    TemplatePath = $geoTpl
+                }
+                if ($script:GeoConsoleUrl) { $exportSplat.WugBaseUrl = $script:GeoConsoleUrl }
+                Export-GeolocationMapHtml @exportSplat -ErrorAction Stop
+                if (-not (Test-Path $script:GeoHtmlOutPath)) { throw "File not created" }
+            }
+        } else { Record-Test -Cmdlet 'Export-GeolocationMapHtml' -Endpoint 'Geolocation / Export' -Status 'Skipped' -Detail 'No data or template missing' }
+    }
+}
+#endregion
+
+###############################################################################
+#region -- Docker -------------------------------------------------------------
+###############################################################################
+$script:DockerHtmlOutPath = $null; $script:DockerDashboardData = $null; $script:DockerConnection = $null
+
+if ($TestDocker) {
+    Write-Host "`nDocker Engine API:" -ForegroundColor Cyan
+    Write-Host "  [1] Connect to Docker host (HTTP/HTTPS)  [S] Skip"
+    $dkrChoice = Read-Host "Selection"
+    if ($dkrChoice.Trim().ToUpper() -eq '1') {
+        $script:DockerHost = Read-Host "Docker host (hostname or IP)"
+        $dkrPort = Read-Host "Port [2375]"
+        $script:DockerPort = if ([string]::IsNullOrWhiteSpace($dkrPort)) { 2375 } else { [int]$dkrPort }
+        $dkrTLS = Read-Host "Use TLS? [Y/N, default N]"
+        $script:DockerUseTLS = $dkrTLS -match '^[Yy]'
+        $dkrSSL = Read-Host "Ignore SSL errors? [Y/N, default Y]"
+        $script:DockerIgnoreSSL = if ($dkrSSL -match '^[Nn]') { $false } else { $true }
+    } else { $TestDocker = $false }
+    if (-not $TestDocker) { Skip-ProviderTests -Provider 'Docker' -Reason 'User skipped' -Cmdlets $script:DockerCmdletList }
+} else { Skip-ProviderTests -Provider 'Docker' -Reason 'Disabled' -Cmdlets $script:DockerCmdletList }
+
+if ($TestDocker) {
+    $currentSection++
+    Write-Host "`n[$currentSection/$sectionCount] Testing Docker ..." -ForegroundColor Cyan
+
+    $script:FirstDockerContainer = $null
+
+    Invoke-Test -Cmdlet 'Connect-DockerServer' -Endpoint 'Docker / Auth / Connect-DockerServer' -Test {
+        $splat = @{ DockerHost = $script:DockerHost; Port = $script:DockerPort }
+        if ($script:DockerUseTLS) { $splat.UseTLS = $true }
+        if ($script:DockerIgnoreSSL) { $splat.IgnoreSSLErrors = $true }
+        $script:DockerConnection = Connect-DockerServer @splat -ErrorAction Stop
+        if (-not $script:DockerConnection) { throw "No connection returned" }
+    }
+    if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        $TestDocker = $false
+        Skip-ProviderTests -Provider 'Docker' -Reason 'Connection failed' -Cmdlets ($script:DockerCmdletList | Where-Object { $_ -ne 'Connect-DockerServer' })
+    }
+
+    if ($TestDocker) {
+        Invoke-Test -Cmdlet 'Get-DockerSystemInfo' -Endpoint 'Docker / System / Get-DockerSystemInfo' -Test {
+            $r = Get-DockerSystemInfo -Connection $script:DockerConnection -ErrorAction Stop
+            Assert-NotNull $r
+            Assert-HasProperty $r @('Hostname','DockerVersion','Containers','CPUs')
+        }
+        Invoke-Test -Cmdlet 'Get-DockerContainers' -Endpoint 'Docker / Containers / Get-DockerContainers' -Test {
+            $r = Get-DockerContainers -Connection $script:DockerConnection -ErrorAction Stop
+            if ($r -and @($r).Count -gt 0) { $script:FirstDockerContainer = @($r)[0] }
+        }
+        if ($script:FirstDockerContainer) {
+            Invoke-Test -Cmdlet 'Get-DockerContainerDetail' -Endpoint 'Docker / Containers / Get-DockerContainerDetail' -Test {
+                $r = Get-DockerContainerDetail -Connection $script:DockerConnection -ContainerId $script:FirstDockerContainer.Id -ErrorAction Stop
+                Assert-NotNull $r
+            }
+            if ($script:FirstDockerContainer.State -eq 'running') {
+                Invoke-Test -Cmdlet 'Get-DockerContainerStats' -Endpoint 'Docker / Containers / Get-DockerContainerStats' -Test {
+                    $r = Get-DockerContainerStats -Connection $script:DockerConnection -ContainerId $script:FirstDockerContainer.Id -ErrorAction Stop
+                    Assert-NotNull $r
+                    Assert-HasProperty $r @('CpuPercent','MemoryUsageMB','MemoryPercent')
+                }
+            } else {
+                Record-Test -Cmdlet 'Get-DockerContainerStats' -Endpoint 'Docker / Containers' -Status 'Skipped' -Detail 'First container not running'
+            }
+        } else {
+            Record-Test -Cmdlet 'Get-DockerContainerDetail' -Endpoint 'Docker / Containers' -Status 'Skipped' -Detail 'No containers found'
+            Record-Test -Cmdlet 'Get-DockerContainerStats' -Endpoint 'Docker / Containers' -Status 'Skipped' -Detail 'No containers found'
+        }
+        Invoke-Test -Cmdlet 'Get-DockerNetworks' -Endpoint 'Docker / Networks / Get-DockerNetworks' -Test {
+            Get-DockerNetworks -Connection $script:DockerConnection -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-DockerVolumes' -Endpoint 'Docker / Volumes / Get-DockerVolumes' -Test {
+            Get-DockerVolumes -Connection $script:DockerConnection -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-DockerImages' -Endpoint 'Docker / Images / Get-DockerImages' -Test {
+            Get-DockerImages -Connection $script:DockerConnection -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-DockerDashboard' -Endpoint 'Docker / Dashboard / Get-DockerDashboard' -Test {
+            $script:DockerDashboardData = Get-DockerDashboard -Connection $script:DockerConnection -ErrorAction Stop
+            Assert-NotNull $script:DockerDashboardData
+        }
+        $dkrTpl = Join-Path $helpersRoot 'docker\Docker-Dashboard-Template.html'
+        if ($script:DockerDashboardData -and @($script:DockerDashboardData).Count -gt 0 -and (Test-Path $dkrTpl)) {
+            Invoke-Test -Cmdlet 'Export-DockerDashboardHtml' -Endpoint 'Docker / Export / Export-DockerDashboardHtml' -Test {
+                $script:DockerHtmlOutPath = Join-Path $outDir "Get-DockerDashboardResult-$(Get-Date -Format 'yyyy-MM-dd').html"
+                Export-DockerDashboardHtml -DashboardData $script:DockerDashboardData -OutputPath $script:DockerHtmlOutPath -ReportTitle 'WUGHelperTest Docker' -TemplatePath $dkrTpl -ErrorAction Stop
+                if (-not (Test-Path $script:DockerHtmlOutPath)) { throw "File not created" }
+            }
+        } else { Record-Test -Cmdlet 'Export-DockerDashboardHtml' -Endpoint 'Docker / Export' -Status 'Skipped' -Detail 'No data or template missing' }
+    }
+}
+#endregion
+
+###############################################################################
 #region -- Cleanup ------------------------------------------------------------
 ###############################################################################
 $currentSection++
@@ -1606,11 +2048,26 @@ if ($script:TestFortiManager -and (Get-Command 'Disconnect-FortiManager' -ErrorA
     }
 }
 
+if ($script:VMwareConnection) {
+    Invoke-Test -Cmdlet 'VMware Session Cleanup' -Endpoint 'VMware / Auth / Disconnect-VMware' -Test {
+        Disconnect-VMware -ErrorAction SilentlyContinue
+    }
+}
+
+if ($TestF5 -and $script:F5DashboardData) {
+    Record-Test -Cmdlet 'F5 Session Cleanup' -Endpoint 'F5 / Auth / (session)' -Status 'Pass' -Detail 'REST session cleared from memory'
+}
+
 $script:AWSAccessKey = $null; $script:AWSSecretKeySS = $null; $script:AWSProfileName = $null
 $script:AzureAppId = $null; $script:AzureClientSecretSS = $null
 $script:ProxmoxPassSS = $null; $script:NutanixHeaders = $null; $script:NutanixCred = $null
 $script:HyperVCred = $null; $script:GCPKeyFilePath = $null
 $script:FGTokenSS = $null; $script:FGCred = $null; $script:FMGCred = $null
+$script:VMwareCred = $null; $script:VMwareConnection = $null
+$script:CertIPs = $null; $script:CertPorts = $null
+$script:F5Cred = $null; $script:F5Host = $null
+$script:DockerConnection = $null; $script:DockerHost = $null
+$script:GeoConfig = $null; $script:GeoCred = $null; $script:GeoServer = $null
 #endregion
 
 ###############################################################################
@@ -1659,7 +2116,10 @@ $reportFiles = @()
 if ($htmlGenerated -and (Test-Path $script:TestResultsHtmlPath)) { $reportFiles += $script:TestResultsHtmlPath }
 foreach ($p in @($script:AWSHtmlOutPath, $script:AzureHtmlOutPath, $script:GCPHtmlOutPath,
                  $script:OCIHtmlOutPath, $script:ProxmoxHtmlOutPath, $script:HyperVHtmlOutPath,
-                 $script:NutanixHtmlOutPath)) {
+                 $script:NutanixHtmlOutPath, $script:VMwareHtmlOutPath,
+                 $script:CertHtmlOutPath, $script:F5HtmlOutPath,
+                 $script:DockerHtmlOutPath,
+                 $script:GeoHtmlOutPath)) {
     if ($p -and (Test-Path $p)) { $reportFiles += $p }
 }
 if ($script:FortinetHtmlOutPaths) {

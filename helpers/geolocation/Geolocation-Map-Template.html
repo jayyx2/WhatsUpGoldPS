@@ -1,0 +1,229 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WhatsUp Gold - Geolocation Map</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
+  <!-- Leaflet JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <!-- Leaflet-providers (tile layer shortcuts) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-providers/2.0.0/leaflet-providers.min.js"
+          integrity="sha256-TSSC0RjVO3PVqNbJpnAaEBOx/FGY7KZxLRkcRUrCP/0=" crossorigin="anonymous"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; }
+    /* Tooltip styling - matches original WUG geolocation look */
+    .leaflet-tooltip { padding: 2px 6px; background: #111; color: goldenrod; border: none; box-shadow: none; font-size: 13px; }
+    .leaflet-tooltip-bottom::before { display: none; }
+    /* Info bar */
+    #info-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 9999;
+      background: rgba(0,0,0,0.75); color: #ccc; font-size: 12px;
+      padding: 4px 12px; display: flex; justify-content: space-between;
+      font-family: 'Segoe UI', Arial, sans-serif;
+    }
+    #info-bar a { color: #6cf; text-decoration: none; }
+    /* Legend */
+    .legend {
+      background: rgba(255,255,255,0.92); padding: 8px 12px; border-radius: 6px;
+      box-shadow: 0 1px 5px rgba(0,0,0,0.3); font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 12px; line-height: 20px;
+    }
+    .legend i { width: 14px; height: 14px; display: inline-block; margin-right: 6px; border-radius: 50%; vertical-align: middle; }
+    .legend div { margin: 2px 0; }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="info-bar">
+  <span>WhatsUp Gold Geolocation Map - Generated %%GENERATED_AT%%</span>
+  <span>Devices + Groups: <strong id="marker-count">0</strong></span>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ========== DATA (injected by PowerShell) ==========
+  var markerData    = JSON.parse('%%MARKER_DATA%%');
+  var defaultLat    = parseFloat('%%DEFAULT_LAT%%');
+  var defaultLng    = parseFloat('%%DEFAULT_LNG%%');
+  var defaultZoom   = parseInt('%%DEFAULT_ZOOM%%', 10);
+  var wugBaseUrl    = '%%WUG_BASE_URL%%';
+
+  // ========== MAP INIT ==========
+  var map = L.map('map').setView([defaultLat, defaultLng], defaultZoom);
+
+  // Base layers - free tile providers (no API key required)
+  var baseLayers = {
+    'OpenStreetMap':       L.tileLayer.provider('OpenStreetMap.Mapnik'),
+    'OSM Hot':             L.tileLayer.provider('OpenStreetMap.HOT'),
+    'CartoDB Positron':    L.tileLayer.provider('CartoDB.Positron'),
+    'CartoDB Dark Matter': L.tileLayer.provider('CartoDB.DarkMatter'),
+    'CartoDB Voyager':     L.tileLayer.provider('CartoDB.Voyager'),
+    'OpenTopoMap':         L.tileLayer.provider('OpenTopoMap'),
+    'USGS Imagery':        L.tileLayer.provider('USGS.USImagery'),
+    'USGS Topo':           L.tileLayer.provider('USGS.USTopo'),
+    'Stadia Smooth':       L.tileLayer.provider('Stadia.AlidadeSmooth'),
+    'Stadia Dark':         L.tileLayer.provider('Stadia.AlidadeSmoothDark'),
+    'CyclOSM':             L.tileLayer.provider('CyclOSM')
+  };
+
+  // Default layer
+  baseLayers['OpenStreetMap'].addTo(map);
+
+  // Overlay layer groups
+  var deviceLayerGroup = L.layerGroup();
+  var groupLayerGroup  = L.layerGroup();
+  var overlays = {
+    'WhatsUp Gold - Devices': deviceLayerGroup,
+    'WhatsUp Gold - Groups':  groupLayerGroup
+  };
+
+  // Layer control
+  L.control.layers(baseLayers, overlays, { collapsed: true, sortLayers: false }).addTo(map);
+  L.control.scale().addTo(map);
+
+  // Default overlays on
+  deviceLayerGroup.addTo(map);
+  groupLayerGroup.addTo(map);
+
+  // ========== STATUS ICON (SVG data URIs) ==========
+  function stateColor(item) {
+    // Devices: check WorstState / BestState
+    if (item.Type === 'Device') {
+      var w = (item.WorstState || '').toLowerCase();
+      var b = (item.BestState  || '').toLowerCase();
+      if (w === 'down' || b === 'down') return '#e74c3c';       // red
+      if (w === 'maintenance' || b === 'maintenance') return '#f39c12'; // orange
+      if (b === 'up' || w === 'up') return '#2ecc71';            // green
+      return '#95a5a6'; // grey - unknown
+    }
+    // Groups: check State
+    var s = (item.State || '').toLowerCase();
+    if (s === 'down' || s === '1')          return '#e74c3c';
+    if (s === 'maintenance' || s === '2')   return '#f39c12';
+    if (s === 'up' || s === '3')            return '#2ecc71';
+    return '#95a5a6';
+  }
+
+  function makeSvgIcon(color, shape) {
+    var svg;
+    if (shape === 'circle') {
+      svg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">'
+          + '<circle cx="10" cy="10" r="8" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
+          + '</svg>';
+    } else {
+      // square for groups
+      svg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">'
+          + '<rect x="2" y="2" width="16" height="16" rx="3" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
+          + '</svg>';
+    }
+    return L.icon({
+      iconUrl:    'data:image/svg+xml;base64,' + btoa(svg),
+      iconSize:   [20, 20],
+      iconAnchor: [10, 10]
+    });
+  }
+
+  // ========== ADD MARKERS ==========
+  var count = 0;
+  for (var i = 0; i < markerData.length; i++) {
+    var m = markerData[i];
+    var lat = parseFloat(m.Latitude);
+    var lng = parseFloat(m.Longitude);
+    if (isNaN(lat) || isNaN(lng)) continue;
+
+    var color = stateColor(m);
+    var isDevice = (m.Type === 'Device');
+    var icon  = makeSvgIcon(color, isDevice ? 'circle' : 'square');
+    var label = m.Name || 'Unknown';
+
+    var popupHtml = '<strong>' + label + '</strong><br>'
+                  + 'Type: ' + m.Type + '<br>'
+                  + 'Lat/Lng: ' + lat.toFixed(6) + ', ' + lng.toFixed(6) + '<br>';
+
+    if (isDevice) {
+      popupHtml += 'Best State: ' + (m.BestState || 'N/A') + '<br>'
+                 + 'Worst State: ' + (m.WorstState || 'N/A');
+      if (wugBaseUrl && m.DeviceId) {
+        popupHtml += '<br><a href="' + wugBaseUrl
+          + '/NmConsole/#v=Wug_view_dashboard_DeviceStatus/p=%7B%22deviceId%22%3A' + m.DeviceId + '%7D'
+          + '" target="_blank">Open in WhatsUp Gold</a>';
+      }
+    } else {
+      popupHtml += 'State: ' + (m.State || 'N/A');
+      if (wugBaseUrl && m.GroupId) {
+        popupHtml += '<br><a href="' + wugBaseUrl
+          + '/NmConsole/#home/p=%7B%22groupId%22%3A' + m.GroupId + '%2C%22autoLayout%22%3Atrue%7D'
+          + '" target="_blank">Open in WhatsUp Gold</a>';
+      }
+    }
+
+    var marker = L.marker([lat, lng], { icon: icon })
+      .bindTooltip(label, { permanent: true, direction: 'auto' })
+      .bindPopup(popupHtml);
+
+    if (isDevice) {
+      deviceLayerGroup.addLayer(marker);
+    } else {
+      groupLayerGroup.addLayer(marker);
+    }
+    count++;
+  }
+
+  document.getElementById('marker-count').textContent = count;
+
+  // ========== AUTO-FIT BOUNDS ==========
+  if (count > 0) {
+    var allLayers = [];
+    deviceLayerGroup.eachLayer(function (l) { allLayers.push(l); });
+    groupLayerGroup.eachLayer(function (l)  { allLayers.push(l); });
+    if (allLayers.length > 1) {
+      var group = L.featureGroup(allLayers);
+      map.fitBounds(group.getBounds().pad(0.1));
+    }
+  }
+
+  // ========== LEGEND ==========
+  var legend = L.control({ position: 'bottomright' });
+  legend.onAdd = function () {
+    var div = L.DomUtil.create('div', 'legend');
+    div.innerHTML =
+        '<div><i style="background:#2ecc71"></i> Up</div>'
+      + '<div><i style="background:#e74c3c"></i> Down</div>'
+      + '<div><i style="background:#f39c12"></i> Maintenance</div>'
+      + '<div><i style="background:#95a5a6"></i> Unknown</div>'
+      + '<hr style="margin:4px 0;border-color:#ddd">'
+      + '<div><i style="background:#888;border-radius:50%"></i> Device</div>'
+      + '<div><i style="background:#888;border-radius:3px"></i> Group</div>';
+    return div;
+  };
+  legend.addTo(map);
+
+  // ========== PERSIST VIEW ==========
+  map.on('moveend', function () {
+    try {
+      sessionStorage.setItem('geo_lat',  map.getCenter().lat);
+      sessionStorage.setItem('geo_lng',  map.getCenter().lng);
+      sessionStorage.setItem('geo_zoom', map.getZoom());
+    } catch (e) {}
+  });
+  try {
+    var sLat  = sessionStorage.getItem('geo_lat');
+    var sLng  = sessionStorage.getItem('geo_lng');
+    var sZoom = sessionStorage.getItem('geo_zoom');
+    if (sLat && sLng && sZoom) {
+      map.setView([parseFloat(sLat), parseFloat(sLng)], parseInt(sZoom, 10));
+    }
+  } catch (e) {}
+
+})();
+</script>
+</body>
+</html>

@@ -1,8 +1,8 @@
 ﻿<!DOCTYPE html>
 <!-- Author: jason@wug.ninja                                        -->
-<!-- OCI Dashboard Template for WhatsUpGoldPS                       -->
-<!-- Renders Compute, DB Systems, Autonomous DBs, and Load          -->
-<!-- Balancers with colour-coded lifecycle state indicators.         -->
+<!-- VMware vSphere Dashboard Template for WhatsUpGoldPS            -->
+<!-- Renders VM inventory with ESXi host context and colour-coded   -->
+<!-- power-state indicators for quick operational visibility.        -->
 <html lang="en">
 
 <head>
@@ -38,8 +38,7 @@
         .card-green    { border-left-color: #198754; }
         .card-red      { border-left-color: #dc3545; }
         .card-orange   { border-left-color: #fd7e14; }
-        .card-blue     { border-left-color: #0d6efd; }
-        .card-purple   { border-left-color: #6f42c1; }
+        .card-hosts    { border-left-color: #0d6efd; }
     </style>
 </head>
 
@@ -47,57 +46,49 @@
     <div class="container-fluid p-3">
         <div class="row mb-3">
             <div class="col">
-                <h3 class="mb-0"><i class="bi bi-cloud-sun"></i> ReplaceYourReportNameHere</h3>
+                <h3 class="mb-0"><i class="bi bi-cpu"></i> ReplaceYourReportNameHere</h3>
                 <small class="text-muted">Updated: ReplaceUpdateTimeHere</small>
             </div>
         </div>
 
         <div class="row mb-3" id="summaryRow">
             <div class="col-xl-2 col-md-4 mb-2">
+                <div class="card summary-card card-hosts h-100">
+                    <div class="card-body py-2">
+                        <div class="text-muted small">ESXi Hosts</div>
+                        <h4 id="totalHosts" class="mb-0" style="color:#0d6efd;font-weight:600;">0</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-xl-2 col-md-4 mb-2">
                 <div class="card summary-card card-total h-100">
                     <div class="card-body py-2">
-                        <div class="text-muted small">Total Resources</div>
-                        <h4 id="totalResources" class="mb-0">0</h4>
+                        <div class="text-muted small">Virtual Machines</div>
+                        <h4 id="totalVMs" class="mb-0">0</h4>
                     </div>
                 </div>
             </div>
             <div class="col-xl-2 col-md-4 mb-2">
                 <div class="card summary-card card-green h-100">
                     <div class="card-body py-2">
-                        <div class="text-muted small">Running / Active</div>
-                        <h4 id="runningResources" class="mb-0 status-green">0</h4>
+                        <div class="text-muted small">Powered On</div>
+                        <h4 id="poweredOnVMs" class="mb-0 status-green">0</h4>
                     </div>
                 </div>
             </div>
             <div class="col-xl-2 col-md-4 mb-2">
                 <div class="card summary-card card-red h-100">
                     <div class="card-body py-2">
-                        <div class="text-muted small">Stopped / Other</div>
-                        <h4 id="stoppedResources" class="mb-0 status-red">0</h4>
+                        <div class="text-muted small">Powered Off</div>
+                        <h4 id="poweredOffVMs" class="mb-0 status-red">0</h4>
                     </div>
                 </div>
             </div>
             <div class="col-xl-2 col-md-4 mb-2">
                 <div class="card summary-card card-orange h-100">
                     <div class="card-body py-2">
-                        <div class="text-muted small">Compute</div>
-                        <h4 id="computeCount" class="mb-0 status-orange">0</h4>
-                    </div>
-                </div>
-            </div>
-            <div class="col-xl-2 col-md-4 mb-2">
-                <div class="card summary-card card-blue h-100">
-                    <div class="card-body py-2">
-                        <div class="text-muted small">Databases</div>
-                        <h4 id="dbCount" class="mb-0" style="color:#0d6efd;font-weight:600;">0</h4>
-                    </div>
-                </div>
-            </div>
-            <div class="col-xl-2 col-md-4 mb-2">
-                <div class="card summary-card card-purple h-100">
-                    <div class="card-body py-2">
-                        <div class="text-muted small">Load Balancers</div>
-                        <h4 id="lbCount" class="mb-0" style="color:#6f42c1;font-weight:600;">0</h4>
+                        <div class="text-muted small">Suspended</div>
+                        <h4 id="suspendedVMs" class="mb-0 status-orange">0</h4>
                     </div>
                 </div>
             </div>
@@ -131,52 +122,71 @@
 
     <script type="text/javascript">
     var $table = $('#table');
-    function escapeHtml(t) { if(t==null)return''; return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
 
-    function formatState(value) {
+    function escapeHtml(t) {
+        if (t == null) return '';
+        return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    function formatPowerState(value) {
         if (!value) return '<span class="status-grey"><span class="status-dot dot-grey"></span>Unknown</span>';
         var v = String(value).toLowerCase();
-        if (v==='running'||v==='active'||v==='available') return '<span class="status-green"><span class="status-dot dot-green"></span>' + escapeHtml(value) + '</span>';
-        if (v==='stopped'||v==='terminated'||v==='failed') return '<span class="status-red"><span class="status-dot dot-red"></span>' + escapeHtml(value) + '</span>';
-        if (v==='provisioning'||v==='starting'||v==='stopping'||v==='creating'||v==='updating') return '<span class="status-orange"><span class="status-dot dot-orange"></span>' + escapeHtml(value) + '</span>';
+        if (v === 'poweredon')  return '<span class="status-green"><span class="status-dot dot-green"></span>' + escapeHtml(value) + '</span>';
+        if (v === 'poweredoff') return '<span class="status-red"><span class="status-dot dot-red"></span>' + escapeHtml(value) + '</span>';
+        if (v === 'suspended')  return '<span class="status-orange"><span class="status-dot dot-orange"></span>' + escapeHtml(value) + '</span>';
         return '<span class="status-grey"><span class="status-dot dot-grey"></span>' + escapeHtml(value) + '</span>';
     }
 
-    function computeSummary(data) {
-        var running=0, stopped=0, compute=0, db=0, lb=0;
-        data.forEach(function(r) {
-            var s = String(r.LifecycleState||'').toLowerCase();
-            if (s==='running'||s==='active'||s==='available') running++; else stopped++;
-            var t = String(r.ResourceType||'').toLowerCase();
-            if (t==='compute') compute++;
-            else if (t==='dbsystem'||t==='autonomousdb') db++;
-            else if (t==='loadbalancer') lb++;
-        });
-        $('#totalResources').text(data.length);
-        $('#runningResources').text(running);
-        $('#stoppedResources').text(stopped);
-        $('#computeCount').text(compute);
-        $('#dbCount').text(db);
-        $('#lbCount').text(lb);
+    function formatToolsStatus(value) {
+        if (!value || value === 'N/A') return '<span class="status-grey">N/A</span>';
+        var v = String(value).toLowerCase();
+        if (v === 'toolsok')          return '<span class="status-green">' + escapeHtml(value) + '</span>';
+        if (v === 'toolsnotinstalled') return '<span class="status-red">' + escapeHtml(value) + '</span>';
+        if (v.indexOf('old') !== -1)  return '<span class="status-orange">' + escapeHtml(value) + '</span>';
+        return escapeHtml(value);
     }
 
-    function getExportRows() { return $table.bootstrapTable('getData', { useCurrentPage:false, includeHiddenRows:true }); }
-    function downloadBlob(c,f,m) { saveAs(new Blob([c],{type:m}),f); }
-    function escapeCsvValue(v) { var s=String(v==null?'':v); return (s.indexOf('"')!==-1||s.indexOf(',')!==-1||s.indexOf('\n')!==-1)?'"'+s.replace(/"/g,'""')+'"':s; }
-    function exportCsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join(',')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join(','));}); downloadBlob(l.join('\r\n'),'oci_dashboard.csv','text/csv;charset=utf-8'); }
-    function exportJson(rows) { downloadBlob(JSON.stringify(rows,null,2),'oci_dashboard.json','application/json;charset=utf-8'); }
-    function exportTxt(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var c=rows.map(function(r,i){return['--- Row '+(i+1)+' ---'].concat(h.map(function(k){return k+': '+(r[k]==null?'':r[k]);})).join('\r\n');}).join('\r\n\r\n'); downloadBlob(c,'oci_dashboard.txt','text/plain;charset=utf-8'); }
-    function exportXlsx(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'OCI'); XLSX.writeFile(wb,'oci_dashboard.xlsx'); }
-    function exportXls(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'OCI'); XLSX.writeFile(wb,'oci_dashboard.xls.xlsx'); }
-    function exportTsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join('\t')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join('\t'));}); downloadBlob(l.join('\r\n'),'oci_dashboard.tsv','text/tab-separated-values;charset=utf-8'); }
-    function exportSql(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var s=rows.map(function(r){var v=h.map(function(k){return"'"+String(r[k]==null?'':r[k]).replace(/'/g,"''")+"'";});return'INSERT INTO dashboard_export ('+h.join(', ')+') VALUES ('+v.join(', ')+');';}).join('\r\n'); downloadBlob(s,'oci_dashboard.sql','text/plain;charset=utf-8'); }
-    function exportPng() { html2canvas(document.querySelector('#table')).then(function(c){c.toBlob(function(b){saveAs(b,'oci_dashboard.png');}); }); }
+    function formatType(value) {
+        if (value === 'Host') return '<span class="badge bg-primary">Host</span>';
+        return '<span class="badge bg-secondary">' + escapeHtml(value) + '</span>';
+    }
+
+    function computeSummary(data) {
+        var hosts = 0, vms = 0, on = 0, off = 0, suspended = 0;
+        data.forEach(function(r) {
+            var t = String(r.Type || '');
+            if (t === 'Host') { hosts++; } else { vms++; }
+            var s = String(r.PowerState || '').toLowerCase();
+            if (s === 'poweredon') on++;
+            else if (s === 'poweredoff') off++;
+            else if (s === 'suspended') suspended++;
+        });
+        $('#totalHosts').text(hosts);
+        $('#totalVMs').text(vms);
+        $('#poweredOnVMs').text(on);
+        $('#poweredOffVMs').text(off);
+        $('#suspendedVMs').text(suspended);
+    }
+
+    function getExportRows() { return $table.bootstrapTable('getData', { useCurrentPage: false, includeHiddenRows: true }); }
+    function downloadBlob(c, f, m) { saveAs(new Blob([c], { type: m }), f); }
+    function escapeCsvValue(v) { var s = String(v == null ? '' : v); return (s.indexOf('"')!==-1||s.indexOf(',')!==-1||s.indexOf('\n')!==-1)?'"'+s.replace(/"/g,'""')+'"':s; }
+
+    function exportCsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join(',')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join(','));}); downloadBlob(l.join('\r\n'),'vmware_dashboard.csv','text/csv;charset=utf-8'); }
+    function exportJson(rows) { downloadBlob(JSON.stringify(rows,null,2),'vmware_dashboard.json','application/json;charset=utf-8'); }
+    function exportTxt(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var c=rows.map(function(r,i){return['--- Row '+(i+1)+' ---'].concat(h.map(function(k){return k+': '+(r[k]==null?'':r[k]);})).join('\r\n');}).join('\r\n\r\n'); downloadBlob(c,'vmware_dashboard.txt','text/plain;charset=utf-8'); }
+    function exportXlsx(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'VMware'); XLSX.writeFile(wb,'vmware_dashboard.xlsx'); }
+    function exportXls(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'VMware'); XLSX.writeFile(wb,'vmware_dashboard.xls.xlsx'); }
+    function exportTsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join('\t')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join('\t'));}); downloadBlob(l.join('\r\n'),'vmware_dashboard.tsv','text/tab-separated-values;charset=utf-8'); }
+    function exportSql(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var s=rows.map(function(r){var v=h.map(function(k){return"'"+String(r[k]==null?'':r[k]).replace(/'/g,"''")+"'";});return'INSERT INTO dashboard_export ('+h.join(', ')+') VALUES ('+v.join(', ')+');';}).join('\r\n'); downloadBlob(s,'vmware_dashboard.sql','text/plain;charset=utf-8'); }
+    function exportPng() { html2canvas(document.querySelector('#table')).then(function(c){c.toBlob(function(b){saveAs(b,'vmware_dashboard.png');}); }); }
 
     $(function () {
         $table.bootstrapTable({ replaceThisHere });
         computeSummary($table.bootstrapTable('getData'));
         $('.dropdown-item[data-type]').on('click', function(e) {
-            e.preventDefault(); var t=$(this).data('type'), r=getExportRows();
+            e.preventDefault();
+            var t=$(this).data('type'), r=getExportRows();
             switch(t) { case 'csv':exportCsv(r);break; case 'txt':exportTxt(r);break; case 'xlsx':exportXlsx(r);break; case 'xls':exportXls(r);break; case 'json':exportJson(r);break; case 'png':exportPng();break; case 'sql':exportSql(r);break; case 'tsv':exportTsv(r);break; }
         });
     });

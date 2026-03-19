@@ -1,6 +1,42 @@
 ﻿﻿# WhatsUpGoldPS Release History
-## 0.1.21 - 2026-03-18 [Unreleased]
+## 0.1.21 - 2026-03-19 [Unreleased]
 * Added -- Helpers
+  * helpers/lansweeper/ -- Lansweeper Data API (GraphQL) helper suite for IT asset discovery and vulnerability data
+    * `LansweeperHelpers.ps1` -- 20+ functions for Lansweeper Data API integration
+      * `Connect-LansweeperPAT` -- Authenticate via Personal Access Token (PAT); validates with `me` query
+      * `Connect-LansweeperOAuth` -- Authenticate via OAuth 2.0 authorization code or refresh token flow
+      * `Update-LansweeperOAuthToken` -- Refresh expired OAuth access tokens automatically
+      * `Disconnect-Lansweeper` -- Clear session state
+      * `Invoke-LansweeperGraphQL` -- Core GraphQL executor with auto-refresh, PAT/OAuth header switching, error handling
+      * `Get-LansweeperCurrentUser` -- Retrieve authenticated user profile and site list (`me` query)
+      * `Get-LansweeperSites` -- List API-client-authorized sites (`authorizedSites` query)
+      * `Get-LansweeperSiteInfo` -- Site metadata (name, company, logo)
+      * `Get-LansweeperAssetTypes` -- Enumerate all asset type names for a site
+      * `Get-LansweeperAssetGroups` -- List asset groups with keys
+      * `Get-LansweeperAssets` -- Paginated asset queries with field selection (max 30 paths), filtering, and `-All` auto-pagination
+      * `Get-LansweeperAssetDetails` -- Full single-asset detail (OS, processors, memory, disks, network adapters, software, warranties)
+      * `Get-LansweeperSources` -- List discovery sources/installations for a site
+      * `Get-LansweeperAccounts` -- List authorized accounts for a site
+      * `Get-LansweeperVulnerabilities` -- Query CVE data with severity filtering and auto-pagination (Pro/Enterprise plans)
+      * `Get-LansweeperPatches` -- Microsoft KB patch articles for a specific CVE
+      * `Start-LansweeperExport` -- Initiate bulk async asset export (mutation)
+      * `Get-LansweeperExportStatus` -- Check export progress and download URL
+      * `Wait-LansweeperExport` -- Poll export status until complete with configurable timeout
+      * `Resolve-LansweeperAssetIP` -- IP resolution: assetBasicInfo.ipAddress -> networks[].ipAddressV4 -> DNS fallback
+      * `New-LansweeperFilterBlock` -- Build GraphQL filter blocks from hashtable (conjunction + conditions)
+      * `Get-LansweeperDashboardData` -- Aggregate assets across sites with optional vulnerability counts into flat dashboard objects
+      * `Export-LansweeperDashboardHtml` -- Generate Bootstrap Table HTML report from dashboard data
+    * `Lansweeper-Dashboard-Template.html` -- Bootstrap 5 + Bootstrap Table 1.22.1 interactive report template
+      * Summary stat cards (Total Assets, Asset Types, Sites, With IP Address)
+      * Filter control, column toggle, fullscreen, search, CSV/JSON/XLS export
+      * Lansweeper URL deep-link column, vulnerability badge formatters (Critical/High/Medium)
+    * `Get-LansweeperDashboard.ps1` -- Orchestration script: PAT auth, site selection, data collection, JSON + HTML export, browser open
+    * `discover-lansweeper-immediate-add-with-attributes.ps1` -- WUG discovery script
+      * Authenticates to Lansweeper (PAT) and WhatsUp Gold (Connect-WUGServer)
+      * Retrieves assets with configurable type filter (Windows, Server, Linux, Network, etc.)
+      * Resolves IP per asset, maps Lansweeper type to WUG brand (Microsoft, VMware, Network, AWS, Azure, etc.)
+      * Adds devices via `Add-WUGDeviceTemplate` with Ping monitor and 14 custom Lansweeper attributes
+      * Attributes: Lansweeper_Source, AssetKey, AssetType, Site, SiteId, Domain, MAC, Manufacturer, Model, Serial, FirstSeen, LastSeen, Url, LastSync
   * helpers/geolocation/ -- Geolocation map helper suite (replaces legacy ASP-based wug-geolocation with pure PowerShell + Leaflet)
     * `GeolocationHelpers.ps1` -- 7 functions for querying WUG devices/groups with lat/lng data and generating interactive Leaflet maps
       * `Initialize-GeoSSLBypass` -- SSL bypass for self-signed certs (compiled C# callback for PS 5.1)

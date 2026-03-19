@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReplaceYourReportNameHere</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/bootstrap-table.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .header-bar { background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%); color: white; padding: 20px 30px; margin-bottom: 20px; }
+        .header-bar h1 { margin: 0; font-weight: 300; font-size: 1.8rem; }
+        .header-bar .subtitle { opacity: 0.85; font-size: 0.9rem; }
+        .stat-card { border: none; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+        .stat-card .card-body { padding: 15px 20px; }
+        .stat-card .stat-value { font-size: 1.8rem; font-weight: 600; }
+        .stat-card .stat-label { font-size: 0.85rem; color: #6c757d; text-transform: uppercase; letter-spacing: 0.05em; }
+        .table-container { background: white; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); padding: 20px; }
+        .fixed-table-toolbar .columns .btn, .fixed-table-toolbar .search .form-control { border-radius: 6px; }
+        td, th { font-size: 0.875rem; }
+        .badge-critical { background-color: #dc3545; }
+        .badge-high { background-color: #fd7e14; }
+        .badge-medium { background-color: #ffc107; color: #333; }
+        .badge-low { background-color: #28a745; }
+    </style>
+</head>
+<body>
+    <div class="header-bar">
+        <h1><i class="bi bi-hdd-network"></i> ReplaceYourReportNameHere</h1>
+        <div class="subtitle">Generated: ReplaceUpdateTimeHere</div>
+    </div>
+
+    <div class="container-fluid px-4">
+        <div class="row mb-3" id="statsRow"></div>
+
+        <div class="table-container">
+            <table id="dashboardTable"
+                   data-toggle="table"
+                   data-search="true"
+                   data-show-columns="true"
+                   data-show-toggle="true"
+                   data-show-export="true"
+                   data-show-pagination-switch="true"
+                   data-pagination="true"
+                   data-page-size="50"
+                   data-page-list="[25, 50, 100, 250, 500, All]"
+                   data-sort-name="AssetName"
+                   data-sort-order="asc"
+                   data-show-fullscreen="true"
+                   data-filter-control="true"
+                   data-show-search-clear-button="true"
+                   class="table table-striped table-hover table-sm">
+            </table>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.0/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/bootstrap-table.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/extensions/export/bootstrap-table-export.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/extensions/filter-control/bootstrap-table-filter-control.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin@1.27.0/tableExport.min.js"></script>
+
+    <script>
+        var columns = replaceColumnsHere;
+        var data = replaceDataHere;
+
+        // Format columns
+        columns.forEach(function(col) {
+            col.filterControl = 'input';
+            if (col.field === 'LansweeperUrl' || col.field === 'Lansweeper Url') {
+                col.formatter = function(value) {
+                    if (value && value !== 'N/A') {
+                        return '<a href="' + value + '" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i> View</a>';
+                    }
+                    return value;
+                };
+            }
+            if (col.field === 'Vulnerabilities') {
+                col.formatter = function(value) {
+                    if (!value || value === 0) return '<span class="badge bg-success">0</span>';
+                    if (value >= 10) return '<span class="badge badge-critical">' + value + '</span>';
+                    if (value >= 5) return '<span class="badge badge-high">' + value + '</span>';
+                    return '<span class="badge badge-medium">' + value + '</span>';
+                };
+            }
+            if (col.field === 'CriticalVulns' || col.field === 'Critical Vulns') {
+                col.formatter = function(value) {
+                    if (!value || value === 0) return '<span class="badge bg-success">0</span>';
+                    return '<span class="badge badge-critical">' + value + '</span>';
+                };
+            }
+        });
+
+        // Compute stats
+        var totalAssets = data.length;
+        var uniqueTypes = {};
+        var uniqueSites = {};
+        var withIp = 0;
+        data.forEach(function(row) {
+            if (row.AssetType && row.AssetType !== 'N/A') uniqueTypes[row.AssetType] = true;
+            if (row.Site && row.Site !== 'N/A') uniqueSites[row.Site] = true;
+            if (row.IPAddress && row.IPAddress !== 'N/A' && row.IPAddress !== '') withIp++;
+        });
+
+        var stats = [
+            { label: 'Total Assets', value: totalAssets, icon: 'bi-hdd-stack', color: '#1a73e8' },
+            { label: 'Asset Types', value: Object.keys(uniqueTypes).length, icon: 'bi-tags', color: '#0d47a1' },
+            { label: 'Sites', value: Object.keys(uniqueSites).length, icon: 'bi-building', color: '#34a853' },
+            { label: 'With IP Address', value: withIp, icon: 'bi-ethernet', color: '#ea4335' }
+        ];
+
+        var statsHtml = '';
+        stats.forEach(function(s) {
+            statsHtml += '<div class="col-md-3 col-sm-6 mb-3">' +
+                '<div class="card stat-card"><div class="card-body">' +
+                '<div class="stat-value" style="color:' + s.color + '"><i class="bi ' + s.icon + '"></i> ' + s.value + '</div>' +
+                '<div class="stat-label">' + s.label + '</div>' +
+                '</div></div></div>';
+        });
+        document.getElementById('statsRow').innerHTML = statsHtml;
+
+        // Initialize table
+        $(function() {
+            $('#dashboardTable').bootstrapTable({
+                columns: columns,
+                data: data
+            });
+        });
+    </script>
+</body>
+</html>

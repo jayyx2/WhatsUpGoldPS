@@ -3,9 +3,15 @@
     Azure discovery provider for infrastructure monitoring.
 
 .DESCRIPTION
-    Registers an Azure discovery provider that uses the Az PowerShell
-    modules to discover subscriptions, resource groups, and resources,
-    then builds a monitor plan suitable for WhatsUp Gold or standalone use.
+    Registers an Azure discovery provider that discovers subscriptions,
+    resource groups, and resources, then builds a monitor plan suitable
+    for WhatsUp Gold or standalone use.
+
+    Two collection methods supported:
+      [1] Az PowerShell modules -- uses Az.Accounts, Az.Resources, etc.
+      [2] REST API direct -- zero external dependencies (Invoke-RestMethod)
+
+    The method is selected by the caller via Credential.UseRestApi = $true/$false.
 
     Discovery discovers:
       - Azure subscriptions and resource groups
@@ -17,13 +23,14 @@
       Stored in DPAPI vault as encrypted bundle.
 
     Prerequisites:
-      1. Az PowerShell modules installed: Install-Module -Name Az
-      2. Service principal with Reader role on target subscriptions
-      3. Azure AD app registration with client secret
+      1. Service principal with Reader role on target subscriptions
+      2. Azure AD app registration with client secret
+      3. For Az module mode only:
+         Install-Module -Name Az.Accounts, Az.Resources, Az.Compute, Az.Network, Az.Monitor -Scope CurrentUser -Force
 
 .NOTES
     Author: Jason Alberino (jason@wug.ninja)
-    Requires: DiscoveryHelpers.ps1 loaded first, Az PowerShell modules
+    Requires: DiscoveryHelpers.ps1 and AzureHelpers.ps1 loaded first
     Encoding: UTF-8 with BOM
 #>
 
@@ -88,12 +95,23 @@ Register-DiscoveryProvider -Name 'Azure' `
             return $items
         }
 
+        # Determine collection method
+        $useRest = $false
+        if ($ctx.Credential -and $ctx.Credential.UseRestApi) {
+            $useRest = $ctx.Credential.UseRestApi
+        }
+
         # ================================================================
         # Phase 1: Authenticate and enumerate resources
         # ================================================================
         try {
             Write-Host "  Authenticating to Azure tenant $tenantId..." -ForegroundColor DarkGray
-            Connect-AzureServicePrincipal -TenantId $tenantId -ApplicationId $appId -ClientSecret $secret | Out-Null
+            if ($useRest) {
+                Connect-AzureServicePrincipalREST -TenantId $tenantId -ApplicationId $appId -ClientSecret $secret | Out-Null
+            }
+            else {
+                Connect-AzureServicePrincipal -TenantId $tenantId -ApplicationId $appId -ClientSecret $secret | Out-Null
+            }
             Write-Host "  Authenticated." -ForegroundColor DarkGray
         }
         catch {
@@ -105,7 +123,12 @@ Register-DiscoveryProvider -Name 'Azure' `
 
         try {
             Write-Host "  Listing subscriptions..." -ForegroundColor DarkGray
-            $subscriptions = Get-AzureSubscriptions | Where-Object { $_.State -eq 'Enabled' }
+            if ($useRest) {
+                $subscriptions = Get-AzureSubscriptionsREST | Where-Object { $_.State -eq 'Enabled' }
+            }
+            else {
+                $subscriptions = Get-AzureSubscriptions | Where-Object { $_.State -eq 'Enabled' }
+            }
             # If target specified, filter to specific subscriptions
             if ($ctx.DeviceIP -and $ctx.DeviceIP -ne $tenantId) {
                 $targetSubs = @($ctx.DeviceIP -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -119,10 +142,17 @@ Register-DiscoveryProvider -Name 'Azure' `
 
             foreach ($sub in $subscriptions) {
                 Write-Host "    Subscription: $($sub.SubscriptionName)" -ForegroundColor DarkGray
-                Set-AzContext -SubscriptionId $sub.SubscriptionId -ErrorAction SilentlyContinue | Out-Null
+                if (-not $useRest) {
+                    Set-AzContext -SubscriptionId $sub.SubscriptionId -ErrorAction SilentlyContinue | Out-Null
+                }
 
                 try {
-                    $rgs = Get-AzureResourceGroups
+                    if ($useRest) {
+                        $rgs = Get-AzureResourceGroupsREST -SubscriptionId $sub.SubscriptionId
+                    }
+                    else {
+                        $rgs = Get-AzureResourceGroups
+                    }
                 }
                 catch {
                     Write-Warning "Failed to list RGs for $($sub.SubscriptionName): $_"
@@ -132,7 +162,12 @@ Register-DiscoveryProvider -Name 'Azure' `
 
                 foreach ($rg in $rgs) {
                     try {
-                        $resources = Get-AzureResources -ResourceGroupName $rg.ResourceGroupName
+                        if ($useRest) {
+                            $resources = Get-AzureResourcesREST -SubscriptionId $sub.SubscriptionId -ResourceGroupName $rg.ResourceGroupName
+                        }
+                        else {
+                            $resources = Get-AzureResources -ResourceGroupName $rg.ResourceGroupName
+                        }
                     }
                     catch {
                         Write-Warning "Failed to list resources in $($rg.ResourceGroupName): $_"
@@ -144,7 +179,15 @@ Register-DiscoveryProvider -Name 'Azure' `
 
                     foreach ($r in $resources) {
                         $ip = $null
-                        try { $ip = Resolve-AzureResourceIP -Resource $r } catch { }
+                        try {
+                            if ($useRest) {
+                                $ip = Resolve-AzureResourceIPREST -Resource $r -SubscriptionId $sub.SubscriptionId
+                            }
+                            else {
+                                $ip = Resolve-AzureResourceIP -Resource $r
+                            }
+                        }
+                        catch { }
 
                         $resourceMap[$r.ResourceId] = @{
                             Name         = $r.ResourceName

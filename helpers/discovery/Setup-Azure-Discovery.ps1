@@ -1,10 +1,10 @@
 ﻿<#
 .SYNOPSIS
-    Azure Discovery — Discover resources and optionally push to WhatsUp Gold.
+    Azure Discovery -- Discover resources and optionally push to WhatsUp Gold.
 
 .DESCRIPTION
-    Interactive script that discovers Azure resources across subscriptions
-    using the Az PowerShell modules, then lets you choose what to do:
+    Interactive script that discovers Azure resources across subscriptions,
+    then lets you choose what to do:
 
       [1] Push monitors to WhatsUp Gold (creates devices + monitors)
       [2] Export discovery plan to JSON
@@ -13,26 +13,105 @@
       [5] Generate Azure HTML dashboard
       [6] Exit
 
+    Two collection methods:
+      [1] Az PowerShell modules -- uses Az.Accounts, Az.Resources, etc.
+      [2] REST API (direct) -- zero external dependencies, uses Invoke-RestMethod
+
     First Run:
-      1. Prompts for Tenant ID, Application ID, Client Secret
-      2. Stores service principal in DPAPI vault (encrypted)
-      3. Discovers resources across subscriptions
-      4. Shows summary, then asks what to do
+      1. Prompts for collection method and Tenant ID
+      2. Prompts for Application ID, Client Secret
+      3. Stores service principal in DPAPI vault (encrypted)
+      4. Discovers resources across subscriptions
+      5. Shows summary, then asks what to do
 
     Subsequent Runs:
       Loads service principal from vault automatically.
 
-    Prerequisites:
-      Az PowerShell modules must be installed:
-        Install-Module -Name Az -Scope CurrentUser -Force
-
 .NOTES
-    WhatsUpGoldPS module is only needed if you choose option [1].
-    Requires Az.Accounts, Az.Resources, Az.Monitor, Az.Compute, Az.Network.
+    WhatsUpGoldPS module is only needed if you choose option [1] (push to WUG).
+    REST API mode has zero external module dependencies.
+    Az module mode requires: Az.Accounts, Az.Resources, Az.Compute, Az.Network, Az.Monitor.
 #>
 
 # --- Configuration -----------------------------------------------------------
 $WUGServer = '192.168.74.74'             # Default WhatsUp Gold server
+
+# --- Collection method choice -------------------------------------------------
+Write-Host ""
+Write-Host "Azure data collection method:" -ForegroundColor Cyan
+Write-Host "  [1] Az PowerShell modules (requires Az.Accounts, Az.Resources, etc.)" -ForegroundColor White
+Write-Host "  [2] REST API direct (zero external dependencies)" -ForegroundColor White
+Write-Host ""
+$methodChoice = Read-Host -Prompt "Choice [1/2, default: 2]"
+$UseRestApi = ($methodChoice -ne '1')
+
+if ($UseRestApi) {
+    Write-Host "Using REST API mode (no Az modules needed)." -ForegroundColor Green
+}
+else {
+    Write-Host "Using Az PowerShell module mode." -ForegroundColor Green
+
+    # --- Check for required Az sub-modules --------------------------------
+    $requiredAzModules = @('Az.Accounts', 'Az.Resources', 'Az.Compute', 'Az.Network', 'Az.Monitor')
+    $missingModules = @($requiredAzModules | Where-Object { -not (Get-Module -ListAvailable -Name $_ -ErrorAction SilentlyContinue) })
+    if ($missingModules.Count -gt 0) {
+        Write-Warning "Required Az modules not found: $($missingModules -join ', ')"
+        Write-Host "  Install with:" -ForegroundColor Yellow
+        foreach ($mod in $missingModules) {
+            Write-Host "    Install-Module -Name $mod -Scope CurrentUser -Force" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        $installChoice = Read-Host -Prompt "Attempt to install missing modules now? [y/N]"
+        if ($installChoice -eq 'y' -or $installChoice -eq 'Y') {
+            foreach ($mod in $missingModules) {
+                try {
+                    Write-Host "  Installing $mod..." -ForegroundColor Cyan
+                    Install-Module -Name $mod -Scope CurrentUser -Force -ErrorAction Stop
+                    Write-Host "  $mod installed." -ForegroundColor Green
+                }
+                catch {
+                    Write-Error "Failed to install ${mod}: $_"
+                    return
+                }
+            }
+            Write-Host "All required Az modules installed successfully." -ForegroundColor Green
+        }
+        else {
+            Write-Host "Cannot proceed without required Az modules. Exiting." -ForegroundColor Red
+            return
+        }
+    }
+
+    # --- Pre-load required Az sub-modules to avoid version mismatch -------
+    # IMPORTANT: Never use 'Import-Module Az' -- it loads all ~70 sub-modules
+    # and will fail on broken ones. Only import the specific ones we need.
+    $loadedAccounts = Get-Module -Name Az.Accounts
+    $latestAccounts = Get-Module -ListAvailable -Name Az.Accounts |
+        Sort-Object Version -Descending | Select-Object -First 1
+
+    if ($loadedAccounts -and $latestAccounts -and $loadedAccounts.Version -lt $latestAccounts.Version) {
+        Write-Warning "Az.Accounts $($loadedAccounts.Version) is loaded but $($latestAccounts.Version) is available."
+        Write-Warning "Stale Az module assemblies in this session may cause errors."
+        Write-Warning "Please close this PowerShell window and re-run in a fresh session."
+        return
+    }
+
+    foreach ($azMod in $requiredAzModules) {
+        if (-not (Get-Module -Name $azMod)) {
+            $latest = Get-Module -ListAvailable -Name $azMod |
+                Sort-Object Version -Descending | Select-Object -First 1
+            if ($latest) {
+                try {
+                    Import-Module $azMod -RequiredVersion $latest.Version -ErrorAction Stop
+                    Write-Verbose "Loaded $azMod $($latest.Version)"
+                }
+                catch {
+                    Write-Warning "Could not load ${azMod}: $($_.Exception.Message)"
+                }
+            }
+        }
+    }
+}
 
 # --- Load helpers (works from any directory) ----------------------------------
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
@@ -44,28 +123,6 @@ $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 # ==============================================================================
 Write-Host "=== Azure Discovery ===" -ForegroundColor Cyan
 Write-Host ""
-
-# --- Check for Az modules -----------------------------------------------------
-if (-not (Get-Module -ListAvailable -Name Az.Accounts -ErrorAction SilentlyContinue)) {
-    Write-Warning "Az PowerShell modules not found. Install with:"
-    Write-Host "  Install-Module -Name Az -Scope CurrentUser -Force" -ForegroundColor Yellow
-    Write-Host ""
-    $installChoice = Read-Host -Prompt "Attempt to install now? [y/N]"
-    if ($installChoice -eq 'y' -or $installChoice -eq 'Y') {
-        try {
-            Install-Module -Name Az -Scope CurrentUser -Force -ErrorAction Stop
-            Write-Host "Az modules installed successfully." -ForegroundColor Green
-        }
-        catch {
-            Write-Error "Failed to install Az modules: $_"
-            return
-        }
-    }
-    else {
-        Write-Host "Cannot proceed without Az modules. Exiting." -ForegroundColor Red
-        return
-    }
-}
 
 # ==============================================================================
 # STEP 2: Service Principal Credentials (DPAPI vault)
@@ -101,7 +158,7 @@ finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrAz) }
 $azParts = $AzureCred.UserName -split '\|'
 $plan = Invoke-Discovery -ProviderName 'Azure' `
     -Target @($SubscriptionFilter) `
-    -Credential @{ TenantId = $azParts[0]; ApplicationId = $azParts[1]; ClientSecret = $plainAzSecret }
+    -Credential @{ TenantId = $azParts[0]; ApplicationId = $azParts[1]; ClientSecret = $plainAzSecret; UseRestApi = $UseRestApi }
 
 if (-not $plan -or $plan.Count -eq 0) {
     Write-Warning "No items discovered. Check service principal permissions and connectivity."
@@ -142,9 +199,9 @@ $activeTemplates = @($plan | Where-Object { $_.ItemType -eq 'ActiveMonitor' } |
 $perfTemplates   = @($plan | Where-Object { $_.ItemType -eq 'PerformanceMonitor' } |
     Select-Object -ExpandProperty Name -Unique)
 
-$uniqueSubs = @($devicePlan.Values | Select-Object -ExpandProperty Sub -Unique)
-$uniqueRGs  = @($devicePlan.Values | Select-Object -ExpandProperty RG -Unique)
-$uniqueLocs = @($devicePlan.Values | Select-Object -ExpandProperty Location -Unique)
+$uniqueSubs = @($devicePlan.Values | ForEach-Object { $_.Sub } | Select-Object -Unique)
+$uniqueRGs  = @($devicePlan.Values | ForEach-Object { $_.RG } | Select-Object -Unique)
+$uniqueLocs = @($devicePlan.Values | ForEach-Object { $_.Location } | Select-Object -Unique)
 
 Write-Host ""
 Write-Host "Discovery complete!" -ForegroundColor Green

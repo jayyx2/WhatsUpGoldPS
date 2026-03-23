@@ -229,7 +229,9 @@ $script:AzureCmdletList = @(
     'Get-AzureResourceDetail (metrics)','Get-AzureResourceDetail (no metrics)',
     'Resolve-AzureResourceIP',
     'Get-AzureDashboard (no metrics)','Get-AzureDashboard (with metrics)','Get-AzureDashboard (SubId)',
-    'Export-AzureDashboardHtml','Azure Session Disconnect'
+    'Export-AzureDashboardHtml','Azure Session Disconnect',
+    'Azure REST Authentication','Get-AzureSubscriptionsREST','Get-AzureResourceGroupsREST',
+    'Get-AzureResourcesREST','Resolve-AzureResourceIPREST','Get-AzureResourceMetricsREST'
 )
 $script:GCPCmdletList = @(
     'Connect-GCPAccount','Get-GCPProjects',
@@ -408,7 +410,7 @@ if ($TestAWS) {
 }
 if ($TestAzure) {
     if (-not (Install-RequiredModule -ModuleName 'Az.Accounts' -Provider 'Azure' `
-        -InstallHint 'Install-Module -Name Az -Scope CurrentUser -Repository PSGallery -Force')) {
+        -InstallHint 'Install-Module -Name Az.Accounts, Az.Resources, Az.Compute, Az.Network, Az.Monitor -Scope CurrentUser -Force')) {
         Write-Warning "Azure tests will be skipped."; $TestAzure = $false
     }
 }

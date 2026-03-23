@@ -1,10 +1,10 @@
 ﻿<#
 .SYNOPSIS
-    VMware vSphere Discovery — Discover ESXi hosts/VMs and optionally push to WhatsUp Gold.
+    VMware vSphere Discovery -- Discover ESXi hosts/VMs and optionally push to WhatsUp Gold.
 
 .DESCRIPTION
-    Interactive script that discovers VMware vSphere infrastructure using
-    PowerCLI, then lets you choose what to do with the results:
+    Interactive script that discovers VMware vSphere infrastructure, then
+    lets you choose what to do with the results:
 
       [1] Push monitors to WhatsUp Gold (creates devices + monitors)
       [2] Export discovery plan to JSON
@@ -13,22 +13,23 @@
       [5] Generate VMware HTML dashboard (live metrics)
       [6] Exit
 
+    Two collection methods:
+      [1] VMware PowerCLI -- uses Connect-VIServer, Get-VMHost, Get-VM, etc.
+      [2] REST API (direct) -- zero external dependencies, uses vCenter REST API
+
     First Run:
-      1. Prompts for vCenter server, port, credentials (username + password)
+      1. Prompts for collection method, vCenter server, port, credentials
       2. Stores credentials in DPAPI vault (encrypted to user + machine)
-      3. Discovers ESXi hosts + VMs from vCenter via PowerCLI
+      3. Discovers ESXi hosts + VMs from vCenter
       4. Shows summary, then asks what to do with the results
 
     Subsequent Runs:
-      Loads credentials from vault automatically — skips credential prompt.
-
-    Prerequisites:
-      VMware PowerCLI must be installed:
-        Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force
+      Loads credentials from vault automatically -- skips credential prompt.
 
 .NOTES
     WhatsUpGoldPS module is only needed if you choose option [1].
-    Requires VMware PowerCLI module.
+    REST API mode has zero external module dependencies (vSphere 6.5+ required).
+    Module mode requires: VMware.PowerCLI.
 #>
 
 # --- Configuration -----------------------------------------------------------
@@ -47,30 +48,45 @@ $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 Write-Host "=== VMware vSphere Discovery ===" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Check for PowerCLI -------------------------------------------------------
-if (-not (Get-Module -ListAvailable -Name VMware.PowerCLI -ErrorAction SilentlyContinue)) {
-    Write-Warning "VMware.PowerCLI module not found. Install it with:"
-    Write-Host "  Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force" -ForegroundColor Yellow
-    Write-Host ""
-    $installChoice = Read-Host -Prompt "Attempt to install now? [y/N]"
-    if ($installChoice -eq 'y' -or $installChoice -eq 'Y') {
-        try {
-            Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force -ErrorAction Stop
-            Write-Host "VMware.PowerCLI installed successfully." -ForegroundColor Green
+# --- Collection method choice --------------------------------------------------
+Write-Host "VMware data collection method:" -ForegroundColor Cyan
+Write-Host "  [1] VMware PowerCLI modules (requires VMware.PowerCLI)" -ForegroundColor White
+Write-Host "  [2] REST API direct (zero external dependencies, vSphere 6.5+)" -ForegroundColor White
+Write-Host ""
+$methodChoice = Read-Host -Prompt "Choice [1/2, default: 2]"
+$UseRestApi = ($methodChoice -ne '1')
+
+if ($UseRestApi) {
+    Write-Host "Using REST API mode (no PowerCLI needed)." -ForegroundColor Green
+}
+else {
+    Write-Host "Using VMware PowerCLI module mode." -ForegroundColor Green
+
+    # --- Check for PowerCLI -------------------------------------------------------
+    if (-not (Get-Module -ListAvailable -Name VMware.PowerCLI -ErrorAction SilentlyContinue)) {
+        Write-Warning "VMware.PowerCLI module not found. Install it with:"
+        Write-Host "  Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force" -ForegroundColor Yellow
+        Write-Host ""
+        $installChoice = Read-Host -Prompt "Attempt to install now? [y/N]"
+        if ($installChoice -eq 'y' -or $installChoice -eq 'Y') {
+            try {
+                Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force -ErrorAction Stop
+                Write-Host "VMware.PowerCLI installed successfully." -ForegroundColor Green
+            }
+            catch {
+                Write-Error "Failed to install VMware.PowerCLI: $_"
+                return
+            }
         }
-        catch {
-            Write-Error "Failed to install VMware.PowerCLI: $_"
+        else {
+            Write-Host "Cannot proceed without PowerCLI. Exiting." -ForegroundColor Red
             return
         }
-    }
-    else {
-        Write-Host "Cannot proceed without PowerCLI. Exiting." -ForegroundColor Red
-        return
     }
 }
 
 # --- Prompt for vCenter server -------------------------------------------------
-Write-Host "Enter vCenter Server or ESXi host — IP address or FQDN." -ForegroundColor Cyan
+Write-Host "Enter vCenter Server or ESXi host -- IP address or FQDN." -ForegroundColor Cyan
 $serverInput = Read-Host -Prompt "vCenter server [default: $DefaultServer]"
 if ([string]::IsNullOrWhiteSpace($serverInput)) {
     $serverInput = $DefaultServer
@@ -86,7 +102,7 @@ if ($portInput -and $portInput -match '^\d+$') {
 }
 
 # ==============================================================================
-# STEP 2: Credentials (DPAPI vault — encrypted, cached)
+# STEP 2: Credentials (DPAPI vault -- encrypted, cached)
 # ==============================================================================
 $vaultName = "VMware.$VMwareServer.Credential"
 $VMwareCred = Resolve-DiscoveryCredential -Name $vaultName -CredType PSCredential -ProviderLabel 'VMware'
@@ -96,7 +112,7 @@ if (-not $VMwareCred) {
 }
 
 # ==============================================================================
-# STEP 3: Discover — query vCenter for hosts + VMs via PowerCLI
+# STEP 3: Discover -- query vCenter for hosts + VMs
 # ==============================================================================
 Write-Host ""
 Write-Host "Connecting to vCenter at $VMwareServer..." -ForegroundColor Cyan
@@ -104,7 +120,7 @@ Write-Host "Connecting to vCenter at $VMwareServer..." -ForegroundColor Cyan
 $plan = Invoke-Discovery -ProviderName 'VMware' `
     -Target @($VMwareServer) `
     -ApiPort $DefaultPort `
-    -Credential @{ Username = $VMwareCred.UserName; Password = $VMwareCred.GetNetworkCredential().Password; PSCredential = $VMwareCred }
+    -Credential @{ Username = $VMwareCred.UserName; Password = $VMwareCred.GetNetworkCredential().Password; PSCredential = $VMwareCred; UseRestApi = $UseRestApi }
 
 if (-not $plan -or $plan.Count -eq 0) {
     Write-Warning "No items discovered. Check vCenter connectivity and credentials."
@@ -119,6 +135,7 @@ if (-not $plan -or $plan.Count -eq 0) {
 $devicePlan = [ordered]@{}
 
 foreach ($item in $plan) {
+    if (-not $item -or -not $item.Attributes) { continue }
     $type = $item.Attributes['VMware.DeviceType']
     switch ($type) {
         'vCenter' {
@@ -184,7 +201,7 @@ foreach ($t in $perfTemplates)   { Write-Host "  [Perf]   $t" -ForegroundColor W
 Write-Host ""
 
 if ($vmNoIP.Count -gt 0) {
-    Write-Host "VMs without IP (VMware Tools needed — monitors attach to parent host):" -ForegroundColor Yellow
+    Write-Host "VMs without IP (VMware Tools needed -- monitors attach to parent host):" -ForegroundColor Yellow
     foreach ($vm in $vmNoIP) {
         Write-Host "    $($vm.Name) (on $($vm.ParentHost))" -ForegroundColor DarkYellow
     }
@@ -209,7 +226,7 @@ Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + credential + 
 Write-Host "  [2] Export plan to JSON file"
 Write-Host "  [3] Export plan to CSV file"
 Write-Host "  [4] Show full plan table"
-Write-Host "  [5] Generate VMware HTML dashboard (live metrics)"
+Write-Host "  [5] Generate VMware HTML dashboard (from discovery data)"
 Write-Host "  [6] Exit (do nothing)"
 Write-Host ""
 $choice = Read-Host -Prompt "Choice [1-6]"
@@ -299,7 +316,7 @@ switch ($choice) {
                     Write-Host "  $($dev.Name) (VM, no IP) -> host $($dev.ParentHost)" -ForegroundColor DarkGray
                 }
                 else {
-                    Write-Warning "No WUG device for VM '$($dev.Name)' — parent host '$($dev.ParentHost)' not found."
+                    Write-Warning "No WUG device for VM '$($dev.Name)' -- parent host '$($dev.ParentHost)' not found."
                 }
             }
         }
@@ -365,92 +382,71 @@ switch ($choice) {
     }
     '5' {
         # ----------------------------------------------------------------
-        # Generate VMware HTML Dashboard with live metrics
+        # Generate VMware HTML Dashboard from already-collected plan data
         # ----------------------------------------------------------------
         Write-Host ""
-        Write-Host "Connecting to vCenter for live metrics..." -ForegroundColor Cyan
-
-        try {
-            Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -Confirm:$false -Scope Session -ErrorAction SilentlyContinue | Out-Null
-            Connect-VIServer -Server $VMwareServer -Credential $VMwareCred -Port $DefaultPort -ErrorAction Stop | Out-Null
-        }
-        catch {
-            Write-Error "Failed to connect to vCenter: $_"
-            return
-        }
+        Write-Host "Building VMware dashboard from discovery data..." -ForegroundColor Cyan
 
         $dashboardRows = @()
 
-        # Collect host data
-        try {
-            $esxiHosts = Get-VMHost -ErrorAction Stop
-            foreach ($esxi in $esxiHosts) {
-                Write-Host "  Host: $($esxi.Name)" -ForegroundColor DarkGray
-                $hostDetail = Get-VMwareHostDetail -VMHost $esxi
+        foreach ($key in $devicePlan.Keys) {
+            $dev = $devicePlan[$key]
+            $attrs = $dev.Attrs
 
-                $dashboardRows += [PSCustomObject]@{
-                    Type              = "Host"
-                    Name              = $hostDetail.Name
-                    PowerState        = $hostDetail.PowerState
-                    IPAddress         = $hostDetail.IPAddress
-                    Cluster           = $hostDetail.Cluster
-                    ESXiHost          = $hostDetail.Name
-                    GuestOS           = "VMware ESXi $($hostDetail.Version)"
-                    ToolsStatus       = "N/A"
-                    CPU               = "$($hostDetail.CpuUsagePct)% ($($hostDetail.CpuSockets)s/$($hostDetail.CpuCores)c/$($hostDetail.CpuThreads)t)"
-                    Memory            = "$($hostDetail.MemUsagePct)% ($($hostDetail.MemoryUsageGB) / $($hostDetail.MemoryTotalGB) GB)"
-                    CpuUsagePct       = $hostDetail.CpuUsagePct
-                    MemUsagePct       = $hostDetail.MemUsagePct
-                    NetUsageKBps      = $hostDetail.NetUsageKBps
-                    DiskUsageKBps     = $hostDetail.DiskUsageKBps
-                    Hardware          = "$($hostDetail.Manufacturer) $($hostDetail.Model)".Trim()
-                    VersionBuild      = "ESXi $($hostDetail.Version) Build $($hostDetail.Build)"
-                    Datastores        = $hostDetail.Datastores
-                    ProvisionedSpaceGB = "N/A"
-                    UsedSpaceGB       = "N/A"
-                    NicCount          = "N/A"
-                    DiskCount         = "N/A"
-                    DiskLatencyMs     = "N/A"
-                }
-
-                # VMs on this host
-                $vms = Get-VM -Location $esxi -ErrorAction SilentlyContinue
-                foreach ($vm in $vms) {
-                    Write-Host "    VM: $($vm.Name)" -ForegroundColor DarkGray
-                    $vmDetail = Get-VMwareVMDetail -VM $vm
-
+            switch ($dev.Type) {
+                'ESXiHost' {
                     $dashboardRows += [PSCustomObject]@{
-                        Type              = "VM"
-                        Name              = $vmDetail.Name
-                        PowerState        = $vmDetail.PowerState
-                        IPAddress         = $vmDetail.IPAddress
-                        Cluster           = $vmDetail.Cluster
-                        ESXiHost          = $vmDetail.ESXiHost
-                        GuestOS           = $vmDetail.GuestOS
-                        ToolsStatus       = $vmDetail.ToolsStatus
-                        CPU               = "$($vmDetail.CpuUsagePct)% ($($vmDetail.NumCPU) vCPU)"
-                        Memory            = "$($vmDetail.MemUsagePct)% ($($vmDetail.MemoryGB) GB)"
-                        CpuUsagePct       = $vmDetail.CpuUsagePct
-                        MemUsagePct       = $vmDetail.MemUsagePct
-                        NetUsageKBps      = $vmDetail.NetUsageKBps
-                        DiskUsageKBps     = $vmDetail.DiskUsageKBps
-                        Hardware          = "N/A"
-                        VersionBuild      = "N/A"
-                        Datastores        = $vmDetail.Datastores
-                        ProvisionedSpaceGB = $vmDetail.ProvisionedSpaceGB
-                        UsedSpaceGB       = $vmDetail.UsedSpaceGB
-                        NicCount          = $vmDetail.NicCount
-                        DiskCount         = $vmDetail.DiskCount
-                        DiskLatencyMs     = $vmDetail.DiskLatencyMs
+                        Type              = 'Host'
+                        Name              = $dev.Name
+                        PowerState        = if ($attrs['VMware.PowerState']) { $attrs['VMware.PowerState'] } elseif ($attrs['VMware.Version']) { 'PoweredOn' } else { 'N/A' }
+                        IPAddress         = if ($dev.IP) { $dev.IP } else { 'N/A' }
+                        Cluster           = if ($attrs['VMware.Cluster']) { $attrs['VMware.Cluster'] } else { 'N/A' }
+                        ESXiHost          = $dev.Name
+                        GuestOS           = if ($attrs['VMware.Version']) { "VMware ESXi $($attrs['VMware.Version'])" } else { 'ESXi' }
+                        ToolsStatus       = 'N/A'
+                        CPU               = if ($attrs['VMware.CpuCores'] -and $attrs['VMware.CpuCores'] -ne 'N/A') { "$($attrs['VMware.CpuSockets'])s/$($attrs['VMware.CpuCores'])c" } else { 'N/A' }
+                        Memory            = if ($attrs['VMware.MemTotalGB'] -and $attrs['VMware.MemTotalGB'] -ne 'N/A') { "$($attrs['VMware.MemTotalGB']) GB" } else { 'N/A' }
+                        CpuUsagePct       = 'N/A'
+                        MemUsagePct       = 'N/A'
+                        NetUsageKBps      = 'N/A'
+                        DiskUsageKBps     = 'N/A'
+                        Hardware          = if ($attrs['VMware.Manufacturer']) { "$($attrs['VMware.Manufacturer']) $($attrs['VMware.Model'])".Trim() } else { 'N/A' }
+                        VersionBuild      = if ($attrs['VMware.Version']) { "ESXi $($attrs['VMware.Version']) Build $($attrs['VMware.Build'])" } else { 'N/A' }
+                        Datastores        = 'N/A'
+                        ProvisionedSpaceGB = 'N/A'
+                        UsedSpaceGB       = 'N/A'
+                        NicCount          = 'N/A'
+                        DiskCount         = 'N/A'
+                        DiskLatencyMs     = 'N/A'
+                    }
+                }
+                'VM' {
+                    $dashboardRows += [PSCustomObject]@{
+                        Type              = 'VM'
+                        Name              = $dev.Name
+                        PowerState        = if ($attrs['VMware.PowerState']) { $attrs['VMware.PowerState'] } else { 'N/A' }
+                        IPAddress         = if ($dev.IP) { $dev.IP } else { 'N/A' }
+                        Cluster           = if ($attrs['VMware.Cluster']) { $attrs['VMware.Cluster'] } else { 'N/A' }
+                        ESXiHost          = if ($attrs['VMware.ESXiHost']) { $attrs['VMware.ESXiHost'] } else { 'N/A' }
+                        GuestOS           = if ($attrs['VMware.GuestOS']) { $attrs['VMware.GuestOS'] } else { 'N/A' }
+                        ToolsStatus       = if ($attrs['VMware.ToolsStatus']) { $attrs['VMware.ToolsStatus'] } else { 'N/A' }
+                        CPU               = if ($attrs['VMware.NumCPU']) { "$($attrs['VMware.NumCPU']) vCPU" } else { 'N/A' }
+                        Memory            = if ($attrs['VMware.MemoryGB']) { "$($attrs['VMware.MemoryGB']) GB" } else { 'N/A' }
+                        CpuUsagePct       = 'N/A'
+                        MemUsagePct       = 'N/A'
+                        NetUsageKBps      = 'N/A'
+                        DiskUsageKBps     = 'N/A'
+                        Hardware          = 'N/A'
+                        VersionBuild      = 'N/A'
+                        Datastores        = 'N/A'
+                        ProvisionedSpaceGB = 'N/A'
+                        UsedSpaceGB       = 'N/A'
+                        NicCount          = if ($attrs['VMware.NicCount']) { $attrs['VMware.NicCount'] } else { 'N/A' }
+                        DiskCount         = if ($attrs['VMware.DiskCount']) { $attrs['VMware.DiskCount'] } else { 'N/A' }
+                        DiskLatencyMs     = 'N/A'
                     }
                 }
             }
-        }
-        catch {
-            Write-Warning "Error collecting VMware metrics: $_"
-        }
-        finally {
-            try { Disconnect-VIServer -Server $VMwareServer -Confirm:$false -ErrorAction SilentlyContinue } catch { }
         }
 
         if ($dashboardRows.Count -eq 0) {

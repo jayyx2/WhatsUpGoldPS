@@ -3,9 +3,15 @@
     VMware vSphere discovery provider for infrastructure monitoring.
 
 .DESCRIPTION
-    Registers a VMware discovery provider that uses PowerCLI to discover
-    ESXi hosts and virtual machines, then builds a monitor plan suitable
-    for WhatsUp Gold REST API monitors or standalone use.
+    Registers a VMware discovery provider that discovers ESXi hosts and
+    virtual machines, then builds a monitor plan suitable for WhatsUp Gold
+    REST API monitors or standalone use.
+
+    Two collection methods:
+      [1] VMware PowerCLI -- uses Connect-VIServer, Get-VMHost, Get-VM, etc.
+      [2] REST API direct -- zero external dependencies, uses vCenter REST API
+
+    The method is selected by the caller via Credential.UseRestApi = $true/$false.
 
     Discovery discovers:
       - ESXi hosts (IP, CPU, Memory, Storage, Version, Power State)
@@ -17,13 +23,12 @@
       or via custom REST API monitors pointing at vCenter API.
 
     Prerequisites:
-      1. VMware PowerCLI module installed: Install-Module VMware.PowerCLI
-      2. vCenter Server or standalone ESXi host reachable on port 443
-      3. Credentials with at least read-only (Auditor) role
+      Module mode: VMware PowerCLI installed
+      REST mode: No external dependencies (vSphere 6.5+ required)
 
 .NOTES
     Author: Jason Alberino (jason@wug.ninja)
-    Requires: DiscoveryHelpers.ps1 loaded first, VMware.PowerCLI module
+    Requires: DiscoveryHelpers.ps1 loaded first
     Encoding: UTF-8 with BOM
 #>
 
@@ -79,94 +84,248 @@ Register-DiscoveryProvider -Name 'VMware' `
             return $items
         }
 
+        # Determine collection method
+        $useRest = $false
+        if ($ctx.Credential -and $ctx.Credential.UseRestApi) {
+            $useRest = $ctx.Credential.UseRestApi
+        }
+
         # ================================================================
-        # Phase 1: Connect and enumerate via PowerCLI
+        # Phase 1: Connect and enumerate
         # ================================================================
         $hostMap = @{}   # hostName -> @{ IP; Cluster; PowerState; Version; Build; ... }
         $vmMap   = @{}   # vmName -> @{ IP; ESXiHost; PowerState; GuestOS; ... }
 
-        try {
-            $connParams = @{
-                Server     = $deviceIP
-                Credential = $cred
-                Port       = $ctx.Port
+        if ($useRest) {
+            # --- REST API mode ---
+            try {
+                Write-Host "  Connecting to vCenter REST API at $deviceIP..." -ForegroundColor DarkGray
+                $connParams = @{
+                    Server     = $deviceIP
+                    Credential = $cred
+                    Port       = $ctx.Port
+                    IgnoreSSLErrors = ($ignoreCert -eq '1')
+                }
+                Connect-VMwareREST @connParams
+                Write-Host "  Connected to vCenter REST API." -ForegroundColor DarkGray
             }
-            if ($ignoreCert -eq '1') {
-                Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -Confirm:$false -Scope Session -ErrorAction SilentlyContinue | Out-Null
+            catch {
+                Write-Warning "Failed to connect to VMware REST API $deviceIP : $_"
+                return $items
             }
-            $viConn = Connect-VIServer @connParams -ErrorAction Stop
-            Write-Verbose "Connected to VMware: $deviceIP ($($viConn.ProductLine) $($viConn.Version))"
-        }
-        catch {
-            Write-Warning "Failed to connect to VMware $deviceIP : $_"
-            return $items
-        }
 
-        try {
-            # Discover ESXi hosts
-            $esxiHosts = Get-VMHost -ErrorAction Stop
-            foreach ($esxi in $esxiHosts) {
-                $mgmtIP = $null
+            try {
+                # ----------------------------------------------------------
+                # Step 1: Enumerate ESXi hosts
+                # ----------------------------------------------------------
+                Write-Host "  Enumerating ESXi hosts..." -ForegroundColor DarkGray
+                $esxiHosts = @(Get-VMwareHostsREST)
+                Write-Host "  Found $($esxiHosts.Count) ESXi host(s)." -ForegroundColor DarkGray
+
+                # Build hostId -> hostName lookup
+                $hostIdToName = @{}
+                foreach ($esxi in $esxiHosts) {
+                    $hostIdToName[$esxi.HostId] = $esxi.Name
+                }
+
+                # ----------------------------------------------------------
+                # Step 2: Resolve cluster-to-host membership
+                # ----------------------------------------------------------
+                Write-Host "  Resolving cluster membership..." -ForegroundColor DarkGray
+                $clusterHostMap = @{}  # hostName -> clusterName
                 try {
-                    $mgmtIP = (Get-VMHostNetworkAdapter -VMHost $esxi -VMKernel -ErrorAction SilentlyContinue |
-                        Where-Object { $_.ManagementTrafficEnabled } | Select-Object -First 1).IP
+                    $clusters = @(Get-VMwareClustersREST)
+                    foreach ($c in $clusters) {
+                        try {
+                            $cHosts = @(Invoke-VMwareREST -Path "/api/vcenter/host?clusters=$($c.ClusterId)")
+                            foreach ($ch in $cHosts) {
+                                $hName = "$($ch.name)"
+                                if ($hName) { $clusterHostMap[$hName] = "$($c.Name)" }
+                            }
+                        }
+                        catch { }
+                    }
+                    Write-Host "  Found $($clusters.Count) cluster(s)." -ForegroundColor DarkGray
                 }
-                catch { }
-                if (-not $mgmtIP) { $mgmtIP = $null }
+                catch { Write-Host "  No cluster info available." -ForegroundColor DarkGray }
 
-                $clusterName = if ($esxi.Parent -and $esxi.Parent.GetType().Name -eq 'ClusterImpl') {
-                    "$($esxi.Parent.Name)"
-                } else { 'N/A' }
+                # ----------------------------------------------------------
+                # Step 3: Build host entries with cluster + DNS IP
+                # ----------------------------------------------------------
+                foreach ($esxi in $esxiHosts) {
+                    Write-Host "    Host: $($esxi.Name)" -ForegroundColor DarkGray
+                    # Resolve management IP via DNS
+                    $mgmtIP = $null
+                    try {
+                        $resolved = [System.Net.Dns]::GetHostAddresses($esxi.Name) |
+                            Where-Object { $_.AddressFamily -eq 'InterNetwork' } |
+                            Select-Object -First 1
+                        if ($resolved) { $mgmtIP = $resolved.IPAddressToString }
+                    }
+                    catch { }
 
-                $hostMap[$esxi.Name] = @{
-                    IP          = $mgmtIP
-                    Cluster     = $clusterName
-                    PowerState  = "$($esxi.PowerState)"
-                    Version     = "$($esxi.Version)"
-                    Build       = "$($esxi.Build)"
-                    CpuSockets  = "$($esxi.ExtensionData.Hardware.CpuInfo.NumCpuPackages)"
-                    CpuCores    = "$($esxi.ExtensionData.Hardware.CpuInfo.NumCpuCores)"
-                    MemTotalGB  = "$([math]::Round($esxi.MemoryTotalGB, 2))"
-                    Manufacturer= "$($esxi.Manufacturer)"
-                    Model       = "$($esxi.Model)"
+                    $clusterName = if ($clusterHostMap.ContainsKey($esxi.Name)) { $clusterHostMap[$esxi.Name] } else { 'N/A' }
+
+                    $hostMap[$esxi.Name] = @{
+                        IP          = $mgmtIP
+                        Cluster     = $clusterName
+                        PowerState  = "$($esxi.PowerState)"
+                        Version     = 'N/A'
+                        Build       = 'N/A'
+                        CpuSockets  = 'N/A'
+                        CpuCores    = 'N/A'
+                        MemTotalGB  = 'N/A'
+                        Manufacturer= 'N/A'
+                        Model       = 'N/A'
+                    }
+                }
+
+                # ----------------------------------------------------------
+                # Step 4: Build VM-to-host mapping (query VMs per host)
+                # ----------------------------------------------------------
+                Write-Host "  Mapping VMs to ESXi hosts..." -ForegroundColor DarkGray
+                $vmIdToHost = @{}  # vmMoRef -> hostName
+                foreach ($esxi in $esxiHosts) {
+                    try {
+                        $hostVMs = @(Invoke-VMwareREST -Path "/api/vcenter/vm?hosts=$($esxi.HostId)")
+                        foreach ($hv in $hostVMs) {
+                            $vmIdToHost["$($hv.vm)"] = $esxi.Name
+                        }
+                        Write-Host "    $($esxi.Name): $($hostVMs.Count) VM(s)" -ForegroundColor DarkGray
+                    }
+                    catch { Write-Host "    $($esxi.Name): error querying VMs" -ForegroundColor DarkYellow }
+                }
+
+                # ----------------------------------------------------------
+                # Step 5: Discover VMs with full details
+                # ----------------------------------------------------------
+                Write-Host "  Enumerating VMs..." -ForegroundColor DarkGray
+                $allVMs = @(Get-VMwareVMsREST)
+                $vmTotal = $allVMs.Count
+                Write-Host "  Found $vmTotal VM(s). Resolving details (this may take a while)..." -ForegroundColor DarkGray
+                $vmCount = 0
+                foreach ($vm in $allVMs) {
+                    $vmCount++
+                    if ($vmCount % 50 -eq 0 -or $vmCount -eq $vmTotal) {
+                        Write-Host "    VM $vmCount / $vmTotal ..." -ForegroundColor DarkGray
+                    }
+                    $vmDetail = Get-VMwareVMDetailREST -VMId $vm.VMId -VMName $vm.Name
+                    $vmIP = $vmDetail.IPAddress
+                    if (-not $vmIP) { $vmIP = $null }
+
+                    # Look up host + cluster from our mappings
+                    $vmHostName = if ($vmIdToHost.ContainsKey($vm.VMId)) { $vmIdToHost[$vm.VMId] } else { 'N/A' }
+                    $vmCluster = if ($vmHostName -ne 'N/A' -and $clusterHostMap.ContainsKey($vmHostName)) { $clusterHostMap[$vmHostName] } else { 'N/A' }
+
+                    $vmMap[$vm.Name] = @{
+                        IP         = $vmIP
+                        ESXiHost   = $vmHostName
+                        Cluster    = $vmCluster
+                        PowerState = "$($vmDetail.PowerState)"
+                        GuestOS    = "$($vmDetail.GuestOS)"
+                        ToolsStatus= "$($vmDetail.ToolsStatus)"
+                        NumCPU     = "$($vmDetail.NumCPU)"
+                        MemoryGB   = "$($vmDetail.MemoryGB)"
+                        DiskCount  = "$($vmDetail.DiskCount)"
+                        NicCount   = "$($vmDetail.NicCount)"
+                    }
                 }
             }
-
-            # Discover VMs
-            $allVMs = Get-VM -ErrorAction Stop
-            foreach ($vm in $allVMs) {
-                $vmIP = $null
-                try {
-                    $guest = $vm | Get-VMGuest -ErrorAction SilentlyContinue
-                    $vmIP = $guest.IPAddress | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' } | Select-Object -First 1
-                }
-                catch { }
-
-                $vmHost = "$($vm.VMHost.Name)"
-                $clusterName = if ($vm.VMHost.Parent -and $vm.VMHost.Parent.GetType().Name -eq 'ClusterImpl') {
-                    "$($vm.VMHost.Parent.Name)"
-                } else { 'N/A' }
-
-                $vmMap[$vm.Name] = @{
-                    IP         = $vmIP
-                    ESXiHost   = $vmHost
-                    Cluster    = $clusterName
-                    PowerState = "$($vm.PowerState)"
-                    GuestOS    = "$($vm.ExtensionData.Config.GuestFullName)"
-                    ToolsStatus= "$($vm.ExtensionData.Guest.ToolsStatus)"
-                    NumCPU     = "$($vm.NumCpu)"
-                    MemoryGB   = "$($vm.MemoryGB)"
-                }
+            catch {
+                Write-Warning "Error during VMware REST enumeration: $_"
+            }
+            finally {
+                Write-Host "  Disconnecting from vCenter REST API..." -ForegroundColor DarkGray
+                try { Disconnect-VMwareREST } catch { }
             }
         }
-        catch {
-            Write-Warning "Error during VMware enumeration: $_"
-        }
-        finally {
-            try { Disconnect-VIServer -Server $deviceIP -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+        else {
+            # --- PowerCLI module mode ---
+            try {
+                $connParams = @{
+                    Server     = $deviceIP
+                    Credential = $cred
+                    Port       = $ctx.Port
+                }
+                if ($ignoreCert -eq '1') {
+                    Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -Confirm:$false -Scope Session -ErrorAction SilentlyContinue | Out-Null
+                }
+                $viConn = Connect-VIServer @connParams -ErrorAction Stop
+                Write-Verbose "Connected to VMware: $deviceIP ($($viConn.ProductLine) $($viConn.Version))"
+            }
+            catch {
+                Write-Warning "Failed to connect to VMware $deviceIP : $_"
+                return $items
+            }
+
+            try {
+                # Discover ESXi hosts
+                $esxiHosts = Get-VMHost -ErrorAction Stop
+                foreach ($esxi in $esxiHosts) {
+                    $mgmtIP = $null
+                    try {
+                        $mgmtIP = (Get-VMHostNetworkAdapter -VMHost $esxi -VMKernel -ErrorAction SilentlyContinue |
+                            Where-Object { $_.ManagementTrafficEnabled } | Select-Object -First 1).IP
+                    }
+                    catch { }
+                    if (-not $mgmtIP) { $mgmtIP = $null }
+
+                    $clusterName = if ($esxi.Parent -and $esxi.Parent.GetType().Name -eq 'ClusterImpl') {
+                        "$($esxi.Parent.Name)"
+                    } else { 'N/A' }
+
+                    $hostMap[$esxi.Name] = @{
+                        IP          = $mgmtIP
+                        Cluster     = $clusterName
+                        PowerState  = "$($esxi.PowerState)"
+                        Version     = "$($esxi.Version)"
+                        Build       = "$($esxi.Build)"
+                        CpuSockets  = "$($esxi.ExtensionData.Hardware.CpuInfo.NumCpuPackages)"
+                        CpuCores    = "$($esxi.ExtensionData.Hardware.CpuInfo.NumCpuCores)"
+                        MemTotalGB  = "$([math]::Round($esxi.MemoryTotalGB, 2))"
+                        Manufacturer= "$($esxi.Manufacturer)"
+                        Model       = "$($esxi.Model)"
+                    }
+                }
+
+                # Discover VMs
+                $allVMs = Get-VM -ErrorAction Stop
+                foreach ($vm in $allVMs) {
+                    $vmIP = $null
+                    try {
+                        $guest = $vm | Get-VMGuest -ErrorAction SilentlyContinue
+                        $vmIP = $guest.IPAddress | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' } | Select-Object -First 1
+                    }
+                    catch { }
+
+                    $vmHost = "$($vm.VMHost.Name)"
+                    $clusterName = if ($vm.VMHost.Parent -and $vm.VMHost.Parent.GetType().Name -eq 'ClusterImpl') {
+                        "$($vm.VMHost.Parent.Name)"
+                    } else { 'N/A' }
+
+                    $vmMap[$vm.Name] = @{
+                        IP         = $vmIP
+                        ESXiHost   = $vmHost
+                        Cluster    = $clusterName
+                        PowerState = "$($vm.PowerState)"
+                        GuestOS    = "$($vm.ExtensionData.Config.GuestFullName)"
+                        ToolsStatus= "$($vm.ExtensionData.Guest.ToolsStatus)"
+                        NumCPU     = "$($vm.NumCpu)"
+                        MemoryGB   = "$($vm.MemoryGB)"
+                        DiskCount  = "$(@($vm | Get-HardDisk -ErrorAction SilentlyContinue).Count)"
+                        NicCount   = "$(@($vm | Get-NetworkAdapter -ErrorAction SilentlyContinue).Count)"
+                    }
+                }
+            }
+            catch {
+                Write-Warning "Error during VMware enumeration: $_"
+            }
+            finally {
+                try { Disconnect-VIServer -Server $deviceIP -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+            }
         }
 
-        Write-Verbose "Topology: $($hostMap.Count) ESXi hosts, $($vmMap.Count) VMs"
+        Write-Host "  Topology: $($hostMap.Count) ESXi host(s), $($vmMap.Count) VM(s)" -ForegroundColor DarkGray
 
         # ================================================================
         # Phase 2: Build discovery plan
@@ -202,6 +361,7 @@ Register-DiscoveryProvider -Name 'VMware' `
             $hostAttrs['VMware.DeviceType'] = 'ESXiHost'
             $hostAttrs['VMware.HostName']   = $hostName
             $hostAttrs['VMware.Cluster']    = $hostInfo.Cluster
+            $hostAttrs['VMware.PowerState'] = $hostInfo.PowerState
             $hostAttrs['VMware.Version']    = $hostInfo.Version
             $hostAttrs['VMware.Build']      = $hostInfo.Build
             if ($hostIP) { $hostAttrs['VMware.HostIP'] = $hostIP }
@@ -252,6 +412,8 @@ Register-DiscoveryProvider -Name 'VMware' `
             $vmAttrs['VMware.ToolsStatus'] = $vmInfo.ToolsStatus
             $vmAttrs['VMware.NumCPU']      = $vmInfo.NumCPU
             $vmAttrs['VMware.MemoryGB']    = $vmInfo.MemoryGB
+            if ($vmInfo.DiskCount) { $vmAttrs['VMware.DiskCount'] = $vmInfo.DiskCount }
+            if ($vmInfo.NicCount)  { $vmAttrs['VMware.NicCount']  = $vmInfo.NicCount }
             if ($vmIP) { $vmAttrs['VMware.VMIP'] = $vmIP }
 
             $items += New-DiscoveredItem `

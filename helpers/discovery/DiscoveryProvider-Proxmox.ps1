@@ -171,6 +171,7 @@ Register-DiscoveryProvider -Name 'Proxmox' `
 
         # ================================================================
         # Live API helper (for discovery calls, NOT stored in monitors)
+        # Handles Cookie as a restricted header on PS 5.1 via Cookies collection
         # ================================================================
         $invokeApi = {
             param([string]$Url, [string]$HdrName, [string]$HdrVal, [string]$SkipSsl)
@@ -189,11 +190,18 @@ Register-DiscoveryProvider -Name 'Proxmox' `
                     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
                 }
                 $ws = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-                $m = [System.Net.WebHeaderCollection].GetMethod(
-                    'AddWithoutValidate',
-                    [System.Reflection.BindingFlags]'Instance,NonPublic'
-                )
-                $m.Invoke($ws.Headers, @($HdrName, $HdrVal))
+                if ($HdrName -eq 'Cookie') {
+                    $parsed = [System.Uri]$Url
+                    $parts = $HdrVal -split '=', 2
+                    $ws.Cookies.Add((New-Object System.Net.Cookie($parts[0], $parts[1], '/', $parsed.Host)))
+                }
+                else {
+                    $m = [System.Net.WebHeaderCollection].GetMethod(
+                        'AddWithoutValidate',
+                        [System.Reflection.BindingFlags]'Instance,NonPublic'
+                    )
+                    $m.Invoke($ws.Headers, @($HdrName, $HdrVal))
+                }
                 Invoke-RestMethod -Uri $Url -Method GET -WebSession $ws -ErrorAction Stop
             }
         }

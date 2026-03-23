@@ -3,9 +3,15 @@
     AWS discovery provider for infrastructure monitoring.
 
 .DESCRIPTION
-    Registers an AWS discovery provider that uses AWS.Tools PowerShell
-    modules to discover EC2 instances, RDS instances, and load balancers,
-    then builds a monitor plan suitable for WhatsUp Gold or standalone use.
+    Registers an AWS discovery provider that discovers EC2 instances,
+    RDS instances, and load balancers, then builds a monitor plan
+    suitable for WhatsUp Gold or standalone use.
+
+    Two collection methods:
+      [1] AWS.Tools PowerShell modules (requires AWS.Tools.EC2, etc.)
+      [2] REST API direct (zero external dependencies, SigV4 signing)
+
+    The method is selected by the caller via Credential.UseRestApi = $true/$false.
 
     Discovery discovers:
       - EC2 instances (IP, State, Type, Platform, VPC)
@@ -17,13 +23,12 @@
       Supports multi-region discovery.
 
     Prerequisites:
-      1. AWS.Tools PowerShell modules installed
-      2. IAM credentials with EC2/RDS/ELB read-only access
-      3. Target regions accessible from this machine
+      Module mode: AWS.Tools PowerShell modules installed
+      REST mode: No external dependencies (uses SigV4 signing + Invoke-RestMethod)
 
 .NOTES
     Author: Jason Alberino (jason@wug.ninja)
-    Requires: DiscoveryHelpers.ps1 loaded first, AWS.Tools.* modules
+    Requires: DiscoveryHelpers.ps1 loaded first
     Encoding: UTF-8 with BOM
 #>
 
@@ -84,6 +89,12 @@ Register-DiscoveryProvider -Name 'AWS' `
             return $items
         }
 
+        # Determine collection method
+        $useRest = $false
+        if ($ctx.Credential -and $ctx.Credential.UseRestApi) {
+            $useRest = $ctx.Credential.UseRestApi
+        }
+
         # Parse region from target if provided
         $targets = if ($ctx.DeviceIP -is [System.Collections.IEnumerable] -and $ctx.DeviceIP -isnot [string]) {
             @($ctx.DeviceIP)
@@ -106,8 +117,13 @@ Register-DiscoveryProvider -Name 'AWS' `
         # Phase 1: Authenticate and enumerate resources
         # ================================================================
         try {
-            Connect-AWSProfile -AccessKey $accessKey -SecretKey $secretKey -Region $regions[0]
-            Write-Verbose "Connected to AWS region $($regions[0])"
+            if ($useRest) {
+                Connect-AWSProfileREST -AccessKey $accessKey -SecretKey $secretKey -Region $regions[0]
+            }
+            else {
+                Connect-AWSProfile -AccessKey $accessKey -SecretKey $secretKey -Region $regions[0]
+            }
+            Write-Verbose "Connected to AWS region $($regions[0])$(if ($useRest) { ' (REST)' } else { ' (Module)' })"
         }
         catch {
             Write-Warning "Failed to connect to AWS: $_"
@@ -121,7 +137,7 @@ Register-DiscoveryProvider -Name 'AWS' `
 
             # EC2 Instances
             try {
-                $ec2s = Get-AWSEC2Instances -Region $regionName
+                $ec2s = if ($useRest) { Get-AWSEC2InstancesREST -Region $regionName } else { Get-AWSEC2Instances -Region $regionName }
                 foreach ($ec2 in $ec2s) {
                     $resKey = "ec2:${regionName}:$($ec2.InstanceId)"
                     $ip = $ec2.PublicIP
@@ -147,7 +163,7 @@ Register-DiscoveryProvider -Name 'AWS' `
 
             # RDS Instances
             try {
-                $rdss = Get-AWSRDSInstances -Region $regionName
+                $rdss = if ($useRest) { Get-AWSRDSInstancesREST -Region $regionName } else { Get-AWSRDSInstances -Region $regionName }
                 foreach ($rds in $rdss) {
                     $resKey = "rds:${regionName}:$($rds.DBInstanceIdentifier)"
                     $ip = $null
@@ -178,7 +194,7 @@ Register-DiscoveryProvider -Name 'AWS' `
 
             # Load Balancers
             try {
-                $elbs = Get-AWSLoadBalancers -Region $regionName
+                $elbs = if ($useRest) { Get-AWSLoadBalancersREST -Region $regionName } else { Get-AWSLoadBalancers -Region $regionName }
                 foreach ($elb in $elbs) {
                     $resKey = "elb:${regionName}:$($elb.LoadBalancerName)"
                     $ip = $null

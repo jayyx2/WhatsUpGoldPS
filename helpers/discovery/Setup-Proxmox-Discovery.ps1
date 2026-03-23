@@ -247,12 +247,7 @@ else {
 Write-Host "  [2] Export plan to JSON file"
 Write-Host "  [3] Export plan to CSV file"
 Write-Host "  [4] Show full plan table"
-if ($ProxmoxToken) {
-    Write-Host "  [5] Generate Proxmox HTML dashboard (live metrics)"
-}
-else {
-    Write-Host "  [5] Generate Proxmox HTML dashboard (requires API token auth)" -ForegroundColor DarkGray
-}
+Write-Host "  [5] Generate Proxmox HTML dashboard (live metrics)"
 Write-Host "  [6] Exit (do nothing)"
 Write-Host ""
 $choice = Read-Host -Prompt "Choice [1-6]"
@@ -498,17 +493,13 @@ switch ($choice) {
         $plan | Export-DiscoveryPlan -Format Table
     }
     '5' {
-        if (-not $ProxmoxToken) {
-            Write-Warning "Dashboard requires API token auth. Re-run and choose option [1] for authentication."
-            return
-        }
         # ----------------------------------------------------------------
         # Generate Proxmox HTML Dashboard with live metrics
         # ----------------------------------------------------------------
         Write-Host ""
         Write-Host "Fetching live metrics from Proxmox..." -ForegroundColor Cyan
 
-        # Cross-version API helper (same pattern as provider)
+        # Cross-version API helper -- handles Cookie properly on PS 5.1
         $dashInvokeApi = {
             param([string]$Url, [string]$HdrName, [string]$HdrVal, [string]$SkipSsl)
             if ($PSVersionTable.PSEdition -eq 'Core') {
@@ -523,22 +514,105 @@ switch ($choice) {
             }
             else {
                 if ($SkipSsl -eq '1') {
-                    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+                    if (([System.Management.Automation.PSTypeName]'SSLValidator').Type) {
+                        [SSLValidator]::OverrideValidation()
+                    }
+                    else {
+                        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+                    }
                 }
                 $ws = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-                $m = [System.Net.WebHeaderCollection].GetMethod(
-                    'AddWithoutValidate',
-                    [System.Reflection.BindingFlags]'Instance,NonPublic'
-                )
-                $m.Invoke($ws.Headers, @($HdrName, $HdrVal))
+                if ($HdrName -eq 'Cookie') {
+                    # Cookie is a restricted header on PS 5.1 -- must use
+                    # WebSession.Cookies, same approach as Invoke-ProxmoxAPI
+                    $parsed = [System.Uri]$Url
+                    $parts = $HdrVal -split '=', 2
+                    $ws.Cookies.Add((New-Object System.Net.Cookie($parts[0], $parts[1], '/', $parsed.Host)))
+                }
+                else {
+                    $m = [System.Net.WebHeaderCollection].GetMethod(
+                        'AddWithoutValidate',
+                        [System.Reflection.BindingFlags]'Instance,NonPublic'
+                    )
+                    $m.Invoke($ws.Headers, @($HdrName, $HdrVal))
+                }
                 Invoke-RestMethod -Uri $Url -Method GET -WebSession $ws -ErrorAction Stop
             }
         }
 
         $dashApiHost = $ProxmoxHosts[0]
         $dashBaseUri = "https://${dashApiHost}:${ProxmoxPort}"
-        $dashHdrName = 'Authorization'
-        $dashHdrVal  = "PVEAPIToken=$ProxmoxToken"
+
+        # Determine auth header based on method used
+        if ($ProxmoxToken) {
+            $dashHdrName = 'Authorization'
+            $dashHdrVal  = "PVEAPIToken=$ProxmoxToken"
+        }
+        elseif ($ProxmoxCredential -and $ProxmoxCredential.Username -and $ProxmoxCredential.Password) {
+            # Obtain a session ticket via username+password
+            Write-Host "  Authenticating to Proxmox with username+password..." -ForegroundColor DarkGray
+            try {
+                $ticketUri  = "${dashBaseUri}/api2/json/access/ticket"
+                $ticketBody = "username=$([uri]::EscapeDataString($ProxmoxCredential.Username))&password=$([uri]::EscapeDataString($ProxmoxCredential.Password))"
+                $ticketSplat = @{
+                    Uri         = $ticketUri
+                    Method      = 'POST'
+                    Body        = $ticketBody
+                    ContentType = 'application/x-www-form-urlencoded'
+                    ErrorAction = 'Stop'
+                }
+                if ($PSVersionTable.PSEdition -eq 'Core') {
+                    $ticketSplat.SkipCertificateCheck = $true
+                }
+                else {
+                    # Use compiled C# callback -- scriptblock delegates get GC'd
+                    # under PS 5.1, causing "connection was closed unexpectedly"
+                    if (-not ([System.Management.Automation.PSTypeName]'SSLValidator').Type) {
+                        Add-Type -TypeDefinition @"
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class SSLValidator {
+    private static bool OnValidateCertificate(
+        object sender,
+        X509Certificate certificate,
+        X509Chain chain,
+        SslPolicyErrors sslPolicyErrors) {
+        return true;
+    }
+    public static void OverrideValidation() {
+        ServicePointManager.ServerCertificateValidationCallback =
+            new RemoteCertificateValidationCallback(OnValidateCertificate);
+        ServicePointManager.Expect100Continue = false;
+        ServicePointManager.DefaultConnectionLimit = 64;
+        ServicePointManager.SecurityProtocol =
+            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+    }
+}
+"@
+                    }
+                    [SSLValidator]::OverrideValidation()
+                }
+                $ticketResp = Invoke-RestMethod @ticketSplat
+                if ($ticketResp.data.ticket) {
+                    $dashHdrName = 'Cookie'
+                    $dashHdrVal  = "PVEAuthCookie=$($ticketResp.data.ticket)"
+                    Write-Host "  Session ticket obtained." -ForegroundColor Green
+                }
+                else {
+                    Write-Warning "Proxmox ticket response did not contain a ticket. Cannot generate dashboard."
+                    return
+                }
+            }
+            catch {
+                Write-Warning "Failed to authenticate to Proxmox: $($_.Exception.Message)"
+                return
+            }
+        }
+        else {
+            Write-Warning "No Proxmox credentials available. Re-run and authenticate first."
+            return
+        }
         $dashboardRows = @()
 
         # --- Fetch live node stats ---

@@ -1,12 +1,12 @@
 ﻿# =============================================================================
 # AWS Helpers for WhatsUpGoldPS
-# Requires the AWS.Tools PowerShell modules. Install them first:
-#   Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force
-#   Install-AWSToolsModule EC2, CloudWatch, RDS, ElasticLoadBalancingV2, S3, ECS, Lambda, ResourceGroupsTaggingAPI -CleanUp
-# Or install individually:
-#   Install-Module -Name AWS.Tools.Common, AWS.Tools.EC2, AWS.Tools.CloudWatch,
-#       AWS.Tools.RDS, AWS.Tools.ElasticLoadBalancingV2,
-#       AWS.Tools.ResourceGroupsTaggingAPI -Scope CurrentUser -Force
+#
+# Two collection methods supported:
+#   [1] AWS.Tools PowerShell modules (AWS.Tools.EC2, CloudWatch, RDS, etc.)
+#   [2] Direct REST API calls (zero external dependencies -- uses SigV4 signing)
+#
+# Functions suffixed with "REST" use the AWS REST/Query API directly.
+# Functions without the suffix use the AWS.Tools cmdlets.
 # =============================================================================
 
 function Connect-AWSProfile {
@@ -644,6 +644,445 @@ function Export-AWSDashboardHtml {
 
     Set-Content -Path $OutputPath -Value $html -Encoding UTF8
     Write-Verbose "AWS Dashboard HTML written to $OutputPath"
+}
+
+# =============================================================================
+# REST API Collection Method (zero external dependencies)
+# Uses AWS Query/REST API with SigV4 signing via Invoke-RestMethod
+# =============================================================================
+
+# Script-scoped credential cache for REST API calls
+if (-not (Get-Variable -Name '_AWSRESTAccessKey' -Scope Script -ErrorAction SilentlyContinue)) {
+    $script:_AWSRESTAccessKey = $null
+    $script:_AWSRESTSecretKey = $null
+    $script:_AWSRESTRegion = $null
+}
+
+function _AWSHMACSHA256 {
+    # Internal helper -- computes HMAC-SHA256
+    param([byte[]]$Key, [string]$Message)
+    $hmac = New-Object System.Security.Cryptography.HMACSHA256
+    $hmac.Key = $Key
+    return $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Message))
+}
+
+function _AWSSigV4Sign {
+    <#
+    .SYNOPSIS
+        Internal helper -- generates AWS SigV4 Authorization header components.
+    .DESCRIPTION
+        Implements the AWS Signature Version 4 signing process for REST API requests.
+        Returns a hashtable with the required Authorization header and other headers.
+    #>
+    param(
+        [string]$AccessKey,
+        [string]$SecretKey,
+        [string]$Region,
+        [string]$Service,
+        [string]$Method = 'GET',
+        [string]$Uri,
+        [string]$Body = '',
+        [hashtable]$Headers = @{},
+        [string]$ContentType = ''
+    )
+
+    $now = [DateTime]::UtcNow
+    $dateStamp = $now.ToString('yyyyMMdd')
+    $amzDate = $now.ToString('yyyyMMddTHHmmssZ')
+
+    $parsedUri = [System.Uri]$Uri
+    $canonicalUri = $parsedUri.AbsolutePath
+    if (-not $canonicalUri) { $canonicalUri = '/' }
+    $canonicalQuery = if ($parsedUri.Query) { $parsedUri.Query.TrimStart('?') } else { '' }
+    # Sort query parameters
+    if ($canonicalQuery) {
+        $qparts = $canonicalQuery -split '&' | Sort-Object
+        $canonicalQuery = $qparts -join '&'
+    }
+
+    $payloadHash = [System.BitConverter]::ToString(
+        [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+            [System.Text.Encoding]::UTF8.GetBytes($Body)
+        )
+    ).Replace('-', '').ToLower()
+
+    $allHeaders = @{
+        'host'                 = $parsedUri.Host
+        'x-amz-date'          = $amzDate
+        'x-amz-content-sha256' = $payloadHash
+    }
+    if ($ContentType) { $allHeaders['content-type'] = $ContentType }
+    foreach ($k in $Headers.Keys) { $allHeaders[$k.ToLower()] = $Headers[$k] }
+
+    $sortedHeaderNames = $allHeaders.Keys | Sort-Object
+    $canonicalHeaders = ($sortedHeaderNames | ForEach-Object { "$($_):$($allHeaders[$_])" }) -join "`n"
+    $canonicalHeaders += "`n"
+    $signedHeaders = ($sortedHeaderNames) -join ';'
+
+    $canonicalRequest = @($Method, $canonicalUri, $canonicalQuery, $canonicalHeaders, $signedHeaders, $payloadHash) -join "`n"
+
+    $credentialScope = "$dateStamp/$Region/$Service/aws4_request"
+    $stringToSign = @(
+        'AWS4-HMAC-SHA256'
+        $amzDate
+        $credentialScope
+        [System.BitConverter]::ToString(
+            [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+                [System.Text.Encoding]::UTF8.GetBytes($canonicalRequest)
+            )
+        ).Replace('-', '').ToLower()
+    ) -join "`n"
+
+    $kDate    = _AWSHMACSHA256 -Key ([System.Text.Encoding]::UTF8.GetBytes("AWS4$SecretKey")) -Message $dateStamp
+    $kRegion  = _AWSHMACSHA256 -Key $kDate -Message $Region
+    $kService = _AWSHMACSHA256 -Key $kRegion -Message $Service
+    $kSigning = _AWSHMACSHA256 -Key $kService -Message 'aws4_request'
+
+    $signature = [System.BitConverter]::ToString(
+        (_AWSHMACSHA256 -Key $kSigning -Message $stringToSign)
+    ).Replace('-', '').ToLower()
+
+    $authHeader = "AWS4-HMAC-SHA256 Credential=$AccessKey/$credentialScope, SignedHeaders=$signedHeaders, Signature=$signature"
+
+    return @{
+        Authorization          = $authHeader
+        'x-amz-date'           = $amzDate
+        'x-amz-content-sha256' = $payloadHash
+        'host'                 = $parsedUri.Host
+    }
+}
+
+function Invoke-AWSREST {
+    <#
+    .SYNOPSIS
+        Internal helper -- calls an AWS REST/Query API endpoint with SigV4.
+    .PARAMETER Service
+        AWS service name (e.g., ec2, rds, elasticloadbalancing, monitoring).
+    .PARAMETER Action
+        The API action name.
+    .PARAMETER Parameters
+        Additional query parameters as a hashtable.
+    .PARAMETER Region
+        AWS region. Uses cached region if not specified.
+    .PARAMETER Method
+        HTTP method. Defaults to GET.
+    .PARAMETER Version
+        API version string.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Service,
+        [string]$Action,
+        [hashtable]$Parameters = @{},
+        [string]$Region,
+        [string]$Method = 'GET',
+        [string]$Version
+    )
+
+    if (-not $script:_AWSRESTAccessKey) {
+        throw "AWS REST credentials not set. Call Connect-AWSProfileREST first."
+    }
+    if (-not $Region) { $Region = $script:_AWSRESTRegion }
+
+    $host_ = "$Service.$Region.amazonaws.com"
+    $queryParams = @{}
+    if ($Action) { $queryParams['Action'] = $Action }
+    if ($Version) { $queryParams['Version'] = $Version }
+    foreach ($k in $Parameters.Keys) { $queryParams[$k] = $Parameters[$k] }
+
+    $queryString = ($queryParams.GetEnumerator() | Sort-Object Name | ForEach-Object {
+        "$([uri]::EscapeDataString($_.Name))=$([uri]::EscapeDataString($_.Value))"
+    }) -join '&'
+
+    $uri = "https://${host_}/?${queryString}"
+
+    $sigHeaders = _AWSSigV4Sign -AccessKey $script:_AWSRESTAccessKey `
+        -SecretKey $script:_AWSRESTSecretKey `
+        -Region $Region -Service $Service `
+        -Method $Method -Uri $uri
+
+    $reqHeaders = @{
+        'Authorization'          = $sigHeaders.Authorization
+        'x-amz-date'            = $sigHeaders.'x-amz-date'
+        'x-amz-content-sha256'  = $sigHeaders.'x-amz-content-sha256'
+    }
+
+    $resp = Invoke-RestMethod -Uri $uri -Method $Method -Headers $reqHeaders -ErrorAction Stop
+    return $resp
+}
+
+function Connect-AWSProfileREST {
+    <#
+    .SYNOPSIS
+        Stores AWS credentials for REST API calls and validates connectivity.
+    .PARAMETER AccessKey
+        AWS IAM Access Key ID.
+    .PARAMETER SecretKey
+        AWS IAM Secret Access Key.
+    .PARAMETER Region
+        Default AWS region. Defaults to us-east-1.
+    .EXAMPLE
+        Connect-AWSProfileREST -AccessKey 'AKIA...' -SecretKey 'wJalr...' -Region 'us-east-1'
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AccessKey,
+        [Parameter(Mandatory)][string]$SecretKey,
+        [string]$Region = 'us-east-1'
+    )
+
+    $script:_AWSRESTAccessKey = $AccessKey
+    $script:_AWSRESTSecretKey = $SecretKey
+    $script:_AWSRESTRegion = $Region
+
+    # Validate with a lightweight call
+    try {
+        $resp = Invoke-AWSREST -Service 'ec2' -Action 'DescribeRegions' -Version '2016-11-15' -Region $Region
+        Write-Verbose "AWS REST authenticated. Found $(@($resp.DescribeRegionsResponse.regionInfo.item).Count) regions."
+    }
+    catch {
+        $script:_AWSRESTAccessKey = $null
+        $script:_AWSRESTSecretKey = $null
+        throw "Failed to validate AWS credentials via REST: $($_.Exception.Message)"
+    }
+}
+
+function Get-AWSRegionListREST {
+    <#
+    .SYNOPSIS
+        Returns all AWS regions via REST API.
+    .EXAMPLE
+        Get-AWSRegionListREST
+    #>
+
+    $resp = Invoke-AWSREST -Service 'ec2' -Action 'DescribeRegions' -Version '2016-11-15'
+    foreach ($r in $resp.DescribeRegionsResponse.regionInfo.item) {
+        [PSCustomObject]@{
+            RegionName = "$($r.regionName)"
+            Endpoint   = "$($r.regionEndpoint)"
+        }
+    }
+}
+
+function Get-AWSEC2InstancesREST {
+    <#
+    .SYNOPSIS
+        Returns all EC2 instances in a region via REST API.
+    .PARAMETER Region
+        AWS region to query.
+    .EXAMPLE
+        Get-AWSEC2InstancesREST -Region 'us-east-1'
+    #>
+    param([string]$Region)
+
+    $params = @{}
+    $resp = Invoke-AWSREST -Service 'ec2' -Action 'DescribeInstances' -Version '2016-11-15' -Region $Region -Parameters $params
+    $reservations = $resp.DescribeInstancesResponse.reservationSet.item
+    if (-not $reservations) { return @() }
+
+    foreach ($res in @($reservations)) {
+        foreach ($inst in @($res.instancesSet.item)) {
+            $nameTag = ''
+            $allTags = ''
+            if ($inst.tagSet -and $inst.tagSet.item) {
+                $tags = @($inst.tagSet.item)
+                $nameObj = $tags | Where-Object { $_.key -eq 'Name' } | Select-Object -First 1
+                if ($nameObj) { $nameTag = "$($nameObj.value)" }
+                $allTags = ($tags | ForEach-Object { "$($_.key)=$($_.value)" }) -join '; '
+            }
+            $sgNames = ''; $sgIds = ''
+            if ($inst.groupSet -and $inst.groupSet.item) {
+                $sgs = @($inst.groupSet.item)
+                $sgNames = ($sgs | ForEach-Object { $_.groupName }) -join ', '
+                $sgIds = ($sgs | ForEach-Object { $_.groupId }) -join ', '
+            }
+            $diskCount = 0
+            if ($inst.blockDeviceMapping -and $inst.blockDeviceMapping.item) {
+                $diskCount = @($inst.blockDeviceMapping.item).Count
+            }
+            [PSCustomObject]@{
+                InstanceId       = "$($inst.instanceId)"
+                Name             = $nameTag
+                InstanceType     = "$($inst.instanceType)"
+                State            = "$($inst.instanceState.name)"
+                Region           = if ($Region) { $Region } else { $script:_AWSRESTRegion }
+                AvailabilityZone = "$($inst.placement.availabilityZone)"
+                VpcId            = "$($inst.vpcId)"
+                SubnetId         = "$($inst.subnetId)"
+                PublicIP         = if ($inst.ipAddress) { "$($inst.ipAddress)" } else { '' }
+                PrivateIP        = if ($inst.privateIpAddress) { "$($inst.privateIpAddress)" } else { '' }
+                PublicDnsName    = "$($inst.dnsName)"
+                PrivateDnsName   = "$($inst.privateDnsName)"
+                Platform         = if ($inst.platformDetails) { "$($inst.platformDetails)" } else { if ($inst.platform) { "$($inst.platform)" } else { 'Linux/UNIX' } }
+                Architecture     = "$($inst.architecture)"
+                ImageId          = "$($inst.imageId)"
+                KeyName          = "$($inst.keyName)"
+                LaunchTime       = "$($inst.launchTime)"
+                SecurityGroups   = $sgNames
+                SecurityGroupIds = $sgIds
+                DiskCount        = $diskCount
+                RootDeviceType   = "$($inst.rootDeviceType)"
+                Tags             = $allTags
+                IAMRole          = if ($inst.iamInstanceProfile) { "$($inst.iamInstanceProfile.arn)" } else { '' }
+                Monitoring       = "$($inst.monitoring.state)"
+            }
+        }
+    }
+}
+
+function Get-AWSRDSInstancesREST {
+    <#
+    .SYNOPSIS
+        Returns all RDS instances in a region via REST API.
+    .PARAMETER Region
+        AWS region to query.
+    .EXAMPLE
+        Get-AWSRDSInstancesREST -Region 'us-east-1'
+    #>
+    param([string]$Region)
+
+    $resp = Invoke-AWSREST -Service 'rds' -Action 'DescribeDBInstances' -Version '2014-10-31' -Region $Region
+    $instances = $resp.DescribeDBInstancesResponse.DescribeDBInstancesResult.DBInstances.DBInstance
+    if (-not $instances) { return @() }
+
+    foreach ($db in @($instances)) {
+        [PSCustomObject]@{
+            DBInstanceId       = "$($db.DBInstanceIdentifier)"
+            Engine             = "$($db.Engine)"
+            EngineVersion      = "$($db.EngineVersion)"
+            DBInstanceClass    = "$($db.DBInstanceClass)"
+            Status             = "$($db.DBInstanceStatus)"
+            Endpoint           = if ($db.Endpoint -and $db.Endpoint.Address) { "$($db.Endpoint.Address)" } else { 'N/A' }
+            Port               = if ($db.Endpoint -and $db.Endpoint.Port) { "$($db.Endpoint.Port)" } else { '' }
+            Region             = if ($Region) { $Region } else { $script:_AWSRESTRegion }
+            AvailabilityZone   = "$($db.AvailabilityZone)"
+            MultiAZ            = "$($db.MultiAZ)"
+            StorageType        = "$($db.StorageType)"
+            AllocatedStorageGB = "$($db.AllocatedStorage)"
+            VpcId              = if ($db.DBSubnetGroup -and $db.DBSubnetGroup.VpcId) { "$($db.DBSubnetGroup.VpcId)" } else { '' }
+            PubliclyAccessible = "$($db.PubliclyAccessible)"
+            StorageEncrypted   = "$($db.StorageEncrypted)"
+            DBName             = "$($db.DBName)"
+            MasterUsername     = "$($db.MasterUsername)"
+            BackupRetention    = "$($db.BackupRetentionPeriod)"
+            ARN                = "$($db.DBInstanceArn)"
+        }
+    }
+}
+
+function Get-AWSLoadBalancersREST {
+    <#
+    .SYNOPSIS
+        Returns all ELBv2 load balancers in a region via REST API.
+    .PARAMETER Region
+        AWS region to query.
+    .EXAMPLE
+        Get-AWSLoadBalancersREST -Region 'us-east-1'
+    #>
+    param([string]$Region)
+
+    $resp = Invoke-AWSREST -Service 'elasticloadbalancing' -Action 'DescribeLoadBalancers' -Version '2015-12-01' -Region $Region
+    $lbs = $resp.DescribeLoadBalancersResponse.DescribeLoadBalancersResult.LoadBalancers.member
+    if (-not $lbs) { return @() }
+
+    foreach ($lb in @($lbs)) {
+        $azList = ''
+        if ($lb.AvailabilityZones -and $lb.AvailabilityZones.member) {
+            $azList = (@($lb.AvailabilityZones.member) | ForEach-Object { $_.ZoneName }) -join ', '
+        }
+        [PSCustomObject]@{
+            LoadBalancerName = "$($lb.LoadBalancerName)"
+            Type             = "$($lb.Type)"
+            Scheme           = "$($lb.Scheme)"
+            State            = if ($lb.State) { "$($lb.State.Code)" } else { 'N/A' }
+            DNSName          = "$($lb.DNSName)"
+            Region           = if ($Region) { $Region } else { $script:_AWSRESTRegion }
+            VpcId            = "$($lb.VpcId)"
+            AvailabilityZones = $azList
+            ARN              = "$($lb.LoadBalancerArn)"
+        }
+    }
+}
+
+function Get-AWSCloudWatchMetricsREST {
+    <#
+    .SYNOPSIS
+        Returns CloudWatch metric statistics via REST API.
+    .PARAMETER Namespace
+        CloudWatch namespace (e.g., AWS/EC2, AWS/RDS).
+    .PARAMETER DimensionName
+        Dimension name (e.g., InstanceId, DBInstanceIdentifier).
+    .PARAMETER DimensionValue
+        Dimension value.
+    .PARAMETER MetricNames
+        Optional array of metric names to query.
+    .PARAMETER Region
+        AWS region.
+    .EXAMPLE
+        Get-AWSCloudWatchMetricsREST -Namespace 'AWS/EC2' -DimensionName 'InstanceId' -DimensionValue 'i-12345' -Region 'us-east-1'
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Namespace,
+        [Parameter(Mandatory)][string]$DimensionName,
+        [Parameter(Mandatory)][string]$DimensionValue,
+        [string[]]$MetricNames,
+        [string]$Region
+    )
+
+    $defaultMetrics = @{
+        'AWS/EC2'             = @('CPUUtilization','NetworkIn','NetworkOut','DiskReadOps','DiskWriteOps','StatusCheckFailed')
+        'AWS/RDS'             = @('CPUUtilization','FreeableMemory','ReadIOPS','WriteIOPS','DatabaseConnections','FreeStorageSpace')
+        'AWS/ELB'             = @('RequestCount','HealthyHostCount','UnHealthyHostCount','Latency')
+        'AWS/ApplicationELB'  = @('RequestCount','TargetResponseTime','HealthyHostCount','UnHealthyHostCount')
+        'AWS/NetworkELB'      = @('ActiveFlowCount','NewFlowCount','ProcessedBytes','HealthyHostCount','UnHealthyHostCount')
+    }
+
+    if (-not $MetricNames) {
+        $MetricNames = if ($defaultMetrics.ContainsKey($Namespace)) { $defaultMetrics[$Namespace] } else { @('CPUUtilization') }
+    }
+
+    $metrics = @()
+    $endTime = [DateTime]::UtcNow
+    $startTime = $endTime.AddHours(-1)
+
+    foreach ($metricName in $MetricNames) {
+        try {
+            $params = @{
+                'Namespace'                          = $Namespace
+                'MetricName'                         = $metricName
+                'StartTime'                          = $startTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                'EndTime'                            = $endTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                'Period'                             = '300'
+                'Statistics.member.1'                = 'Average'
+                'Dimensions.member.1.Name'           = $DimensionName
+                'Dimensions.member.1.Value'          = $DimensionValue
+            }
+
+            $resp = Invoke-AWSREST -Service 'monitoring' -Action 'GetMetricStatistics' -Version '2010-08-01' -Region $Region -Parameters $params
+            $datapoints = $resp.GetMetricStatisticsResponse.GetMetricStatisticsResult.Datapoints.member
+            $lastValue = 'N/A'
+            $unit = 'N/A'
+            if ($datapoints) {
+                $sorted = @($datapoints) | Sort-Object { [datetime]$_.Timestamp }
+                $latest = $sorted | Select-Object -Last 1
+                if ($latest.Average) {
+                    $lastValue = "$([math]::Round([double]$latest.Average, 4))"
+                }
+                if ($latest.Unit) { $unit = "$($latest.Unit)" }
+            }
+
+            $metrics += [PSCustomObject]@{
+                MetricName = $metricName
+                Namespace  = $Namespace
+                LastValue  = $lastValue
+                Unit       = $unit
+            }
+        }
+        catch {
+            Write-Verbose "Could not retrieve CloudWatch metric $metricName via REST: $($_.Exception.Message)"
+        }
+    }
+
+    return $metrics
 }
 
 # SIG # Begin signature block

@@ -1,7 +1,11 @@
 ﻿# =============================================================================
 # VMware vSphere Helpers for WhatsUpGoldPS
-# Requires VMware PowerCLI modules. Install them first:
-#   Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force
+#
+# Two collection methods supported:
+#   [1] VMware.PowerCLI module (Connect-VIServer, Get-VM, etc.)
+#   [2] vCenter REST API direct (zero external dependencies -- uses Invoke-RestMethod)
+#
+# Functions suffixed with "REST" use the vCenter REST API directly.
 # =============================================================================
 
 function Connect-VMware {
@@ -509,6 +513,318 @@ function Disconnect-VMware {
     }
     catch {
         Write-Warning "VMware disconnect: $($_.Exception.Message)"
+    }
+}
+
+# =============================================================================
+# REST API Collection Method (zero external dependencies)
+# Uses vCenter REST API via Invoke-RestMethod (PS 5.1 built-in)
+# vSphere 6.5+ required for REST API support
+# =============================================================================
+
+# Script-scoped session cache
+if (-not (Get-Variable -Name '_VMwareRESTSession' -Scope Script -ErrorAction SilentlyContinue)) {
+    $script:_VMwareRESTSession = $null
+    $script:_VMwareRESTServer = $null
+    $script:_VMwareRESTPort = 443
+}
+
+function Invoke-VMwareREST {
+    <#
+    .SYNOPSIS
+        Internal helper -- calls a vCenter REST API endpoint with the cached session token.
+    .PARAMETER Path
+        API path (e.g., /api/vcenter/vm).
+    .PARAMETER Method
+        HTTP method. Defaults to GET.
+    .PARAMETER Body
+        Request body for POST/PUT.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Method = 'GET',
+        [string]$Body
+    )
+
+    if (-not $script:_VMwareRESTSession) {
+        throw "vCenter REST session not established. Call Connect-VMwareREST first."
+    }
+
+    $uri = "https://$($script:_VMwareRESTServer):$($script:_VMwareRESTPort)$Path"
+    $headers = @{ 'vmware-api-session-id' = $script:_VMwareRESTSession }
+
+    $params = @{
+        Uri     = $uri
+        Method  = $Method
+        Headers = $headers
+        ErrorAction = 'Stop'
+    }
+    if ($Body) {
+        $params.Body = $Body
+        $params.ContentType = 'application/json'
+    }
+
+    return Invoke-RestMethod @params
+}
+
+function Connect-VMwareREST {
+    <#
+    .SYNOPSIS
+        Authenticates to vCenter REST API and caches the session token.
+    .PARAMETER Server
+        vCenter server hostname or IP.
+    .PARAMETER Credential
+        PSCredential with vCenter username and password.
+    .PARAMETER Port
+        vCenter HTTPS port. Defaults to 443.
+    .PARAMETER IgnoreSSLErrors
+        Skip SSL certificate validation.
+    .EXAMPLE
+        $cred = Get-Credential
+        Connect-VMwareREST -Server 'vcenter.lab.local' -Credential $cred -IgnoreSSLErrors
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [Parameter(Mandatory)][PSCredential]$Credential,
+        [int]$Port = 443,
+        [switch]$IgnoreSSLErrors
+    )
+
+    if ($IgnoreSSLErrors) {
+        # PowerShell 5.1 SSL bypass
+        try {
+            Add-Type @"
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+public class TrustAllCertsPolicy : ICertificatePolicy {
+    public bool CheckValidationResult(ServicePoint sp, X509Certificate cert, WebRequest req, int problem) { return true; }
+}
+"@
+            [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+        }
+        catch {
+            # Type may already be added
+            [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+        }
+    }
+
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+
+    $script:_VMwareRESTServer = $Server
+    $script:_VMwareRESTPort = $Port
+
+    $uri = "https://${Server}:${Port}/api/session"
+    $authBytes = [System.Text.Encoding]::UTF8.GetBytes("$($Credential.UserName):$($Credential.GetNetworkCredential().Password)")
+    $authHeader = [System.Convert]::ToBase64String($authBytes)
+    $headers = @{ Authorization = "Basic $authHeader" }
+
+    try {
+        $session = Invoke-RestMethod -Uri $uri -Method POST -Headers $headers -ErrorAction Stop
+        # vCenter 7+ returns a plain string token; 6.x returns JSON with value
+        if ($session -is [string]) {
+            $script:_VMwareRESTSession = $session.Trim('"')
+        }
+        elseif ($session.value) {
+            $script:_VMwareRESTSession = $session.value
+        }
+        else {
+            $script:_VMwareRESTSession = "$session"
+        }
+        Write-Verbose "Connected to vCenter REST API at ${Server}:${Port}"
+        return @{ Server = $Server; Port = $Port }
+    }
+    catch {
+        throw "Failed to authenticate to vCenter REST API: $($_.Exception.Message)"
+    }
+}
+
+function Get-VMwareClustersREST {
+    <#
+    .SYNOPSIS
+        Returns all clusters from vCenter via REST API.
+    .EXAMPLE
+        Get-VMwareClustersREST
+    #>
+
+    $clusters = Invoke-VMwareREST -Path '/api/vcenter/cluster'
+    foreach ($c in $clusters) {
+        $detail = $null
+        try { $detail = Invoke-VMwareREST -Path "/api/vcenter/cluster/$($c.cluster)" } catch { }
+        [PSCustomObject]@{
+            Name               = "$($c.name)"
+            HAEnabled          = if ($detail -and $detail.ha_enabled -ne $null) { $detail.ha_enabled } else { 'N/A' }
+            DrsEnabled         = if ($detail -and $detail.drs_enabled -ne $null) { $detail.drs_enabled } else { 'N/A' }
+            ClusterId          = "$($c.cluster)"
+        }
+    }
+}
+
+function Get-VMwareHostsREST {
+    <#
+    .SYNOPSIS
+        Returns all ESXi hosts from vCenter via REST API.
+    .EXAMPLE
+        Get-VMwareHostsREST
+    #>
+
+    $hosts = Invoke-VMwareREST -Path '/api/vcenter/host'
+    foreach ($h in $hosts) {
+        [PSCustomObject]@{
+            Name            = "$($h.name)"
+            HostId          = "$($h.host)"
+            ConnectionState = "$($h.connection_state)"
+            PowerState      = "$($h.power_state)"
+        }
+    }
+}
+
+function Get-VMwareHostDetailREST {
+    <#
+    .SYNOPSIS
+        Returns detailed ESXi host information via REST API.
+    .PARAMETER HostId
+        The vCenter host MoRef ID (e.g., host-10).
+    .PARAMETER HostName
+        The ESXi host name (for output).
+    .EXAMPLE
+        Get-VMwareHostDetailREST -HostId 'host-10' -HostName 'esxi01.lab.local'
+    #>
+    param(
+        [Parameter(Mandatory)][string]$HostId,
+        [string]$HostName
+    )
+
+    $ip = $null
+    # Get management IP from network interfaces
+    try {
+        $nics = Invoke-VMwareREST -Path "/api/vcenter/host/$HostId"
+        # Host detail endpoint may not have IP; try to resolve hostname
+        if ($HostName) {
+            try {
+                $resolved = [System.Net.Dns]::GetHostAddresses($HostName) | Where-Object { $_.AddressFamily -eq 'InterNetwork' } | Select-Object -First 1
+                if ($resolved) { $ip = $resolved.IPAddressToString }
+            }
+            catch { }
+        }
+    }
+    catch { }
+
+    [PSCustomObject]@{
+        Type            = 'ESXi Host'
+        Name            = if ($HostName) { $HostName } else { $HostId }
+        IPAddress       = if ($ip) { $ip } else { '' }
+        HostId          = $HostId
+    }
+}
+
+function Get-VMwareVMsREST {
+    <#
+    .SYNOPSIS
+        Returns all VMs from vCenter via REST API.
+    .EXAMPLE
+        Get-VMwareVMsREST
+    #>
+
+    $vms = Invoke-VMwareREST -Path '/api/vcenter/vm'
+    foreach ($vm in $vms) {
+        [PSCustomObject]@{
+            Name       = "$($vm.name)"
+            VMId       = "$($vm.vm)"
+            PowerState = "$($vm.power_state)"
+            CpuCount   = if ($vm.cpu_count) { $vm.cpu_count } else { 0 }
+            MemorySizeMB = if ($vm.memory_size_MiB) { $vm.memory_size_MiB } else { 0 }
+        }
+    }
+}
+
+function Get-VMwareVMDetailREST {
+    <#
+    .SYNOPSIS
+        Returns detailed VM information via REST API.
+    .PARAMETER VMId
+        The vCenter VM MoRef ID (e.g., vm-10).
+    .PARAMETER VMName
+        The VM name (for output).
+    .EXAMPLE
+        Get-VMwareVMDetailREST -VMId 'vm-10' -VMName 'MyServer'
+    #>
+    param(
+        [Parameter(Mandatory)][string]$VMId,
+        [string]$VMName
+    )
+
+    $detail = $null
+    try { $detail = Invoke-VMwareREST -Path "/api/vcenter/vm/$VMId" } catch { }
+
+    $ip = $null
+    $guestOS = 'N/A'
+    $guestFamily = 'N/A'
+    $toolsStatus = 'N/A'
+
+    if ($detail) {
+        if ($detail.guest_OS) { $guestOS = "$($detail.guest_OS)" }
+
+        # Try to get guest identity for IP
+        try {
+            $identity = Invoke-VMwareREST -Path "/api/vcenter/vm/$VMId/guest/identity"
+            if ($identity.ip_address) { $ip = "$($identity.ip_address)" }
+            if ($identity.family) { $guestFamily = "$($identity.family)" }
+            if ($identity.name) { $guestOS = "$($identity.name)" }
+        }
+        catch { }
+
+        # Try tools info
+        try {
+            $tools = Invoke-VMwareREST -Path "/api/vcenter/vm/$VMId/tools"
+            if ($tools.run_state) { $toolsStatus = "$($tools.run_state)" }
+        }
+        catch { }
+    }
+
+    $numCpu = 0; $memGB = 0; $diskCount = 0; $nicCount = 0
+    if ($detail) {
+        if ($detail.cpu -and $detail.cpu.count) { $numCpu = $detail.cpu.count }
+        if ($detail.memory -and $detail.memory.size_MiB) { $memGB = [math]::Round($detail.memory.size_MiB / 1024, 2) }
+        if ($detail.disks) { $diskCount = @($detail.disks.PSObject.Properties).Count }
+        if ($detail.nics) { $nicCount = @($detail.nics.PSObject.Properties).Count }
+    }
+
+    $hostName = 'N/A'
+    # VM detail doesn't always include host; we pass it from the caller if needed
+
+    [PSCustomObject]@{
+        Name          = if ($VMName) { $VMName } else { $VMId }
+        IPAddress     = if ($ip) { $ip } else { '' }
+        PowerState    = if ($detail -and $detail.power_state) { "$($detail.power_state)" } else { 'N/A' }
+        GuestOS       = $guestOS
+        GuestFamily   = $guestFamily
+        ToolsStatus   = $toolsStatus
+        NumCPU        = $numCpu
+        MemoryGB      = $memGB
+        DiskCount     = $diskCount
+        NicCount      = $nicCount
+        VMId          = $VMId
+    }
+}
+
+function Disconnect-VMwareREST {
+    <#
+    .SYNOPSIS
+        Disconnects from vCenter REST API session.
+    .EXAMPLE
+        Disconnect-VMwareREST
+    #>
+
+    if ($script:_VMwareRESTSession) {
+        try {
+            Invoke-VMwareREST -Path '/api/session' -Method DELETE
+            Write-Verbose "Disconnected from vCenter REST API"
+        }
+        catch {
+            Write-Verbose "vCenter REST disconnect: $($_.Exception.Message)"
+        }
+        $script:_VMwareRESTSession = $null
     }
 }
 

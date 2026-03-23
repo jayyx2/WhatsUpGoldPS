@@ -13,7 +13,7 @@ if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
 $requiredAzModules = @('Az.Accounts', 'Az.Resources', 'Az.Compute', 'Az.Network')
 foreach ($mod in $requiredAzModules) {
     if (-not (Get-Module -Name $mod -ListAvailable)) {
-        throw "Required module '$mod' is not installed. Run: Install-Module -Name Az -Scope CurrentUser -Repository PSGallery -Force"
+        throw "Required module '$mod' is not installed. Run: Install-Module -Name $mod -Scope CurrentUser -Force"
     }
     if (-not (Get-Module -Name $mod)) { Import-Module $mod }
 }

@@ -1,11 +1,10 @@
 ﻿<#
 .SYNOPSIS
-    AWS Discovery — Discover EC2/RDS/ELB and optionally push to WhatsUp Gold.
+    AWS Discovery -- Discover EC2/RDS/ELB and optionally push to WhatsUp Gold.
 
 .DESCRIPTION
     Interactive script that discovers AWS resources (EC2 instances, RDS
-    instances, Load Balancers) using AWS.Tools PowerShell modules, then
-    lets you choose what to do with the results:
+    instances, Load Balancers), then lets you choose what to do with the results:
 
       [1] Push monitors to WhatsUp Gold (creates devices + monitors)
       [2] Export discovery plan to JSON
@@ -14,8 +13,12 @@
       [5] Generate AWS HTML dashboard (live data)
       [6] Exit
 
+    Two collection methods:
+      [1] AWS.Tools PowerShell modules -- uses AWS.Tools.EC2, etc.
+      [2] REST API (direct) -- zero external dependencies, uses SigV4 signing
+
     First Run:
-      1. Prompts for AWS Access Key, Secret Key, Region
+      1. Prompts for collection method, AWS Access Key, Secret Key, Region
       2. Stores credentials in DPAPI vault (encrypted)
       3. Discovers EC2/RDS/ELB across specified region(s)
       4. Shows summary, then asks what to do
@@ -23,13 +26,11 @@
     Subsequent Runs:
       Loads credentials from vault automatically.
 
-    Prerequisites:
-      AWS.Tools PowerShell modules:
-        Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force
-        Install-AWSToolsModule EC2, RDS, ElasticLoadBalancingV2, CloudWatch -CleanUp
-
 .NOTES
     WhatsUpGoldPS module is only needed if you choose option [1].
+    REST API mode has zero external module dependencies.
+    Module mode requires: AWS.Tools.EC2, AWS.Tools.RDS,
+      AWS.Tools.ElasticLoadBalancingV2, AWS.Tools.CloudWatch.
 #>
 
 # --- Configuration -----------------------------------------------------------
@@ -47,27 +48,42 @@ $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 Write-Host "=== AWS Discovery ===" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Check for AWS.Tools modules -----------------------------------------------
-if (-not (Get-Module -ListAvailable -Name AWS.Tools.EC2 -ErrorAction SilentlyContinue)) {
-    Write-Warning "AWS.Tools.EC2 module not found. Install with:"
-    Write-Host "  Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force" -ForegroundColor Yellow
-    Write-Host "  Install-AWSToolsModule EC2, RDS, ElasticLoadBalancingV2, CloudWatch -CleanUp" -ForegroundColor Yellow
-    Write-Host ""
-    $installChoice = Read-Host -Prompt "Attempt to install now? [y/N]"
-    if ($installChoice -eq 'y' -or $installChoice -eq 'Y') {
-        try {
-            Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force -ErrorAction Stop
-            Install-AWSToolsModule EC2, RDS, ElasticLoadBalancingV2, CloudWatch, Common -CleanUp -ErrorAction Stop
-            Write-Host "AWS.Tools modules installed successfully." -ForegroundColor Green
+# --- Collection method choice --------------------------------------------------
+Write-Host "AWS data collection method:" -ForegroundColor Cyan
+Write-Host "  [1] AWS.Tools PowerShell modules (requires AWS.Tools.EC2, etc.)" -ForegroundColor White
+Write-Host "  [2] REST API direct (zero external dependencies, SigV4 signing)" -ForegroundColor White
+Write-Host ""
+$methodChoice = Read-Host -Prompt "Choice [1/2, default: 2]"
+$UseRestApi = ($methodChoice -ne '1')
+
+if ($UseRestApi) {
+    Write-Host "Using REST API mode (no AWS.Tools modules needed)." -ForegroundColor Green
+}
+else {
+    Write-Host "Using AWS.Tools module mode." -ForegroundColor Green
+
+    # --- Check for AWS.Tools modules -----------------------------------------------
+    if (-not (Get-Module -ListAvailable -Name AWS.Tools.EC2 -ErrorAction SilentlyContinue)) {
+        Write-Warning "AWS.Tools.EC2 module not found. Install with:"
+        Write-Host "  Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force" -ForegroundColor Yellow
+        Write-Host "  Install-AWSToolsModule EC2, RDS, ElasticLoadBalancingV2, CloudWatch -CleanUp" -ForegroundColor Yellow
+        Write-Host ""
+        $installChoice = Read-Host -Prompt "Attempt to install now? [y/N]"
+        if ($installChoice -eq 'y' -or $installChoice -eq 'Y') {
+            try {
+                Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force -ErrorAction Stop
+                Install-AWSToolsModule EC2, RDS, ElasticLoadBalancingV2, CloudWatch, Common -CleanUp -ErrorAction Stop
+                Write-Host "AWS.Tools modules installed successfully." -ForegroundColor Green
+            }
+            catch {
+                Write-Error "Failed to install AWS.Tools modules: $_"
+                return
+            }
         }
-        catch {
-            Write-Error "Failed to install AWS.Tools modules: $_"
+        else {
+            Write-Host "Cannot proceed without AWS.Tools modules. Exiting." -ForegroundColor Red
             return
         }
-    }
-    else {
-        Write-Host "Cannot proceed without AWS.Tools modules. Exiting." -ForegroundColor Red
-        return
     }
 }
 
@@ -106,7 +122,7 @@ try { $plainAwsSK = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($b
 finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrAws) }
 $plan = Invoke-Discovery -ProviderName 'AWS' `
     -Target $AWSRegions `
-    -Credential @{ AccessKey = $AWSCred.UserName; SecretKey = $plainAwsSK; Region = $AWSRegions[0] }
+    -Credential @{ AccessKey = $AWSCred.UserName; SecretKey = $plainAwsSK; Region = $AWSRegions[0]; UseRestApi = $UseRestApi }
 
 if (-not $plan -or $plan.Count -eq 0) {
     Write-Warning "No items discovered. Check AWS credentials and region accessibility."

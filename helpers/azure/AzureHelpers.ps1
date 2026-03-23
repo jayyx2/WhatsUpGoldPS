@@ -1,8 +1,12 @@
 ﻿# =============================================================================
 # Azure Helpers for WhatsUpGoldPS
-# Requires the Az PowerShell modules. Install them first if not already present:
-#   Install-Module -Name Az -Scope CurrentUser -Repository PSGallery -Force
-# This installs Az.Accounts, Az.Resources, Az.Monitor, Az.Compute, Az.Network, etc.
+#
+# Two collection methods supported:
+#   [1] Az PowerShell modules (Az.Accounts, Az.Resources, Az.Compute, Az.Network, Az.Monitor)
+#   [2] Direct REST API calls (zero external dependencies -- uses Invoke-RestMethod)
+#
+# Functions prefixed with "REST" use the Azure Resource Manager REST API directly.
+# Functions without the prefix use the Az PowerShell cmdlets.
 # =============================================================================
 
 function Connect-AzureServicePrincipal {
@@ -34,6 +38,16 @@ function Connect-AzureServicePrincipal {
 
     $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
     $credential = [PSCredential]::new($ApplicationId, $secureSecret)
+
+    # Pre-load latest Az.Accounts to avoid version mismatch when multiple
+    # versions are installed (prevents 'get_SerializationSettings' errors)
+    if (-not (Get-Module -Name Az.Accounts)) {
+        $latest = Get-Module -ListAvailable -Name Az.Accounts |
+            Sort-Object Version -Descending | Select-Object -First 1
+        if ($latest) {
+            Import-Module Az.Accounts -RequiredVersion $latest.Version -ErrorAction SilentlyContinue
+        }
+    }
 
     try {
         $context = Connect-AzAccount -ServicePrincipal -TenantId $TenantId -Credential $credential -ErrorAction Stop
@@ -407,7 +421,7 @@ function Get-AzureDashboard {
         Author  : jason@wug.ninja
         Version : 1.0.0
         Date    : 2025-07-15
-        Requires: PowerShell 5.1+, Az PowerShell modules (Az.Accounts, Az.Resources, Az.Monitor).
+        Requires: PowerShell 5.1+. Az modules needed only for Az mode; REST mode has no dependencies.
     .LINK
         https://github.com/jayyx2/WhatsUpGoldPS
     #>
@@ -568,6 +582,372 @@ function Export-AzureDashboardHtml {
 
     Set-Content -Path $OutputPath -Value $html -Encoding UTF8
     Write-Verbose "Azure Dashboard HTML written to $OutputPath"
+}
+
+# =============================================================================
+# REST API Collection Method (zero external dependencies)
+# Uses Azure Resource Manager REST API via Invoke-RestMethod (built into PS 5.1)
+# =============================================================================
+
+# Script-scoped token cache for REST API calls
+if (-not (Get-Variable -Name '_AzureRESTToken' -Scope Script -ErrorAction SilentlyContinue)) {
+    $script:_AzureRESTToken = $null
+    $script:_AzureRESTTokenExpiry = [datetime]::MinValue
+}
+
+function Connect-AzureServicePrincipalREST {
+    <#
+    .SYNOPSIS
+        Authenticates to Azure via OAuth2 client_credentials and caches the token.
+    .DESCRIPTION
+        Posts to the Azure AD token endpoint using a service principal's
+        Application ID and Client Secret. Caches the bearer token in script
+        scope so subsequent REST helper calls can reuse it.
+    .PARAMETER TenantId
+        The Azure AD tenant (directory) ID.
+    .PARAMETER ApplicationId
+        The Application (client) ID of the service principal.
+    .PARAMETER ClientSecret
+        The client secret string for the service principal.
+    .EXAMPLE
+        Connect-AzureServicePrincipalREST -TenantId $tid -ApplicationId $aid -ClientSecret $secret
+    #>
+    param(
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$ApplicationId,
+        [Parameter(Mandatory)][string]$ClientSecret
+    )
+
+    $tokenUri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+    $body = @{
+        grant_type    = 'client_credentials'
+        client_id     = $ApplicationId
+        client_secret = $ClientSecret
+        scope         = 'https://management.azure.com/.default'
+    }
+
+    try {
+        $resp = Invoke-RestMethod -Uri $tokenUri -Method POST -Body $body -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop
+        $script:_AzureRESTToken = $resp.access_token
+        $script:_AzureRESTTokenExpiry = (Get-Date).AddSeconds($resp.expires_in - 60)
+        Write-Verbose "Authenticated to Azure tenant $TenantId via REST (token valid for $($resp.expires_in)s)"
+        return @{ TenantId = $TenantId; ApplicationId = $ApplicationId }
+    }
+    catch {
+        throw "Failed to authenticate to Azure via REST: $($_.Exception.Message)"
+    }
+}
+
+function Invoke-AzureREST {
+    <#
+    .SYNOPSIS
+        Internal helper -- calls an Azure ARM REST endpoint with the cached token.
+    .PARAMETER Uri
+        Full URI to call.
+    .PARAMETER Method
+        HTTP method. Defaults to GET.
+    .PARAMETER ApiVersion
+        Appended as ?api-version= query parameter if the Uri does not already contain one.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [string]$Method = 'GET',
+        [string]$ApiVersion
+    )
+
+    if (-not $script:_AzureRESTToken -or (Get-Date) -ge $script:_AzureRESTTokenExpiry) {
+        throw "Azure REST token is not set or expired. Call Connect-AzureServicePrincipalREST first."
+    }
+
+    if ($ApiVersion -and $Uri -notmatch 'api-version=') {
+        $sep = if ($Uri.Contains('?')) { '&' } else { '?' }
+        $Uri = "${Uri}${sep}api-version=${ApiVersion}"
+    }
+
+    $headers = @{ Authorization = "Bearer $($script:_AzureRESTToken)" }
+
+    # Handle pagination (nextLink)
+    $allValues = @()
+    $currentUri = $Uri
+    do {
+        $resp = Invoke-RestMethod -Uri $currentUri -Method $Method -Headers $headers -ErrorAction Stop
+        if ($resp.value) {
+            $allValues += $resp.value
+        }
+        else {
+            # Single-object response (not a list)
+            return $resp
+        }
+        $currentUri = $resp.nextLink
+    } while ($currentUri)
+
+    return $allValues
+}
+
+function Get-AzureSubscriptionsREST {
+    <#
+    .SYNOPSIS
+        Returns all accessible Azure subscriptions via REST API.
+    .EXAMPLE
+        Get-AzureSubscriptionsREST
+    .EXAMPLE
+        Get-AzureSubscriptionsREST | Where-Object { $_.State -eq "Enabled" }
+    #>
+
+    $subs = Invoke-AzureREST -Uri 'https://management.azure.com/subscriptions' -ApiVersion '2022-12-01'
+    foreach ($sub in $subs) {
+        [PSCustomObject]@{
+            SubscriptionId   = "$($sub.subscriptionId)"
+            SubscriptionName = "$($sub.displayName)"
+            State            = "$($sub.state)"
+            TenantId         = "$($sub.tenantId)"
+        }
+    }
+}
+
+function Get-AzureResourceGroupsREST {
+    <#
+    .SYNOPSIS
+        Returns all resource groups in a subscription via REST API.
+    .PARAMETER SubscriptionId
+        The subscription ID to query.
+    .EXAMPLE
+        Get-AzureResourceGroupsREST -SubscriptionId "xxxx-yyyy"
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SubscriptionId
+    )
+
+    $rgs = Invoke-AzureREST -Uri "https://management.azure.com/subscriptions/$SubscriptionId/resourcegroups" -ApiVersion '2024-03-01'
+    foreach ($rg in $rgs) {
+        $tags = ''
+        if ($rg.tags -and $rg.tags -is [PSCustomObject]) {
+            $tags = ($rg.tags.PSObject.Properties | Where-Object { $_.Name -ne '' } | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join '; '
+        }
+        [PSCustomObject]@{
+            ResourceGroupName = "$($rg.name)"
+            Location          = "$($rg.location)"
+            ProvisioningState = "$($rg.properties.provisioningState)"
+            Tags              = $tags
+        }
+    }
+}
+
+function Get-AzureResourcesREST {
+    <#
+    .SYNOPSIS
+        Returns all resources within a resource group via REST API.
+    .PARAMETER SubscriptionId
+        The subscription ID.
+    .PARAMETER ResourceGroupName
+        The name of the resource group to enumerate.
+    .EXAMPLE
+        Get-AzureResourcesREST -SubscriptionId "xxxx" -ResourceGroupName "Production-RG"
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SubscriptionId,
+        [Parameter(Mandatory)][string]$ResourceGroupName
+    )
+
+    $uri = "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/resources"
+    $resources = Invoke-AzureREST -Uri $uri -ApiVersion '2024-03-01'
+    foreach ($r in $resources) {
+        $provState = 'N/A'
+        if ($r.properties -and $r.properties.provisioningState) {
+            $provState = "$($r.properties.provisioningState)"
+        }
+        $tags = ''
+        if ($r.tags -and $r.tags -is [PSCustomObject]) {
+            $tags = ($r.tags.PSObject.Properties | Where-Object { $_.Name -ne '' } | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join '; '
+        }
+        [PSCustomObject]@{
+            ResourceName      = "$($r.name)"
+            ResourceId        = "$($r.id)"
+            ResourceType      = "$($r.type)"
+            Location          = "$($r.location)"
+            Kind              = if ($r.kind) { "$($r.kind)" } else { 'N/A' }
+            Sku               = if ($r.sku -and $r.sku.name) { "$($r.sku.name)" } else { 'N/A' }
+            ProvisioningState = $provState
+            Tags              = $tags
+        }
+    }
+}
+
+function Resolve-AzureResourceIPREST {
+    <#
+    .SYNOPSIS
+        Attempts to resolve an IP address for an Azure resource via REST API.
+    .DESCRIPTION
+        For VMs, queries the network interface REST endpoints. For App Services,
+        SQL, and other resources, attempts DNS resolution.
+    .PARAMETER Resource
+        A resource object from Get-AzureResourcesREST.
+    .PARAMETER SubscriptionId
+        The subscription ID (needed for VM NIC lookups).
+    .EXAMPLE
+        Resolve-AzureResourceIPREST -Resource $resource -SubscriptionId "xxxx"
+    #>
+    param(
+        [Parameter(Mandatory)]$Resource,
+        [string]$SubscriptionId
+    )
+
+    $ip = $null
+
+    switch -Wildcard ($Resource.ResourceType) {
+        "Microsoft.Compute/virtualMachines" {
+            try {
+                # Get VM details to find NIC references
+                $vmUri = "https://management.azure.com$($Resource.ResourceId)"
+                $vm = Invoke-AzureREST -Uri $vmUri -ApiVersion '2024-03-01'
+                if ($vm.properties.networkProfile.networkInterfaces) {
+                    foreach ($nicRef in $vm.properties.networkProfile.networkInterfaces) {
+                        $nicUri = "https://management.azure.com$($nicRef.id)"
+                        $nic = Invoke-AzureREST -Uri $nicUri -ApiVersion '2024-01-01'
+                        if ($nic.properties.ipConfigurations) {
+                            foreach ($ipConfig in $nic.properties.ipConfigurations) {
+                                # Prefer public IP
+                                if ($ipConfig.properties.publicIPAddress) {
+                                    $pubUri = "https://management.azure.com$($ipConfig.properties.publicIPAddress.id)"
+                                    try {
+                                        $pubIp = Invoke-AzureREST -Uri $pubUri -ApiVersion '2024-01-01'
+                                        if ($pubIp.properties.ipAddress -and $pubIp.properties.ipAddress -ne 'Not Assigned') {
+                                            $ip = $pubIp.properties.ipAddress
+                                            break
+                                        }
+                                    }
+                                    catch { }
+                                }
+                                # Fall back to private IP
+                                if (-not $ip -and $ipConfig.properties.privateIPAddress) {
+                                    $ip = $ipConfig.properties.privateIPAddress
+                                }
+                            }
+                        }
+                        if ($ip) { break }
+                    }
+                }
+            }
+            catch {
+                Write-Verbose "Could not resolve VM IP via REST for $($Resource.ResourceName): $($_.Exception.Message)"
+            }
+        }
+        "Microsoft.Network/publicIPAddresses" {
+            try {
+                $pubUri = "https://management.azure.com$($Resource.ResourceId)"
+                $pubIp = Invoke-AzureREST -Uri $pubUri -ApiVersion '2024-01-01'
+                if ($pubIp.properties.ipAddress -and $pubIp.properties.ipAddress -ne 'Not Assigned') {
+                    $ip = $pubIp.properties.ipAddress
+                }
+            }
+            catch {
+                Write-Verbose "Could not resolve public IP via REST for $($Resource.ResourceName): $($_.Exception.Message)"
+            }
+        }
+        "Microsoft.Sql/servers" {
+            try {
+                $fqdn = "$($Resource.ResourceName).database.windows.net"
+                $resolved = [System.Net.Dns]::GetHostAddresses($fqdn) | Select-Object -First 1
+                if ($resolved) { $ip = $resolved.IPAddressToString }
+            }
+            catch {
+                Write-Verbose "Could not resolve SQL server FQDN for $($Resource.ResourceName): $($_.Exception.Message)"
+            }
+        }
+        "Microsoft.Web/sites" {
+            try {
+                $fqdn = "$($Resource.ResourceName).azurewebsites.net"
+                $resolved = [System.Net.Dns]::GetHostAddresses($fqdn) | Select-Object -First 1
+                if ($resolved) { $ip = $resolved.IPAddressToString }
+            }
+            catch {
+                Write-Verbose "Could not resolve App Service FQDN for $($Resource.ResourceName): $($_.Exception.Message)"
+            }
+        }
+        default {
+            try {
+                $resolved = [System.Net.Dns]::GetHostAddresses($Resource.ResourceName) | Select-Object -First 1
+                if ($resolved) { $ip = $resolved.IPAddressToString }
+            }
+            catch {
+                Write-Verbose "No IP resolution available for $($Resource.ResourceType) : $($Resource.ResourceName)"
+            }
+        }
+    }
+
+    return $ip
+}
+
+function Get-AzureResourceMetricsREST {
+    <#
+    .SYNOPSIS
+        Returns metric definitions and recent values for an Azure resource via REST API.
+    .PARAMETER ResourceId
+        The full Azure resource ID.
+    .PARAMETER MaxMetrics
+        Maximum number of metrics to retrieve. Defaults to 20.
+    .EXAMPLE
+        Get-AzureResourceMetricsREST -ResourceId "/subscriptions/xxxx/resourceGroups/myRG/providers/Microsoft.Compute/virtualMachines/myVM"
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ResourceId,
+        [int]$MaxMetrics = 20
+    )
+
+    $metrics = @()
+    try {
+        # Get metric definitions
+        $defUri = "https://management.azure.com${ResourceId}/providers/Microsoft.Insights/metricDefinitions"
+        $definitions = Invoke-AzureREST -Uri $defUri -ApiVersion '2024-02-01'
+        if (-not $definitions) { return $metrics }
+
+        $definitions = @($definitions) | Select-Object -First $MaxMetrics
+
+        foreach ($def in $definitions) {
+            $metricName = $def.name.value
+            $displayName = $def.name.localizedValue
+            $metricUnit = "$($def.unit)"
+            $primaryAgg = if ($def.primaryAggregationType) { "$($def.primaryAggregationType)" } else { "Average" }
+
+            try {
+                $endTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+                $startTime = (Get-Date).AddHours(-1).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+                $metricUri = "https://management.azure.com${ResourceId}/providers/Microsoft.Insights/metrics"
+                $metricUri += "?api-version=2024-02-01&metricnames=$([uri]::EscapeDataString($metricName))"
+                $metricUri += "&timespan=${startTime}/${endTime}&interval=PT5M&aggregation=$primaryAgg"
+
+                $metricResp = Invoke-AzureREST -Uri $metricUri
+                $lastValue = 'N/A'
+                if ($metricResp.value -and $metricResp.value[0].timeseries) {
+                    $dataPoints = $metricResp.value[0].timeseries[0].data
+                    if ($dataPoints) {
+                        $aggLower = $primaryAgg.Substring(0,1).ToLower() + $primaryAgg.Substring(1)
+                        $latest = $dataPoints | Where-Object { $null -ne $_.$aggLower } | Select-Object -Last 1
+                        if ($latest) {
+                            $lastValue = "$([math]::Round($latest.$aggLower, 4))"
+                        }
+                    }
+                }
+
+                $metrics += [PSCustomObject]@{
+                    MetricName  = $metricName
+                    DisplayName = $displayName
+                    Unit        = $metricUnit
+                    Aggregation = $primaryAgg
+                    LastValue   = $lastValue
+                }
+            }
+            catch {
+                Write-Verbose "Could not retrieve metric $metricName via REST: $($_.Exception.Message)"
+            }
+        }
+    }
+    catch {
+        Write-Verbose "Could not retrieve metric definitions via REST for $ResourceId : $($_.Exception.Message)"
+    }
+
+    return $metrics
 }
 
 # SIG # Begin signature block

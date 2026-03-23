@@ -23,6 +23,11 @@
         .badge-high { background-color: #fd7e14; }
         .badge-medium { background-color: #ffc107; color: #333; }
         .badge-low { background-color: #28a745; }
+        .row-counter { font-size: 0.85rem; color: #6c757d; padding: 6px 0; white-space: nowrap; }
+        .fixed-table-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+        .fixed-table-toolbar > .row-counter { flex: 1; order: 1; }
+        .fixed-table-toolbar > .search { order: 2; }
+        .fixed-table-toolbar > .columns { order: 3; }
     </style>
 </head>
 <body>
@@ -40,15 +45,13 @@
                    data-search="true"
                    data-show-columns="true"
                    data-show-toggle="true"
-                   data-show-export="true"
-                   data-show-pagination-switch="true"
-                   data-pagination="true"
+                   data-show-export="false"
+                   data-pagination="false"
                    data-page-size="50"
                    data-page-list="[25, 50, 100, 250, 500, All]"
                    data-sort-name="AssetName"
                    data-sort-order="asc"
                    data-show-fullscreen="true"
-                   data-filter-control="true"
                    data-show-search-clear-button="true"
                    class="table table-striped table-hover table-sm">
             </table>
@@ -59,8 +62,9 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/bootstrap-table.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/extensions/export/bootstrap-table-export.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/extensions/filter-control/bootstrap-table-filter-control.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin@1.27.0/tableExport.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
     <script>
         var columns = replaceColumnsHere;
@@ -68,7 +72,6 @@
 
         // Format columns
         columns.forEach(function(col) {
-            col.filterControl = 'input';
             if (col.field === 'LansweeperUrl' || col.field === 'Lansweeper Url') {
                 col.formatter = function(value) {
                     if (value && value !== 'N/A') {
@@ -121,12 +124,87 @@
         });
         document.getElementById('statsRow').innerHTML = statsHtml;
 
+        // Export helpers
+        var $table = $('#dashboardTable');
+        var allData = [];
+
+        function getExportRows() { return $table.bootstrapTable('getData', { useCurrentPage:false, includeHiddenRows:true }); }
+        function downloadBlob(c,f,m) { saveAs(new Blob([c],{type:m}),f); }
+        function escapeCsvValue(v) { var s=String(v==null?'':v); return (s.indexOf('"')!==-1||s.indexOf(',')!==-1||s.indexOf('\n')!==-1)?'"'+s.replace(/"/g,'""')+'"':s; }
+        function exportCsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join(',')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join(','));}); downloadBlob(l.join('\r\n'),'lansweeper_dashboard.csv','text/csv;charset=utf-8'); }
+        function exportJson(rows) { downloadBlob(JSON.stringify(rows,null,2),'lansweeper_dashboard.json','application/json;charset=utf-8'); }
+        function exportTxt(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var c=rows.map(function(r,i){return['--- Row '+(i+1)+' ---'].concat(h.map(function(k){return k+': '+(r[k]==null?'':r[k]);})).join('\r\n');}).join('\r\n\r\n'); downloadBlob(c,'lansweeper_dashboard.txt','text/plain;charset=utf-8'); }
+        function exportXlsx(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Lansweeper'); XLSX.writeFile(wb,'lansweeper_dashboard.xlsx'); }
+        function exportXls(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Lansweeper'); XLSX.writeFile(wb,'lansweeper_dashboard.xls.xlsx'); }
+        function exportTsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join('\t')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join('\t'));}); downloadBlob(l.join('\r\n'),'lansweeper_dashboard.tsv','text/tab-separated-values;charset=utf-8'); }
+        function exportSql(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var s=rows.map(function(r){var v=h.map(function(k){return"'"+String(r[k]==null?'':r[k]).replace(/'/g,"''")+"'";});return'INSERT INTO dashboard_export ('+h.join(', ')+') VALUES ('+v.join(', ')+');';}).join('\r\n'); downloadBlob(s,'lansweeper_dashboard.sql','text/plain;charset=utf-8'); }
+        function exportPng() { html2canvas(document.querySelector('#dashboardTable')).then(function(c){c.toBlob(function(b){saveAs(b,'lansweeper_dashboard.png');}); }); }
+
         // Initialize table
         $(function() {
-            $('#dashboardTable').bootstrapTable({
+            $table.bootstrapTable({
                 columns: columns,
                 data: data
             });
+            allData = $table.bootstrapTable('getData');
+
+            // Custom export handler
+            function wireExport() {
+                $(document).on('click', '.dropdown-item[data-type]', function(e) {
+                    e.preventDefault(); var t=$(this).data('type'), r=getExportRows();
+                    switch(t) { case 'csv':exportCsv(r);break; case 'txt':exportTxt(r);break; case 'xlsx':exportXlsx(r);break; case 'xls':exportXls(r);break; case 'json':exportJson(r);break; case 'png':exportPng();break; case 'sql':exportSql(r);break; case 'tsv':exportTsv(r);break; }
+                });
+            }
+
+            // Row counter
+            function updateRowCounter() {
+                var shown = $table.bootstrapTable('getData').length;
+                var total = allData.length;
+                $('#rowCounter').text(shown === total ? 'Showing ' + total + ' rows' : 'Showing ' + shown + ' of ' + total + ' rows');
+            }
+
+            // Inject all controls into bootstrap-table's toolbar
+            var $toolbar = $('.fixed-table-toolbar');
+            if ($toolbar.length) {
+                // Row counter on the left
+                $toolbar.prepend('<span class="row-counter" id="rowCounter"></span>');
+
+                // Pagination toggle + custom export into the button group
+                var $btnGroup = $toolbar.find('.columns');
+                if ($btnGroup.length) {
+                    // Pagination toggle
+                    var $pgBtn = $('<button type="button" class="btn btn-secondary" title="Toggle pagination">' +
+                        '<i class="bi bi-list-ol"></i></button>');
+                    $btnGroup.prepend($pgBtn);
+                    $pgBtn.on('click', function() {
+                        var isOn = $table.bootstrapTable('getOptions').pagination;
+                        $table.bootstrapTable('togglePagination');
+                        $(this).toggleClass('active', !isOn);
+                        updateRowCounter();
+                    });
+
+                    // Custom export dropdown
+                    var $exportBtn = $(
+                        '<div class="btn-group">' +
+                        '<button type="button" class="btn btn-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">' +
+                        '<i class="bi bi-download"></i> Export</button>' +
+                        '<ul class="dropdown-menu dropdown-menu-end">' +
+                        '<li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>' +
+                        '<li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>' +
+                        '<li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>' +
+                        '<li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>' +
+                        '<li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>' +
+                        '<li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>' +
+                        '<li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>' +
+                        '<li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>' +
+                        '</ul></div>');
+                    $btnGroup.append($exportBtn);
+                }
+            }
+
+            $table.on('post-body.bs.table', updateRowCounter);
+            wireExport();
+            updateRowCounter();
         });
     </script>
 </body>

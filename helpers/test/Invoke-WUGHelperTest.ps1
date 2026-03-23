@@ -30,6 +30,9 @@
     Include Docker Engine helper tests. Default $true.
 .PARAMETER TestGeolocation
     Include Geolocation map helper tests. Default $true.
+.PARAMETER TestDiscovery
+    Include Discovery Runner end-to-end tests (runs Invoke-WUGDiscoveryRunner.ps1
+    using DPAPI vault credentials in non-interactive mode). Default $true.
 .PARAMETER AWSRegion
     Default AWS region. Prompted at runtime if omitted.
 .PARAMETER AzureTenantId
@@ -68,6 +71,7 @@ param(
     [bool]$TestF5,
     [bool]$TestDocker,
     [bool]$TestGeolocation,
+    [bool]$TestDiscovery,
     [switch]$IncludeSkipped,
     [string]$AWSRegion,
     [string]$AzureTenantId,
@@ -75,7 +79,7 @@ param(
 )
 
 # If any Test* parameter was explicitly specified, only run those; otherwise run all.
-$testParams = @('TestAWS','TestAzure','TestGCP','TestOCI','TestProxmox','TestHyperV','TestNutanix','TestFortinet','TestVMware','TestCertificates','TestF5','TestDocker','TestGeolocation')
+$testParams = @('TestAWS','TestAzure','TestGCP','TestOCI','TestProxmox','TestHyperV','TestNutanix','TestFortinet','TestVMware','TestCertificates','TestF5','TestDocker','TestGeolocation','TestDiscovery')
 $anyExplicit = $testParams | Where-Object { $PSBoundParameters.ContainsKey($_) }
 if ($anyExplicit) {
     foreach ($p in $testParams) {
@@ -497,15 +501,18 @@ $script:AWSDashboardData = $null
 
 if ($TestAWS) {
     Write-Host "AWS Authentication - choose a method:" -ForegroundColor Cyan
-    Write-Host "  [1] Access Key + Secret Key"
+    Write-Host "  [1] Access Key + Secret Key (DPAPI vault)"
     Write-Host "  [2] Named AWS credential profile"
     Write-Host "  [S] Skip AWS tests"
     $awsChoice = Read-Host "Selection"
     switch ($awsChoice.Trim().ToUpper()) {
         '1' {
             $script:AWSAuthMethod = 'Keys'
-            $script:AWSAccessKey = Read-Host "AWS Access Key ID"
-            $script:AWSSecretKeySS = Read-Host "AWS Secret Access Key" -AsSecureString
+            $script:AWSKeysCred = Resolve-DiscoveryCredential -Name 'AWS.Credential' -CredType AWSKeys -ProviderLabel 'AWS' -DeferSave
+            if ($script:AWSKeysCred) {
+                $script:AWSAccessKey    = $script:AWSKeysCred.UserName
+                $script:AWSSecretKeySS  = $script:AWSKeysCred.Password
+            } else { $TestAWS = $false }
         }
         '2' {
             $script:AWSAuthMethod = 'Profile'
@@ -531,18 +538,29 @@ if ($TestAWS) {
     Invoke-Test -Cmdlet 'Connect-AWSProfile' -Endpoint 'AWS / Auth / Connect-AWSProfile' -Test {
         switch ($script:AWSAuthMethod) {
             'Keys' {
+                Write-Host "    Connecting with AccessKey=$($script:AWSAccessKey) Region=$AWSRegion" -ForegroundColor DarkGray
                 $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($script:AWSSecretKeySS)
                 try {
                     $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
                     Connect-AWSProfile -AccessKey $script:AWSAccessKey -SecretKey $plain -Region $AWSRegion -ErrorAction Stop
                 } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
             }
-            'Profile' { Connect-AWSProfile -ProfileName $script:AWSProfileName -Region $AWSRegion -ErrorAction Stop }
+            'Profile' {
+                Write-Host "    Connecting with Profile=$($script:AWSProfileName) Region=$AWSRegion" -ForegroundColor DarkGray
+                Connect-AWSProfile -ProfileName $script:AWSProfileName -Region $AWSRegion -ErrorAction Stop
+            }
         }
         $regionCheck = Get-EC2Region -Region $AWSRegion -ErrorAction Stop
         if (-not $regionCheck) { throw "Region validation failed" }
     }
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:AWSAuthMethod -eq 'Keys' -and $script:AWSKeysCred) {
+        Save-ResolvedCredential -Name 'AWS.Credential' -CredType AWSKeys -Value $script:AWSKeysCred
+    }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        if ($script:AWSAuthMethod -eq 'Keys') {
+            Remove-DiscoveryCredential -Name 'AWS.Credential' -Confirm:$false -ErrorAction SilentlyContinue
+            Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
+        }
         $TestAWS = $false
         Skip-ProviderTests -Provider 'AWS' -Reason 'Auth failed' -Cmdlets ($script:AWSCmdletList | Where-Object { $_ -ne 'Connect-AWSProfile' })
     }
@@ -626,14 +644,19 @@ $script:AzureAuthMethod = $null; $script:AzureHtmlOutPath = $null; $script:Azure
 
 if ($TestAzure) {
     Write-Host "`nAzure Authentication - choose a method:" -ForegroundColor Cyan
-    Write-Host "  [1] Service Principal  [2] Interactive browser  [3] Current Az context  [S] Skip"
+    Write-Host "  [1] Service Principal (DPAPI vault)  [2] Interactive browser  [3] Current Az context  [S] Skip"
     $azChoice = Read-Host "Selection"
     switch ($azChoice.Trim().ToUpper()) {
         '1' {
             $script:AzureAuthMethod = 'ServicePrincipal'
             if (-not $AzureTenantId) { $AzureTenantId = Read-Host "Azure Tenant ID" }
-            $script:AzureAppId = Read-Host "Application (Client) ID"
-            $script:AzureClientSecretSS = Read-Host "Client Secret" -AsSecureString
+            $script:AzureSPCred = Resolve-DiscoveryCredential -Name "Azure.$AzureTenantId.ServicePrincipal" -CredType AzureSP -ProviderLabel 'Azure' -DeferSave
+            if ($script:AzureSPCred) {
+                $spParts = $script:AzureSPCred.UserName -split '\|', 2
+                $AzureTenantId         = $spParts[0]
+                $script:AzureAppId     = $spParts[1]
+                $script:AzureClientSecretSS = $script:AzureSPCred.Password
+            } else { $TestAzure = $false }
         }
         '2' { $script:AzureAuthMethod = 'Interactive' }
         '3' { $script:AzureAuthMethod = 'Existing' }
@@ -651,18 +674,32 @@ if ($TestAzure) {
     Invoke-Test -Cmdlet 'Azure Authentication' -Endpoint 'Azure / Auth / Connect-Az*' -Test {
         switch ($script:AzureAuthMethod) {
             'ServicePrincipal' {
+                Write-Host "    Connecting SP: Tenant=$AzureTenantId, AppId=$($script:AzureAppId)" -ForegroundColor DarkGray
                 $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($script:AzureClientSecretSS)
                 try {
                     $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
                     Connect-AzureServicePrincipal -TenantId $AzureTenantId -ApplicationId $script:AzureAppId -ClientSecret $plain -ErrorAction Stop
                 } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
             }
-            'Interactive' { Connect-AzAccount -ErrorAction Stop }
-            'Existing' { $ctx = Get-AzContext -ErrorAction Stop; if (-not $ctx -or -not $ctx.Account) { throw "No Az context" } }
+            'Interactive' {
+                Write-Host "    Connecting via browser..." -ForegroundColor DarkGray
+                Connect-AzAccount -ErrorAction Stop
+            }
+            'Existing' {
+                Write-Host "    Using existing Az context..." -ForegroundColor DarkGray
+                $ctx = Get-AzContext -ErrorAction Stop; if (-not $ctx -or -not $ctx.Account) { throw "No Az context" }
+            }
         }
         $ctx = Get-AzContext -ErrorAction Stop; if (-not $ctx.Account) { throw "No account after auth" }
     }
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:AzureAuthMethod -eq 'ServicePrincipal' -and $script:AzureSPCred) {
+        Save-ResolvedCredential -Name "Azure.$AzureTenantId.ServicePrincipal" -CredType AzureSP -Value $script:AzureSPCred
+    }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        if ($script:AzureAuthMethod -eq 'ServicePrincipal' -and $AzureTenantId) {
+            Remove-DiscoveryCredential -Name "Azure.$AzureTenantId.ServicePrincipal" -Confirm:$false -ErrorAction SilentlyContinue
+            Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
+        }
         $TestAzure = $false
         Skip-ProviderTests -Provider 'Azure' -Reason 'Auth failed' -Cmdlets ($script:AzureCmdletList | Where-Object { $_ -ne 'Azure Authentication' })
     }
@@ -949,7 +986,7 @@ $script:ProxmoxHtmlOutPath = $null; $script:ProxmoxDashboardData = $null; $scrip
 
 if ($TestProxmox) {
     Write-Host "`nProxmox Authentication:" -ForegroundColor Cyan
-    Write-Host "  [1] Username + Password  [S] Skip"
+    Write-Host "  [1] Username + Password (DPAPI vault)  [S] Skip"
     $pmxChoice = Read-Host "Selection"
     if ($pmxChoice.Trim().ToUpper() -eq '1') {
         $pmxHost = Read-Host "Proxmox host or IP [default: localhost]"
@@ -957,10 +994,11 @@ if ($TestProxmox) {
         $pmxHost = $pmxHost -replace '^https?://','' -replace ':[0-9]+$',''
         $script:ProxmoxServer = "https://${pmxHost}:8006"
         Write-Host "  Using: $($script:ProxmoxServer)" -ForegroundColor DarkGray
-        $pmxUser = Read-Host "Username [default: root@pam]"
-        $script:ProxmoxUser = if ([string]::IsNullOrWhiteSpace($pmxUser)) { 'root@pam' } else { $pmxUser }
-        Write-Host "  Using: $($script:ProxmoxUser)" -ForegroundColor DarkGray
-        $script:ProxmoxPassSS = Read-Host "Password" -AsSecureString
+        $script:ProxmoxCred = Resolve-DiscoveryCredential -Name "Proxmox.$pmxHost.Credential" -CredType PSCredential -ProviderLabel 'Proxmox' -DeferSave
+        if ($script:ProxmoxCred) {
+            $script:ProxmoxUser   = $script:ProxmoxCred.UserName
+            $script:ProxmoxPassSS = $script:ProxmoxCred.Password
+        } else { $TestProxmox = $false }
     } else { $TestProxmox = $false }
     if (-not $TestProxmox) { Skip-ProviderTests -Provider 'Proxmox' -Reason 'User skipped' -Cmdlets $script:ProxmoxCmdletList }
 } else { Skip-ProviderTests -Provider 'Proxmox' -Reason 'Disabled' -Cmdlets $script:ProxmoxCmdletList }
@@ -972,6 +1010,7 @@ if ($TestProxmox) {
     $script:FirstProxmoxNode = $null; $script:FirstProxmoxVM = $null
 
     Invoke-Test -Cmdlet 'Connect-ProxmoxServer' -Endpoint 'Proxmox / Auth / Connect-ProxmoxServer' -Test {
+        Write-Host "    Connecting to $($script:ProxmoxServer) as $($script:ProxmoxUser)" -ForegroundColor DarkGray
         Initialize-SSLBypass
         $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($script:ProxmoxPassSS)
         try {
@@ -980,7 +1019,13 @@ if ($TestProxmox) {
         } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
         if (-not $script:ProxmoxCookie) { throw "No cookie returned" }
     }
+    $pmxVaultName = "Proxmox.$($pmxHost).Credential"
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:ProxmoxCred) {
+        Save-ResolvedCredential -Name $pmxVaultName -CredType PSCredential -Value $script:ProxmoxCred
+    }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        Remove-DiscoveryCredential -Name $pmxVaultName -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
         $TestProxmox = $false
         Skip-ProviderTests -Provider 'Proxmox' -Reason 'Auth failed' -Cmdlets ($script:ProxmoxCmdletList | Where-Object { $_ -ne 'Connect-ProxmoxServer' })
     }
@@ -1040,7 +1085,7 @@ if ($TestHyperV) {
     $hvChoice = Read-Host "Selection"
     if ($hvChoice.Trim().ToUpper() -eq '1') {
         $script:HyperVHost = Read-Host "Hyper-V host name or IP"
-        $script:HyperVCred = Get-Credential -Message "Hyper-V host credentials"
+        $script:HyperVCred = Resolve-DiscoveryCredential -Name "HyperV.$($script:HyperVHost).Credential" -CredType PSCredential -ProviderLabel 'Hyper-V' -DeferSave
     } else { $TestHyperV = $false }
     if (-not $TestHyperV) { Skip-ProviderTests -Provider 'HyperV' -Reason 'User skipped' -Cmdlets $script:HyperVCmdletList }
 } else { Skip-ProviderTests -Provider 'HyperV' -Reason 'Disabled or module unavailable' -Cmdlets $script:HyperVCmdletList }
@@ -1052,10 +1097,16 @@ if ($TestHyperV) {
     $script:FirstHyperVVM = $null
 
     Invoke-Test -Cmdlet 'Connect-HypervHost' -Endpoint 'HyperV / Auth / Connect-HypervHost' -Test {
+        Write-Host "    Connecting to $($script:HyperVHost) as $($script:HyperVCred.UserName) via CIM ..." -ForegroundColor DarkGray
         $script:HyperVSession = Connect-HypervHost -ComputerName $script:HyperVHost -Credential $script:HyperVCred -ErrorAction Stop
         if (-not $script:HyperVSession) { throw "No CIM session returned" }
     }
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:HyperVCred) {
+        Save-ResolvedCredential -Name "HyperV.$($script:HyperVHost).Credential" -CredType PSCredential -Value $script:HyperVCred
+    }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        Remove-DiscoveryCredential -Name "HyperV.$($script:HyperVHost).Credential" -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
         $TestHyperV = $false
         Skip-ProviderTests -Provider 'HyperV' -Reason 'Auth failed' -Cmdlets ($script:HyperVCmdletList | Where-Object { $_ -ne 'Connect-HypervHost' })
     }
@@ -1100,7 +1151,7 @@ if ($TestNutanix) {
     $nxChoice = Read-Host "Selection"
     if ($nxChoice.Trim().ToUpper() -eq '1') {
         $script:NutanixServer = Read-Host "Prism server URI (e.g. https://192.168.1.50:9440)"
-        $script:NutanixCred = Get-Credential -Message "Nutanix Prism credentials"
+        $script:NutanixCred = Resolve-DiscoveryCredential -Name 'Nutanix.Prism.Credential' -CredType PSCredential -ProviderLabel 'Nutanix Prism' -DeferSave
     } else { $TestNutanix = $false }
     if (-not $TestNutanix) { Skip-ProviderTests -Provider 'Nutanix' -Reason 'User skipped' -Cmdlets $script:NutanixCmdletList }
 } else { Skip-ProviderTests -Provider 'Nutanix' -Reason 'Disabled' -Cmdlets $script:NutanixCmdletList }
@@ -1112,11 +1163,17 @@ if ($TestNutanix) {
     $script:FirstNutanixHost = $null; $script:FirstNutanixVM = $null
 
     Invoke-Test -Cmdlet 'Connect-NutanixCluster' -Endpoint 'Nutanix / Auth / Connect-NutanixCluster' -Test {
+        Write-Host "    Connecting to Nutanix Prism at $($script:NutanixServer) as $($script:NutanixCred.UserName) ..." -ForegroundColor DarkGray
         Initialize-SSLBypass
         $script:NutanixHeaders = Connect-NutanixCluster -Server $script:NutanixServer -Credential $script:NutanixCred -ErrorAction Stop
         if (-not $script:NutanixHeaders) { throw "No auth headers returned" }
     }
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:NutanixCred) {
+        Save-ResolvedCredential -Name 'Nutanix.Prism.Credential' -CredType PSCredential -Value $script:NutanixCred
+    }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        Remove-DiscoveryCredential -Name 'Nutanix.Prism.Credential' -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
         $TestNutanix = $false
         Skip-ProviderTests -Provider 'Nutanix' -Reason 'Auth failed' -Cmdlets ($script:NutanixCmdletList | Where-Object { $_ -ne 'Connect-NutanixCluster' })
     }
@@ -1176,14 +1233,19 @@ if ($TestFortinet) {
             $script:FGServer = Read-Host "FortiGate host or IP"
             $fgPort = Read-Host "Port [443]"
             $script:FGPort = if ([string]::IsNullOrWhiteSpace($fgPort)) { 443 } else { [int]$fgPort }
-            $script:FGTokenSS = Read-Host "API Token" -AsSecureString
+            $script:FGToken = Resolve-DiscoveryCredential -Name "FortiGate.$($script:FGServer).Token" -CredType BearerToken -ProviderLabel 'FortiGate' -DeferSave
+            if ($script:FGToken) {
+                $script:FGTokenSS = ConvertTo-SecureString $script:FGToken -AsPlainText -Force
+            } else {
+                $TestFortinet = $false
+            }
         }
         '2' {
             $script:FGAuthMethod = 'Credential'
             $script:FGServer = Read-Host "FortiGate host or IP"
             $fgPort = Read-Host "Port [443]"
             $script:FGPort = if ([string]::IsNullOrWhiteSpace($fgPort)) { 443 } else { [int]$fgPort }
-            $script:FGCred = Get-Credential -Message "FortiGate admin credentials"
+            $script:FGCred = Resolve-DiscoveryCredential -Name "FortiGate.$($script:FGServer).Credential" -CredType PSCredential -ProviderLabel 'FortiGate' -DeferSave
         }
         default { $TestFortinet = $false }
     }
@@ -1192,7 +1254,7 @@ if ($TestFortinet) {
         if ($fmgChoice -match '^[Yy]') {
             $script:TestFortiManager = $true
             $script:FMGServer = Read-Host "FortiManager host or IP"
-            $script:FMGCred = Get-Credential -Message "FortiManager credentials"
+            $script:FMGCred = Resolve-DiscoveryCredential -Name "FortiManager.$($script:FMGServer).Credential" -CredType PSCredential -ProviderLabel 'FortiManager' -DeferSave
         }
     }
     if (-not $TestFortinet) { Skip-ProviderTests -Provider 'Fortinet' -Reason 'User skipped' -Cmdlets $script:FortinetCmdletList }
@@ -1204,6 +1266,7 @@ if ($TestFortinet) {
 
     # -- Auth --
     Invoke-Test -Cmdlet 'Connect-FortiGate' -Endpoint 'Fortinet / Auth / Connect-FortiGate' -Test {
+        Write-Host "    Connecting to FortiGate at $($script:FGServer):$($script:FGPort) ($($script:FGAuthMethod) auth) ..." -ForegroundColor DarkGray
         switch ($script:FGAuthMethod) {
             'Token' {
                 $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($script:FGTokenSS)
@@ -1217,7 +1280,20 @@ if ($TestFortinet) {
             }
         }
     }
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass') {
+        if ($script:FGAuthMethod -eq 'Token' -and $script:FGToken) {
+            Save-ResolvedCredential -Name "FortiGate.$($script:FGServer).Token" -CredType BearerToken -Value $script:FGToken
+        } elseif ($script:FGAuthMethod -eq 'Credential' -and $script:FGCred) {
+            Save-ResolvedCredential -Name "FortiGate.$($script:FGServer).Credential" -CredType PSCredential -Value $script:FGCred
+        }
+    }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        if ($script:FGAuthMethod -eq 'Token') {
+            Remove-DiscoveryCredential -Name "FortiGate.$($script:FGServer).Token" -Confirm:$false -ErrorAction SilentlyContinue
+        } else {
+            Remove-DiscoveryCredential -Name "FortiGate.$($script:FGServer).Credential" -Confirm:$false -ErrorAction SilentlyContinue
+        }
+        Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
         $TestFortinet = $false
         Skip-ProviderTests -Provider 'Fortinet' -Reason 'Auth failed' -Cmdlets ($script:FortinetCmdletList | Where-Object { $_ -ne 'Connect-FortiGate' })
     }
@@ -1586,9 +1662,16 @@ if ($TestFortinet) {
         if ($script:TestFortiManager) {
             Write-Host "    -- FortiManager --" -ForegroundColor DarkCyan
             Invoke-Test -Cmdlet 'Connect-FortiManager' -Endpoint 'Fortinet / FMG / Auth' -Test {
+                Write-Host "    Connecting to FortiManager at $($script:FMGServer) as $($script:FMGCred.UserName) ..." -ForegroundColor DarkGray
                 Connect-FortiManager -Server $script:FMGServer -Credential $script:FMGCred -IgnoreSSLErrors -ErrorAction Stop
             }
             $fmgAuth = ($script:TestResults | Select-Object -Last 1).Status -eq 'Pass'
+            if ($fmgAuth -and $script:FMGCred) {
+                Save-ResolvedCredential -Name "FortiManager.$($script:FMGServer).Credential" -CredType PSCredential -Value $script:FMGCred
+            } else {
+                Remove-DiscoveryCredential -Name "FortiManager.$($script:FMGServer).Credential" -Confirm:$false -ErrorAction SilentlyContinue
+                Write-Host "  Bad FortiManager credential removed from vault." -ForegroundColor Yellow
+            }
             if ($fmgAuth) {
                 Invoke-Test -Cmdlet 'Get-FortiManagerSystemStatus' -Endpoint 'Fortinet / FMG / sys/status' -Test {
                     $r = Get-FortiManagerSystemStatus -ErrorAction Stop; Assert-NotNull $r
@@ -1640,7 +1723,7 @@ if ($TestVMware) {
     $vmwChoice = Read-Host "Selection"
     if ($vmwChoice.Trim().ToUpper() -eq '1') {
         $script:VMwareServer = Read-Host "vCenter / ESXi host or IP"
-        $script:VMwareCred = Get-Credential -Message "VMware vSphere credentials"
+        $script:VMwareCred = Resolve-DiscoveryCredential -Name "VMware.$($script:VMwareServer).Credential" -CredType PSCredential -ProviderLabel 'VMware vSphere' -DeferSave
     } else { $TestVMware = $false }
     if (-not $TestVMware) { Skip-ProviderTests -Provider 'VMware' -Reason 'User skipped' -Cmdlets $script:VMwareCmdletList }
 } else { Skip-ProviderTests -Provider 'VMware' -Reason 'Disabled or modules unavailable' -Cmdlets $script:VMwareCmdletList }
@@ -1652,10 +1735,16 @@ if ($TestVMware) {
     $script:FirstVMwareHost = $null; $script:FirstVMwareVM = $null
 
     Invoke-Test -Cmdlet 'Connect-VMware' -Endpoint 'VMware / Auth / Connect-VMware' -Test {
+        Write-Host "    Connecting to VMware at $($script:VMwareServer) as $($script:VMwareCred.UserName) ..." -ForegroundColor DarkGray
         $script:VMwareConnection = Connect-VMware -Server $script:VMwareServer -Credential $script:VMwareCred -IgnoreSSLErrors -ErrorAction Stop
         if (-not $script:VMwareConnection) { throw "No connection returned" }
     }
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:VMwareCred) {
+        Save-ResolvedCredential -Name "VMware.$($script:VMwareServer).Credential" -CredType PSCredential -Value $script:VMwareCred
+    }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        Remove-DiscoveryCredential -Name "VMware.$($script:VMwareServer).Credential" -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
         $TestVMware = $false
         Skip-ProviderTests -Provider 'VMware' -Reason 'Auth failed' -Cmdlets ($script:VMwareCmdletList | Where-Object { $_ -ne 'Connect-VMware' })
     }
@@ -1773,7 +1862,7 @@ if ($TestF5) {
         $script:F5Host = Read-Host "F5 BIG-IP hostname or IP"
         $f5PortInput = Read-Host "Port [443]"
         $script:F5Port = if ([string]::IsNullOrWhiteSpace($f5PortInput)) { 443 } else { [int]$f5PortInput }
-        $script:F5Cred = Get-Credential -Message "F5 BIG-IP credentials"
+        $script:F5Cred = Resolve-DiscoveryCredential -Name "F5.$($script:F5Host).Credential" -CredType PSCredential -ProviderLabel 'F5 BIG-IP' -DeferSave
     } else { $TestF5 = $false }
     if (-not $TestF5) { Skip-ProviderTests -Provider 'F5' -Reason 'User skipped' -Cmdlets $script:F5CmdletList }
 } else { Skip-ProviderTests -Provider 'F5' -Reason 'Disabled' -Cmdlets $script:F5CmdletList }
@@ -1785,9 +1874,15 @@ if ($TestF5) {
     $script:FirstF5VS = $null; $script:FirstF5Pool = $null
 
     Invoke-Test -Cmdlet 'Connect-F5Server' -Endpoint 'F5 / Auth / Connect-F5Server' -Test {
+        Write-Host "    Connecting to F5 BIG-IP at $($script:F5Host):$($script:F5Port) as $($script:F5Cred.UserName) ..." -ForegroundColor DarkGray
         Connect-F5Server -F5Host $script:F5Host -Port $script:F5Port -Credential $script:F5Cred -IgnoreSSLErrors -ErrorAction Stop
     }
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:F5Cred) {
+        Save-ResolvedCredential -Name "F5.$($script:F5Host).Credential" -CredType PSCredential -Value $script:F5Cred
+    }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        Remove-DiscoveryCredential -Name "F5.$($script:F5Host).Credential" -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
         $TestF5 = $false
         Skip-ProviderTests -Provider 'F5' -Reason 'Auth failed' -Cmdlets ($script:F5CmdletList | Where-Object { $_ -ne 'Connect-F5Server' })
     }
@@ -1849,16 +1944,18 @@ if ($TestGeolocation) {
     Write-Host "  [1] Connect to WUG server  [S] Skip"
     $geoChoice = Read-Host "Selection"
     if ($geoChoice.Trim().ToUpper() -eq '1') {
-        $script:GeoServer = Read-Host "WUG server hostname or IP"
-        $geoProto = Read-Host "Protocol [https]"
-        $script:GeoProtocol = if ([string]::IsNullOrWhiteSpace($geoProto)) { 'https' } else { $geoProto }
-        $geoPort = Read-Host "Port [9644]"
-        $script:GeoPort = if ([string]::IsNullOrWhiteSpace($geoPort)) { 9644 } else { [int]$geoPort }
-        $script:GeoCred = Get-Credential -Message "WUG credentials for geolocation tests"
-        $geoSSL = Read-Host "Ignore SSL errors? [Y/N, default Y]"
-        $script:GeoIgnoreSSL = if ($geoSSL -match '^[Nn]') { $false } else { $true }
-        $geoConsole = Read-Host "WUG web console base URL (e.g. https://wug:443) [press Enter to skip]"
-        $script:GeoConsoleUrl = if ([string]::IsNullOrWhiteSpace($geoConsole)) { '' } else { $geoConsole }
+        $script:WUGServerInfo = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -DeferSave
+        if ($script:WUGServerInfo) {
+            $script:GeoServer     = $script:WUGServerInfo.Server
+            $script:GeoPort       = $script:WUGServerInfo.Port
+            $script:GeoProtocol   = $script:WUGServerInfo.Protocol
+            $script:GeoCred       = $script:WUGServerInfo.Credential
+            $script:GeoIgnoreSSL  = $script:WUGServerInfo.IgnoreSSL
+            $geoConsole = Read-Host "WUG web console base URL (e.g. https://wug:443) [press Enter to skip]"
+            $script:GeoConsoleUrl = if ([string]::IsNullOrWhiteSpace($geoConsole)) { '' } else { $geoConsole }
+        } else {
+            $TestGeolocation = $false
+        }
     } else { $TestGeolocation = $false }
     if (-not $TestGeolocation) { Skip-ProviderTests -Provider 'Geolocation' -Reason 'User skipped' -Cmdlets $script:GeolocationCmdletList }
 } else { Skip-ProviderTests -Provider 'Geolocation' -Reason 'Disabled' -Cmdlets $script:GeolocationCmdletList }
@@ -1868,6 +1965,7 @@ if ($TestGeolocation) {
     Write-Host "`n[$currentSection/$sectionCount] Testing Geolocation ..." -ForegroundColor Cyan
 
     Invoke-Test -Cmdlet 'Connect-GeoWUGServer' -Endpoint 'Geolocation / Auth / Connect-GeoWUGServer' -Test {
+        Write-Host "    Connecting to WUG at $($script:GeoProtocol)://$($script:GeoServer):$($script:GeoPort) as $($script:GeoCred.GetNetworkCredential().UserName) ..." -ForegroundColor DarkGray
         $splat = @{
             ServerUri = $script:GeoServer
             Username  = $script:GeoCred.GetNetworkCredential().UserName
@@ -1879,7 +1977,13 @@ if ($TestGeolocation) {
         $script:GeoConfig = Connect-GeoWUGServer @splat -ErrorAction Stop
         if (-not $script:GeoConfig) { throw "No config returned" }
     }
+    # Save to vault only if connection succeeded
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:WUGServerInfo) {
+        Save-ResolvedCredential -Name 'WUG.Server' -CredType WUGServer -Value $script:WUGServerInfo
+    }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        Remove-DiscoveryCredential -Name 'WUG.Server' -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
         $TestGeolocation = $false
         Skip-ProviderTests -Provider 'Geolocation' -Reason 'Connection failed' -Cmdlets ($script:GeolocationCmdletList | Where-Object { $_ -ne 'Connect-GeoWUGServer' })
     }
@@ -2071,6 +2175,66 @@ $script:GeoConfig = $null; $script:GeoCred = $null; $script:GeoServer = $null
 #endregion
 
 ###############################################################################
+#region -- Discovery Runner ---------------------------------------------------
+###############################################################################
+if ($TestDiscovery) {
+    Write-Host "`n=== Discovery Runner (end-to-end) ===" -ForegroundColor Magenta
+
+    $discoveryRunnerPath = Join-Path $PSScriptRoot 'Invoke-WUGDiscoveryRunner.ps1'
+    if (Test-Path $discoveryRunnerPath) {
+        $discoveryOutDir = Join-Path $outDir 'DiscoveryRunner'
+        if (-not (Test-Path $discoveryOutDir)) {
+            New-Item -ItemType Directory -Path $discoveryOutDir -Force | Out-Null
+        }
+
+        # Map the active helper-test toggles to discovery runner params
+        $drParams = @{
+            OutputPath     = $discoveryOutDir
+            NonInteractive = $true
+        }
+        if ($TestAWS)      { $drParams.RunAWS      = $true }
+        if ($TestAzure)    { $drParams.RunAzure    = $true }
+        if ($TestF5)       { $drParams.RunF5       = $true }
+        if ($TestFortinet) { $drParams.RunFortinet = $true }
+        if ($TestHyperV)   { $drParams.RunHyperV   = $true }
+        if ($TestProxmox)  { $drParams.RunProxmox  = $true }
+        if ($TestVMware)   { $drParams.RunVMware   = $true }
+
+        Invoke-Test -Cmdlet 'Discovery Runner' -Endpoint 'Discovery / Runner / Execute' -Test {
+            & $discoveryRunnerPath @drParams
+        }
+
+        # Collect discovery runner report if generated
+        $drReports = @(Get-ChildItem -Path $discoveryOutDir -Filter 'DiscoveryRunner-Report-*.html' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+        if ($drReports.Count -gt 0) {
+            $script:DiscoveryRunnerReportPath = $drReports[0].FullName
+            Record-Test -Cmdlet 'Discovery Runner Report' -Endpoint $script:DiscoveryRunnerReportPath -Status 'Pass'
+        }
+
+        $drPlans = @(Get-ChildItem -Path $discoveryOutDir -Filter 'MasterPlan-*.json' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+        if ($drPlans.Count -gt 0) {
+            $planContent = Get-Content -Path $drPlans[0].FullName -Raw -ErrorAction SilentlyContinue
+            $planItems = ($planContent | ConvertFrom-Json -ErrorAction SilentlyContinue)
+            $planItemCount = if ($planItems) { @($planItems).Count } else { 0 }
+            Record-Test -Cmdlet 'Discovery Master Plan' -Endpoint $drPlans[0].FullName `
+                -Status $(if ($planItemCount -gt 0) { 'Pass' } else { 'Fail' }) `
+                -Detail "$planItemCount items across all providers"
+        }
+    }
+    else {
+        Record-Test -Cmdlet 'Discovery Runner' -Endpoint $discoveryRunnerPath `
+            -Status 'Fail' -Detail 'Invoke-WUGDiscoveryRunner.ps1 not found'
+    }
+}
+else {
+    Skip-ProviderTests -Provider 'Discovery' -Reason 'TestDiscovery not enabled' `
+        -Cmdlets @('Discovery Runner','Discovery Runner Report','Discovery Master Plan')
+}
+#endregion
+
+###############################################################################
 #region -- Summary ------------------------------------------------------------
 ###############################################################################
 Write-Host "`n============================================================" -ForegroundColor Cyan
@@ -2119,7 +2283,8 @@ foreach ($p in @($script:AWSHtmlOutPath, $script:AzureHtmlOutPath, $script:GCPHt
                  $script:NutanixHtmlOutPath, $script:VMwareHtmlOutPath,
                  $script:CertHtmlOutPath, $script:F5HtmlOutPath,
                  $script:DockerHtmlOutPath,
-                 $script:GeoHtmlOutPath)) {
+                 $script:GeoHtmlOutPath,
+                 $script:DiscoveryRunnerReportPath)) {
     if ($p -and (Test-Path $p)) { $reportFiles += $p }
 }
 if ($script:FortinetHtmlOutPaths) {
@@ -2139,8 +2304,8 @@ $displayResults
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD92OfLKsVO9ZOA
-# kPBBi0KI0SorlqOSv0XIcNqG5ClKqKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBp/0/Fbomqc9QF
+# nlD0KOhvxKKi7hXt8R7Pry/Fr/U+bKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -2240,17 +2405,17 @@ $displayResults
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg3hBupN9XrxPFxepDQ22QCSG6dFfrc4CW
-# p9Lo84ByOHYwDQYJKoZIhvcNAQEBBQAEggIA6ojbhrX9d+TPZPzqyLtWPA3F8x4J
-# l4tHfVAqfARrhd9vyjHVesVMAi3Sc7AqyBk6FA+Js8nSOmCwRJBMwBE+RuQOv4nf
-# LMKsSX12966d6zVW6t91DVqCX457jJ0Sr0+iTfAIStt8tn+apFlKM2nQ75Klv+Lp
-# idyjXJq8R5N9GYbh4EKT7U5mzSP2sE/Jqq6ZN4idT9tq/qNirzKJsNdEtYS0R01i
-# mcbJ16TUGivCEPtNbFlpAofYf0xH34TFH/08Qq+i2U+UhKoHTpo1xFcfmUSLMl9k
-# dol1GThFMQk7zI8UpWHd07rG7OuOhVyIQrIOqeVJRQGU/DEoW6BQFjQUfSzCHZQ4
-# b58u8eVY3egOOsqmljTWab05cwkCCz04R+NnOff34N1Ktq7dIKQNzG6lGfhc8KVT
-# GMiK49T6GROyuZPbWOfruB1pwspEa4hUSPHZE1fWRLrz/GqWc7TzDWggb8xQsP0a
-# 06u+VZu9wybTgGQix89eH4A1Y3d0PnxVl1jLUqUtVoHgHBbIqJMd3EZxJaK67wbs
-# yEuBAWdO8/ldNP/wddT0F4umv2bDypXQ4VFjvSE9gj81+iwO3Ay0lferd9MZrEUD
-# M7nObv5uMUQ/MLriSDW3/zyhtc2vu4EmXQ1bTQcHCojreMclxq9Y4n5xYACjqDsy
-# ZA3HyMjtRz1fj1g=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgTkqgWfpZBzAMsBW/Y6AJ4dfDXUFeP3fE
+# O40qXSd+h8QwDQYJKoZIhvcNAQEBBQAEggIA1Pj+vhWbN3Zl0Gjo9Fww1Tr+XUIb
+# 8A7D7S4j26r7XgGYreIHFiVtLj9T1SOsKa3D1cyGVP5QcHgkOEL1holej9M/MIMw
+# Pn81MEcX0YJE42IWXlvwuFfscV7D2wX9pm5k26SwJx/VisZjeYMfbZXIn2QTM+66
+# FYrlEVGab0gYkE/0DfkFPE9jDFAcdGGQtFT8gWtj4YOdCe7NriIRWS2Zo2cF8iVT
+# YAeQSNEE/1Ai0wwHDgLGM/8aBSHrzeTYO7x0ciVH3nq/066uGGbpAwBKUPmovDWG
+# QfDmallNPhkNo28spWKtUmzEwM38AyhXZWwWWWsSP3gu/5e3ZJ06w4rqQn+Vj9A0
+# eXFowcLJijeHtURNXosXY5qE60qcAYHAbNp5FMtzYIRvnfersDafcNuEH4yJLMCP
+# 8ma9xroo9D2SbBKnMnPBHp6stO/B37ewU38vVmIfWD4nKMo+f79F5o7h5X7QI7at
+# 1qQISI0M6tzSLmVQ0RfUCHgml6fp8SZCXQZWNBo2bhY3g7u8B5J6dEilbJN7mMaF
+# fFGr6QaJutVLztn4U/3DwsyiUUg/c7jQ/Pf26+AJDuUmMIbPVURRLOw7P2bkoP4p
+# 6/s8RdAxQl54LwBn9l890cq6+xUKKhraAfal8kOXwStUkGCR3e4OVzXwRGeMRCcu
+# NqG5h2HG7IY7cKk=
 # SIG # End signature block

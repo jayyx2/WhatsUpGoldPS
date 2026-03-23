@@ -91,7 +91,7 @@ function Get-AzureResourceGroups {
             ResourceGroupName = "$($rg.ResourceGroupName)"
             Location          = "$($rg.Location)"
             ProvisioningState = "$($rg.ProvisioningState)"
-            Tags              = if ($rg.Tags) { ($rg.Tags.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; " } else { "" }
+            Tags              = if ($rg.Tags -and $rg.Tags -is [hashtable]) { ($rg.Tags.GetEnumerator() | Where-Object { $_.Key -ne '' -and $null -ne $_.Key } | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; " } else { "" }
         }
     }
 }
@@ -131,7 +131,7 @@ function Get-AzureResources {
             Kind              = if ($r.Kind) { "$($r.Kind)" } else { "N/A" }
             Sku               = if ($r.Sku -and $r.Sku.Name) { "$($r.Sku.Name)" } else { "N/A" }
             ProvisioningState = $provState
-            Tags              = if ($r.Tags) { ($r.Tags.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; " } else { "" }
+            Tags              = if ($r.Tags -and $r.Tags -is [hashtable]) { ($r.Tags.GetEnumerator() | Where-Object { $_.Key -ne '' -and $null -ne $_.Key } | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; " } else { "" }
         }
     }
 }
@@ -573,8 +573,8 @@ function Export-AzureDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBU+bbTYMoqUIAX
-# 8akHdreUn7F59G7h2yHuv9cCwpPvZ6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1KvUDosierU+6
+# 35T6zL4G4ENKODQqz+f4glWB/gKQpaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -674,17 +674,17 @@ function Export-AzureDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgnIUpFfVPj4oX1yrn6iVKtN0zeIGE54zA
-# YNx1ZE2I0YAwDQYJKoZIhvcNAQEBBQAEggIAp57fL1Jq2/rPfWE4JextCLMmP7O5
-# hTJCydqLwQoQj2i9jwl3uJtsogXRWxBj5SmTtVoKzZNiGVLl2eQlehZUnXcqa+ID
-# s+7nvz1S1tyyh0oerDLUGixoOsTMBXINOrCq7tiMlNnRV2uUIcOrgSIXkvo8pmI7
-# nRfGsJnSlFEnanFsmlB1zhxTFehCMf773G/6ThpmF37XcJfWICupzzEGluyZvDCh
-# AJyzy83EysFjquObkVNbWiruq57/1Ke5Kj4vSLoui/WEqu/z9egEBvGa1I6ApGRe
-# mqGUSxbnDuZkgrpBhUAR4JQYMajCvKudJSaNAfmJK7Sg4S/PHJVHXwTMoxl+Q30t
-# ZGp2NNaq6zUEPAntkmDDmdaLy8Azs+dkOzYLX45htcd/iCSOKwaDu5CaDu6HZClu
-# DwqaKfw5rZRD6blRXHwxmAZDyWEwxhJOIOOvWqzzzU1O7AKJcB+aKRB5d0t+nxKl
-# GO9aRPCgdW7U2LBVECuVJUQdpCHPz1UQcNIP3AAdWB9Xo6FDLCSvPyKzcGy+IuGv
-# M7J8o3RaKX9cpM/QT0Qv+efqNipZt31rUGp80gJDXgN33KQPMD6QkkhUjnOlghEf
-# 30wBinyerxBsrpumGAA0vnRjW7aRcMzs4dyl6i6KURu+VeqnqQKZ7fPUE9lLf361
-# vXvQvBtXQKvR3AU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg7l1RB1yLsZGng/8wdLQCNIZm7onfR70x
+# U7PM+zv82RgwDQYJKoZIhvcNAQEBBQAEggIAyi29nCkAKe/e82Ll9ehQl1bmfo6E
+# ILdQKihEvDO2owmNd/AW2R5b+xF3LG5Muy/NAX+YzmZvN0GypJKg8c3yGx00uKeE
+# TM6NdWanLApyRvjDbyfpTx7le9DZFMWVmrlCuO3MwYIWbP7LN9IR1vf/ojduUeLG
+# qm/wO7RdWZdqMtpZEbRbhsffEPB4zqk5Vj3a9TWEM+EgUerwZkTLEaYWPCYpgNm5
+# YwecRbBubWPzuvyeiZOoHc55FMalsiZ6IMXjFAQHaGf5rRDwb9YWkr7tDyt/HA2h
+# ybl3jE3+lK8Lr4hzF80+0FglbwJXBvCLFOTjovQuWIUPdzuMf2MfNXp8Gi2uskaw
+# 4sj6YQPvDz7ndef/JLItRL4Rq2FjJ3aGHnAA2qVs0DueANk0Nk4qz88otv6o+mRH
+# RDy4YOJAxv/Y5BKpXan8tdIYNaisLUwXFU3xs7BS+yz6aI3XgNjwdxuFuasdgbVA
+# Anz7hXLBIC2pRG0nqe5Dm+URxsMO6oMcItLO+ajY//0TvjIG7yIqa6Xs4Q44MDkq
+# mjNZrDyYzIsd8yO2a2eOaLLL50lsrLABFVvETBnnv4+SJLxlQm8vXkaLa9ngclKv
+# KjZQiQ+N0FS/dsxc3Lq36dKtDg1pyA2O5/OHgOIg9QwAHC9Wh19jpkFhKT1kz1jn
+# MVD8M8OddyJJuRw=
 # SIG # End signature block

@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<!-- Author: jason@wug.ninja                                          -->
+<!-- Dynamic Dashboard Template for WhatsUpGoldPS                     -->
+<!-- Auto-generates summary cards and data table from any JSON input. -->
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
+    <title>ReplaceYourReportNameHere</title>
+    <link rel="icon" type="image/x-icon" href="https://wug.ninja/favicon.ico">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap/dist/css/bootstrap.min.css" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.css" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.min.css" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/jquery/dist/jquery.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core/dist/umd/popper.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap/dist/js/bootstrap.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js" crossorigin="anonymous"></script>
+    <style>
+        body { background-color: #f8f9fa; }
+        .summary-card  { border-left: 4px solid; cursor: pointer; transition: box-shadow .15s, transform .1s; user-select: none; min-width: 90px; }
+        .summary-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.15); transform: translateY(-1px); }
+        .summary-card.active-filter { box-shadow: 0 0 0 2px #0d6efd; }
+        .details-toggle { cursor: pointer; user-select: none; }
+        .details-toggle:hover { text-decoration: underline; }
+        .row-counter { font-size: 0.85rem; color: #6c757d; padding: 6px 0; white-space: nowrap; }
+        .fixed-table-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+        .fixed-table-toolbar > .row-counter { flex: 1; order: 1; }
+        .fixed-table-toolbar > .search { order: 2; }
+        .fixed-table-toolbar > .columns { order: 3; }
+        .status-green  { color: #198754; font-weight: 600; }
+        .status-red    { color: #dc3545; font-weight: 600; }
+        .status-orange { color: #fd7e14; font-weight: 600; }
+        .status-grey   { color: #6c757d; font-weight: 600; }
+        .status-dot    { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+        .dot-green     { background-color: #198754; }
+        .dot-red       { background-color: #dc3545; }
+        .dot-orange    { background-color: #fd7e14; }
+        .dot-grey      { background-color: #6c757d; }
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid p-3">
+        <!-- Dynamic summary card groups -->
+        <div id="cardGroups"></div>
+
+        <!-- Details toggle -->
+        <div class="mb-2">
+            <span class="details-toggle text-muted small" data-bs-toggle="collapse" data-bs-target="#detailsSection" aria-expanded="false">
+                <i class="bi bi-chevron-right" id="detailsChevron"></i> details
+            </span>
+        </div>
+
+        <!-- Collapsible table section -->
+        <div class="collapse" id="detailsSection">
+            <table id="table"
+                data-classes="table table-light table-striped table-bordered table-responsive table-sm caption-top"
+                data-show-export="false"
+                data-show-toggle="true" data-show-columns="true" data-search="true"
+                data-pagination="false"
+                data-page-size="50" data-page-list="[25, 50, 100, 200, All]"
+                data-sort-order="asc">
+                <caption class="p-0 bg-secondary text-white">
+                    <div class="d-flex justify-content-between">
+                        <h6 class="m-1 text-white">&#x1F977; WhatsUpGoldPS Custom Report</h6>
+                        <h6 class="m-1 text-white">ReplaceYourReportNameHere</h6>
+                        <h6 class="m-1 text-white">Updated: ReplaceUpdateTimeHere</h6>
+                    </div>
+                </caption>
+            </table>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+    var $table = $('#table');
+    var allData = [];
+    var activeGroupIndex = -1;
+    var activeCardIndex = -1;
+    var cardGroups = replaceSummaryCardsHere;
+    var thresholdDefs = replaceThresholdDefsHere;
+
+    function escapeHtml(t) { if(t==null)return''; return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+
+    // Threshold-based formatter for numeric columns (CPU, memory, disk, etc.)
+    function formatThreshold(value, row, index, field) {
+        var num = parseFloat(value);
+        if (isNaN(num)) return escapeHtml(value);
+        var def = null;
+        for (var i = 0; i < thresholdDefs.length; i++) {
+            if (thresholdDefs[i].field === field) { def = thresholdDefs[i]; break; }
+        }
+        if (!def) return escapeHtml(value);
+        var cls, dotCls;
+        if (def.invert) {
+            // Lower is worse (e.g. free disk space)
+            if (num <= def.critical) { cls = 'status-red'; dotCls = 'dot-red'; }
+            else if (num <= def.warning) { cls = 'status-orange'; dotCls = 'dot-orange'; }
+            else { cls = 'status-green'; dotCls = 'dot-green'; }
+        } else {
+            // Higher is worse (e.g. CPU utilisation)
+            if (num >= def.critical) { cls = 'status-red'; dotCls = 'dot-red'; }
+            else if (num >= def.warning) { cls = 'status-orange'; dotCls = 'dot-orange'; }
+            else { cls = 'status-green'; dotCls = 'dot-green'; }
+        }
+        return '<span class="' + cls + '"><span class="status-dot ' + dotCls + '"></span>' + escapeHtml(value) + '</span>';
+    }
+
+    // Auto-detect status-like values and colour them
+    function formatStatusAuto(value) {
+        if (!value) return '<span class="status-grey"><span class="status-dot dot-grey"></span>N/A</span>';
+        var v = String(value).toLowerCase();
+        var greens = ['running','active','available','succeeded','up','ok','healthy','online','poweredon','enabled','true','yes','pass','passed','connected','ready','completed'];
+        var reds   = ['stopped','failed','down','error','critical','expired','offline','poweredoff','disabled','false','no','fail','terminated','deleted','disconnected'];
+        var oranges = ['warning','pending','stopping','creating','updating','paused','suspended','degraded','provisioning','unknown'];
+        if (greens.indexOf(v) !== -1) return '<span class="status-green"><span class="status-dot dot-green"></span>' + escapeHtml(value) + '</span>';
+        if (reds.indexOf(v) !== -1) return '<span class="status-red"><span class="status-dot dot-red"></span>' + escapeHtml(value) + '</span>';
+        if (oranges.indexOf(v) !== -1) return '<span class="status-orange"><span class="status-dot dot-orange"></span>' + escapeHtml(value) + '</span>';
+        return '<span class="status-grey"><span class="status-dot dot-grey"></span>' + escapeHtml(value) + '</span>';
+    }
+
+    // Palette for card borders (cycles for unlimited cards)
+    var cardPalette = ['#343a40','#0d6efd','#198754','#dc3545','#fd7e14','#6f42c1','#20c997','#0dcaf0'];
+
+    function buildAllCardGroups(data) {
+        var container = document.getElementById('cardGroups');
+        var html = '';
+        cardGroups.forEach(function(group, gi) {
+            html += '<div class="mb-1"><small class="text-muted fw-bold">' + escapeHtml(group.groupLabel) + '</small></div>';
+            html += '<div class="row mb-2 g-2 align-items-center" data-group-index="' + gi + '">';
+            group.cards.forEach(function(card, ci) {
+                var count = 0;
+                if (card.filterField === '__total__') {
+                    count = data.length;
+                } else {
+                    data.forEach(function(r) {
+                        var val = String(r[card.filterField] == null ? '' : r[card.filterField]).toLowerCase();
+                        if (card.filterValues) { if (card.filterValues.indexOf(val) !== -1) count++; }
+                        else { count++; }
+                    });
+                }
+                var color = cardPalette[ci % cardPalette.length];
+                html += '<div class="col" data-group-index="' + gi + '" data-card-index="' + ci + '" style="max-width:14%">' +
+                    '<div class="card summary-card h-100" style="border-left-color:' + color + '">' +
+                    '<div class="card-body py-2 px-3">' +
+                    '<div class="text-muted small">' + escapeHtml(card.label) + '</div>' +
+                    '<h4 class="mb-0" style="color:' + color + ';font-weight:600">' + count + '</h4>' +
+                    '</div></div></div>';
+            });
+            html += '</div>';
+        });
+        container.innerHTML = html;
+    }
+
+    function applyCardFilter(groupIndex, cardIndex) {
+        var card = cardGroups[groupIndex].cards[cardIndex];
+        // Toggle off if same card clicked again
+        if (activeGroupIndex === groupIndex && activeCardIndex === cardIndex) {
+            activeGroupIndex = -1;
+            activeCardIndex = -1;
+            $('.summary-card').removeClass('active-filter');
+            $table.bootstrapTable('load', allData);
+            return;
+        }
+        activeGroupIndex = groupIndex;
+        activeCardIndex = cardIndex;
+        $('.summary-card').removeClass('active-filter');
+        $('[data-group-index="' + groupIndex + '"][data-card-index="' + cardIndex + '"] .summary-card').addClass('active-filter');
+        if (card.filterField === '__total__') {
+            $table.bootstrapTable('load', allData);
+            return;
+        }
+        var filtered = allData.filter(function(r) {
+            var val = String(r[card.filterField] == null ? '' : r[card.filterField]).toLowerCase();
+            if (card.filterValues) return card.filterValues.indexOf(val) !== -1;
+            return true;
+        });
+        $table.bootstrapTable('load', filtered);
+    }
+
+    function getExportRows() { return $table.bootstrapTable('getData', { useCurrentPage:false, includeHiddenRows:true }); }
+    function downloadBlob(c,f,m) { saveAs(new Blob([c],{type:m}),f); }
+    function escapeCsvValue(v) { var s=String(v==null?'':v); return (s.indexOf('"')!==-1||s.indexOf(',')!==-1||s.indexOf('\n')!==-1)?'"'+s.replace(/"/g,'""')+'"':s; }
+    var exportPrefix = 'replaceExportPrefixHere';
+    function exportCsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join(',')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join(','));}); downloadBlob(l.join('\r\n'),exportPrefix+'.csv','text/csv;charset=utf-8'); }
+    function exportJson(rows) { downloadBlob(JSON.stringify(rows,null,2),exportPrefix+'.json','application/json;charset=utf-8'); }
+    function exportTxt(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var c=rows.map(function(r,i){return['--- Row '+(i+1)+' ---'].concat(h.map(function(k){return k+': '+(r[k]==null?'':r[k]);})).join('\r\n');}).join('\r\n\r\n'); downloadBlob(c,exportPrefix+'.txt','text/plain;charset=utf-8'); }
+    function exportXlsx(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Data'); XLSX.writeFile(wb,exportPrefix+'.xlsx'); }
+    function exportXls(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Data'); XLSX.writeFile(wb,exportPrefix+'.xls.xlsx'); }
+    function exportTsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join('\t')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join('\t'));}); downloadBlob(l.join('\r\n'),exportPrefix+'.tsv','text/tab-separated-values;charset=utf-8'); }
+    function exportSql(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var s=rows.map(function(r){var v=h.map(function(k){return"'"+String(r[k]==null?'':r[k]).replace(/'/g,"''")+"'";});return'INSERT INTO dashboard_export ('+h.join(', ')+') VALUES ('+v.join(', ')+');';}).join('\r\n'); downloadBlob(s,exportPrefix+'.sql','text/plain;charset=utf-8'); }
+    function exportPng() { html2canvas(document.querySelector('#table')).then(function(c){c.toBlob(function(b){saveAs(b,exportPrefix+'.png');}); }); }
+
+    $(function () {
+        $table.bootstrapTable({ replaceThisHere });
+        allData = $table.bootstrapTable('getData');
+        buildAllCardGroups(allData);
+
+        // Card click filters (delegated)
+        $('#cardGroups').on('click', '[data-card-index]', function() {
+            var gi = parseInt($(this).attr('data-group-index'), 10);
+            var ci = parseInt($(this).attr('data-card-index'), 10);
+            applyCardFilter(gi, ci);
+        });
+
+        // Chevron rotation on collapse toggle
+        $('#detailsSection').on('show.bs.collapse', function() {
+            $('#detailsChevron').removeClass('bi-chevron-right').addClass('bi-chevron-down');
+        }).on('hide.bs.collapse', function() {
+            $('#detailsChevron').removeClass('bi-chevron-down').addClass('bi-chevron-right');
+        });
+
+        // Custom export handler
+        function wireExport() {
+            $(document).on('click', '.dropdown-item[data-type]', function(e) {
+                e.preventDefault(); var t=$(this).data('type'), r=getExportRows();
+                switch(t) { case 'csv':exportCsv(r);break; case 'txt':exportTxt(r);break; case 'xlsx':exportXlsx(r);break; case 'xls':exportXls(r);break; case 'json':exportJson(r);break; case 'png':exportPng();break; case 'sql':exportSql(r);break; case 'tsv':exportTsv(r);break; }
+            });
+        }
+
+        // Row counter
+        function updateRowCounter() {
+            var shown = $table.bootstrapTable('getData').length;
+            var total = allData.length;
+            $('#rowCounter').text(shown === total ? 'Showing ' + total + ' rows' : 'Showing ' + shown + ' of ' + total + ' rows');
+        }
+
+        // Inject all controls into bootstrap-table's toolbar
+        var $toolbar = $('.fixed-table-toolbar');
+        if ($toolbar.length) {
+            // Row counter on the left
+            $toolbar.prepend('<span class="row-counter" id="rowCounter"></span>');
+
+            // Pagination toggle + custom export into the button group
+            var $btnGroup = $toolbar.find('.columns');
+            if ($btnGroup.length) {
+                // Pagination toggle
+                var $pgBtn = $('<button type="button" class="btn btn-secondary" title="Toggle pagination">' +
+                    '<i class="bi bi-list-ol"></i></button>');
+                $btnGroup.prepend($pgBtn);
+                $pgBtn.on('click', function() {
+                    var isOn = $table.bootstrapTable('getOptions').pagination;
+                    $table.bootstrapTable('togglePagination');
+                    $(this).toggleClass('active', !isOn);
+                    updateRowCounter();
+                });
+
+                // Custom export dropdown
+                var $exportBtn = $(
+                    '<div class="btn-group">' +
+                    '<button type="button" class="btn btn-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">' +
+                    '<i class="bi bi-download"></i> Export</button>' +
+                    '<ul class="dropdown-menu dropdown-menu-end">' +
+                    '<li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>' +
+                    '</ul></div>');
+                $btnGroup.append($exportBtn);
+            }
+        }
+
+        // Update row counter when table data changes (cards always show overall totals)
+        $table.on('post-body.bs.table', function() {
+            updateRowCounter();
+        });
+
+        // Clear card active highlight when user types in search box
+        $toolbar.find('.search input').on('input', function() {
+            activeGroupIndex = -1;
+            activeCardIndex = -1;
+            $('.summary-card').removeClass('active-filter');
+        });
+
+        wireExport();
+        updateRowCounter();
+    });
+    </script>
+</body>
+</html>

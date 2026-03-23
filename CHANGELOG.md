@@ -1,6 +1,35 @@
 ﻿﻿# WhatsUpGoldPS Release History
-## 0.1.21 - 2026-03-19 [Unreleased]
+## 0.1.21 - 2026-03-22 [Unreleased]
 * Added -- Helpers
+  * helpers/reports/ -- Dynamic Dashboard Generator (`Export-DynamicDashboardHtml`)
+    * `Export-DynamicDashboardHtml.ps1` -- Universal HTML dashboard generator from any PowerShell object array
+      * Pipeline support (`Begin`/`Process`/`End`) -- accepts piped objects or `-Data` array
+      * Auto-flattening of nested objects and arrays to readable strings (picks Name/DisplayName, key=value pairs, comma-joined primitives)
+      * `-CardField` accepts `[string[]]` -- one or more fields to group summary cards by; each field gets its own labelled row of clickable filter cards with auto-counts
+      * `-StatusField` -- keyword-based colour coding (green/red/orange dots for ~40 status keywords: running, up, down, failed, warning, etc.)
+      * `-ThresholdField` -- numeric threshold colouring via hashtable array; supports Warning/Critical levels with optional `Invert=$true` for "lower is worse" metrics (e.g. free disk space)
+      * `-Offline` switch -- rewrites CDN URLs to local `file:///` paths from `helpers/reports/dependency/` folder for air-gapped environments
+      * `-OutputPath` optional -- defaults to `$env:TEMP\WhatsUpGoldPS-Report-<datetime>.html`
+      * `-ReportTitle`, `-ExportPrefix`, `-TemplatePath` customisation
+      * Auto-detection of status and card fields when not specified (scans for Status/State/PowerState/Health/bestState, falls back to low-cardinality string columns)
+      * Column title auto-humanisation: `camelCase` and `PascalCase` to spaced titles (`hostName` -> `Host Name`, `IPAddress` -> `IP Address`)
+      * Case-insensitive field resolution (`Resolve-FieldName`) -- PowerShell property names mapped to exact JSON key casing for JavaScript compatibility
+      * Template injection uses `[string].Replace()` instead of `-replace` to prevent regex `$` character corruption in JSON data
+      * Independent single-item array wrapping for columns vs data (fixes edge case with 1-column or 1-row datasets)
+    * `Dynamic-Dashboard-Template.html` -- Self-contained Bootstrap 5 + Bootstrap Table interactive report template
+      * Multiple card group rows with labels -- each `-CardField` renders its own section with Total + per-value cards
+      * Card click filtering -- click any card to filter the table to matching rows; click again to clear; cross-group independent
+      * `formatStatusAuto()` -- automatic status keyword colour coding with coloured dots (green/red/orange/grey)
+      * `formatThreshold()` -- numeric threshold formatter with configurable warning/critical levels and invert support
+      * 8 export formats: CSV, TXT, XLSX, XLS, JSON, PNG, SQL, TSV (custom implementations via FileSaver + xlsx.js)
+      * Row counter, pagination toggle, column toggle, search, sortable columns
+      * Collapsible details section with chevron animation
+      * Card highlight cleared on search input
+    * `Resolve-DependencyPaths.ps1` -- Shared utility for rewriting CDN URLs to local file paths (supports version-pinned and unpinned CDN URLs)
+    * `dependency/` -- Pre-downloaded offline copies of all CSS/JS dependencies
+      * `bootstrap.min.css`, `bootstrap-table.min.css`, `bootstrap-icons.min.css` (+ `fonts/bootstrap-icons.woff2`, `fonts/bootstrap-icons.woff`)
+      * `jquery.min.js`, `popper.min.js`, `bootstrap.min.js`, `bootstrap-table.min.js`
+      * `FileSaver.min.js`, `xlsx.full.min.js`, `html2canvas.min.js`
   * helpers/lansweeper/ -- Lansweeper Data API (GraphQL) helper suite for IT asset discovery and vulnerability data
     * `LansweeperHelpers.ps1` -- 20+ functions for Lansweeper Data API integration
       * `Connect-LansweeperPAT` -- Authenticate via Personal Access Token (PAT); validates with `me` query
@@ -90,8 +119,46 @@
     * FortiManager: `Connect-FortiManager`, `Disconnect-FortiManager`, `Invoke-FortiManagerAPI`, `Get-FortiManagerSystemStatus`, `Get-FortiManagerADOMs`, `Get-FortiManagerDevices`, `Get-FortiManagerPolicyPackages`, `Get-FortiManagerDashboard`, `Export-FortiManagerDashboardHtml`
     * Universal HTML dashboard template (`Fortinet-Dashboard-Template.html`) with dynamic JSON config injection, dark theme, Bootstrap Table 1.22.1
   * helpers/test/Invoke-WUGHelperTest.ps1 -- Added Fortinet provider (12 category test sections + FortiManager, auth prompt, cleanup, per-category HTML report collection)
+  * helpers/discovery/ -- Unified Discovery Framework with DPAPI Credential Vault and WUG REST API monitor provisioning
+    * `DiscoveryHelpers.ps1` -- 24-function core framework operating in standalone (inventory/audit/CI) or WUG integration mode
+      * Provider Registry: `Register-DiscoveryProvider`, `Get-DiscoveryProvider`, `Find-WUGDiscoveryDevices`, `New-DiscoveredItem`, `Invoke-Discovery`, `Export-DiscoveryPlan` (JSON/CSV/objects with automatic secret scrubbing)
+      * DPAPI Credential Vault: `Set-DiscoveryVaultPath`, `Set-DiscoveryVaultPassword`, `Clear-DiscoveryVaultPassword`, `Initialize-DiscoveryVault` (ACL-locked directory), `Write-VaultAuditLog`, `Protect-VaultData` (DPAPI + optional AES-256 double encryption), `Unprotect-VaultData`
+      * Credential Management: `Save-DiscoveryCredential` (AWSKeys/AzureSP/BearerToken/PSCredential bundles), `Get-DiscoveryCredential` (expiry/integrity checks), `Request-DiscoveryCredential` (interactive prompt), `Resolve-DiscoveryCredential` (vault -> prompt -> WUG attribute fallback), `ConvertFrom-VaultStored`, `Save-ResolvedCredential`, `Remove-DiscoveryCredential`
+      * WUG Integration: `Invoke-WUGDiscovery`, `Invoke-WUGDiscoverySync` (REST API monitor creation), `New-WUGDiscoveryCredential` (WUG credential store), `Start-WUGDiscovery` (top-level orchestrator)
+    * `DiscoveryProvider-AWS.ps1` -- AWS discovery provider (EC2 instances, CloudWatch metrics)
+    * `DiscoveryProvider-Azure.ps1` -- Azure discovery provider (VMs, resource health, metrics)
+    * `DiscoveryProvider-F5.ps1` -- F5 BIG-IP discovery provider (virtual servers, pools, nodes)
+    * `DiscoveryProvider-Fortinet.ps1` -- Fortinet FortiGate discovery provider (system, firewall, VPN)
+    * `DiscoveryProvider-HyperV.ps1` -- Hyper-V discovery provider (hosts, VMs, health)
+    * `DiscoveryProvider-Proxmox.ps1` -- Proxmox VE discovery provider (cluster nodes, QEMU VMs, CPU/memory/disk monitors; API Token auth)
+    * `DiscoveryProvider-VMware.ps1` -- VMware vSphere discovery provider (ESXi hosts, VMs, datastores)
+    * `Setup-AWS-Discovery.ps1` -- Interactive AWS discovery script with vault-backed credential storage, menu-driven export/WUG push
+    * `Setup-Azure-Discovery.ps1` -- Interactive Azure discovery script with Service Principal vault storage
+    * `Setup-F5-Discovery.ps1` -- Interactive F5 BIG-IP discovery script with token vault storage
+    * `Setup-Fortinet-Discovery.ps1` -- Interactive Fortinet FortiGate discovery script with API key vault storage
+    * `Setup-HyperV-Discovery.ps1` -- Interactive Hyper-V discovery script with PSCredential vault storage
+    * `Setup-Proxmox-Discovery.ps1` -- Interactive Proxmox VE discovery script with API token vault storage
+    * `Setup-VMware-Discovery.ps1` -- Interactive VMware vSphere discovery script with PSCredential vault storage
+  * helpers/bigleaf/ -- Bigleaf Cloud Connect SD-WAN dashboard suite (API v2)
+    * `BigleafHelpers.ps1` -- 13 functions for Bigleaf API integration (HTTP Basic auth, 10 calls/min rate limit)
+      * `Connect-BigleafAPI`, `Disconnect-BigleafAPI`, `Invoke-BigleafAPI` (internal wrapper)
+      * `Get-BigleafSites`, `Get-BigleafSiteStatus`, `Get-BigleafCircuitStatus`, `Get-BigleafDeviceStatus`, `Get-BigleafSiteRisks`
+      * `Get-BigleafAccounts`, `Get-BigleafCompanies`, `Get-BigleafMetadata`
+      * `Get-BigleafDashboard` -- Combines sites + status into flat dashboard objects
+      * `Export-BigleafDashboardHtml` -- Renders interactive Bootstrap Table HTML report
+    * `Get-BigleafDashboard.ps1` -- Orchestration script: Bigleaf auth, data collection, optional WUG device enrichment, JSON + HTML export
+    * `Bigleaf-Dashboard-Template.html` -- Bootstrap 5 + Bootstrap Table dashboard with site/circuit status cards
+  * helpers/test/ -- Discovery framework test and management tools
+    * `Invoke-WUGDiscoveryRunner.ps1` -- Master end-to-end orchestrator for all 7 discovery providers (AWS, Azure, F5, Fortinet, HyperV, Proxmox, VMware); `-Run*` switches for selective execution, vault credential loading, per-provider JSON/CSV plan export + HTML dashboard generation, pass/fail test recording
+    * `Invoke-WUGDiscoveryVault.ps1` -- Interactive DPAPI vault manager (List/View/Add/Update/Delete credentials); supports AWSKeys, AzureSP, BearerToken, PSCredential types; `-Action`/`-Name`/`-CredType` parameters for non-interactive use
+    * `Invoke-WUGDiscoveryHelperTest.ps1` -- Automated test harness for Discovery Framework and DPAPI Credential Vault (12 test areas: provider registration, single/multi-field vault ops, credential expiry, tamper detection, AES-256 double encryption, secret scrubbing, aliases, standalone discovery with mock provider, audit log, ACL permissions, cleanup); uses temp vault, no network access required
+    * `Test-Dashboard-Template.html` -- Bootstrap Table HTML template for test result reports
 
 * Changed
+  * Removed unused `tableexport.jquery.plugin` dependency from all 14 dashboard HTML templates -- custom `wireExport()` functions handle all exports via FileSaver + xlsx.js directly; plugin was loaded but never called
+  * Standardized HTML dashboard toolbar across all 14 templates (AWS, Azure, Bigleaf, Certificate, Docker, F5, GCP, Hyper-V, Lansweeper, Nutanix, OCI, Proxmox, Test, VMware)
+    * Unified `wireExport()`, `updateRowCounter()`, toolbar injection pattern (row counter span + pagination toggle + export dropdown into `.fixed-table-toolbar .columns`)
+    * Consistent `data-show-export="false"` to suppress built-in export button in favour of custom dropdown
   * helpers/vmware/ -- Redesigned VMware dashboard data model
     * Hosts always included as own rows (Type="Host"), VMs get Type="VM" (matches Proxmox pattern)
     * Consolidated 4 host-only columns into 2: Version+Build -> "VersionBuild", Manufacturer+Model -> "Hardware"

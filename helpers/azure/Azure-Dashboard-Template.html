@@ -19,7 +19,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin/tableExport.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js" crossorigin="anonymous"></script>
     <style>
         body { background-color: #f8f9fa; }
         .export-menu { margin-top: 3rem; margin-right: 15px; }
@@ -33,103 +33,98 @@
         .dot-red       { background-color: #dc3545; }
         .dot-orange    { background-color: #fd7e14; }
         .dot-grey      { background-color: #6c757d; }
-        .summary-card  { border-left: 4px solid; }
+        .summary-card  { border-left: 4px solid; cursor: pointer; transition: box-shadow .15s, transform .1s; user-select: none; min-width: 90px; }
+        .summary-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.15); transform: translateY(-1px); }
+        .summary-card.active-filter { box-shadow: 0 0 0 2px #0d6efd; }
         .card-total    { border-left-color: #343a40; }
         .card-green    { border-left-color: #198754; }
         .card-red      { border-left-color: #dc3545; }
         .card-blue     { border-left-color: #0d6efd; }
         .card-purple   { border-left-color: #6f42c1; }
+        .details-toggle { cursor: pointer; user-select: none; }
+        .details-toggle:hover { text-decoration: underline; }
+        .row-counter { font-size: 0.85rem; color: #6c757d; padding: 6px 0; white-space: nowrap; }
+        .fixed-table-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+        .fixed-table-toolbar > .row-counter { flex: 1; order: 1; }
+        .fixed-table-toolbar > .search { order: 2; }
+        .fixed-table-toolbar > .columns { order: 3; }
     </style>
 </head>
 
 <body>
     <div class="container-fluid p-3">
-        <div class="row mb-3">
-            <div class="col">
-                <h3 class="mb-0"><i class="bi bi-cloud-fill"></i> ReplaceYourReportNameHere</h3>
-                <small class="text-muted">Updated: ReplaceUpdateTimeHere</small>
-            </div>
-        </div>
-
-        <div class="row mb-3" id="summaryRow">
-            <div class="col-xl-2 col-md-4 mb-2">
+        <div class="row mb-2 g-2 align-items-center">
+            <div class="col" id="filterTotal" style="max-width:14%">
                 <div class="card summary-card card-total h-100">
-                    <div class="card-body py-2">
+                    <div class="card-body py-2 px-3">
                         <div class="text-muted small">Total Resources</div>
                         <h4 id="totalResources" class="mb-0">0</h4>
                     </div>
                 </div>
             </div>
-            <div class="col-xl-2 col-md-4 mb-2">
+            <div class="col" id="filterSucceeded" style="max-width:14%">
                 <div class="card summary-card card-green h-100">
-                    <div class="card-body py-2">
+                    <div class="card-body py-2 px-3">
                         <div class="text-muted small">Succeeded</div>
                         <h4 id="succeededCount" class="mb-0 status-green">0</h4>
                     </div>
                 </div>
             </div>
-            <div class="col-xl-2 col-md-4 mb-2">
+            <div class="col" id="filterFailed" style="max-width:14%">
                 <div class="card summary-card card-red h-100">
-                    <div class="card-body py-2">
+                    <div class="card-body py-2 px-3">
                         <div class="text-muted small">Failed / Other</div>
                         <h4 id="failedCount" class="mb-0 status-red">0</h4>
                     </div>
                 </div>
             </div>
-            <div class="col-xl-2 col-md-4 mb-2">
+            <div class="col" style="max-width:14%">
                 <div class="card summary-card card-blue h-100">
-                    <div class="card-body py-2">
+                    <div class="card-body py-2 px-3">
                         <div class="text-muted small">Subscriptions</div>
                         <h4 id="subCount" class="mb-0" style="color:#0d6efd;font-weight:600;">0</h4>
                     </div>
                 </div>
             </div>
-            <div class="col-xl-2 col-md-4 mb-2">
+            <div class="col" style="max-width:14%">
                 <div class="card summary-card card-purple h-100">
-                    <div class="card-body py-2">
+                    <div class="card-body py-2 px-3">
                         <div class="text-muted small">Resource Groups</div>
                         <h4 id="rgCount" class="mb-0" style="color:#6f42c1;font-weight:600;">0</h4>
                     </div>
                 </div>
             </div>
-            <div class="col-xl-2 col-md-4 mb-2">
-                <div class="card summary-card card-total h-100">
-                    <div class="card-body py-2">
-                        <div class="text-muted small">Locations</div>
-                        <h4 id="locationCount" class="mb-0">0</h4>
-                    </div>
-                </div>
+            <div class="col-auto ps-3">
+                <span class="details-toggle text-muted small" data-bs-toggle="collapse" data-bs-target="#detailsSection" aria-expanded="false">
+                    <i class="bi bi-chevron-right" id="detailsChevron"></i> details
+                </span>
             </div>
         </div>
 
-        <div class="float-end btn-group" role="group">
-            <button id="exportBtn" type="button" class="btn btn-secondary dropdown-toggle rounded-end"
-                data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                <i class="bi bi-download"></i> Export
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end export-menu">
-                <li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>
-                <li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>
-                <li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>
-                <li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>
-                <li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>
-                <li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>
-                <li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>
-                <li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>
-            </ul>
+        <div class="collapse" id="detailsSection">
+            <table id="table"
+                data-classes="table table-light table-striped table-bordered table-responsive table-sm caption-top"
+                data-show-export="false"
+                data-show-toggle="true" data-show-columns="true" data-search="true"
+                data-pagination="false"
+                data-page-size="50" data-page-list="[25, 50, 100, 200, All]"
+                data-sort-name="ResourceName" data-sort-order="asc">
+                <caption class="p-0 bg-secondary text-white">
+                    <div class="d-flex justify-content-between">
+                        <h6 class="m-1 text-white">&#x1F977; WhatsUpGoldPS Custom Report</h6>
+                        <h6 class="m-1 text-white">ReplaceYourReportNameHere</h6>
+                        <h6 class="m-1 text-white">Updated: ReplaceUpdateTimeHere</h6>
+                    </div>
+                </caption>
+            </table>
         </div>
-
-        <table id="table"
-            data-classes="table table-light table-striped table-bordered table-responsive table-sm caption-top"
-            data-show-toggle="true" data-show-columns="true" data-search="true"
-            data-pagination="true" data-page-size="50"
-            data-page-list="[25, 50, 100, 200, All]"
-            data-sort-name="ResourceName" data-sort-order="asc">
-        </table>
     </div>
 
     <script type="text/javascript">
     var $table = $('#table');
+    var allData = [];
+    var activeFilter = null;
+
     function escapeHtml(t) { if(t==null)return''; return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
 
     function formatState(value) {
@@ -142,20 +137,31 @@
     }
 
     function computeSummary(data) {
-        var succeeded=0, failed=0, subs={}, rgs={}, locs={};
+        var succeeded=0, failed=0, subs={}, rgs={};
         data.forEach(function(r) {
             var s = String(r.ProvisioningState||'').toLowerCase();
             if (s==='succeeded'||s==='running'||s==='available'||s==='ready') succeeded++; else failed++;
             if (r.Subscription) subs[r.Subscription]=true;
             if (r.ResourceGroup) rgs[r.ResourceGroup]=true;
-            if (r.Location) locs[r.Location]=true;
         });
         $('#totalResources').text(data.length);
         $('#succeededCount').text(succeeded);
         $('#failedCount').text(failed);
         $('#subCount').text(Object.keys(subs).length);
         $('#rgCount').text(Object.keys(rgs).length);
-        $('#locationCount').text(Object.keys(locs).length);
+    }
+
+    function applyFilter(filterName) {
+        if (activeFilter === filterName) { activeFilter = null; $('.summary-card').removeClass('active-filter'); $table.bootstrapTable('load', allData); return; }
+        activeFilter = filterName;
+        $('.summary-card').removeClass('active-filter');
+        $('#filter' + filterName.charAt(0).toUpperCase() + filterName.slice(1) + ' .summary-card').addClass('active-filter');
+        var filtered = allData.filter(function(r) {
+            var s = String(r.ProvisioningState||'').toLowerCase();
+            var ok = (s==='succeeded'||s==='running'||s==='available'||s==='ready');
+            switch(filterName) { case 'total': return true; case 'succeeded': return ok; case 'failed': return !ok; default: return true; }
+        });
+        $table.bootstrapTable('load', filtered);
     }
 
     function getExportRows() { return $table.bootstrapTable('getData', { useCurrentPage:false, includeHiddenRows:true }); }
@@ -172,12 +178,74 @@
 
     $(function () {
         $table.bootstrapTable({ replaceThisHere });
-        computeSummary($table.bootstrapTable('getData'));
-        $('.dropdown-item[data-type]').on('click', function(e) {
-            e.preventDefault(); var t=$(this).data('type'), r=getExportRows();
-            switch(t) { case 'csv':exportCsv(r);break; case 'txt':exportTxt(r);break; case 'xlsx':exportXlsx(r);break; case 'xls':exportXls(r);break; case 'json':exportJson(r);break; case 'png':exportPng();break; case 'sql':exportSql(r);break; case 'tsv':exportTsv(r);break; }
+        allData = $table.bootstrapTable('getData');
+        computeSummary(allData);
+        $('#filterTotal').on('click', function() { applyFilter('total'); });
+        $('#filterSucceeded').on('click', function() { applyFilter('succeeded'); });
+        $('#filterFailed').on('click', function() { applyFilter('failed'); });
+        $('#detailsSection').on('show.bs.collapse', function() {
+            $('#detailsChevron').removeClass('bi-chevron-right').addClass('bi-chevron-down');
+        }).on('hide.bs.collapse', function() {
+            $('#detailsChevron').removeClass('bi-chevron-down').addClass('bi-chevron-right');
         });
-    });
+        // Custom export handler
+        function wireExport() {
+            $(document).on('click', '.dropdown-item[data-type]', function(e) {
+                e.preventDefault(); var t=$(this).data('type'), r=getExportRows();
+                switch(t) { case 'csv':exportCsv(r);break; case 'txt':exportTxt(r);break; case 'xlsx':exportXlsx(r);break; case 'xls':exportXls(r);break; case 'json':exportJson(r);break; case 'png':exportPng();break; case 'sql':exportSql(r);break; case 'tsv':exportTsv(r);break; }
+            });
+        }
+
+        // Row counter
+        function updateRowCounter() {
+            var shown = $table.bootstrapTable('getData').length;
+            var total = allData.length;
+            $('#rowCounter').text(shown === total ? 'Showing ' + total + ' rows' : 'Showing ' + shown + ' of ' + total + ' rows');
+        }
+
+        // Inject all controls into bootstrap-table's toolbar
+        var $toolbar = $('.fixed-table-toolbar');
+        if ($toolbar.length) {
+            // Row counter on the left
+            $toolbar.prepend('<span class="row-counter" id="rowCounter"></span>');
+
+            // Pagination toggle + custom export into the button group
+            var $btnGroup = $toolbar.find('.columns');
+            if ($btnGroup.length) {
+                // Pagination toggle
+                var $pgBtn = $('<button type="button" class="btn btn-secondary" title="Toggle pagination">' +
+                    '<i class="bi bi-list-ol"></i></button>');
+                $btnGroup.prepend($pgBtn);
+                $pgBtn.on('click', function() {
+                    var isOn = $table.bootstrapTable('getOptions').pagination;
+                    $table.bootstrapTable('togglePagination');
+                    $(this).toggleClass('active', !isOn);
+                    updateRowCounter();
+                });
+
+                // Custom export dropdown
+                var $exportBtn = $(
+                    '<div class="btn-group">' +
+                    '<button type="button" class="btn btn-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">' +
+                    '<i class="bi bi-download"></i> Export</button>' +
+                    '<ul class="dropdown-menu dropdown-menu-end">' +
+                    '<li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>' +
+                    '</ul></div>');
+                $btnGroup.append($exportBtn);
+            }
+        }
+
+        $table.on('post-body.bs.table', updateRowCounter);
+        wireExport();
+        updateRowCounter();
+        });
     </script>
 </body>
 </html>

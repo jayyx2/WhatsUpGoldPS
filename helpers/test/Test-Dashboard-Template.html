@@ -1,8 +1,8 @@
 ﻿<!DOCTYPE html>
 <!-- Author: jason@wug.ninja                                        -->
-<!-- Test Dashboard Template for WhatsUpGoldPS                      -->
-<!-- Renders module test results with colour-coded pass/fail        -->
-<!-- status indicators and export capabilities.                     -->
+<!-- Test Results Dashboard Template for WhatsUpGoldPS              -->
+<!-- Renders test results with colour-coded pass/fail/skip status   -->
+<!-- indicators for Pester and other test frameworks.               -->
 <html lang="en">
 
 <head>
@@ -10,279 +10,195 @@
     <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
     <title>ReplaceYourReportNameHere</title>
     <link rel="icon" type="image/x-icon" href="https://wug.ninja/favicon.ico">
-    <!-- Bootstrap core CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap/dist/css/bootstrap.min.css" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.css" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.min.css" crossorigin="anonymous">
-    <!-- JS dependencies -->
     <script src="https://cdn.jsdelivr.net/npm/jquery/dist/jquery.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core/dist/umd/popper.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap/dist/js/bootstrap.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.js" crossorigin="anonymous"></script>
-    <!-- Export plugins -->
     <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tableexport.jquery.plugin/tableExport.min.js" crossorigin="anonymous"></script>
     <style>
         body { background-color: #f8f9fa; }
         .export-menu { margin-top: 3rem; margin-right: 15px; }
         button#exportBtn { margin-top: 10px; }
-        /* Status colours */
-        .status-pass    { color: #198754; font-weight: 600; }
-        .status-fail    { color: #dc3545; font-weight: 600; }
-        .status-skipped { color: #fd7e14; font-weight: 600; }
-        /* Status dots */
-        .status-dot   { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
-        .dot-pass     { background-color: #198754; }
-        .dot-fail     { background-color: #dc3545; }
-        .dot-skipped  { background-color: #fd7e14; }
-        /* Summary cards */
-        .summary-card  { border-left: 4px solid; }
+        .status-green  { color: #198754; font-weight: 600; }
+        .status-red    { color: #dc3545; font-weight: 600; }
+        .status-orange { color: #fd7e14; font-weight: 600; }
+        .status-grey   { color: #6c757d; font-weight: 600; }
+        .status-dot    { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+        .dot-green     { background-color: #198754; }
+        .dot-red       { background-color: #dc3545; }
+        .dot-orange    { background-color: #fd7e14; }
+        .dot-grey      { background-color: #6c757d; }
+        .summary-card  { border-left: 4px solid; cursor: pointer; transition: box-shadow .15s, transform .1s; user-select: none; min-width: 90px; }
+        .summary-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.15); transform: translateY(-1px); }
+        .summary-card.active-filter { box-shadow: 0 0 0 2px #0d6efd; }
         .card-total    { border-left-color: #343a40; }
-        .card-pass     { border-left-color: #198754; }
-        .card-fail     { border-left-color: #dc3545; }
-        .card-skipped  { border-left-color: #fd7e14; }
+        .card-green    { border-left-color: #198754; }
+        .card-red      { border-left-color: #dc3545; }
+        .card-orange   { border-left-color: #fd7e14; }
+        .details-toggle { cursor: pointer; user-select: none; }
+        .details-toggle:hover { text-decoration: underline; }
+        .row-counter { font-size: 0.85rem; color: #6c757d; padding: 6px 0; white-space: nowrap; }
+        .fixed-table-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+        .fixed-table-toolbar > .row-counter { flex: 1; order: 1; }
+        .fixed-table-toolbar > .search { order: 2; }
+        .fixed-table-toolbar > .columns { order: 3; }
     </style>
 </head>
 
 <body>
     <div class="container-fluid p-3">
-        <!-- Header -->
-        <div class="row mb-3">
-            <div class="col">
-                <h3 class="mb-0"><i class="bi bi-check2-circle"></i> ReplaceYourReportNameHere</h3>
-                <small class="text-muted">Updated: ReplaceUpdateTimeHere</small>
+        <div class="row mb-2 g-2 align-items-center">
+            <div class="col" id="filterTotal" style="max-width:16%">
+                <div class="card summary-card card-total h-100"><div class="card-body py-2 px-3">
+                    <div class="text-muted small">Total Tests</div><h4 id="totalTests" class="mb-0">0</h4>
+                </div></div>
+            </div>
+            <div class="col" id="filterPass" style="max-width:16%">
+                <div class="card summary-card card-green h-100"><div class="card-body py-2 px-3">
+                    <div class="text-muted small">Passed</div><h4 id="passTests" class="mb-0 status-green">0</h4>
+                </div></div>
+            </div>
+            <div class="col" id="filterFail" style="max-width:16%">
+                <div class="card summary-card card-red h-100"><div class="card-body py-2 px-3">
+                    <div class="text-muted small">Failed</div><h4 id="failTests" class="mb-0 status-red">0</h4>
+                </div></div>
+            </div>
+            <div class="col" id="filterSkipped" style="max-width:16%">
+                <div class="card summary-card card-orange h-100"><div class="card-body py-2 px-3">
+                    <div class="text-muted small">Skipped</div><h4 id="skipTests" class="mb-0 status-orange">0</h4>
+                </div></div>
+            </div>
+            <div class="col-auto ps-3">
+                <span class="details-toggle text-muted small" data-bs-toggle="collapse" data-bs-target="#detailsSection" aria-expanded="false">
+                    <i class="bi bi-chevron-right" id="detailsChevron"></i> details
+                </span>
             </div>
         </div>
+        <div class="collapse" id="detailsSection">
 
-        <!-- Summary cards (populated by JS) -->
-        <div class="row mb-3" id="summaryRow">
-            <div class="col-xl-3 col-md-6 mb-2">
-                <div class="card summary-card card-total h-100">
-                    <div class="card-body py-2">
-                        <div class="text-muted small">Total Tests</div>
-                        <h4 id="totalTests" class="mb-0">0</h4>
-                    </div>
-                </div>
-            </div>
-            <div class="col-xl-3 col-md-6 mb-2">
-                <div class="card summary-card card-pass h-100">
-                    <div class="card-body py-2">
-                        <div class="text-muted small">Passed</div>
-                        <h4 id="passTests" class="mb-0 status-pass">0</h4>
-                    </div>
-                </div>
-            </div>
-            <div class="col-xl-3 col-md-6 mb-2">
-                <div class="card summary-card card-fail h-100">
-                    <div class="card-body py-2">
-                        <div class="text-muted small">Failed</div>
-                        <h4 id="failTests" class="mb-0 status-fail">0</h4>
-                    </div>
-                </div>
-            </div>
-            <div class="col-xl-3 col-md-6 mb-2">
-                <div class="card summary-card card-skipped h-100">
-                    <div class="card-body py-2">
-                        <div class="text-muted small">Skipped</div>
-                        <h4 id="skipTests" class="mb-0 status-skipped">0</h4>
-                    </div>
-                </div>
-            </div>
+            <table id="table" data-classes="table table-light table-striped table-bordered table-responsive table-sm caption-top"
+                data-show-export="false" data-show-toggle="true" data-show-columns="true" data-search="true"
+                data-pagination="false"
+                data-page-size="50" data-page-list="[25, 50, 100, 200, All]"
+                data-sort-name="Status" data-sort-order="asc">
+                <caption class="p-0 bg-secondary text-white"><div class="d-flex justify-content-between">
+                    <h6 class="m-1 text-white">&#x1F977; WhatsUpGoldPS Custom Report</h6>
+                    <h6 class="m-1 text-white">ReplaceYourReportNameHere</h6>
+                    <h6 class="m-1 text-white">Updated: ReplaceUpdateTimeHere</h6>
+                </div></caption>
+            </table>
         </div>
-
-        <!-- Export dropdown -->
-        <div class="float-end btn-group" role="group">
-            <button id="exportBtn" type="button" class="btn btn-secondary dropdown-toggle rounded-end"
-                data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                <i class="bi bi-download"></i> Export
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end export-menu">
-                <li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>
-                <li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>
-                <li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>
-                <li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>
-                <li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>
-                <li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>
-                <li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>
-                <li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>
-            </ul>
-        </div>
-
-        <!-- Main data table -->
-        <table id="table" data-toolbar="#toolbar"
-            data-classes="table table-light table-striped table-bordered table-responsive table-sm caption-top"
-            data-show-toggle="true"
-            data-show-columns="true"
-            data-search="true"
-            data-pagination="true"
-            data-page-size="50"
-            data-page-list="[25, 50, 100, 200, All]"
-            data-sort-name="Status"
-            data-sort-order="asc">
-        </table>
     </div>
-
     <script type="text/javascript">
-    var $table = $('#table');
-
-    function escapeHtml(text) {
-        if (text === null || text === undefined) return '';
-        return String(text)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
-    }
-
-    // Test status formatter (Pass / Fail / Skipped)
+    var $table = $('#table'), allData = [], activeFilter = null;
+    function escapeHtml(t) { if(t==null)return''; return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
     function formatTestStatus(value, row, index) {
-        if (!value) return '';
-        var lower = String(value).toLowerCase();
-        if (lower === 'pass') {
-            return '<span class="status-pass"><span class="status-dot dot-pass"></span>' + escapeHtml(value) + '</span>';
-        }
-        if (lower === 'fail') {
-            return '<span class="status-fail"><span class="status-dot dot-fail"></span>' + escapeHtml(value) + '</span>';
-        }
-        if (lower === 'skipped') {
-            return '<span class="status-skipped"><span class="status-dot dot-skipped"></span>' + escapeHtml(value) + '</span>';
-        }
-        return escapeHtml(value);
+        if (!value) return '<span class="status-grey"><span class="status-dot dot-grey"></span>Unknown</span>';
+        var v = String(value).toLowerCase();
+        if (v==='pass'||v==='passed') return '<span class="status-green"><span class="status-dot dot-green"></span>' + escapeHtml(value) + '</span>';
+        if (v==='fail'||v==='failed') return '<span class="status-red"><span class="status-dot dot-red"></span>' + escapeHtml(value) + '</span>';
+        if (v==='skipped'||v==='skip') return '<span class="status-orange"><span class="status-dot dot-orange"></span>' + escapeHtml(value) + '</span>';
+        return '<span class="status-grey"><span class="status-dot dot-grey"></span>' + escapeHtml(value) + '</span>';
     }
-
     function computeSummary(data) {
-        var total = data.length;
-        var pass = 0, fail = 0, skipped = 0;
-        data.forEach(function(row) {
-            var status = String(row.Status || '').toLowerCase();
-            if (status === 'pass') pass++;
-            else if (status === 'fail') fail++;
-            else if (status === 'skipped') skipped++;
+        var pass=0, fail=0, skip=0;
+        data.forEach(function(r) {
+            var s = String(r.Status||'').toLowerCase();
+            if (s==='pass'||s==='passed') pass++; else if (s==='fail'||s==='failed') fail++; else if (s==='skipped'||s==='skip') skip++;
         });
-        $('#totalTests').text(total);
-        $('#passTests').text(pass);
-        $('#failTests').text(fail);
-        $('#skipTests').text(skipped);
+        $('#totalTests').text(data.length); $('#passTests').text(pass); $('#failTests').text(fail); $('#skipTests').text(skip);
     }
-
-    function getExportRows() {
-        return $table.bootstrapTable('getData', {
-            useCurrentPage: false,
-            includeHiddenRows: true
-        });
+    function applyFilter(filterName) {
+        if (activeFilter === filterName) { activeFilter = null; $('.summary-card').removeClass('active-filter'); $table.bootstrapTable('load', allData); return; }
+        activeFilter = filterName; $('.summary-card').removeClass('active-filter');
+        $('#filter' + filterName.charAt(0).toUpperCase() + filterName.slice(1) + ' .summary-card').addClass('active-filter');
+        var filtered = allData.filter(function(r) {
+            var s = String(r.Status||'').toLowerCase();
+            switch(filterName) { case 'total': return true; case 'pass': return s==='pass'||s==='passed'; case 'fail': return s==='fail'||s==='failed'; case 'skipped': return s==='skipped'||s==='skip'; default: return true; }
+        }); $table.bootstrapTable('load', filtered);
     }
-
-    function downloadBlob(content, fileName, mimeType) {
-        var blob = new Blob([content], { type: mimeType });
-        saveAs(blob, fileName);
-    }
-
-    function escapeCsvValue(value) {
-        var s = String(value == null ? '' : value);
-        if (s.indexOf('"') !== -1 || s.indexOf(',') !== -1 || s.indexOf('\n') !== -1 || s.indexOf('\r') !== -1) {
-            return '"' + s.replace(/"/g, '""') + '"';
-        }
-        return s;
-    }
-
-    function exportCsv(rows) {
-        if (!rows.length) return;
-        var headers = Object.keys(rows[0]);
-        var lines = [headers.join(',')];
-        rows.forEach(function(row) {
-            lines.push(headers.map(function(h) { return escapeCsvValue(row[h]); }).join(','));
-        });
-        downloadBlob(lines.join('\r\n'), 'test_results_export.csv', 'text/csv;charset=utf-8');
-    }
-
-    function exportJson(rows) {
-        downloadBlob(JSON.stringify(rows, null, 2), 'test_results_export.json', 'application/json;charset=utf-8');
-    }
-
-    function exportTxt(rows) {
-        if (!rows.length) return;
-        var headers = Object.keys(rows[0]);
-        var content = rows.map(function(row, i) {
-            return ['--- Row ' + (i + 1) + ' ---'].concat(
-                headers.map(function(h) { return h + ': ' + (row[h] == null ? '' : row[h]); })
-            ).join('\r\n');
-        }).join('\r\n\r\n');
-        downloadBlob(content, 'test_results_export.txt', 'text/plain;charset=utf-8');
-    }
-
-    function exportXlsx(rows) {
-        if (!rows.length) return;
-        var ws = XLSX.utils.json_to_sheet(rows);
-        var wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'TestResults');
-        XLSX.writeFile(wb, 'test_results_export.xlsx');
-    }
-
-    function exportXls(rows) {
-        if (!rows.length) return;
-        var ws = XLSX.utils.json_to_sheet(rows);
-        var wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'TestResults');
-        XLSX.writeFile(wb, 'test_results_export.xls.xlsx');
-    }
-
-    function exportTsv(rows) {
-        if (!rows.length) return;
-        var headers = Object.keys(rows[0]);
-        var lines = [headers.join('\t')];
-        rows.forEach(function(row) {
-            lines.push(headers.map(function(h) { return escapeCsvValue(row[h]); }).join('\t'));
-        });
-        downloadBlob(lines.join('\r\n'), 'test_results_export.tsv', 'text/tab-separated-values;charset=utf-8');
-    }
-
-    function exportSql(rows) {
-        if (!rows.length) return;
-        var headers = Object.keys(rows[0]);
-        var sql = rows.map(function(row) {
-            var values = headers.map(function(h) {
-                return "'" + String(row[h] == null ? '' : row[h]).replace(/'/g, "''") + "'";
-            });
-            return 'INSERT INTO dashboard_export (' + headers.join(', ') + ') VALUES (' + values.join(', ') + ');';
-        }).join('\r\n');
-        downloadBlob(sql, 'test_results_export.sql', 'text/plain;charset=utf-8');
-    }
-
-    function exportPng() {
-        html2canvas(document.querySelector('#table')).then(function(canvas) {
-            canvas.toBlob(function(blob) { saveAs(blob, 'test_results_export.png'); });
-        });
-    }
-
+    function getExportRows() { return $table.bootstrapTable('getData', { useCurrentPage:false, includeHiddenRows:true }); }
+    function downloadBlob(c,f,m) { saveAs(new Blob([c],{type:m}),f); }
+    function escapeCsvValue(v) { var s=String(v==null?'':v); return (s.indexOf('"')!==-1||s.indexOf(',')!==-1||s.indexOf('\n')!==-1)?'"'+s.replace(/"/g,'""')+'"':s; }
+    function exportCsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join(',')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join(','));}); downloadBlob(l.join('\r\n'),'test_results.csv','text/csv;charset=utf-8'); }
+    function exportJson(rows) { downloadBlob(JSON.stringify(rows,null,2),'test_results.json','application/json;charset=utf-8'); }
+    function exportTxt(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var c=rows.map(function(r,i){return['--- Row '+(i+1)+' ---'].concat(h.map(function(k){return k+': '+(r[k]==null?'':r[k]);})).join('\r\n');}).join('\r\n\r\n'); downloadBlob(c,'test_results.txt','text/plain;charset=utf-8'); }
+    function exportXlsx(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'TestResults'); XLSX.writeFile(wb,'test_results.xlsx'); }
+    function exportXls(rows) { if(!rows.length)return; var ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'TestResults'); XLSX.writeFile(wb,'test_results.xls.xlsx'); }
+    function exportTsv(rows) { if(!rows.length)return; var h=Object.keys(rows[0]),l=[h.join('\t')]; rows.forEach(function(r){l.push(h.map(function(k){return escapeCsvValue(r[k]);}).join('\t'));}); downloadBlob(l.join('\r\n'),'test_results.tsv','text/tab-separated-values;charset=utf-8'); }
+    function exportSql(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var s=rows.map(function(r){var v=h.map(function(k){return"'"+String(r[k]==null?'':r[k]).replace(/'/g,"''")+"'";});return'INSERT INTO dashboard_export ('+h.join(', ')+') VALUES ('+v.join(', ')+');';}).join('\r\n'); downloadBlob(s,'test_results.sql','text/plain;charset=utf-8'); }
+    function exportPng() { html2canvas(document.querySelector('#table')).then(function(c){c.toBlob(function(b){saveAs(b,'test_results.png');}); }); }
     $(function () {
-        $table.bootstrapTable({
-            replaceThisHere
-        });
+        $table.bootstrapTable({ replaceThisHere });
+        allData = $table.bootstrapTable('getData'); computeSummary(allData);
+        $('#filterTotal').on('click', function() { applyFilter('total'); });
+        $('#filterPass').on('click', function() { applyFilter('pass'); });
+        $('#filterFail').on('click', function() { applyFilter('fail'); });
+        $('#filterSkipped').on('click', function() { applyFilter('skipped'); });
+        $('#detailsSection').on('show.bs.collapse', function() { $('#detailsChevron').removeClass('bi-chevron-right').addClass('bi-chevron-down'); }).on('hide.bs.collapse', function() { $('#detailsChevron').removeClass('bi-chevron-down').addClass('bi-chevron-right'); });
+        // Custom export handler
+        function wireExport() {
+            $(document).on('click', '.dropdown-item[data-type]', function(e) {
+                e.preventDefault(); var t=$(this).data('type'), r=getExportRows();
+                switch(t) { case 'csv':exportCsv(r);break; case 'txt':exportTxt(r);break; case 'xlsx':exportXlsx(r);break; case 'xls':exportXls(r);break; case 'json':exportJson(r);break; case 'png':exportPng();break; case 'sql':exportSql(r);break; case 'tsv':exportTsv(r);break; }
+            });
+        }
 
-        // Compute summary after table loads
-        var data = $table.bootstrapTable('getData');
-        computeSummary(data);
+        // Row counter
+        function updateRowCounter() {
+            var shown = $table.bootstrapTable('getData').length;
+            var total = allData.length;
+            $('#rowCounter').text(shown === total ? 'Showing ' + total + ' rows' : 'Showing ' + shown + ' of ' + total + ' rows');
+        }
 
-        // Export handlers
-        $('.dropdown-item[data-type]').on('click', function (e) {
-            e.preventDefault();
-            var type = $(this).data('type');
-            var rows = getExportRows();
-            switch (type) {
-                case 'csv':  exportCsv(rows); break;
-                case 'txt':  exportTxt(rows); break;
-                case 'xlsx': exportXlsx(rows); break;
-                case 'xls':  exportXls(rows); break;
-                case 'json': exportJson(rows); break;
-                case 'png':  exportPng(); break;
-                case 'sql':  exportSql(rows); break;
-                case 'tsv':  exportTsv(rows); break;
+        // Inject all controls into bootstrap-table's toolbar
+        var $toolbar = $('.fixed-table-toolbar');
+        if ($toolbar.length) {
+            // Row counter on the left
+            $toolbar.prepend('<span class="row-counter" id="rowCounter"></span>');
+
+            // Pagination toggle + custom export into the button group
+            var $btnGroup = $toolbar.find('.columns');
+            if ($btnGroup.length) {
+                // Pagination toggle
+                var $pgBtn = $('<button type="button" class="btn btn-secondary" title="Toggle pagination">' +
+                    '<i class="bi bi-list-ol"></i></button>');
+                $btnGroup.prepend($pgBtn);
+                $pgBtn.on('click', function() {
+                    var isOn = $table.bootstrapTable('getOptions').pagination;
+                    $table.bootstrapTable('togglePagination');
+                    $(this).toggleClass('active', !isOn);
+                    updateRowCounter();
+                });
+
+                // Custom export dropdown
+                var $exportBtn = $(
+                    '<div class="btn-group">' +
+                    '<button type="button" class="btn btn-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">' +
+                    '<i class="bi bi-download"></i> Export</button>' +
+                    '<ul class="dropdown-menu dropdown-menu-end">' +
+                    '<li><a class="dropdown-item" href="#" data-type="csv">CSV</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="txt">TXT</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="xlsx">XLSX</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="xls">XLS</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="json">JSON</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="png">PNG</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="sql">SQL</a></li>' +
+                    '<li><a class="dropdown-item" href="#" data-type="tsv">TSV</a></li>' +
+                    '</ul></div>');
+                $btnGroup.append($exportBtn);
             }
+        }
+
+        $table.on('post-body.bs.table', updateRowCounter);
+        wireExport();
+        updateRowCounter();
         });
-    });
     </script>
 </body>
 </html>

@@ -342,7 +342,7 @@ The `helpers/` directory contains automation examples and discovery tools.
 | helpers/aws | AWS resource discovery |
 | helpers/gcp | GCP resource discovery |
 | helpers/oci | Oracle Cloud discovery |
-| helpers/reports | HTML report templates |
+| helpers/reports | HTML report templates and `Export-DynamicDashboardHtml` universal dashboard generator |
 | helpers/test | End-to-end integration test harness |
 
 ---

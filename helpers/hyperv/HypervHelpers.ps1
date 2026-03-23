@@ -41,54 +41,208 @@
     }
 }
 
+function Get-HypervClusterInfo {
+    <#
+    .SYNOPSIS
+        Detects whether a Hyper-V host is a Failover Cluster node and returns cluster metadata.
+    .PARAMETER ComputerName
+        Hostname or IP of the Hyper-V host.
+    .PARAMETER Credential
+        PSCredential for authentication.
+    .EXAMPLE
+        $cluster = Get-HypervClusterInfo -ComputerName "hyperv01" -Credential $cred
+        if ($cluster) { "Cluster: $($cluster.ClusterName), Nodes: $($cluster.Nodes -join ', ')" }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ComputerName,
+        [Parameter(Mandatory)][PSCredential]$Credential
+    )
+
+    try {
+        $clusterObj = Get-WmiObject -Namespace 'root\MSCluster' -Class MSCluster_Cluster `
+            -ComputerName $ComputerName -Credential $Credential -ErrorAction Stop
+    }
+    catch {
+        Write-Verbose "No Failover Cluster on $ComputerName (root\MSCluster unavailable)."
+        return $null
+    }
+    if (-not $clusterObj) { return $null }
+
+    $nodes = @(Get-WmiObject -Namespace 'root\MSCluster' -Class MSCluster_Node `
+        -ComputerName $ComputerName -Credential $Credential -ErrorAction SilentlyContinue)
+
+    $nodeDetails = @{}
+    foreach ($n in $nodes) {
+        $nodeDetails["$($n.Name)"] = switch ([int]$n.State) {
+            0 { 'Up' }; 1 { 'Down' }; 2 { 'Paused' }; 3 { 'Joining' }
+            default { "Unknown($($n.State))" }
+        }
+    }
+
+    $vmOwners = @{}
+    try {
+        $groups = Get-WmiObject -Namespace 'root\MSCluster' -Class MSCluster_ResourceGroup `
+            -ComputerName $ComputerName -Credential $Credential -ErrorAction Stop
+        foreach ($grp in $groups) {
+            if ([int]$grp.GroupType -eq 111 -or $grp.Name -match '^[0-9a-f]{8}-') {
+                $vmOwners[$grp.Name] = "$($grp.OwnerNode)"
+            }
+        }
+    }
+    catch { }
+
+    $quorumType = ''
+    try {
+        $quorumType = switch ([int]$clusterObj.QuorumType) {
+            1 { 'NodeMajority' }; 2 { 'NodeAndDiskMajority' }; 3 { 'NodeAndFileShareMajority' }
+            4 { 'DiskOnly' }; 5 { 'NodeAndCloudWitness' }
+            default { "Type$($clusterObj.QuorumType)" }
+        }
+    }
+    catch { }
+
+    [PSCustomObject]@{
+        ClusterName = "$($clusterObj.Name)"
+        Nodes       = @($nodes | ForEach-Object { "$($_.Name)" })
+        NodeStates  = $nodeDetails
+        VMOwners    = $vmOwners
+        QuorumType  = $quorumType
+    }
+}
+
 function Get-HypervHostDetail {
     <#
     .SYNOPSIS
         Gathers detailed information about a Hyper-V host.
     .PARAMETER CimSession
         An active CIM session to the Hyper-V host.
+    .PARAMETER ComputerName
+        Hostname or IP of the Hyper-V host (WMI fallback mode).
+    .PARAMETER Credential
+        PSCredential for WMI authentication when using ComputerName.
     .EXAMPLE
         $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred
         Get-HypervHostDetail -CimSession $session
         Returns OS, CPU, RAM, and uptime details for the Hyper-V host.
     .EXAMPLE
-        $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred
-        $hostInfo = Get-HypervHostDetail -CimSession $session
-        $hostInfo.IPAddress
-        Retrieves and displays the primary IP address of the Hyper-V host.
+        Get-HypervHostDetail -ComputerName "hyperv01" -Credential $cred
+        Returns the same details using WMI instead of a CIM session.
     #>
+    [CmdletBinding(DefaultParameterSetName = 'CimSession')]
     param(
-        [Parameter(Mandatory)][Microsoft.Management.Infrastructure.CimSession]$CimSession
+        [Parameter(Mandatory, ParameterSetName = 'CimSession')]
+        [Microsoft.Management.Infrastructure.CimSession]$CimSession,
+
+        [Parameter(Mandatory, ParameterSetName = 'Direct')]
+        [string]$ComputerName,
+
+        [Parameter(ParameterSetName = 'Direct')]
+        [PSCredential]$Credential
     )
 
-    $computerName = $CimSession.ComputerName
+    if ($PSCmdlet.ParameterSetName -eq 'CimSession') {
+        $targetName = $CimSession.ComputerName
 
-    # OS info
-    $os = Get-CimInstance -CimSession $CimSession -ClassName Win32_OperatingSystem
-    # Computer system
-    $cs = Get-CimInstance -CimSession $CimSession -ClassName Win32_ComputerSystem
-    # Processor
-    $cpu = Get-CimInstance -CimSession $CimSession -ClassName Win32_Processor | Select-Object -First 1
+        $os  = Get-CimInstance -CimSession $CimSession -ClassName Win32_OperatingSystem
+        $cs  = Get-CimInstance -CimSession $CimSession -ClassName Win32_ComputerSystem
+        $cpu = Get-CimInstance -CimSession $CimSession -ClassName Win32_Processor | Select-Object -First 1
 
-    # Get IP from active network adapters
-    try {
-        $netConfigs = Get-CimInstance -CimSession $CimSession -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled = True"
-        $ip = $netConfigs |
+        try {
+            $netConfigs = Get-CimInstance -CimSession $CimSession -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled = True"
+        }
+        catch { $netConfigs = $null }
+
+        $cpuCount = @(Get-CimInstance -CimSession $CimSession -ClassName Win32_Processor).Count
+
+        # Host disks
+        try {
+            $hostDisks = @(Get-CimInstance -CimSession $CimSession -ClassName Win32_LogicalDisk -Filter "DriveType = 3")
+        } catch { $hostDisks = @() }
+
+        # Virtual switches
+        try {
+            $vSwitches = @(Get-CimInstance -CimSession $CimSession -Namespace 'root\virtualization\v2' -ClassName Msvm_VirtualEthernetSwitch)
+        } catch { $vSwitches = @() }
+    }
+    else {
+        $targetName = $ComputerName
+        $wmiSplat = @{ ComputerName = $ComputerName; ErrorAction = 'Stop' }
+        if ($Credential) { $wmiSplat['Credential'] = $Credential }
+
+        $os  = Get-WmiObject -Class Win32_OperatingSystem @wmiSplat
+        $cs  = Get-WmiObject -Class Win32_ComputerSystem @wmiSplat
+        $cpu = Get-WmiObject -Class Win32_Processor @wmiSplat | Select-Object -First 1
+
+        try {
+            $netConfigs = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter "IPEnabled = True" @wmiSplat
+        }
+        catch { $netConfigs = $null }
+
+        $cpuCount = @(Get-WmiObject -Class Win32_Processor @wmiSplat).Count
+
+        # Host disks
+        try {
+            $hostDisks = @(Get-WmiObject -Class Win32_LogicalDisk -Filter "DriveType = 3" @wmiSplat)
+        } catch { $hostDisks = @() }
+
+        # Virtual switches
+        try {
+            $vSwitches = @(Get-WmiObject -Namespace 'root\virtualization\v2' -Class Msvm_VirtualEthernetSwitch @wmiSplat)
+        } catch { $vSwitches = @() }
+    }
+
+    # Resolve real hostname from Win32_ComputerSystem
+    if ($cs -and $cs.Name) { $targetName = $cs.Name }
+
+    # Resolve IP from active adapters
+    $ip = "N/A"
+    if ($netConfigs) {
+        $foundIP = $netConfigs |
             ForEach-Object { $_.IPAddress } |
             Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notlike '169.254.*' } |
             Select-Object -First 1
-        if (-not $ip) { $ip = "N/A" }
-    }
-    catch {
-        $ip = "N/A"
+        if ($foundIP) { $ip = $foundIP }
     }
 
-    # CPU count
-    $cpuCount = @(Get-CimInstance -CimSession $CimSession -ClassName Win32_Processor).Count
+    # LastBootUpTime handling (WMI returns string, CIM returns DateTime)
+    $uptimeHours = 0
+    try {
+        if ($os.LastBootUpTime -is [datetime]) {
+            $uptimeHours = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1)
+        }
+        else {
+            $boot = [System.Management.ManagementDateTimeConverter]::ToDateTime($os.LastBootUpTime)
+            $uptimeHours = [math]::Round(((Get-Date) - $boot).TotalHours, 1)
+        }
+    }
+    catch { }
+
+    # NIC count
+    $nicCount = if ($netConfigs) { @($netConfigs).Count } else { 0 }
+
+    # Disk summary — per-drive details
+    $diskSummary = ''
+    $diskTotalGB = 0
+    $diskFreeGB  = 0
+    if ($hostDisks.Count -gt 0) {
+        $driveParts = @()
+        foreach ($d in $hostDisks) {
+            $dTotal = [math]::Round([long]$d.Size / 1GB, 0)
+            $dFree  = [math]::Round([long]$d.FreeSpace / 1GB, 0)
+            $diskTotalGB += $dTotal
+            $diskFreeGB  += $dFree
+            $driveParts += "$($d.DeviceID) $dFree/$($dTotal) GB"
+        }
+        $diskSummary = $driveParts -join ', '
+    }
+
+    # Virtual switch names
+    $switchNames = ($vSwitches | ForEach-Object { $_.ElementName } | Select-Object -Unique) -join ', '
 
     [PSCustomObject]@{
         Type             = "Hyper-V Host"
-        HostName         = $computerName
+        HostName         = $targetName
         IPAddress        = $ip
         OSName           = "$($os.Caption)"
         OSVersion        = "$($os.Version)"
@@ -102,8 +256,13 @@ function Get-HypervHostDetail {
         CPULogical       = "$($cpu.NumberOfLogicalProcessors)"
         RAM_TotalGB      = "$([math]::Round($cs.TotalPhysicalMemory / 1GB, 2))"
         RAM_FreeGB       = "$([math]::Round($os.FreePhysicalMemory / 1MB, 2))"
-        Uptime           = "$([math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1)) hours"
+        Uptime           = "$uptimeHours hours"
         Status           = if ($os.Status -eq "OK") { "running" } else { "$($os.Status)" }
+        NicCount         = "$nicCount"
+        DiskSummary      = $diskSummary
+        DiskTotalGB      = "$diskTotalGB"
+        DiskFreeGB       = "$diskFreeGB"
+        SwitchNames      = $switchNames
     }
 }
 
@@ -113,19 +272,69 @@ function Get-HypervVMs {
         Returns a list of VMs on the Hyper-V host.
     .PARAMETER CimSession
         An active CIM session to the Hyper-V host.
+    .PARAMETER ComputerName
+        Hostname or IP of the Hyper-V host (WMI fallback mode).
+    .PARAMETER Credential
+        PSCredential for WMI authentication when using ComputerName.
     .EXAMPLE
         $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred
         $vms = Get-HypervVMs -CimSession $session
         Returns all VMs on the Hyper-V host.
     .EXAMPLE
-        Get-HypervVMs -CimSession $session | Where-Object { $_.State -eq "Running" }
-        Returns only running VMs on the host.
+        $vms = Get-HypervVMs -ComputerName "hyperv01" -Credential $cred
+        Returns all VMs using WMI instead of a CIM session.
     #>
+    [CmdletBinding(DefaultParameterSetName = 'CimSession')]
     param(
-        [Parameter(Mandatory)][Microsoft.Management.Infrastructure.CimSession]$CimSession
+        [Parameter(Mandatory, ParameterSetName = 'CimSession')]
+        [Microsoft.Management.Infrastructure.CimSession]$CimSession,
+
+        [Parameter(Mandatory, ParameterSetName = 'Direct')]
+        [string]$ComputerName,
+
+        [Parameter(ParameterSetName = 'Direct')]
+        [PSCredential]$Credential
     )
 
-    Get-VM -CimSession $CimSession
+    if ($PSCmdlet.ParameterSetName -eq 'CimSession') {
+        Get-VM -CimSession $CimSession
+    }
+    else {
+        $wmiSplat = @{ ComputerName = $ComputerName; ErrorAction = 'Stop' }
+        if ($Credential) { $wmiSplat['Credential'] = $Credential }
+
+        $wmiVMs = Get-WmiObject -Namespace 'root\virtualization\v2' -Class Msvm_ComputerSystem @wmiSplat |
+            Where-Object { $_.Caption -eq 'Virtual Machine' }
+
+        foreach ($wv in $wmiVMs) {
+            [PSCustomObject]@{
+                Name               = $wv.ElementName
+                VMId               = $wv.Name
+                State              = switch ([int]$wv.EnabledState) {
+                    2     { 'Running' }
+                    3     { 'Off' }
+                    6     { 'Saved' }
+                    9     { 'Paused' }
+                    32768 { 'Paused' }
+                    32769 { 'Suspended' }
+                    default { "Unknown($($wv.EnabledState))" }
+                }
+                ProcessorCount     = 0
+                CPUUsage           = 0
+                MemoryAssigned     = 0
+                MemoryStartup      = 0
+                DynamicMemoryEnabled = $false
+                Generation         = 0
+                Version            = ''
+                Uptime             = [timespan]::Zero
+                Status             = 'OK'
+                ReplicationState   = 'None'
+                Notes              = ''
+                _WmiMode           = $true
+                _WmiObject         = $wv
+            }
+        }
+    }
 }
 
 function Get-HypervVMDetail {
@@ -135,21 +344,300 @@ function Get-HypervVMDetail {
     .PARAMETER CimSession
         An active CIM session to the Hyper-V host.
     .PARAMETER VM
-        A VM object returned by Get-VM.
+        A VM object returned by Get-VM or Get-HypervVMs.
+    .PARAMETER ComputerName
+        Hostname or IP of the Hyper-V host (WMI fallback mode).
+    .PARAMETER Credential
+        PSCredential for WMI authentication when using ComputerName.
     .EXAMPLE
         $session = Connect-HypervHost -ComputerName "hyperv01" -Credential $cred
         $vms = Get-HypervVMs -CimSession $session
         Get-HypervVMDetail -CimSession $session -VM $vms[0]
-        Returns detailed information (IP, CPU, memory, disks, NICs) for the first VM.
     .EXAMPLE
-        Get-HypervVMs -CimSession $session | ForEach-Object { Get-HypervVMDetail -CimSession $session -VM $_ }
-        Returns detailed information for every VM on the host.
+        $vms = Get-HypervVMs -ComputerName "hyperv01" -Credential $cred
+        Get-HypervVMDetail -ComputerName "hyperv01" -Credential $cred -VM $vms[0]
     #>
+    [CmdletBinding(DefaultParameterSetName = 'CimSession')]
     param(
-        [Parameter(Mandatory)][Microsoft.Management.Infrastructure.CimSession]$CimSession,
-        [Parameter(Mandatory)]$VM
+        [Parameter(Mandatory, ParameterSetName = 'CimSession')]
+        [Microsoft.Management.Infrastructure.CimSession]$CimSession,
+
+        [Parameter(Mandatory)]$VM,
+
+        [Parameter(Mandatory, ParameterSetName = 'Direct')]
+        [string]$ComputerName,
+
+        [Parameter(ParameterSetName = 'Direct')]
+        [PSCredential]$Credential
     )
 
+    # ---- WMI / Direct mode ------------------------------------------------
+    if ($PSCmdlet.ParameterSetName -eq 'Direct') {
+        $hostName = $ComputerName
+        $wmiSplat = @{ ComputerName = $ComputerName; ErrorAction = 'SilentlyContinue' }
+        if ($Credential) { $wmiSplat['Credential'] = $Credential }
+
+        $ns = 'root\virtualization\v2'
+        $vmGuid = $VM.VMId
+
+        # --- VM Settings (generation, notes) ---
+        $generation = '0'
+        $notes = ''
+        $guestOSName = ''
+        try {
+            $vssd = Get-WmiObject -Namespace $ns -Class Msvm_VirtualSystemSettingData @wmiSplat |
+                Where-Object { $_.VirtualSystemIdentifier -eq $vmGuid -and $_.VirtualSystemType -eq 'Microsoft:Hyper-V:System:Realized' }
+            if ($vssd) {
+                $generation = if ($vssd.VirtualSystemSubType -eq 'Microsoft:Hyper-V:SubType:2') { '2' } else { '1' }
+                $noteText = if ($vssd.Notes) {
+                    if ($vssd.Notes -is [array]) { "$($vssd.Notes[0])" } else { "$($vssd.Notes)" }
+                } else { '' }
+                if ($noteText.Length -gt 200) { $noteText = $noteText.Substring(0, 200) }
+                $notes = $noteText
+            }
+        } catch {}
+
+        # --- CPU count ---
+        $cpuCount = 0
+        try {
+            $cpuSD = Get-WmiObject -Namespace $ns -Class Msvm_ProcessorSettingData @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" }
+            if ($cpuSD) { $cpuCount = [int]$cpuSD.VirtualQuantity }
+        } catch {}
+
+        # --- Memory (startup, dynamic) ---
+        $memStartupMB = 0
+        $memDynamic = $false
+        try {
+            $memSD = Get-WmiObject -Namespace $ns -Class Msvm_MemorySettingData @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" }
+            if ($memSD) {
+                $memStartupMB = [long]$memSD.VirtualQuantity
+                $memDynamic = [bool]$memSD.DynamicMemoryEnabled
+            }
+        } catch {}
+        $memStartupGB = [math]::Round($memStartupMB / 1024, 2)
+        $memAssignedGB = $memStartupGB
+
+        # --- IP addresses ---
+        $vmIP = 'N/A'
+        # Method 1: Msvm_GuestNetworkAdapterConfiguration (modern, preferred)
+        try {
+            $guestNicConfigs = Get-WmiObject -Namespace $ns -Class Msvm_GuestNetworkAdapterConfiguration @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" }
+            foreach ($gnic in @($guestNicConfigs)) {
+                if ($gnic.IPAddresses) {
+                    $foundIP = @($gnic.IPAddresses) |
+                        Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notlike '169.254.*' } |
+                        Select-Object -First 1
+                    if ($foundIP) { $vmIP = $foundIP; break }
+                }
+            }
+        } catch {}
+
+        # Method 2: KVP exchange (fallback, with IP format validation)
+        if ($vmIP -eq 'N/A') {
+            try {
+                $kvpItems = Get-WmiObject -Namespace $ns -Class Msvm_KvpExchangeComponent @wmiSplat |
+                    Where-Object { $_.SystemName -eq $vmGuid }
+                if ($kvpItems -and $kvpItems.GuestIntrinsicExchangeItems) {
+                    foreach ($item in $kvpItems.GuestIntrinsicExchangeItems) {
+                        try {
+                            $xml = [xml]$item
+                            $kvpName = ($xml.SelectNodes("//PROPERTY[@NAME='Name']/VALUE")).InnerText
+                            $kvpVal  = ($xml.SelectNodes("//PROPERTY[@NAME='Data']/VALUE")).InnerText
+                            if ($kvpName -eq 'NetworkAddressIPv4' -and $kvpVal -match '^\d{1,3}(\.\d{1,3}){3}$' -and $kvpVal -notlike '169.254.*') {
+                                $vmIP = $kvpVal; break
+                            }
+                        } catch {}
+                    }
+                }
+            } catch {}
+        }
+
+        # --- Guest OS name from KVP (for fallback Notes) ---
+        try {
+            $kvpItems2 = Get-WmiObject -Namespace $ns -Class Msvm_KvpExchangeComponent @wmiSplat |
+                Where-Object { $_.SystemName -eq $vmGuid }
+            if ($kvpItems2 -and $kvpItems2.GuestIntrinsicExchangeItems) {
+                foreach ($item in $kvpItems2.GuestIntrinsicExchangeItems) {
+                    try {
+                        $xml = [xml]$item
+                        $kvpName = ($xml.SelectNodes("//PROPERTY[@NAME='Name']/VALUE")).InnerText
+                        $kvpVal  = ($xml.SelectNodes("//PROPERTY[@NAME='Data']/VALUE")).InnerText
+                        if ($kvpName -eq 'OSName' -and $kvpVal) {
+                            $guestOSName = "$kvpVal"; break
+                        }
+                    } catch {}
+                }
+            }
+        } catch {}
+
+        # If no user-set notes, use guest OS name as fallback
+        if (-not $notes -and $guestOSName) { $notes = $guestOSName }
+
+        # --- NICs (synthetic + legacy) ---
+        $nicCount = 0
+        try {
+            $vmNics = Get-WmiObject -Namespace $ns -Class Msvm_SyntheticEthernetPortSettingData @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" }
+            $nicCount = @($vmNics).Count
+        } catch {}
+        try {
+            $legacyNics = Get-WmiObject -Namespace $ns -Class Msvm_EmulatedEthernetPortSettingData @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" }
+            $nicCount += @($legacyNics).Count
+        } catch {}
+
+        # --- Virtual switch names ---
+        $switchNames = ''
+        try {
+            $allSwitches = @{}
+            Get-WmiObject -Namespace $ns -Class Msvm_VirtualEthernetSwitch @wmiSplat | ForEach-Object {
+                $allSwitches[$_.Name] = $_.ElementName
+            }
+            $portAllocs = Get-WmiObject -Namespace $ns -Class Msvm_EthernetPortAllocationSettingData @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" }
+            $swNames = @()
+            foreach ($pa in @($portAllocs)) {
+                if ($pa.HostResource) {
+                    foreach ($hr in $pa.HostResource) {
+                        if ($hr -match 'Name="([^"]+)"') {
+                            $swGuid = $Matches[1]
+                            if ($allSwitches.ContainsKey($swGuid)) {
+                                $swNames += $allSwitches[$swGuid]
+                            }
+                        }
+                    }
+                }
+            }
+            $switchNames = ($swNames | Select-Object -Unique) -join ', '
+        } catch {}
+
+        # --- VLAN IDs ---
+        $vlanIds = ''
+        try {
+            $vlanSettings = Get-WmiObject -Namespace $ns -Class Msvm_EthernetSwitchPortVlanSettingData @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" }
+            $vids = @($vlanSettings | ForEach-Object { $_.AccessVlanId } | Where-Object { $_ -and $_ -ne 0 } | Select-Object -Unique)
+            $vlanIds = $vids -join ', '
+        } catch {}
+
+        # --- Storage / disks ---
+        $diskCount = 0
+        $diskTotalGB = 0
+        try {
+            $storSD = Get-WmiObject -Namespace $ns -Class Msvm_StorageAllocationSettingData @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" -and $_.HostResource.Count -gt 0 }
+            $diskCount = @($storSD).Count
+            foreach ($sd in @($storSD)) {
+                try {
+                    # Limit = max VHD size in bytes (most reliable)
+                    if ($sd.Limit -and [long]$sd.Limit -gt 0) {
+                        $diskTotalGB += [math]::Round([long]$sd.Limit / 1GB, 2)
+                    }
+                    elseif ($sd.VirtualQuantity -and $sd.VirtualResourceBlockSize -and
+                            [long]$sd.VirtualQuantity -gt 0 -and [long]$sd.VirtualResourceBlockSize -gt 0) {
+                        $diskTotalGB += [math]::Round(([long]$sd.VirtualQuantity * [long]$sd.VirtualResourceBlockSize) / 1GB, 2)
+                    }
+                    elseif ($sd.HostResource) {
+                        # Fall back to VHD file size on disk
+                        foreach ($hr in $sd.HostResource) {
+                            try {
+                                $vhdPath = ($hr -replace '\\\\', '\').Trim()
+                                $escapedPath = $vhdPath -replace '\\', '\\' -replace "'", "''"
+                                $fileObj = Get-WmiObject -Class CIM_DataFile -Filter "Name='$escapedPath'" @wmiSplat
+                                if ($fileObj -and $fileObj.FileSize) {
+                                    $diskTotalGB += [math]::Round([long]$fileObj.FileSize / 1GB, 2)
+                                }
+                            } catch {}
+                        }
+                    }
+                } catch {}
+            }
+        } catch {}
+
+        # --- Snapshots ---
+        $snapshotCount = 0
+        try {
+            $snapshots = @(Get-WmiObject -Namespace $ns -Class Msvm_VirtualSystemSettingData @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" -and $_.VirtualSystemType -like '*Snapshot*' })
+            $snapshotCount = $snapshots.Count
+        } catch {}
+
+        # --- Heartbeat ---
+        $heartbeatText = 'N/A'
+        try {
+            $hbComp = Get-WmiObject -Namespace $ns -Class Msvm_HeartbeatComponent @wmiSplat |
+                Where-Object { $_.SystemName -eq $vmGuid }
+            if ($hbComp -and $hbComp.OperationalStatus) {
+                $heartbeatText = switch ([int]$hbComp.OperationalStatus[0]) {
+                    2  { 'OK' }
+                    12 { 'No Contact' }
+                    13 { 'Lost Communication' }
+                    default { "Unknown($($hbComp.OperationalStatus[0]))" }
+                }
+            }
+        } catch {}
+
+        # --- Uptime ---
+        $uptimeStr = '00:00:00'
+        try {
+            $vmWmi = if ($VM._WmiObject) { $VM._WmiObject } else {
+                Get-WmiObject -Namespace $ns -Class Msvm_ComputerSystem @wmiSplat |
+                    Where-Object { $_.Name -eq $vmGuid }
+            }
+            if ($vmWmi -and $vmWmi.OnTimeInMilliseconds -and [long]$vmWmi.OnTimeInMilliseconds -gt 0) {
+                $ts = [timespan]::FromMilliseconds([long]$vmWmi.OnTimeInMilliseconds)
+                $uptimeStr = $ts.ToString('d\.hh\:mm\:ss')
+            }
+        } catch {}
+
+        # --- Replication ---
+        $replState = 'None'
+        try {
+            $repl = Get-WmiObject -Namespace $ns -Class Msvm_ReplicationRelationship @wmiSplat |
+                Where-Object { $_.InstanceID -like "*$vmGuid*" }
+            if ($repl) {
+                $replState = switch ([int]$repl.ReplicationState) {
+                    0 { 'Disabled' }; 1 { 'ReadyForInitialReplication' }
+                    2 { 'WaitingToCompleteInitialReplication' }; 3 { 'Replicating' }
+                    4 { 'SyncedReplicationComplete' }; 5 { 'Recovered' }
+                    6 { 'Committed' }; 7 { 'Suspended' }; 8 { 'Critical' }
+                    9 { 'WaitingForStartResynchronize' }; 10 { 'Resynchronizing' }
+                    default { "Unknown($($repl.ReplicationState))" }
+                }
+            }
+        } catch {}
+
+        return [PSCustomObject]@{
+            Name              = "$($VM.Name)"
+            VMId              = "$($VM.VMId)"
+            Host              = $hostName
+            State             = "$($VM.State)"
+            Status            = "$($VM.Status)"
+            IPAddress         = $vmIP
+            Generation        = $generation
+            Version           = "$($VM.Version)"
+            Uptime            = $uptimeStr
+            CPUCount          = "$cpuCount"
+            CPUUsagePct       = "$($VM.CPUUsage)%"
+            MemoryAssignedGB  = "$memAssignedGB"
+            MemoryStartupGB   = "$memStartupGB"
+            DynamicMemory     = "$memDynamic"
+            DiskCount         = "$diskCount"
+            DiskTotalGB       = "$([math]::Round($diskTotalGB, 2))"
+            NicCount          = "$nicCount"
+            SwitchNames       = $switchNames
+            VLanIds           = $vlanIds
+            SnapshotCount     = "$snapshotCount"
+            Heartbeat         = $heartbeatText
+            ReplicationState  = $replState
+            Notes             = $notes
+        }
+    }
+
+    # ---- CIM session mode (original) -------------------------------------
     $hostName = $CimSession.ComputerName
 
     # Network adapters and IP
@@ -207,7 +695,7 @@ function Get-HypervVMDetail {
         SnapshotCount     = "$($snapshots.Count)"
         Heartbeat         = if ($heartbeat) { "$heartbeat" } else { "N/A" }
         ReplicationState  = "$($VM.ReplicationState)"
-        Notes             = if ($VM.Notes) { "$($VM.Notes.Substring(0, [math]::Min(200, $VM.Notes.Length)))" } else { "" }
+        Notes             = if ($VM.Notes) { "$($VM.Notes.Substring(0, [math]::Min(200, $VM.Notes.Length)))" } else { "$($VM.GuestOperatingSystem)" }
     }
 }
 
@@ -389,7 +877,7 @@ function Export-HypervDashboardHtml {
     }
 
     $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
-    $dataJson    = $DashboardData | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = ConvertTo-Json -InputObject @($DashboardData) -Depth 5 -Compress
 
     $tableConfig = @"
         columns: $columnsJson,
@@ -408,8 +896,8 @@ function Export-HypervDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC8g1pyyI4Sd1hZ
-# uAAud8nXCN3HQ9/xjY1utKyW1IOleaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCe3QY3m9SmpdJ/
+# CM6R1gev+j99Tj3pm3CHupFxpN/OMqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -509,17 +997,17 @@ function Export-HypervDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg80tY2myDWQMwcq9xaSlnvg77JftrcoxB
-# qmMvLEZgWcwwDQYJKoZIhvcNAQEBBQAEggIAZrC+2Crx86QOypl3+IzrAnrT7Pr9
-# iGRMguxBol1DNpC108hU5eHNngX2Ay5S2E7ZBfNAEeNV9gL8qmuypMod8SAYBZHf
-# IIyaznD1Ns3RXxY57+ziDWbX4PBbDmDiOpdiWbDL7F6KAViAnzvfNTWcKyMWPYvN
-# r99QIhvHXRVuyO7Klo8LWiffLfvdcR8hjQnPJdaQj6t33VhKo6p0lePQzVt+7Vs1
-# LZgPRymzUUJF07as32ByhCDgM9GYx7RoklNBO2CCRuoIBKGqKl3dEmP9er6MhU0o
-# PJw6dzoWVio/L/wYc4FW8/D3DhH7pr8nTQ8iC63WoXK0cOCSk9zRH7heAhc/W6M8
-# 5GHbywsl7ESemDmpH7GXp8t+eFV/AcCi9cYVJ0UDgWaXfAuYVB0Cxa1FD7mOb5KS
-# MM+pqbSf9mU8ynpEDc48+iFtBMwuPRWyJ5++nXympuDW/5KhbsDGWkonxY+fDQQc
-# hMOjGybvgNOTwh5afZ3yV2yq4o4ViZ6eQXbyzTNSRh+SR87RrKen+0NspI4naKMZ
-# 7BePI7jnVZReSXyxfnGGWjMbiHMfcm8cO1bMz72kyHH4fqtLBHpdCPi0KDwcq/8a
-# 5MNbkhN1mbrCZE/Q4GTdOxs9CtiiPwJ+PEbmerYioPby/wLxhlO6NlYdDB8/H20T
-# Yewr6sx6doA4uUI=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgQcw1xsgi8BqxYiL9OubAqxud6Y9MxlDc
+# s1Ze18YtdWkwDQYJKoZIhvcNAQEBBQAEggIAqhMs/hVk+oHk9C4rD4dY8FM1hVFH
+# cE6bgc50yw2AQ39LQnPEPxPNvpOt3kJa3W7WnwiIQGgopiliBCpSQwXTA2ojL3os
+# PcfvB6fpfc5EnVAg4f5Tt7ftTTXCRx/7jX75h1ODFaipuldvSp3LLI8h58RnR50U
+# 9lMjMZJ4zJzs49k6Fe/+OzJlZXpPBo0afWz0SH8/JHCmMoBItqkNLcL13LNkYWvk
+# 7kojENVCCrVT349XiUJGCvBhu8j4aP9hFhUoRk3FR/Dqw77f2hrJIqXs0GLOhROZ
+# YFdqRl2+ZjucJCiH5ziqYvsoWSaz0HR4MXzF8URua3tTCA/DBO/brCjJCHce8Xhu
+# JsKShb/1FUUZR7F9boj86zYt+6BvjJw6fpyi2Ao0dudIvueArZ+KaYHv/cD+peEy
+# HKRriSp6wzTdrliQUKNsOmVjbLxodD3MMgqnXpSOo3GeHrAFuPKUKLHP0RTR6Nmj
+# VnJ9+7RptdlzqGCtrMRfvROjv2XHeLraaKcV+lzFlFVYSVyD8W5f11nZBkJSiPm1
+# lYvMr4UyD8uRARsKQWMZ+fuxe7PG15rCC+pVVUcz0H2NSHxW8snMT3OciutEkxR2
+# V2a8Qf3jOPV7/VQYgMtYmZ8+GHG2SKkUt15LbM06ss2iuQzfs3CpDdLUqk6mc26j
+# q48BnDND9mJIbhs=
 # SIG # End signature block

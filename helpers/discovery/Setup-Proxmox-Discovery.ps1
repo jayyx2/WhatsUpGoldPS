@@ -44,15 +44,82 @@
       6. Full token format: user@realm!tokenid=secret-uuid
          Example: root@pam!monitoring=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
+.PARAMETER Target
+    Proxmox host(s) — IP address or FQDN. Accepts multiple values.
+    When omitted in interactive mode, prompts for input (default: 192.168.1.39).
+
+.PARAMETER ApiPort
+    Proxmox API port. Default: 8006.
+
+.PARAMETER AuthMethod
+    Authentication method: 'Token' (default) or 'Password'.
+    Token is required for WUG monitor push.
+
+.PARAMETER Action
+    What to do with discovery results. When specified, skips the interactive menu.
+    Valid values: PushToWUG, ExportJSON, ExportCSV, ShowTable, Dashboard, None.
+
+.PARAMETER WUGServer
+    WhatsUp Gold server address. Default: 192.168.74.74.
+
+.PARAMETER WUGCredential
+    PSCredential for WhatsUp Gold admin login (non-interactive WUG push).
+
+.PARAMETER NonInteractive
+    Suppress all prompts. Uses cached vault credentials and parameter defaults.
+    Ideal for scheduled task execution.
+
 .NOTES
     WhatsUpGoldPS module is only needed if you choose option [1].
     Requires Proxmox VE 6.1+ for API token support.
+
+.EXAMPLE
+    .\Setup-Proxmox-Discovery.ps1
+    # Interactive mode — prompts for everything.
+
+.EXAMPLE
+    .\Setup-Proxmox-Discovery.ps1 -Target '192.168.1.39' -Action ExportJSON -NonInteractive
+    # Scheduled mode — uses vault credentials, exports JSON, no prompts.
+
+.EXAMPLE
+    .\Setup-Proxmox-Discovery.ps1 -Target 'pve1.lab','pve2.lab' -Action PushToWUG -WUGServer '10.0.0.1' -WUGCredential $cred -NonInteractive
+    # Scheduled mode — discovers and pushes to WUG automatically.
 #>
+[CmdletBinding()]
+param(
+    [string[]]$Target,
+
+    [int]$ApiPort = 8006,
+
+    [ValidateSet('Token', 'Password')]
+    [string]$AuthMethod = 'Token',
+
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [string]$Action,
+
+    [string]$WUGServer = '192.168.74.74',
+
+    [PSCredential]$WUGCredential,
+
+    [string]$OutputPath,
+
+    [switch]$NonInteractive
+)
+
+# --- Output directory (persistent default for scheduled runs) -----------------
+if (-not $OutputPath) {
+    if ($NonInteractive) {
+        $OutputPath = Join-Path $env:LOCALAPPDATA 'DiscoveryHelpers\Output'
+    } else {
+        $OutputPath = $env:TEMP
+    }
+}
+if (-not (Test-Path $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null }
+$OutputDir = $OutputPath
 
 # --- Configuration -----------------------------------------------------------
-$DefaultHost   = '192.168.1.39'          # Default Proxmox host
-$ProxmoxPort   = 8006                   # Proxmox API port (default 8006)
-$WUGServer     = '192.168.74.74'         # Default WhatsUp Gold server
+$DefaultHost   = '192.168.1.39'          # Default Proxmox host (interactive fallback)
+$ProxmoxPort   = $ApiPort
 
 # --- Load helpers (works from any directory) ----------------------------------
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
@@ -65,14 +132,22 @@ $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 Write-Host "=== Proxmox VE Discovery ===" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Prompt for Proxmox host(s) -----------------------------------------------
-Write-Host "Enter Proxmox host(s) — IP address or FQDN." -ForegroundColor Cyan
-Write-Host "For multiple hosts, separate with commas." -ForegroundColor Gray
-$hostInput = Read-Host -Prompt "Proxmox host(s) [default: $DefaultHost]"
-if ([string]::IsNullOrWhiteSpace($hostInput)) {
-    $hostInput = $DefaultHost
+# --- Resolve Proxmox host(s) --------------------------------------------------
+if ($Target) {
+    $ProxmoxHosts = @($Target)
 }
-$ProxmoxHosts = @($hostInput -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+elseif ($NonInteractive) {
+    $ProxmoxHosts = @($DefaultHost)
+}
+else {
+    Write-Host "Enter Proxmox host(s) — IP address or FQDN." -ForegroundColor Cyan
+    Write-Host "For multiple hosts, separate with commas." -ForegroundColor Gray
+    $hostInput = Read-Host -Prompt "Proxmox host(s) [default: $DefaultHost]"
+    if ([string]::IsNullOrWhiteSpace($hostInput)) {
+        $hostInput = $DefaultHost
+    }
+    $ProxmoxHosts = @($hostInput -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
 if ($ProxmoxHosts.Count -eq 0) {
     Write-Error 'No valid host provided. Exiting.'
     return
@@ -80,32 +155,40 @@ if ($ProxmoxHosts.Count -eq 0) {
 Write-Host "Targets: $($ProxmoxHosts -join ', ')" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Prompt for port (default 8006) --------------------------------------------
-$portInput = Read-Host -Prompt "Proxmox API port [default: $ProxmoxPort]"
-if ($portInput -and $portInput -match '^\d+$') {
-    $ProxmoxPort = [int]$portInput
+# --- Resolve port --------------------------------------------------------------
+if (-not $PSBoundParameters.ContainsKey('ApiPort') -and -not $NonInteractive) {
+    $portInput = Read-Host -Prompt "Proxmox API port [default: $ProxmoxPort]"
+    if ($portInput -and $portInput -match '^\d+$') {
+        $ProxmoxPort = [int]$portInput
+    }
 }
 
 # ==============================================================================
 # STEP 2: Authentication (API token OR username+password)
 # ==============================================================================
-Write-Host ""
-Write-Host "Authentication method:" -ForegroundColor Cyan
-Write-Host "  [1] API Token (recommended for WUG monitoring)" -ForegroundColor White
-Write-Host "  [2] Username + Password (standalone discovery only)" -ForegroundColor White
-Write-Host ""
-$authChoice = Read-Host -Prompt "Choice [1/2, default: 1]"
-
 $ProxmoxCredential = $null
 $ProxmoxToken = $null
 
-if ($authChoice -eq '2') {
-    # Username + Password auth
+# Resolve auth method
+$authChoice = if ($AuthMethod -eq 'Password') { '2' } else { '1' }
+if (-not $PSBoundParameters.ContainsKey('AuthMethod') -and -not $NonInteractive) {
     Write-Host ""
-    Write-Host "Enter Proxmox credentials (e.g. root@pam)." -ForegroundColor Cyan
-    $psCred = Get-Credential -Message "Proxmox username and password"
+    Write-Host "Authentication method:" -ForegroundColor Cyan
+    Write-Host "  [1] API Token (recommended for WUG monitoring)" -ForegroundColor White
+    Write-Host "  [2] Username + Password (standalone discovery only)" -ForegroundColor White
+    Write-Host ""
+    $authChoice = Read-Host -Prompt "Choice [1/2, default: 1]"
+}
+
+if ($authChoice -eq '2') {
+    # Username + Password auth — vault-backed for scheduled runs
+    $pwVaultName = "Proxmox.$($ProxmoxHosts[0]).Credential"
+    $credSplat = @{ Name = $pwVaultName; CredType = 'PSCredential'; ProviderLabel = 'Proxmox' }
+    if ($NonInteractive) { $credSplat.NonInteractive = $true }
+    elseif ($Action) { $credSplat.AutoUse = $true }
+    $psCred = Resolve-DiscoveryCredential @credSplat
     if (-not $psCred) {
-        Write-Error 'No credentials provided. Exiting.'
+        Write-Error 'No Proxmox credentials available. Exiting.'
         return
     }
     $ProxmoxCredential = @{
@@ -118,7 +201,10 @@ if ($authChoice -eq '2') {
 else {
     # API Token auth (default)
     $vaultName = "Proxmox.$($ProxmoxHosts[0]).Token"
-    $ProxmoxToken = Resolve-DiscoveryCredential -Name $vaultName -CredType BearerToken -ProviderLabel 'Proxmox'
+    $credSplat = @{ Name = $vaultName; CredType = 'BearerToken'; ProviderLabel = 'Proxmox' }
+    if ($NonInteractive) { $credSplat.NonInteractive = $true }
+    elseif ($Action) { $credSplat.AutoUse = $true }
+    $ProxmoxToken = Resolve-DiscoveryCredential @credSplat
     if (-not $ProxmoxToken) {
         Write-Error 'No Proxmox token. Exiting.'
         return
@@ -237,20 +323,36 @@ $devicePlan.Values | Sort-Object @{E={$_.Type}}, @{E={$_.Name}} |
 # ==============================================================================
 # STEP 5: Export or push to WUG
 # ==============================================================================
-Write-Host "What would you like to do?" -ForegroundColor Cyan
-if ($ProxmoxToken) {
-    Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + credential + monitors)"
+
+# --- Map Action parameter to menu choice number ---
+$choice = $null
+if ($Action) {
+    switch ($Action) {
+        'PushToWUG' { $choice = '1' }
+        'ExportJSON' { $choice = '2' }
+        'ExportCSV' { $choice = '3' }
+        'ShowTable' { $choice = '4' }
+        'Dashboard' { $choice = '5' }
+        'None' { $choice = '6' }
+    }
 }
-else {
-    Write-Host "  [1] Push monitors to WhatsUp Gold (requires API token auth)" -ForegroundColor DarkGray
+
+if (-not $choice) {
+    Write-Host "What would you like to do?" -ForegroundColor Cyan
+    if ($ProxmoxToken) {
+        Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + credential + monitors)"
+    }
+    else {
+        Write-Host "  [1] Push monitors to WhatsUp Gold (requires API token auth)" -ForegroundColor DarkGray
+    }
+    Write-Host "  [2] Export plan to JSON file"
+    Write-Host "  [3] Export plan to CSV file"
+    Write-Host "  [4] Show full plan table"
+    Write-Host "  [5] Generate Proxmox HTML dashboard (live metrics)"
+    Write-Host "  [6] Exit (do nothing)"
+    Write-Host ""
+    $choice = Read-Host -Prompt "Choice [1-6]"
 }
-Write-Host "  [2] Export plan to JSON file"
-Write-Host "  [3] Export plan to CSV file"
-Write-Host "  [4] Show full plan table"
-Write-Host "  [5] Generate Proxmox HTML dashboard (live metrics)"
-Write-Host "  [6] Exit (do nothing)"
-Write-Host ""
-$choice = Read-Host -Prompt "Choice [1-6]"
 
 switch ($choice) {
     '1' {
@@ -259,10 +361,12 @@ switch ($choice) {
             return
         }
         # --- Multi-device push to WUG -----------------------------------------
-        Write-Host ""
-        $wugInput = Read-Host -Prompt "WhatsUp Gold server [default: $WUGServer]"
-        if ($wugInput -and -not [string]::IsNullOrWhiteSpace($wugInput)) {
-            $WUGServer = $wugInput.Trim()
+        if (-not $NonInteractive) {
+            Write-Host ""
+            $wugInput = Read-Host -Prompt "WhatsUp Gold server [default: $WUGServer]"
+            if ($wugInput -and -not [string]::IsNullOrWhiteSpace($wugInput)) {
+                $WUGServer = $wugInput.Trim()
+            }
         }
 
         Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
@@ -274,7 +378,21 @@ switch ($choice) {
             return
         }
 
-        $wugCred = Get-Credential -Message "WhatsUp Gold admin credentials for $WUGServer"
+        if ($WUGCredential) {
+            $wugCred = $WUGCredential
+        }
+        elseif ($NonInteractive) {
+            $wugResolved = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -NonInteractive
+            if (-not $wugResolved) {
+                Write-Error 'No WUG credentials in vault. Run interactively first to cache them, or pass -WUGCredential.'
+                return
+            }
+            $wugCred = $wugResolved.Credential
+            if ($wugResolved.Server) { $WUGServer = $wugResolved.Server }
+        }
+        else {
+            $wugCred = Get-Credential -Message "WhatsUp Gold admin credentials for $WUGServer"
+        }
         Connect-WUGServer -serverUri $WUGServer -Credential $wugCred -IgnoreSSLErrors
 
         # ----------------------------------------------------------------
@@ -480,12 +598,12 @@ switch ($choice) {
         Write-Host "Done! Monitors pushed to WhatsUp Gold." -ForegroundColor Green
     }
     '2' {
-        $jsonPath = Join-Path (Get-Location) 'proxmox-discovery-plan.json'
+        $jsonPath = Join-Path $OutputDir 'proxmox-discovery-plan.json'
         $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath -IncludeParams
         Write-Host "Exported to: $jsonPath" -ForegroundColor Green
     }
     '3' {
-        $csvPath = Join-Path (Get-Location) 'proxmox-discovery-plan.csv'
+        $csvPath = Join-Path $OutputDir 'proxmox-discovery-plan.csv'
         $plan | Export-DiscoveryPlan -Format CSV -Path $csvPath
         Write-Host "Exported to: $csvPath" -ForegroundColor Green
     }
@@ -498,6 +616,11 @@ switch ($choice) {
         # ----------------------------------------------------------------
         Write-Host ""
         Write-Host "Fetching live metrics from Proxmox..." -ForegroundColor Cyan
+
+        # Ensure TLS 1.2 for Proxmox API (PS 5.1 defaults to TLS 1.0)
+        if ([System.Net.ServicePointManager]::SecurityProtocol -notmatch 'Tls12') {
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+        }
 
         # Cross-version API helper -- handles Cookie properly on PS 5.1
         $dashInvokeApi = {
@@ -521,22 +644,18 @@ switch ($choice) {
                         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
                     }
                 }
-                $ws = New-Object Microsoft.PowerShell.Commands.WebRequestSession
                 if ($HdrName -eq 'Cookie') {
                     # Cookie is a restricted header on PS 5.1 -- must use
                     # WebSession.Cookies, same approach as Invoke-ProxmoxAPI
+                    $ws = New-Object Microsoft.PowerShell.Commands.WebRequestSession
                     $parsed = [System.Uri]$Url
                     $parts = $HdrVal -split '=', 2
                     $ws.Cookies.Add((New-Object System.Net.Cookie($parts[0], $parts[1], '/', $parsed.Host)))
+                    Invoke-RestMethod -Uri $Url -Method GET -WebSession $ws -ErrorAction Stop
                 }
                 else {
-                    $m = [System.Net.WebHeaderCollection].GetMethod(
-                        'AddWithoutValidate',
-                        [System.Reflection.BindingFlags]'Instance,NonPublic'
-                    )
-                    $m.Invoke($ws.Headers, @($HdrName, $HdrVal))
+                    Invoke-RestMethod -Uri $Url -Method GET -Headers @{ $HdrName = $HdrVal } -ErrorAction Stop
                 }
-                Invoke-RestMethod -Uri $Url -Method GET -WebSession $ws -ErrorAction Stop
             }
         }
 
@@ -721,7 +840,7 @@ public static class SSLValidator {
         }
         else {
             $dashReportTitle = "Proxmox Dashboard"
-            $dashTempPath = Join-Path $env:TEMP 'Proxmox-Dashboard.html'
+            $dashTempPath = Join-Path $OutputDir 'Proxmox-Dashboard.html'
 
             $null = Export-ProxmoxDashboardHtml `
                 -DashboardData $dashboardRows `

@@ -16,6 +16,7 @@ ForEach ($folder in $functionFolders)
 Export-ModuleMember -Function Get-WUGProduct
 Export-ModuleMember -Function Add-WUGDeviceTemplate
 Export-ModuleMember -Function Add-WUGDeviceTemplates
+Export-ModuleMember -Function Add-WUGMonitorTemplate
 Export-ModuleMember -Function Set-WUGDeviceTemplate
 Export-ModuleMember -Function Invoke-WUGDeviceRefresh
 Export-ModuleMember -Function Get-WUGActiveMonitor
@@ -99,6 +100,8 @@ Export-ModuleMember -Function Add-WUGPassiveMonitor
 Export-ModuleMember -Function Add-WUGPassiveMonitorToDevice
 Export-ModuleMember -Function Set-WUGMonitorTemplate
 Export-ModuleMember -Function Set-WUGDeviceGroupMembership
+Export-ModuleMember -Function Get-WUGPerformanceMonitor
+Export-ModuleMember -Function Set-WUGPerformanceMonitor
 
 
 # SIG # Begin signature block

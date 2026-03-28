@@ -189,7 +189,8 @@ function Add-WUGDeviceTemplate {
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $NCMTasks,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $ApplicationProfiles,
         [Parameter()] [ValidateNotNullOrEmpty()] [string] $Layer2Data,
-        [Parameter()] [ValidateNotNullOrEmpty()] [string] $GroupName
+        [Parameter()] [ValidateNotNullOrEmpty()] [string] $GroupName,
+        [Parameter()] [switch] $NoDefaultActiveMonitor
     )
 
     Write-Debug "Function: Add-WUGDeviceTemplate"
@@ -248,17 +249,17 @@ function Add-WUGDeviceTemplate {
         foreach ($ActiveMonitor in $ActiveMonitors) {
             $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
                 classId = ''
-                Name    = $ActiveMonitor
+                name    = $ActiveMonitor
             }
             $ActiveMonitorObjects += $ActiveMonitorObject
         }
     }
     else {
-        if (!$Template) {
+        if (!$Template -and -not $NoDefaultActiveMonitor) {
             $ActiveMonitorObjects = @()
             $ActiveMonitorObject = New-Object -TypeName PSObject -Property @{
                 classId = ''
-                Name    = 'Ping'
+                name    = 'Ping'
             }
             $ActiveMonitorObjects += $ActiveMonitorObject   
         }
@@ -270,7 +271,7 @@ function Add-WUGDeviceTemplate {
         foreach ($PerformanceMonitor in $PerformanceMonitors) {
             $PerformanceMonitorObject = New-Object -TypeName PSObject -Property @{
                 classId = ''
-                Name    = $PerformanceMonitor
+                name    = $PerformanceMonitor
             }
             $PerformanceMonitorObjects += $PerformanceMonitorObject
         }
@@ -281,7 +282,7 @@ function Add-WUGDeviceTemplate {
         foreach ($PassiveMonitor in $PassiveMonitors) {
             $PassiveMonitorObject = New-Object -TypeName PSObject -Property @{
                 classId = ''
-                Name    = $PassiveMonitor
+                name    = $PassiveMonitor
                 #actions = ''
             }
             $PassiveMonitorObjects += $PassiveMonitorObject
@@ -329,6 +330,20 @@ function Add-WUGDeviceTemplate {
         $CredentialObject = New-Object -TypeName PSObject -Property @{
         credentialType = 'AWS'
         credential     = $CredentialAws
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialAzure){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'Azure'
+        credential     = $CredentialAzure
+        }
+        $CredentialObjects += $CredentialObject
+    }
+    if ($CredentialMeraki){
+        $CredentialObject = New-Object -TypeName PSObject -Property @{
+        credentialType = 'Meraki'
+        credential     = $CredentialMeraki
         }
         $CredentialObjects += $CredentialObject
     }

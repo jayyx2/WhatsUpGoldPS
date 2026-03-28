@@ -325,6 +325,44 @@ Register-DiscoveryProvider -Name 'Fortinet' `
         return $items
     }
 
+# ============================================================================
+# Fortinet Discovery Dashboard Export
+# ============================================================================
+function Export-FortinetDiscoveryDashboardHtml {
+    <#
+    .SYNOPSIS
+        Generates a Fortinet discovery dashboard HTML from plan data.
+    .PARAMETER DashboardData
+        Array of PSCustomObject rows (Device, IP, Monitor, Type, Status).
+    .PARAMETER OutputPath
+        File path for the generated HTML.
+    .PARAMETER ReportTitle
+        Dashboard title. Default: 'FortiGate Discovery Dashboard'.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = 'FortiGate Discovery Dashboard'
+    )
+
+    $dynDashPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\Export-DynamicDashboardHtml.ps1'
+    if (-not (Get-Command -Name 'Export-DynamicDashboardHtml' -ErrorAction SilentlyContinue)) {
+        if (Test-Path $dynDashPath) { . $dynDashPath }
+    }
+
+    if (Get-Command -Name 'Export-DynamicDashboardHtml' -ErrorAction SilentlyContinue) {
+        Export-DynamicDashboardHtml -Data $DashboardData `
+            -OutputPath $OutputPath `
+            -ReportTitle $ReportTitle `
+            -CardField 'Device','Type' `
+            -StatusField 'Status'
+    }
+    else {
+        Write-Error "No dashboard generator available."
+    }
+}
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG

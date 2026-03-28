@@ -87,6 +87,40 @@ Register-DiscoveryProvider -Name 'Proxmox' `
     -DiscoverScript {
         param($ctx)
 
+        # Ensure TLS 1.2 for Proxmox API (PS 5.1 defaults to TLS 1.0)
+        if ([System.Net.ServicePointManager]::SecurityProtocol -notmatch 'Tls12') {
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+        }
+
+        # Compiled SSL bypass for PS 5.1 — scriptblock delegates get GC'd,
+        # causing intermittent "connection was closed unexpectedly" errors.
+        if ($PSVersionTable.PSEdition -ne 'Core') {
+            if (-not ([System.Management.Automation.PSTypeName]'SSLValidator').Type) {
+                Add-Type -TypeDefinition @"
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class SSLValidator {
+    private static bool OnValidateCertificate(
+        object sender,
+        X509Certificate certificate,
+        X509Chain chain,
+        SslPolicyErrors sslPolicyErrors) {
+        return true;
+    }
+    public static void OverrideValidation() {
+        ServicePointManager.ServerCertificateValidationCallback =
+            new RemoteCertificateValidationCallback(OnValidateCertificate);
+        ServicePointManager.Expect100Continue = false;
+        ServicePointManager.DefaultConnectionLimit = 64;
+        ServicePointManager.SecurityProtocol =
+            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+    }
+}
+"@
+            }
+        }
+
         $items = @()
         $baseUri    = $ctx.BaseUri
         $deviceIP   = $ctx.DeviceIP
@@ -129,7 +163,7 @@ Register-DiscoveryProvider -Name 'Proxmox' `
                 }
                 else {
                     if ($ignoreCert -eq '1') {
-                        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+                        [SSLValidator]::OverrideValidation()
                     }
                     $ticketResp = Invoke-RestMethod -Uri $ticketUri -Method POST -Body $ticketBody `
                         -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop
@@ -187,22 +221,18 @@ Register-DiscoveryProvider -Name 'Proxmox' `
             }
             else {
                 if ($SkipSsl -eq '1') {
-                    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+                    [SSLValidator]::OverrideValidation()
                 }
-                $ws = New-Object Microsoft.PowerShell.Commands.WebRequestSession
                 if ($HdrName -eq 'Cookie') {
+                    $ws = New-Object Microsoft.PowerShell.Commands.WebRequestSession
                     $parsed = [System.Uri]$Url
                     $parts = $HdrVal -split '=', 2
                     $ws.Cookies.Add((New-Object System.Net.Cookie($parts[0], $parts[1], '/', $parsed.Host)))
+                    Invoke-RestMethod -Uri $Url -Method GET -WebSession $ws -ErrorAction Stop
                 }
                 else {
-                    $m = [System.Net.WebHeaderCollection].GetMethod(
-                        'AddWithoutValidate',
-                        [System.Reflection.BindingFlags]'Instance,NonPublic'
-                    )
-                    $m.Invoke($ws.Headers, @($HdrName, $HdrVal))
+                    Invoke-RestMethod -Uri $Url -Method GET -Headers @{ $HdrName = $HdrVal } -ErrorAction Stop
                 }
-                Invoke-RestMethod -Uri $Url -Method GET -WebSession $ws -ErrorAction Stop
             }
         }
 
@@ -234,7 +264,7 @@ Register-DiscoveryProvider -Name 'Proxmox' `
                     }
                 }
             }
-            catch { Write-Warning "Could not query cluster status for node IPs." }
+            catch { Write-Warning "Could not query cluster status for node IPs: $_" }
 
             # Ensure all nodes are in nodeMap
             try {
@@ -247,7 +277,7 @@ Register-DiscoveryProvider -Name 'Proxmox' `
                     }
                 }
             }
-            catch { Write-Warning "Could not query node list." }
+            catch { Write-Warning "Could not query node list: $_" }
 
             # VMs per node + guest agent IPs
             foreach ($node in @($nodeMap.Keys)) {
@@ -290,7 +320,7 @@ Register-DiscoveryProvider -Name 'Proxmox' `
                         }
                     }
                 }
-                catch { Write-Warning "Could not query VMs on node ${node}." }
+                catch { Write-Warning "Could not query VMs on node ${node}: $_" }
             }
         }
 

@@ -26,16 +26,83 @@
     Subsequent Runs:
       Loads credentials from vault automatically -- skips credential prompt.
 
+.PARAMETER Target
+    vCenter server or ESXi host — IP address or FQDN.
+    When omitted in interactive mode, prompts for input.
+
+.PARAMETER ApiPort
+    vCenter port. Default: 443.
+
+.PARAMETER UseRestApi
+    Use vCenter REST API (no PowerCLI needed, vSphere 6.5+ required). Default: true.
+    Pass -UseRestApi:$false for VMware PowerCLI mode.
+
+.PARAMETER Action
+    What to do with discovery results. When specified, skips the interactive menu.
+    Valid values: PushToWUG, ExportJSON, ExportCSV, ShowTable, Dashboard, None.
+
+.PARAMETER WUGServer
+    WhatsUp Gold server address. Default: 192.168.74.74.
+
+.PARAMETER WUGCredential
+    PSCredential for WhatsUp Gold admin login (non-interactive WUG push).
+
+.PARAMETER NonInteractive
+    Suppress all prompts. Uses cached vault credentials and parameter defaults.
+    Ideal for scheduled task execution.
+
+.EXAMPLE
+    .\Setup-VMware-Discovery.ps1
+    # Interactive mode — prompts for everything.
+
+.EXAMPLE
+    .\Setup-VMware-Discovery.ps1 -Target 'vcenter01.lab.local' -Action ExportJSON -NonInteractive
+    # Scheduled mode — uses vault credentials, exports JSON, no prompts.
+
 .NOTES
     WhatsUpGoldPS module is only needed if you choose option [1].
     REST API mode has zero external module dependencies (vSphere 6.5+ required).
     Module mode requires: VMware.PowerCLI.
 #>
+[CmdletBinding()]
+param(
+    [string]$Target,
+
+    [int]$ApiPort = 443,
+
+    [switch]$UseRestApi,
+
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [string]$Action,
+
+    [string]$WUGServer = '192.168.74.74',
+
+    [PSCredential]$WUGCredential,
+
+    [string]$OutputPath,
+
+    [switch]$NonInteractive
+)
+
+# --- Output directory (persistent default for scheduled runs) -----------------
+if (-not $OutputPath) {
+    if ($NonInteractive) {
+        $OutputPath = Join-Path $env:LOCALAPPDATA 'DiscoveryHelpers\Output'
+    } else {
+        $OutputPath = $env:TEMP
+    }
+}
+if (-not (Test-Path $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null }
+$OutputDir = $OutputPath
 
 # --- Configuration -----------------------------------------------------------
-$DefaultServer = 'vcenter01.lab.local'   # Default vCenter server
-$DefaultPort   = 443                     # Default vCenter port
-$WUGServer     = '192.168.74.74'         # Default WhatsUp Gold server
+$DefaultServer = 'vcenter01.lab.local'   # Default vCenter server (interactive fallback)
+$DefaultPort   = $ApiPort
+
+# Default to REST API if not explicitly set
+if (-not $PSBoundParameters.ContainsKey('UseRestApi')) {
+    $UseRestApi = $true
+}
 
 # --- Load helpers (works from any directory) ----------------------------------
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
@@ -48,13 +115,15 @@ $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 Write-Host "=== VMware vSphere Discovery ===" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Collection method choice --------------------------------------------------
-Write-Host "VMware data collection method:" -ForegroundColor Cyan
-Write-Host "  [1] VMware PowerCLI modules (requires VMware.PowerCLI)" -ForegroundColor White
-Write-Host "  [2] REST API direct (zero external dependencies, vSphere 6.5+)" -ForegroundColor White
-Write-Host ""
-$methodChoice = Read-Host -Prompt "Choice [1/2, default: 2]"
-$UseRestApi = ($methodChoice -ne '1')
+# --- Collection method ---------------------------------------------------------
+if (-not $PSBoundParameters.ContainsKey('UseRestApi') -and -not $NonInteractive) {
+    Write-Host "VMware data collection method:" -ForegroundColor Cyan
+    Write-Host "  [1] VMware PowerCLI modules (requires VMware.PowerCLI)" -ForegroundColor White
+    Write-Host "  [2] REST API direct (zero external dependencies, vSphere 6.5+)" -ForegroundColor White
+    Write-Host ""
+    $methodChoice = Read-Host -Prompt "Choice [1/2, default: 2]"
+    $UseRestApi = ($methodChoice -ne '1')
+}
 
 if ($UseRestApi) {
     Write-Host "Using REST API mode (no PowerCLI needed)." -ForegroundColor Green
@@ -66,6 +135,10 @@ else {
     if (-not (Get-Module -ListAvailable -Name VMware.PowerCLI -ErrorAction SilentlyContinue)) {
         Write-Warning "VMware.PowerCLI module not found. Install it with:"
         Write-Host "  Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force" -ForegroundColor Yellow
+        if ($NonInteractive) {
+            Write-Error "VMware.PowerCLI module not found and cannot install in non-interactive mode."
+            return
+        }
         Write-Host ""
         $installChoice = Read-Host -Prompt "Attempt to install now? [y/N]"
         if ($installChoice -eq 'y' -or $installChoice -eq 'Y') {
@@ -85,27 +158,40 @@ else {
     }
 }
 
-# --- Prompt for vCenter server -------------------------------------------------
-Write-Host "Enter vCenter Server or ESXi host -- IP address or FQDN." -ForegroundColor Cyan
-$serverInput = Read-Host -Prompt "vCenter server [default: $DefaultServer]"
-if ([string]::IsNullOrWhiteSpace($serverInput)) {
-    $serverInput = $DefaultServer
+# --- Resolve vCenter server -----------------------------------------------------
+if ($Target) {
+    $VMwareServer = $Target
 }
-$VMwareServer = $serverInput.Trim()
+elseif ($NonInteractive) {
+    $VMwareServer = $DefaultServer
+}
+else {
+    Write-Host "Enter vCenter Server or ESXi host -- IP address or FQDN." -ForegroundColor Cyan
+    $serverInput = Read-Host -Prompt "vCenter server [default: $DefaultServer]"
+    if ([string]::IsNullOrWhiteSpace($serverInput)) {
+        $serverInput = $DefaultServer
+    }
+    $VMwareServer = $serverInput.Trim()
+}
 Write-Host "Target: $VMwareServer" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Prompt for port -----------------------------------------------------------
-$portInput = Read-Host -Prompt "vCenter port [default: $DefaultPort]"
-if ($portInput -and $portInput -match '^\d+$') {
-    $DefaultPort = [int]$portInput
+# --- Resolve port --------------------------------------------------------------
+if (-not $PSBoundParameters.ContainsKey('ApiPort') -and -not $NonInteractive) {
+    $portInput = Read-Host -Prompt "vCenter port [default: $DefaultPort]"
+    if ($portInput -and $portInput -match '^\d+$') {
+        $DefaultPort = [int]$portInput
+    }
 }
 
 # ==============================================================================
 # STEP 2: Credentials (DPAPI vault -- encrypted, cached)
 # ==============================================================================
 $vaultName = "VMware.$VMwareServer.Credential"
-$VMwareCred = Resolve-DiscoveryCredential -Name $vaultName -CredType PSCredential -ProviderLabel 'VMware'
+$credSplat = @{ Name = $vaultName; CredType = 'PSCredential'; ProviderLabel = 'VMware' }
+if ($NonInteractive) { $credSplat.NonInteractive = $true }
+elseif ($Action) { $credSplat.AutoUse = $true }
+$VMwareCred = Resolve-DiscoveryCredential @credSplat
 if (-not $VMwareCred) {
     Write-Error 'No credentials provided. Exiting.'
     return
@@ -221,23 +307,41 @@ $devicePlan.Values | Sort-Object @{E={$_.Type}}, @{E={$_.Name}} |
 # ==============================================================================
 # STEP 5: Export or push to WUG
 # ==============================================================================
-Write-Host "What would you like to do?" -ForegroundColor Cyan
-Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + credential + monitors)"
-Write-Host "  [2] Export plan to JSON file"
-Write-Host "  [3] Export plan to CSV file"
-Write-Host "  [4] Show full plan table"
-Write-Host "  [5] Generate VMware HTML dashboard (from discovery data)"
-Write-Host "  [6] Exit (do nothing)"
-Write-Host ""
-$choice = Read-Host -Prompt "Choice [1-6]"
+
+# --- Map Action parameter to menu choice number ---
+$choice = $null
+if ($Action) {
+    switch ($Action) {
+        'PushToWUG' { $choice = '1' }
+        'ExportJSON' { $choice = '2' }
+        'ExportCSV' { $choice = '3' }
+        'ShowTable' { $choice = '4' }
+        'Dashboard' { $choice = '5' }
+        'None' { $choice = '6' }
+    }
+}
+
+if (-not $choice) {
+    Write-Host "What would you like to do?" -ForegroundColor Cyan
+    Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + credential + monitors)"
+    Write-Host "  [2] Export plan to JSON file"
+    Write-Host "  [3] Export plan to CSV file"
+    Write-Host "  [4] Show full plan table"
+    Write-Host "  [5] Generate VMware HTML dashboard (from discovery data)"
+    Write-Host "  [6] Exit (do nothing)"
+    Write-Host ""
+    $choice = Read-Host -Prompt "Choice [1-6]"
+}
 
 switch ($choice) {
     '1' {
         # --- Multi-device push to WUG -----------------------------------------
-        Write-Host ""
-        $wugInput = Read-Host -Prompt "WhatsUp Gold server [default: $WUGServer]"
-        if ($wugInput -and -not [string]::IsNullOrWhiteSpace($wugInput)) {
-            $WUGServer = $wugInput.Trim()
+        if (-not $NonInteractive) {
+            Write-Host ""
+            $wugInput = Read-Host -Prompt "WhatsUp Gold server [default: $WUGServer]"
+            if ($wugInput -and -not [string]::IsNullOrWhiteSpace($wugInput)) {
+                $WUGServer = $wugInput.Trim()
+            }
         }
 
         Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
@@ -249,7 +353,21 @@ switch ($choice) {
             return
         }
 
-        $wugCred = Get-Credential -Message "WhatsUp Gold admin credentials for $WUGServer"
+        if ($WUGCredential) {
+            $wugCred = $WUGCredential
+        }
+        elseif ($NonInteractive) {
+            $wugResolved = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -NonInteractive
+            if (-not $wugResolved) {
+                Write-Error 'No WUG credentials in vault. Run interactively first to cache them, or pass -WUGCredential.'
+                return
+            }
+            $wugCred = $wugResolved.Credential
+            if ($wugResolved.Server) { $WUGServer = $wugResolved.Server }
+        }
+        else {
+            $wugCred = Get-Credential -Message "WhatsUp Gold admin credentials for $WUGServer"
+        }
         Connect-WUGServer -serverUri $WUGServer -Credential $wugCred -IgnoreSSLErrors
 
         # Create/find devices in WUG
@@ -368,12 +486,12 @@ switch ($choice) {
         Write-Host "Done! Monitors pushed to WhatsUp Gold." -ForegroundColor Green
     }
     '2' {
-        $jsonPath = Join-Path (Get-Location) 'vmware-discovery-plan.json'
+        $jsonPath = Join-Path $OutputDir 'vmware-discovery-plan.json'
         $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath -IncludeParams
         Write-Host "Exported to: $jsonPath" -ForegroundColor Green
     }
     '3' {
-        $csvPath = Join-Path (Get-Location) 'vmware-discovery-plan.csv'
+        $csvPath = Join-Path $OutputDir 'vmware-discovery-plan.csv'
         $plan | Export-DiscoveryPlan -Format CSV -Path $csvPath
         Write-Host "Exported to: $csvPath" -ForegroundColor Green
     }
@@ -454,7 +572,7 @@ switch ($choice) {
         }
         else {
             $dashReportTitle = "VMware vSphere Dashboard"
-            $dashTempPath = Join-Path $env:TEMP 'VMware-Dashboard.html'
+            $dashTempPath = Join-Path $OutputDir 'VMware-Dashboard.html'
 
             $null = Export-VMwareDiscoveryDashboardHtml `
                 -DashboardData $dashboardRows `

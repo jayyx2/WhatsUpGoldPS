@@ -26,13 +26,64 @@
       Hyper-V PowerShell module (comes with Hyper-V role or RSAT).
       WinRM must be enabled on target Hyper-V hosts.
 
+.PARAMETER Target
+    Hyper-V host(s) — IP address, hostname, or FQDN. Accepts multiple values.
+    When omitted in interactive mode, prompts for input.
+
+.PARAMETER Action
+    What to do with discovery results. When specified, skips the interactive menu.
+    Valid values: PushToWUG, ExportJSON, ExportCSV, ShowTable, Dashboard, None.
+
+.PARAMETER WUGServer
+    WhatsUp Gold server address. Default: 192.168.74.74.
+
+.PARAMETER WUGCredential
+    PSCredential for WhatsUp Gold admin login (non-interactive WUG push).
+
+.PARAMETER NonInteractive
+    Suppress all prompts. Uses cached vault credentials and parameter defaults.
+    Ideal for scheduled task execution.
+
+.EXAMPLE
+    .\Setup-HyperV-Discovery.ps1
+    # Interactive mode — prompts for everything.
+
+.EXAMPLE
+    .\Setup-HyperV-Discovery.ps1 -Target 'hyperv01.lab.local' -Action ExportJSON -NonInteractive
+    # Scheduled mode — uses vault credentials, exports JSON, no prompts.
+
 .NOTES
     WhatsUpGoldPS module is only needed if you choose option [1].
 #>
+[CmdletBinding()]
+param(
+    [string[]]$Target,
+
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [string]$Action,
+
+    [string]$WUGServer = '192.168.74.74',
+
+    [PSCredential]$WUGCredential,
+
+    [string]$OutputPath,
+
+    [switch]$NonInteractive
+)
+
+# --- Output directory (persistent default for scheduled runs) -----------------
+if (-not $OutputPath) {
+    if ($NonInteractive) {
+        $OutputPath = Join-Path $env:LOCALAPPDATA 'DiscoveryHelpers\Output'
+    } else {
+        $OutputPath = $env:TEMP
+    }
+}
+if (-not (Test-Path $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null }
+$OutputDir = $OutputPath
 
 # --- Configuration -----------------------------------------------------------
-$DefaultHost = 'hyperv01.lab.local'      # Default Hyper-V host
-$WUGServer   = '192.168.74.74'           # Default WhatsUp Gold server
+$DefaultHost = 'hyperv01.lab.local'      # Default Hyper-V host (interactive fallback)
 
 # --- Load helpers (works from any directory) ----------------------------------
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
@@ -45,14 +96,22 @@ $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 Write-Host "=== Hyper-V Discovery ===" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Prompt for Hyper-V host(s) -----------------------------------------------
-Write-Host "Enter Hyper-V host(s) — IP address, hostname, or FQDN." -ForegroundColor Cyan
-Write-Host "For multiple hosts, separate with commas." -ForegroundColor Gray
-$hostInput = Read-Host -Prompt "Hyper-V host(s) [default: $DefaultHost]"
-if ([string]::IsNullOrWhiteSpace($hostInput)) {
-    $hostInput = $DefaultHost
+# --- Resolve Hyper-V host(s) --------------------------------------------------
+if ($Target) {
+    $HypervHosts = @($Target)
 }
-$HypervHosts = @($hostInput -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+elseif ($NonInteractive) {
+    $HypervHosts = @($DefaultHost)
+}
+else {
+    Write-Host "Enter Hyper-V host(s) — IP address, hostname, or FQDN." -ForegroundColor Cyan
+    Write-Host "For multiple hosts, separate with commas." -ForegroundColor Gray
+    $hostInput = Read-Host -Prompt "Hyper-V host(s) [default: $DefaultHost]"
+    if ([string]::IsNullOrWhiteSpace($hostInput)) {
+        $hostInput = $DefaultHost
+    }
+    $HypervHosts = @($hostInput -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
 if ($HypervHosts.Count -eq 0) {
     Write-Error 'No valid host provided. Exiting.'
     return
@@ -64,7 +123,10 @@ Write-Host ""
 # STEP 2: Credentials (DPAPI vault — encrypted, cached)
 # ==============================================================================
 $vaultName = "HyperV.$($HypervHosts[0]).Credential"
-$HypervCred = Resolve-DiscoveryCredential -Name $vaultName -CredType PSCredential -ProviderLabel 'Hyper-V'
+$credSplat = @{ Name = $vaultName; CredType = 'PSCredential'; ProviderLabel = 'Hyper-V' }
+if ($NonInteractive) { $credSplat.NonInteractive = $true }
+elseif ($Action) { $credSplat.AutoUse = $true }
+$HypervCred = Resolve-DiscoveryCredential @credSplat
 if (-not $HypervCred) {
     Write-Error 'No credentials provided. Exiting.'
     return
@@ -172,22 +234,40 @@ $devicePlan.Values | Sort-Object @{E={$_.Type}}, @{E={$_.Name}} |
 # ==============================================================================
 # STEP 5: Export or push to WUG
 # ==============================================================================
-Write-Host "What would you like to do?" -ForegroundColor Cyan
-Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + monitors)"
-Write-Host "  [2] Export plan to JSON file"
-Write-Host "  [3] Export plan to CSV file"
-Write-Host "  [4] Show full plan table"
-Write-Host "  [5] Generate Hyper-V HTML dashboard (live metrics)"
-Write-Host "  [6] Exit (do nothing)"
-Write-Host ""
-$choice = Read-Host -Prompt "Choice [1-6]"
+
+# --- Map Action parameter to menu choice number ---
+$choice = $null
+if ($Action) {
+    switch ($Action) {
+        'PushToWUG' { $choice = '1' }
+        'ExportJSON' { $choice = '2' }
+        'ExportCSV' { $choice = '3' }
+        'ShowTable' { $choice = '4' }
+        'Dashboard' { $choice = '5' }
+        'None' { $choice = '6' }
+    }
+}
+
+if (-not $choice) {
+    Write-Host "What would you like to do?" -ForegroundColor Cyan
+    Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + monitors)"
+    Write-Host "  [2] Export plan to JSON file"
+    Write-Host "  [3] Export plan to CSV file"
+    Write-Host "  [4] Show full plan table"
+    Write-Host "  [5] Generate Hyper-V HTML dashboard (live metrics)"
+    Write-Host "  [6] Exit (do nothing)"
+    Write-Host ""
+    $choice = Read-Host -Prompt "Choice [1-6]"
+}
 
 switch ($choice) {
     '1' {
-        Write-Host ""
-        $wugInput = Read-Host -Prompt "WhatsUp Gold server [default: $WUGServer]"
-        if ($wugInput -and -not [string]::IsNullOrWhiteSpace($wugInput)) {
-            $WUGServer = $wugInput.Trim()
+        if (-not $NonInteractive) {
+            Write-Host ""
+            $wugInput = Read-Host -Prompt "WhatsUp Gold server [default: $WUGServer]"
+            if ($wugInput -and -not [string]::IsNullOrWhiteSpace($wugInput)) {
+                $WUGServer = $wugInput.Trim()
+            }
         }
 
         Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
@@ -199,7 +279,21 @@ switch ($choice) {
             return
         }
 
-        $wugCred = Get-Credential -Message "WhatsUp Gold admin credentials for $WUGServer"
+        if ($WUGCredential) {
+            $wugCred = $WUGCredential
+        }
+        elseif ($NonInteractive) {
+            $wugResolved = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -NonInteractive
+            if (-not $wugResolved) {
+                Write-Error 'No WUG credentials in vault. Run interactively first to cache them, or pass -WUGCredential.'
+                return
+            }
+            $wugCred = $wugResolved.Credential
+            if ($wugResolved.Server) { $WUGServer = $wugResolved.Server }
+        }
+        else {
+            $wugCred = Get-Credential -Message "WhatsUp Gold admin credentials for $WUGServer"
+        }
         Connect-WUGServer -serverUri $WUGServer -Credential $wugCred -IgnoreSSLErrors
 
         Write-Host ""
@@ -314,12 +408,12 @@ switch ($choice) {
         Write-Host "Done! Monitors pushed to WhatsUp Gold." -ForegroundColor Green
     }
     '2' {
-        $jsonPath = Join-Path (Get-Location) 'hyperv-discovery-plan.json'
+        $jsonPath = Join-Path $OutputDir 'hyperv-discovery-plan.json'
         $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath -IncludeParams
         Write-Host "Exported to: $jsonPath" -ForegroundColor Green
     }
     '3' {
-        $csvPath = Join-Path (Get-Location) 'hyperv-discovery-plan.csv'
+        $csvPath = Join-Path $OutputDir 'hyperv-discovery-plan.csv'
         $plan | Export-DiscoveryPlan -Format CSV -Path $csvPath
         Write-Host "Exported to: $csvPath" -ForegroundColor Green
     }
@@ -661,7 +755,7 @@ switch ($choice) {
         }
         else {
             $dashReportTitle = "Hyper-V Dashboard"
-            $dashTempPath = Join-Path $env:TEMP 'Hyperv-Dashboard.html'
+            $dashTempPath = Join-Path $OutputDir 'Hyperv-Dashboard.html'
 
             $null = Export-HypervDiscoveryDashboardHtml `
                 -DashboardData $dashboardRows `

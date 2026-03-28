@@ -950,6 +950,77 @@ function Get-AzureResourceMetricsREST {
     return $metrics
 }
 
+function Get-AzureResourceHealthREST {
+    <#
+    .SYNOPSIS
+        Returns the health/availability status for one or more Azure resources.
+    .DESCRIPTION
+        Queries the Azure Resource Health API to get the current availability
+        status of each resource. Works for any resource type that supports
+        Microsoft.ResourceHealth.
+
+        Returns: Available, Unavailable, Degraded, or Unknown.
+
+        For VMs, also queries the instance view to get the power state
+        (Running, Stopped, Deallocated, etc.).
+    .PARAMETER ResourceId
+        One or more full Azure resource IDs.
+    .EXAMPLE
+        Get-AzureResourceHealthREST -ResourceId '/subscriptions/.../providers/Microsoft.Compute/virtualMachines/myvm'
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [string[]]$ResourceId
+    )
+
+    process {
+        foreach ($resId in $ResourceId) {
+            $healthStatus = 'Unknown'
+            $healthReason = ''
+            $powerState   = ''
+
+            # Resource Health API
+            try {
+                $healthUri = "https://management.azure.com${resId}/providers/Microsoft.ResourceHealth/availabilityStatuses/current"
+                $healthResp = Invoke-AzureREST -Uri $healthUri -ApiVersion '2023-07-01-preview'
+                if ($healthResp.properties) {
+                    $healthStatus = "$($healthResp.properties.availabilityState)"
+                    $healthReason = "$($healthResp.properties.summary)"
+                }
+            }
+            catch {
+                Write-Verbose "Resource Health not available for ${resId}: $_"
+            }
+
+            # VM instance view for power state
+            if ($resId -match 'Microsoft\.Compute/virtualMachines') {
+                try {
+                    $ivUri = "https://management.azure.com${resId}/instanceView"
+                    $ivResp = Invoke-AzureREST -Uri $ivUri -ApiVersion '2024-03-01'
+                    if ($ivResp.statuses) {
+                        $pwStatus = $ivResp.statuses | Where-Object { $_.code -match '^PowerState/' } | Select-Object -First 1
+                        if ($pwStatus) {
+                            $powerState = ($pwStatus.code -replace 'PowerState/', '')
+                        }
+                    }
+                }
+                catch {
+                    Write-Verbose "VM instanceView not available for ${resId}: $_"
+                }
+            }
+
+            [PSCustomObject]@{
+                ResourceId   = $resId
+                ResourceName = ($resId -split '/')[-1]
+                Health       = $healthStatus
+                Reason       = $healthReason
+                PowerState   = $powerState
+            }
+        }
+    }
+}
+
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG

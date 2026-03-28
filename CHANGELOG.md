@@ -1,5 +1,5 @@
 ﻿﻿# WhatsUpGoldPS Release History
-## 0.1.21 - 2026-03-22 [Unreleased]
+## 0.1.21 - 2026-03-26 [Unreleased]
 * Added -- Helpers
   * helpers/reports/ -- Dynamic Dashboard Generator (`Export-DynamicDashboardHtml`)
     * `Export-DynamicDashboardHtml.ps1` -- Universal HTML dashboard generator from any PowerShell object array
@@ -126,14 +126,27 @@
       * Credential Management: `Save-DiscoveryCredential` (AWSKeys/AzureSP/BearerToken/PSCredential bundles), `Get-DiscoveryCredential` (expiry/integrity checks), `Request-DiscoveryCredential` (interactive prompt), `Resolve-DiscoveryCredential` (vault -> prompt -> WUG attribute fallback), `ConvertFrom-VaultStored`, `Save-ResolvedCredential`, `Remove-DiscoveryCredential`
       * WUG Integration: `Invoke-WUGDiscovery`, `Invoke-WUGDiscoverySync` (REST API monitor creation), `New-WUGDiscoveryCredential` (WUG credential store), `Start-WUGDiscovery` (top-level orchestrator)
     * `DiscoveryProvider-AWS.ps1` -- AWS discovery provider (EC2 instances, CloudWatch metrics)
-    * `DiscoveryProvider-Azure.ps1` -- Azure discovery provider (VMs, resource health, metrics)
+    * `DiscoveryProvider-Azure.ps1` -- Azure discovery provider with per-resource metric enumeration
+      * Phase 2: Azure Monitor metric definition enumeration per resource (REST API `metricDefinitions` or `Get-AzMetricDefinition`)
+      * Builds REST API Active Monitor per resource (provisioning state health check via ARM API)
+      * Builds REST API Performance Monitor per metric definition per resource (Azure Metrics API with JSONPath)
+      * `Azure.MetricCount` and `Azure.AvailableMetrics` device attributes for metric visibility
+      * Numeric metrics (Average/Total/Count/Max/Min) -> Performance Monitor; string/unspecified -> Active Monitor
     * `DiscoveryProvider-F5.ps1` -- F5 BIG-IP discovery provider (virtual servers, pools, nodes)
     * `DiscoveryProvider-Fortinet.ps1` -- Fortinet FortiGate discovery provider (system, firewall, VPN)
     * `DiscoveryProvider-HyperV.ps1` -- Hyper-V discovery provider (hosts, VMs, health)
     * `DiscoveryProvider-Proxmox.ps1` -- Proxmox VE discovery provider (cluster nodes, QEMU VMs, CPU/memory/disk monitors; API Token auth)
     * `DiscoveryProvider-VMware.ps1` -- VMware vSphere discovery provider (ESXi hosts, VMs, datastores)
     * `Setup-AWS-Discovery.ps1` -- Interactive AWS discovery script with vault-backed credential storage, menu-driven export/WUG push
-    * `Setup-Azure-Discovery.ps1` -- Interactive Azure discovery script with Service Principal vault storage
+    * `Setup-Azure-Discovery.ps1` -- Azure cloud resource discovery with full WUG integration
+      * PushToWUG [1]: adds ALL resources as WUG devices (0.0.0.0 for IP-less cloud resources)
+      * Creates Azure credential + REST API OAuth2 credential in WUG library from vault SP
+      * Assigns both credentials to each device for REST API monitor authentication
+      * Per-resource health Active Monitor + per-metric Performance Monitor via `Invoke-WUGDiscoverySync`
+      * TestCredential [7]: create, verify, and delete Azure + REST API credentials in WUG (round-trip test)
+      * Non-interactive defaults to Dashboard action (scheduled task friendly)
+      * Dashboard includes MetricCount column; resources without IP shown as 0.0.0.0
+      * Plan summary shows metric counts per resource and total metric-enabled resources
     * `Setup-F5-Discovery.ps1` -- Interactive F5 BIG-IP discovery script with token vault storage
     * `Setup-Fortinet-Discovery.ps1` -- Interactive Fortinet FortiGate discovery script with API key vault storage
     * `Setup-HyperV-Discovery.ps1` -- Interactive Hyper-V discovery script with PSCredential vault storage
@@ -155,6 +168,20 @@
     * `Test-Dashboard-Template.html` -- Bootstrap Table HTML template for test result reports
 
 * Changed
+  * `DiscoveryProvider-Azure.ps1` -- Replaced generic PowerShell monitor stubs with concrete REST API monitors
+    * Phase 2 metric enumeration discovers all available Azure Monitor metric definitions per resource
+    * Each metric becomes a dedicated REST API Performance Monitor with JSONPath extraction
+    * Resource health check now uses ARM REST API GET with `provisioningState` JSONPath (was generic PowerShell stub)
+    * Progress bar during metric enumeration with resource count and name display
+  * `Setup-Azure-Discovery.ps1` -- Major WUG integration overhaul
+    * PushToWUG now adds ALL resources (previously skipped resources without IP)
+    * Cloud resources (no IP) added as 0.0.0.0 devices with Azure Cloud Resource attributes
+    * Creates two WUG credentials per tenant: Azure SP for device identity + REST API OAuth2 for monitor auth
+    * Credential assignment to every cloud resource device (Azure + REST API)
+    * TestCredential option [7] for round-trip credential verification before committing
+    * Non-interactive mode defaults to Dashboard (previously required explicit -Action)
+    * Plan summary shows metric counts, cloud resource counts, and total plan items
+    * ValidateSet for -Action now includes `TestCredential`
   * Removed unused `tableexport.jquery.plugin` dependency from all 14 dashboard HTML templates -- custom `wireExport()` functions handle all exports via FileSaver + xlsx.js directly; plugin was loaded but never called
   * Standardized HTML dashboard toolbar across all 14 templates (AWS, Azure, Bigleaf, Certificate, Docker, F5, GCP, Hyper-V, Lansweeper, Nutanix, OCI, Proxmox, Test, VMware)
     * Unified `wireExport()`, `updateRowCounter()`, toolbar injection pattern (row counter span + pagination toggle + export dropdown into `.fixed-table-toolbar .columns`)

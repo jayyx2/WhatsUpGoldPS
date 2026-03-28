@@ -101,33 +101,49 @@ Register-DiscoveryProvider -Name 'AWS' `
         } else {
             @($ctx.DeviceIP)
         }
-        # Targets can be region names
+        # Targets can be region names or 'all' to scan every enabled region
         $regions = @()
+        $scanAll = $false
         foreach ($t in $targets) {
             if ($t -match '^[a-z]{2}-[a-z]+-\d+$') {
                 $regions += $t
             }
             elseif ($t -eq 'all') {
-                $regions = @()  # will enumerate all
+                $scanAll = $true
             }
         }
-        if ($regions.Count -eq 0) { $regions = @($region) }
+        if ($regions.Count -eq 0 -and -not $scanAll) { $regions = @($region) }
 
         # ================================================================
         # Phase 1: Authenticate and enumerate resources
         # ================================================================
+        $connectRegion = if ($regions.Count -gt 0) { $regions[0] } else { $region }
         try {
             if ($useRest) {
-                Connect-AWSProfileREST -AccessKey $accessKey -SecretKey $secretKey -Region $regions[0]
+                Connect-AWSProfileREST -AccessKey $accessKey -SecretKey $secretKey -Region $connectRegion
             }
             else {
-                Connect-AWSProfile -AccessKey $accessKey -SecretKey $secretKey -Region $regions[0]
+                Connect-AWSProfile -AccessKey $accessKey -SecretKey $secretKey -Region $connectRegion
             }
-            Write-Verbose "Connected to AWS region $($regions[0])$(if ($useRest) { ' (REST)' } else { ' (Module)' })"
+            Write-Verbose "Connected to AWS region ${connectRegion}$(if ($useRest) { ' (REST)' } else { ' (Module)' })"
         }
         catch {
             Write-Warning "Failed to connect to AWS: $_"
             return $items
+        }
+
+        # If scanning all regions, enumerate enabled regions now
+        if ($scanAll) {
+            Write-Verbose "Enumerating all enabled AWS regions..."
+            try {
+                $allRegions = if ($useRest) { Get-AWSRegionListREST } else { Get-AWSRegionList }
+                $regions = @($allRegions | Select-Object -ExpandProperty RegionName | Sort-Object)
+                Write-Verbose "Found $($regions.Count) enabled regions"
+            }
+            catch {
+                Write-Warning "Could not enumerate regions: $_. Falling back to $connectRegion"
+                $regions = @($connectRegion)
+            }
         }
 
         $resourceMap = @{}  # uniqueKey -> @{ ... }

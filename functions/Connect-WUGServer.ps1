@@ -8,6 +8,11 @@ and obtains an authorization token using the OAuth 2.0 password grant type flow.
 input parameters and handles credential input, and also allows for ignoring SSL certificate validation errors.
 The authorization token is stored in a global variable for subsequent API requests.
 
+When called with no parameters, the function checks the DPAPI vault for a previously saved connection.
+If found, it prompts to reuse, reset, or enter new connection details. Successful connections are
+automatically saved to the vault for future use. The vault is stored at
+%LOCALAPPDATA%\DiscoveryHelpers\Vault and is interoperable with the DiscoveryHelpers credential vault.
+
 .PARAMETER serverUri
 The URI of the WhatsUp Gold server to connect to.
 
@@ -41,6 +46,11 @@ OAuth 2.0 authorization token.
 $Cred = Get-Credential
 Connect-WUGServer -serverUri 192.168.1.250 -Credential $Cred -IgnoreSSLErrors
 
+.EXAMPLE
+Connect-WUGServer
+When called with no parameters, checks the vault for a saved connection. If found, prompts to use it.
+If no saved connection exists, interactively prompts for server, port, protocol, and credentials.
+
 .NOTES
 Author: Jason Alberino (jason@wug.ninja)
 Last Modified: 2024-09-26
@@ -51,10 +61,12 @@ https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html#secti
 
 #>
 function Connect-WUGServer {
-    [CmdletBinding(DefaultParameterSetName = 'CredentialSet')]
+    [CmdletBinding(DefaultParameterSetName = 'VaultSet')]
     param (
-        # Common Parameters for Both Parameter Sets
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        # Common Parameters for CredentialSet / UserPassSet
+        [Parameter(Mandatory = $true, ParameterSetName = 'CredentialSet', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'UserPassSet', ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(ParameterSetName = 'VaultSet')]
         [string]$serverUri,
 
         [Parameter()]
@@ -87,6 +99,151 @@ function Connect-WUGServer {
     
     begin {
         Write-Debug "Starting Connect-WUGServer function"
+
+        # ── Vault helpers (DPAPI, interoperable with DiscoveryHelpers vault) ──
+        $vaultDir  = Join-Path $env:LOCALAPPDATA 'DiscoveryHelpers\Vault'
+        $vaultFile = Join-Path $vaultDir 'WUG.Server.cred'
+        $_fromVault = $false
+
+        # Read a saved WUG connection from the DPAPI vault
+        function _GetSavedWUGConnection {
+            param([string]$Path)
+            if (-not (Test-Path $Path)) { return $null }
+            try {
+                $obj = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+                if (-not $obj.Encrypted) { return $null }
+                if ($obj.Encrypted -like 'AES256:*') {
+                    Write-Warning "Vault credential is AES-encrypted. Use the DiscoveryHelpers to unlock, or reset."
+                    return $null
+                }
+                # Verify integrity hash
+                if ($obj.Integrity) {
+                    $intInput = "$($obj.Encrypted)|$($env:COMPUTERNAME)|$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+                    $sha = [System.Security.Cryptography.SHA256]::Create()
+                    $hBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($intInput))
+                    $sha.Dispose()
+                    $expected = [BitConverter]::ToString($hBytes) -replace '-', ''
+                    if ($obj.Integrity -ne $expected) {
+                        Write-Warning "Vault integrity check failed for WUG.Server. The file may have been tampered with."
+                        return $null
+                    }
+                }
+                # Decrypt DPAPI
+                $ss = ConvertTo-SecureString -String $obj.Encrypted
+                $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss)
+                try { $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+                finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+                $parts = $plain -split '\|', 5
+                if ($parts.Count -ge 5) {
+                    $secPwd = ConvertTo-SecureString $parts[4] -AsPlainText -Force
+                    return @{
+                        Server     = $parts[0]
+                        Port       = [int]$parts[1]
+                        Protocol   = $parts[2]
+                        Credential = [PSCredential]::new($parts[3], $secPwd)
+                        IgnoreSSL  = $true
+                    }
+                }
+                return $null
+            }
+            catch {
+                Write-Warning "Could not read vault credential: $_"
+                return $null
+            }
+        }
+
+        # Save a WUG connection to the DPAPI vault
+        function _SaveWUGConnection {
+            param([string]$VaultDir, [string]$Path, [string]$Server, [int]$ConnPort, [string]$Proto, [string]$User, [string]$Pass)
+            if (-not (Test-Path $VaultDir)) {
+                New-Item -Path $VaultDir -ItemType Directory -Force | Out-Null
+                try {
+                    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+                    $acl.SetAccessRuleProtection($true, $false)
+                    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+                    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                        $currentUser, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+                    $acl.AddAccessRule($rule)
+                    $sysRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                        'SYSTEM', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+                    $acl.AddAccessRule($sysRule)
+                    Set-Acl -Path $VaultDir -AclObject $acl
+                }
+                catch { Write-Verbose "Could not restrict vault directory ACL: $_" }
+            }
+            $combined = "$Server|$ConnPort|$Proto|$User|$Pass"
+            $ss = ConvertTo-SecureString $combined -AsPlainText -Force
+            $encrypted = ConvertFrom-SecureString -SecureString $ss
+            $intInput = "$encrypted|$($env:COMPUTERNAME)|$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            $hBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($intInput))
+            $sha.Dispose()
+            $hash = [BitConverter]::ToString($hBytes) -replace '-', ''
+            $credObj = [ordered]@{
+                Name        = 'WUG.Server'
+                Type        = 'Single'
+                Description = "WUG ${Proto}://${Server}:${ConnPort} ($User)"
+                CreatedUtc  = (Get-Date).ToUniversalTime().ToString('o')
+                ExpiresUtc  = $null
+                Machine     = $env:COMPUTERNAME
+                User        = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+                Integrity   = $hash
+                Encrypted   = $encrypted
+            }
+            $json = $credObj | ConvertTo-Json -Depth 5
+            [System.IO.File]::WriteAllText($Path, $json, [System.Text.UTF8Encoding]::new($true))
+        }
+
+        # ── VaultSet: resolve connection from vault or interactive prompt ──
+        if ($PSCmdlet.ParameterSetName -eq 'VaultSet' -and -not $PSBoundParameters.ContainsKey('serverUri')) {
+            $saved = _GetSavedWUGConnection -Path $vaultFile
+            $useExisting = $false
+            if ($saved) {
+                $preview = "Server=$($saved.Server):$($saved.Port) ($($saved.Protocol)), User=$($saved.Credential.UserName)"
+                Write-Host ''
+                Write-Host "  Saved WUG connection found in vault:" -ForegroundColor Cyan
+                Write-Host "  $preview" -ForegroundColor Green
+                Write-Host ''
+                $choice = Read-Host -Prompt "  [Y] Use saved  [N] New connection  [R] Reset"
+                switch -Regex ($choice) {
+                    '^[Yy]' {
+                        $serverUri = $saved.Server
+                        $Port = $saved.Port
+                        $Protocol = $saved.Protocol
+                        $Credential = $saved.Credential
+                        $IgnoreSSLErrors = [switch]$true
+                        $Username = $Credential.GetNetworkCredential().UserName
+                        $Password = $Credential.GetNetworkCredential().Password
+                        $_fromVault = $true
+                        $useExisting = $true
+                        Write-Host "  Using saved connection." -ForegroundColor Green
+                    }
+                    '^[Rr]' {
+                        Write-Host "  Removing saved connection..." -ForegroundColor Yellow
+                        Remove-Item -Path $vaultFile -Force -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+            if (-not $useExisting) {
+                Write-Host ''
+                Write-Host "  WhatsUp Gold server connection:" -ForegroundColor Yellow
+                $srvInput = Read-Host -Prompt "    Server hostname or IP"
+                if ([string]::IsNullOrWhiteSpace($srvInput)) { throw "Server hostname or IP is required." }
+                $serverUri = $srvInput.Trim()
+                $pInput = Read-Host -Prompt "    Port [9644]"
+                if (-not [string]::IsNullOrWhiteSpace($pInput)) { $Port = [int]$pInput }
+                $prInput = Read-Host -Prompt "    Protocol [https]"
+                if (-not [string]::IsNullOrWhiteSpace($prInput)) { $Protocol = $prInput.Trim().ToLower() }
+                $Credential = Get-Credential -Message "WhatsUp Gold credentials for $serverUri"
+                if (-not $Credential) { throw "Credentials are required." }
+                $Username = $Credential.GetNetworkCredential().UserName
+                $Password = $Credential.GetNetworkCredential().Password
+                $sslInput = Read-Host -Prompt "    Ignore SSL errors? [Y/N] (default: Y)"
+                if ($sslInput -match '^[Nn]') { $IgnoreSSLErrors = [switch]$false }
+                else { $IgnoreSSLErrors = [switch]$true }
+            }
+        }
+
         Write-Debug "Server URI: $serverUri, Protocol: $Protocol, Port: $Port"
         
         # Input validation
@@ -126,6 +283,10 @@ function Connect-WUGServer {
             'UserPassSet' {
                 Write-Debug "Using Username and Password parameter set."
                 # Username and Password are already provided
+            }
+            'VaultSet' {
+                Write-Debug "Using Vault parameter set. Credentials already resolved."
+                # Username and Password were set during vault/interactive resolution above
             }
             default {
                 throw "Invalid parameter set. Please specify either -Credential or both -Username and -Password."
@@ -183,6 +344,19 @@ function Connect-WUGServer {
     end {
         # Output connection status and return the token details
         Write-Output "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at ${global:expiry} UTC."
+
+        # Save connection to vault after successful authentication
+        if (-not $_fromVault) {
+            try {
+                _SaveWUGConnection -VaultDir $vaultDir -Path $vaultFile `
+                    -Server $serverUri -ConnPort $Port -Proto $Protocol `
+                    -User $Username -Pass $Password
+                Write-Host "  Connection saved to vault." -ForegroundColor DarkGray
+            }
+            catch {
+                Write-Verbose "Could not save connection to vault: $_"
+            }
+        }
     }
 }
 # SIG # Begin signature block

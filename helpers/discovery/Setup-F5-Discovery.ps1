@@ -1,17 +1,20 @@
 ﻿<#
 .SYNOPSIS
-    Example: F5 BIG-IP Discovery — Standalone or WUG Integration
+    F5 BIG-IP Discovery — Interactive dashboard, export, or WUG push.
 
 .DESCRIPTION
     Discovers F5 BIG-IP virtual servers, pools, and system health
     endpoints via iControl REST API.
 
-    Two modes:
-      Standalone: Just discovery — outputs a plan you can use anywhere.
-      WUG Mode:   Full automation — prompts for creds once, adds device to
-                  WUG, creates monitors, assigns them. Re-runs are automatic.
+    Actions:
+      PushToWUG   Full WUG automation — creates devices, credentials, monitors.
+      ExportJSON  Export discovery plan to JSON.
+      ExportCSV   Export discovery plan to CSV.
+      ShowTable   Print full plan table to console.
+      Dashboard   Generate an interactive HTML dashboard from discovery data.
+      None        Discovery only — no output action.
 
-    Architecture (WUG mode):
+    Architecture (WUG push):
       [F5 Device in WUG]
           |-- "F5 VS List [F5-LB1]"               (REST API Active, 5 min)
           |-- "F5 System Info [F5-LB1]"            (REST API Active, 5 min)
@@ -24,12 +27,10 @@
     First Run:
       1. Prompts for F5 iControl credentials (masked input, never plaintext)
       2. Stores creds in DPAPI vault (encrypted to user + machine)
-      3. Adds F5 device(s) to WUG if not already present
-      4. Pushes REST API credential to WUG's credential store
-      5. Discovers endpoints and creates monitors
+      3. Discovers endpoints and presents action menu
 
     Subsequent Runs:
-      Fully automatic — loads creds from vault, skips existing monitors.
+      Fully automatic — loads creds from vault, skips prompts.
 
     Security:
       - Credentials are DPAPI-encrypted at rest (tied to Windows user + machine)
@@ -37,84 +38,316 @@
       - Masked input — creds never appear in plaintext on screen, history, or logs
       - Optional AES-256 double encryption via -VaultPassword
 
+.PARAMETER Target
+    F5 BIG-IP management IPs or hostnames. Accepts multiple values.
+    Default: lb1.corp.local, lb2.corp.local.
+
+.PARAMETER Action
+    What to do after discovery:
+      PushToWUG  — Push monitors to WhatsUp Gold (creates devices + monitors)
+      ExportJSON — Export plan to JSON file
+      ExportCSV  — Export plan to CSV file
+      ShowTable  — Show full plan table
+      Dashboard  — Generate F5 HTML dashboard
+      None       — Exit after discovery (do nothing)
+    If omitted, shows interactive menu. If -NonInteractive and no Action,
+    defaults to Dashboard.
+
+.PARAMETER ApiPort
+    F5 iControl REST API port. Default: 443.
+
+.PARAMETER WUGServer
+    WhatsUp Gold server address. Default: 192.168.1.250.
+
+.PARAMETER WUGCredential
+    PSCredential for WhatsUp Gold admin login (non-interactive WUG push).
+
+.PARAMETER OutputPath
+    Output directory for exports and dashboards.
+    Non-interactive default: %LOCALAPPDATA%\DiscoveryHelpers\Output.
+
+.PARAMETER NonInteractive
+    Suppress all prompts. Uses cached vault credentials and parameter defaults.
+    Ideal for scheduled task execution.
+
+.EXAMPLE
+    .\Setup-F5-Discovery.ps1 -Target 'lb1.corp.local' -Action Dashboard
+    # Discovers F5 and generates an HTML dashboard.
+
+.EXAMPLE
+    .\Setup-F5-Discovery.ps1 -Target 'lb1.corp.local' -Action PushToWUG -NonInteractive
+    # Scheduled mode — discovers F5, pushes to WUG, no prompts.
+
 .NOTES
-    No WUG module required for standalone mode.
-    For WUG mode: Import-Module WhatsUpGoldPS and Connect-WUGServer first.
+    No WUG module required for non-WUG actions.
+    For PushToWUG: Import-Module WhatsUpGoldPS and Connect-WUGServer first.
 #>
+[CmdletBinding()]
+param(
+    [string[]]$Target = @('lb1.corp.local', 'lb2.corp.local'),
 
-# --- Pick your mode -----------------------------------------------------------
-$Mode = 'Standalone'     # Change to 'WUG' for WhatsUp Gold integration
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [string]$Action,
 
-# --- Configuration (edit these) -----------------------------------------------
-$F5Hosts       = @('lb1.corp.local', 'lb2.corp.local')  # F5 BIG-IP management IPs
-$F5Port        = 443                                      # Management port
+    [int]$ApiPort = 443,
 
-# WUG-only settings (ignored in standalone mode)
-$WUGServer     = '192.168.1.250'
+    [string]$WUGServer = '192.168.1.250',
+
+    [PSCredential]$WUGCredential,
+
+    [string]$OutputPath,
+
+    [switch]$NonInteractive
+)
+
+# --- Output directory (persistent default for scheduled runs) -----------------
+if (-not $OutputPath) {
+    if ($NonInteractive) {
+        $OutputPath = Join-Path $env:LOCALAPPDATA 'DiscoveryHelpers\Output'
+    } else {
+        $OutputPath = $env:TEMP
+    }
+}
+if (-not (Test-Path $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null }
+$OutputDir = $OutputPath
+
+# --- Configuration (from parameters) -----------------------------------------
+$F5Hosts = $Target
+$F5Port  = $ApiPort
 
 # --- Load helpers (works from any directory) ----------------------------------
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 . (Join-Path $scriptDir 'DiscoveryHelpers.ps1')
 . (Join-Path $scriptDir 'DiscoveryProvider-F5.ps1')
 
+# Load dynamic dashboard generator
+$dynDashPath = Join-Path (Split-Path $scriptDir -Parent) 'reports\Export-DynamicDashboardHtml.ps1'
+if (Test-Path $dynDashPath) { . $dynDashPath }
+
 # ==============================================================================
-# STANDALONE MODE — No WUG needed, runs anywhere PowerShell 5.1+ runs
+# STEP 1: Credential — resolve from vault or prompt
 # ==============================================================================
-if ($Mode -eq 'Standalone') {
+Write-Host "=== F5 BIG-IP Discovery ===" -ForegroundColor Cyan
+Write-Host "Targets: $($F5Hosts -join ', ')" -ForegroundColor Cyan
+Write-Host ""
 
-    Write-Host "=== F5 Discovery (Standalone) ===" -ForegroundColor Cyan
-    Write-Host "Targets: $($F5Hosts -join ', ')" -ForegroundColor Cyan
-    Write-Host ""
-
-    # Discover — just queries what's on the F5 and returns a plan
-    $plan = Invoke-Discovery -ProviderName 'F5' `
-        -Target $F5Hosts `
-        -ApiPort $F5Port
-
-    if (-not $plan -or $plan.Count -eq 0) {
-        Write-Warning "No items discovered."
-        return
-    }
-
-    # Review
-    Write-Host "Discovered $($plan.Count) items:" -ForegroundColor Green
-    $plan | Export-DiscoveryPlan -Format Table
-
-    # Export options — pick any or all:
-    # $plan | Export-DiscoveryPlan -Format JSON -Path '.\f5-discovery.json'
-    # $plan | Export-DiscoveryPlan -Format CSV  -Path '.\f5-discovery.csv'
-    # $plan | Export-DiscoveryPlan -Format Object | Out-GridView
-
-    Write-Host ""
-    Write-Host "Done. Use Export-DiscoveryPlan for JSON/CSV output." -ForegroundColor Cyan
+$credSplat = @{ Name = "F5.$($F5Hosts[0]).Credential"; CredType = 'PSCredential'; ProviderLabel = 'F5' }
+if ($NonInteractive) { $credSplat.NonInteractive = $true }
+elseif ($Action) { $credSplat.AutoUse = $true }
+$F5Cred = Resolve-DiscoveryCredential @credSplat
+if (-not $F5Cred) {
+    Write-Error 'No F5 credentials available. Exiting.'
     return
 }
 
 # ==============================================================================
-# WUG MODE — One command does everything
+# STEP 2: Discover — query F5 iControl REST API
 # ==============================================================================
-if ($Mode -eq 'WUG') {
+Write-Host ""
+Write-Host "Querying F5 at $($F5Hosts -join ', ')..." -ForegroundColor Cyan
 
-    Import-Module WhatsUpGoldPS
+$plan = Invoke-Discovery -ProviderName 'F5' `
+    -Target $F5Hosts `
+    -ApiPort $F5Port
 
-    # Connect to WUG (prompts for WUG admin creds)
-    $wugCred = Get-Credential -Message "WhatsUp Gold credentials"
-    Connect-WUGServer -serverUri $WUGServer -Credential $wugCred -IgnoreSSLErrors
+if (-not $plan -or $plan.Count -eq 0) {
+    Write-Warning "No items discovered. Check F5 connectivity and credentials."
+    return
+}
 
-    # Start-WUGDiscovery handles everything:
-    #   - Checks DPAPI vault for F5 creds, prompts with masked input if missing
-    #   - Adds F5 devices to WUG if they don't exist
-    #   - Creates REST API credential in WUG and assigns to each device
-    #   - Runs discovery and creates all monitors
-    #   - Re-runs are fully automatic (no prompts, skips existing monitors)
-    Start-WUGDiscovery -ProviderName 'F5' `
-        -Target $F5Hosts `
-        -ApiPort $F5Port `
-        -PollingIntervalSeconds 300 `
-        -PerfPollingIntervalMinutes 5
+Write-Host "Discovered $($plan.Count) items." -ForegroundColor Green
 
+# ==============================================================================
+# STEP 3: Show the plan summary
+# ==============================================================================
+$devicePlan = [ordered]@{}
+foreach ($item in $plan) {
+    $key = $item.DeviceName
+    if (-not $devicePlan.ContainsKey($key)) {
+        $devicePlan[$key] = @{ Name = $key; IP = $item.DeviceIP; Items = @() }
+    }
+    $devicePlan[$key].Items += $item
+}
+
+Write-Host ""
+Write-Host "Device Plan:" -ForegroundColor White
+foreach ($key in $devicePlan.Keys) {
+    $dev = $devicePlan[$key]
+    $activeCount = @($dev.Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' }).Count
+    $perfCount   = @($dev.Items | Where-Object { $_.ItemType -eq 'PerformanceMonitor' }).Count
+    Write-Host "  $($dev.Name) ($($dev.IP))  Active=$activeCount  Perf=$perfCount" -ForegroundColor Cyan
+}
+
+# ==============================================================================
+# STEP 4: Action menu
+# ==============================================================================
+$choice = $null
+if ($Action) {
+    switch ($Action) {
+        'PushToWUG' { $choice = '1' }
+        'ExportJSON' { $choice = '2' }
+        'ExportCSV'  { $choice = '3' }
+        'ShowTable'  { $choice = '4' }
+        'Dashboard'  { $choice = '5' }
+        'None'       { $choice = '6' }
+    }
+}
+
+if (-not $choice -and $NonInteractive) {
+    $choice = '5'  # Default to Dashboard for non-interactive
+}
+
+if (-not $choice) {
     Write-Host ""
-    Write-Host "Done. Re-run anytime to discover new F5 items." -ForegroundColor Cyan
+    Write-Host "What would you like to do?" -ForegroundColor Cyan
+    Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + monitors)"
+    Write-Host "  [2] Export plan to JSON file"
+    Write-Host "  [3] Export plan to CSV file"
+    Write-Host "  [4] Show full plan table"
+    Write-Host "  [5] Generate F5 HTML dashboard"
+    Write-Host "  [6] Exit (do nothing)"
+    Write-Host ""
+    $choice = Read-Host -Prompt "Choice [1-6]"
+}
+
+switch ($choice) {
+    '1' {
+        # ----------------------------------------------------------------
+        # Push to WUG
+        # ----------------------------------------------------------------
+        Import-Module WhatsUpGoldPS
+
+        if ($WUGCredential) {
+            $wugCred = $WUGCredential
+        }
+        elseif ($NonInteractive) {
+            $wugResolved = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -NonInteractive
+            if (-not $wugResolved) {
+                Write-Error 'No WUG credentials in vault. Run interactively first to cache them, or pass -WUGCredential.'
+                return
+            }
+            $wugCred = $wugResolved.Credential
+            if ($wugResolved.Server) { $WUGServer = $wugResolved.Server }
+        }
+        else {
+            $wugCred = Get-Credential -Message "WhatsUp Gold credentials"
+        }
+        Connect-WUGServer -serverUri $WUGServer -Credential $wugCred -IgnoreSSLErrors
+
+        Start-WUGDiscovery -ProviderName 'F5' `
+            -Target $F5Hosts `
+            -ApiPort $F5Port `
+            -PollingIntervalSeconds 300 `
+            -PerfPollingIntervalMinutes 5
+
+        Write-Host ""
+        Write-Host "Done. Re-run anytime to discover new F5 items." -ForegroundColor Cyan
+    }
+    '2' {
+        # ----------------------------------------------------------------
+        # Export JSON
+        # ----------------------------------------------------------------
+        $jsonPath = Join-Path $OutputDir "F5-Plan-$(Get-Date -Format yyyyMMdd-HHmmss).json"
+        $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath
+        Write-Host "JSON exported: $jsonPath" -ForegroundColor Green
+    }
+    '3' {
+        # ----------------------------------------------------------------
+        # Export CSV
+        # ----------------------------------------------------------------
+        $csvPath = Join-Path $OutputDir "F5-Plan-$(Get-Date -Format yyyyMMdd-HHmmss).csv"
+        $plan | Export-DiscoveryPlan -Format CSV -Path $csvPath
+        Write-Host "CSV exported: $csvPath" -ForegroundColor Green
+    }
+    '4' {
+        # ----------------------------------------------------------------
+        # Show table
+        # ----------------------------------------------------------------
+        $plan | Export-DiscoveryPlan -Format Table
+    }
+    '5' {
+        # ----------------------------------------------------------------
+        # Generate F5 HTML Dashboard
+        # ----------------------------------------------------------------
+        Write-Host ""
+        Write-Host "Building F5 dashboard from discovery data..." -ForegroundColor Cyan
+
+        $dashboardRows = @()
+        foreach ($key in $devicePlan.Keys) {
+            $dev = $devicePlan[$key]
+            $activeItems = @($dev.Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' })
+            $perfItems   = @($dev.Items | Where-Object { $_.ItemType -eq 'PerformanceMonitor' })
+
+            foreach ($item in ($activeItems + $perfItems)) {
+                $monType = $item.Attributes['F5.MonitorType']
+                if (-not $monType) { $monType = $item.Name -replace '\s*\[.*\]$', '' }
+
+                $dashboardRows += [PSCustomObject]@{
+                    Device         = $dev.Name
+                    IP             = $dev.IP
+                    Monitor        = $monType
+                    Type           = $item.ItemType
+                    Status         = 'Discovered'
+                    LastDiscovery  = (Get-Date).ToString('yyyy-MM-dd HH:mm')
+                }
+            }
+        }
+
+        if ($dashboardRows.Count -eq 0) {
+            Write-Warning "No data to generate dashboard."
+        }
+        else {
+            $dashPath = Join-Path $OutputDir 'F5-Dashboard.html'
+
+            if (Get-Command -Name 'Export-DynamicDashboardHtml' -ErrorAction SilentlyContinue) {
+                Export-DynamicDashboardHtml -Data $dashboardRows `
+                    -OutputPath $dashPath `
+                    -ReportTitle 'F5 BIG-IP Discovery Dashboard' `
+                    -CardField 'Device','Type' `
+                    -StatusField 'Status'
+            }
+            elseif (Get-Command -Name 'Export-F5DashboardHtml' -ErrorAction SilentlyContinue) {
+                Export-F5DashboardHtml -DashboardData $dashboardRows `
+                    -OutputPath $dashPath `
+                    -ReportTitle 'F5 BIG-IP Discovery Dashboard'
+            }
+            else {
+                Write-Warning "No dashboard function available. Export as JSON instead."
+                $jsonPath = Join-Path $OutputDir "F5-Plan-$(Get-Date -Format yyyyMMdd-HHmmss).json"
+                $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath
+                Write-Host "JSON exported: $jsonPath" -ForegroundColor Green
+                return
+            }
+
+            Write-Host ""
+            Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
+            Write-Host "  Devices: $($devicePlan.Count)  |  Monitors: $($dashboardRows.Count)" -ForegroundColor White
+
+            # Try to copy to WUG NmConsole
+            $nmConsolePaths = @(
+                "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole"
+                "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole"
+            )
+            $nmConsolePath = $nmConsolePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($nmConsolePath) {
+                $wugDashPath = Join-Path $nmConsolePath 'F5-Dashboard.html'
+                try {
+                    Copy-Item -Path $dashPath -Destination $wugDashPath -Force
+                    Write-Host "Copied to WUG: $wugDashPath" -ForegroundColor Green
+                    Write-Host "  Access via WUG web UI: /NmConsole/F5-Dashboard.html" -ForegroundColor Cyan
+                }
+                catch {
+                    Write-Warning "Could not copy to NmConsole (run as admin?): $_"
+                }
+            }
+        }
+    }
+    '6' {
+        Write-Host "Exiting — no action taken." -ForegroundColor Yellow
+    }
+    default {
+        Write-Host "Invalid choice." -ForegroundColor Red
+    }
 }
 
 # SIG # Begin signature block

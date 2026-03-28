@@ -35,16 +35,19 @@
 # ============================================================
 <#
 .SYNOPSIS
-    Creates a performance monitor in the WhatsUp Gold library and assigns it to a device.
+    Creates a performance monitor in the WhatsUp Gold library, and optionally assigns it to a device.
 
 .DESCRIPTION
     Add-WUGPerformanceMonitor creates a performance monitor of the specified type in the
-    WhatsUp Gold monitor library, then assigns it to the target device. Each monitor type
-    has its own parameter set with explicit named parameters for each property bag field.
-    Required fields are mandatory parameters; optional fields have sensible defaults.
+    WhatsUp Gold monitor library. When DeviceId is provided, the monitor is also assigned
+    to the target device. When DeviceId is omitted, the monitor is created in the library
+    only. Each monitor type has its own parameter set with explicit named parameters for
+    each property bag field. Required fields are mandatory parameters; optional fields
+    have sensible defaults.
 
 .PARAMETER DeviceId
-    The ID of the device to assign the performance monitor to. Accepts pipeline input
+    The ID of the device to assign the performance monitor to. When omitted, the monitor
+    is created in the library only without device assignment. Accepts pipeline input
     by property name.
 
 .PARAMETER Type
@@ -264,7 +267,7 @@ function Add-WUGPerformanceMonitor {
     [CmdletBinding(DefaultParameterSetName = 'Snmp', SupportsShouldProcess = $true)]
     param(
         # -- Common parameters (all parameter sets) ---------------------------
-        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(ValueFromPipelineByPropertyName = $true)]
         [Alias('id')]
         [int]$DeviceId,
 
@@ -562,7 +565,8 @@ function Add-WUGPerformanceMonitor {
     process {
         # Auto-generate name if not supplied
         if (-not $Name) {
-            $Name = "PerfMon-${Type}-Device${DeviceId}-$(Get-Date -Format 'yyyyMMddHHmmss')"
+            $suffix = if ($DeviceId) { "Device${DeviceId}" } else { 'Library' }
+            $Name = "PerfMon-${Type}-${suffix}-$(Get-Date -Format 'yyyyMMddHHmmss')"
         }
 
         Write-Verbose "Creating $Type performance monitor: $Name"
@@ -582,7 +586,8 @@ function Add-WUGPerformanceMonitor {
         $jsonPayload = $payload | ConvertTo-Json -Compress -Depth 5
         Write-Debug "Create payload: $jsonPayload"
 
-        if (-not $PSCmdlet.ShouldProcess("$Type performance monitor '$Name' on device $DeviceId", 'Create and assign performance monitor')) { return }
+        $targetDesc = if ($DeviceId) { "$Type performance monitor '$Name' on device $DeviceId" } else { "$Type performance monitor '$Name' in library" }
+        if (-not $PSCmdlet.ShouldProcess($targetDesc, 'Create performance monitor')) { return }
 
         # Step 1: Create the performance monitor in the library
         $newMonitorId = $null
@@ -606,7 +611,19 @@ function Add-WUGPerformanceMonitor {
             return
         }
 
-        # Step 2: Assign the monitor to the device
+        # Step 2: Assign the monitor to the device (if DeviceId was provided)
+        if (-not $DeviceId) {
+            Write-Verbose "No DeviceId specified — monitor '$Name' created in library only (ID: $newMonitorId)."
+            Write-Output ([PSCustomObject]@{
+                DeviceId    = $null
+                MonitorType = $Type
+                MonitorName = $Name
+                MonitorId   = $newMonitorId
+                Success     = $true
+            })
+            return
+        }
+
         $assignUri  = "$($global:WhatsUpServerBaseURI)/api/v1/devices/${DeviceId}/monitors/-"
         $assignBody = @{
             type          = "performance"

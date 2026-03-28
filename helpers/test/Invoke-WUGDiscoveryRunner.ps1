@@ -226,7 +226,7 @@ function Export-TestResultsHtml {
 $ProviderConfig = [ordered]@{
     AWS = @{
         Toggle        = [ref]$RunAWS
-        Targets       = @('us-east-1')              # Region list (not IPs)
+        Targets       = @('all')                     # Scan all enabled regions
         Port          = $null                        # N/A for cloud
         Protocol      = $null
         VaultName     = 'AWS.Credential'
@@ -262,7 +262,7 @@ $ProviderConfig = [ordered]@{
         Modules       = @()
         HelperFile    = 'F5'
         ProviderFile  = 'F5'
-        DashboardFunc = 'Export-F5DashboardHtml'
+        DashboardFunc = 'Export-F5DiscoveryDashboardHtml'
         DashboardFile = 'F5-Dashboard.html'
         GetDashData   = $null
     }
@@ -276,8 +276,8 @@ $ProviderConfig = [ordered]@{
         Modules       = @()
         HelperFile    = 'Fortinet'
         ProviderFile  = 'Fortinet'
-        DashboardFunc = $null                         # Fortinet has its own multi-dashboard pattern
-        DashboardFile = $null
+        DashboardFunc = 'Export-FortinetDiscoveryDashboardHtml'
+        DashboardFile = 'Fortinet-Dashboard.html'
         GetDashData   = $null
     }
     HyperV = @{

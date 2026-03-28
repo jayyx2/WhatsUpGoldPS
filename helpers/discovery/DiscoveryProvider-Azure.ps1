@@ -120,6 +120,10 @@ Register-DiscoveryProvider -Name 'Azure' `
         }
 
         $resourceMap = @{}  # resourceId -> @{ ... }
+        $healthTypeSupport = @{}   # FullType -> $true/$false
+        $healthFallbackApi = @{}   # FullType -> API version string for ARM GET
+        $healthJsonProp    = @{}   # FullType -> property name found in response (e.g. 'availabilityState','enabled','provisioningState')
+        $providerCache = @{}       # namespace -> provider info (for API version lookup)
 
         try {
             Write-Host "  Listing subscriptions..." -ForegroundColor DarkGray
@@ -204,6 +208,134 @@ Register-DiscoveryProvider -Name 'Azure' `
                             Sku          = $r.Sku
                             Tags         = if ($r.Tags) { $r.Tags } else { '' }
                         }
+
+                        # Check Resource Health support for this type (once per type)
+                        if (-not $healthTypeSupport.ContainsKey($r.ResourceType)) {
+                            $healthTestUrl = "https://management.azure.com$($r.ResourceId)/providers/Microsoft.ResourceHealth/availabilityStatuses/current?api-version=2023-07-01-preview"
+                            try {
+                                $healthResp = $null
+                                if ($useRest) {
+                                    $healthResp = Invoke-AzureREST -Uri $healthTestUrl
+                                }
+                                else {
+                                    $azResp = Invoke-AzRestMethod -Uri $healthTestUrl -Method GET -ErrorAction Stop
+                                    if ($azResp.StatusCode -ge 400) { throw $azResp.Content }
+                                    $healthResp = $azResp.Content | ConvertFrom-Json
+                                }
+                                $healthTypeSupport[$r.ResourceType] = $true
+
+                                # Probe the response to find which property actually exists
+                                if ($healthResp -and $healthResp.properties) {
+                                    $props = $healthResp.properties
+                                    if ($null -ne $props.availabilityState) {
+                                        $healthJsonProp[$r.ResourceType] = 'availabilityState'
+                                    } elseif ($null -ne $props.enabled) {
+                                        $healthJsonProp[$r.ResourceType] = 'enabled'
+                                    } elseif ($null -ne $props.state) {
+                                        $healthJsonProp[$r.ResourceType] = 'state'
+                                    } elseif ($null -ne $props.provisioningState) {
+                                        $healthJsonProp[$r.ResourceType] = 'provisioningState'
+                                    } elseif ($null -ne $props.dailyMaxActiveDevices) {
+                                        $healthJsonProp[$r.ResourceType] = 'dailyMaxActiveDevices'
+                                    }
+                                    if ($healthJsonProp.ContainsKey($r.ResourceType)) {
+                                        Write-Verbose "  Resource Health property for $($r.ResourceType): $($healthJsonProp[$r.ResourceType])"
+                                    }
+                                }
+                            }
+                            catch {
+                                $errMsg = "$_"
+                                if ($errMsg -match 'UnsupportedResourceType|ResourceTypeNotSupported') {
+                                    $healthTypeSupport[$r.ResourceType] = $false
+                                    Write-Verbose "  Resource Health not supported: $($r.ResourceType)"
+
+                                    # Look up provider's latest stable API version for the ARM fallback URL
+                                    $nsParts = $r.ResourceType -split '/'
+                                    $ns = $nsParts[0]
+                                    $rtName = ($nsParts[1..($nsParts.Count - 1)] -join '/')
+                                    if (-not $providerCache.ContainsKey($ns)) {
+                                        try {
+                                            if ($useRest) {
+                                                $providerCache[$ns] = Invoke-AzureREST -Uri "https://management.azure.com/subscriptions/$($sub.SubscriptionId)/providers/${ns}" -ApiVersion '2021-04-01'
+                                            }
+                                            else {
+                                                $providerCache[$ns] = Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction Stop
+                                            }
+                                        }
+                                        catch {
+                                            Write-Verbose "  Could not query provider $ns for API versions: $_"
+                                            $providerCache[$ns] = $null
+                                        }
+                                    }
+
+                                    $provInfo = $providerCache[$ns]
+                                    $apiVer = $null
+                                    if ($provInfo) {
+                                        if ($useRest) {
+                                            $rtInfo = @($provInfo.resourceTypes | Where-Object { $_.resourceType -eq $rtName })
+                                        }
+                                        else {
+                                            $rtInfo = @($provInfo.ResourceTypes | Where-Object { $_.ResourceTypeName -eq $rtName })
+                                        }
+                                        if ($rtInfo.Count -gt 0) {
+                                            if ($useRest) { $apiVersions = @($rtInfo[0].apiVersions) }
+                                            else          { $apiVersions = @($rtInfo[0].ApiVersions) }
+                                            $stable = @($apiVersions | Where-Object { $_ -notmatch 'preview' })
+                                            if ($stable.Count -gt 0)      { $apiVer = $stable[0] }
+                                            elseif ($apiVersions.Count -gt 0) { $apiVer = $apiVersions[0] }
+                                        }
+                                    }
+                                    if ($apiVer) {
+                                        $healthFallbackApi[$r.ResourceType] = $apiVer
+                                        Write-Verbose "  ARM fallback API version for $($r.ResourceType): $apiVer"
+                                    }
+
+                                    # Probe the ARM resource directly to find which property exists
+                                    $probeApi = if ($apiVer) { $apiVer } else { '2021-04-01' }
+                                    try {
+                                        $armResp = $null
+                                        $armProbeUrl = "https://management.azure.com$($r.ResourceId)?api-version=$probeApi"
+                                        if ($useRest) {
+                                            $armResp = Invoke-AzureREST -Uri $armProbeUrl
+                                        }
+                                        else {
+                                            $azArmResp = Invoke-AzRestMethod -Uri $armProbeUrl -Method GET -ErrorAction Stop
+                                            if ($azArmResp.StatusCode -lt 400) {
+                                                $armResp = $azArmResp.Content | ConvertFrom-Json
+                                            }
+                                        }
+                                        if ($armResp -and $armResp.properties) {
+                                            $armProps = $armResp.properties
+                                            # Check in priority order: availabilityState > enabled > state > provisioningState > dailyMaxActiveDevices
+                                            if ($null -ne $armProps.availabilityState) {
+                                                $healthJsonProp[$r.ResourceType] = 'availabilityState'
+                                            } elseif ($null -ne $armProps.enabled) {
+                                                $healthJsonProp[$r.ResourceType] = 'enabled'
+                                            } elseif ($null -ne $armProps.state) {
+                                                $healthJsonProp[$r.ResourceType] = 'state'
+                                            } elseif ($null -ne $armProps.provisioningState) {
+                                                $healthJsonProp[$r.ResourceType] = 'provisioningState'
+                                            } elseif ($null -ne $armProps.dailyMaxActiveDevices) {
+                                                $healthJsonProp[$r.ResourceType] = 'dailyMaxActiveDevices'
+                                            }
+                                            if ($healthJsonProp.ContainsKey($r.ResourceType)) {
+                                                Write-Verbose "  ARM fallback property for $($r.ResourceType): $($healthJsonProp[$r.ResourceType])"
+                                            } else {
+                                                Write-Verbose "  ARM fallback: no known health property found for $($r.ResourceType)"
+                                            }
+                                        }
+                                    }
+                                    catch {
+                                        Write-Verbose "  ARM probe failed for $($r.ResourceType): $_"
+                                    }
+                                }
+                                else {
+                                    # Other error (auth, rate-limit) — assume supported
+                                    $healthTypeSupport[$r.ResourceType] = $true
+                                    Write-Verbose "  Resource Health check error for $($r.ResourceType) (assuming supported): $errMsg"
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -213,14 +345,397 @@ Register-DiscoveryProvider -Name 'Azure' `
         }
 
         Write-Host "  Total resources: $($resourceMap.Count)" -ForegroundColor DarkGray
+        $unsupCount = @($healthTypeSupport.Keys | Where-Object { -not $healthTypeSupport[$_] }).Count
+        $supCount = $healthTypeSupport.Count - $unsupCount
+        if ($unsupCount -gt 0) {
+            Write-Host "  Resource Health: $supCount/$($healthTypeSupport.Count) types supported ($unsupCount will use ARM fallback)" -ForegroundColor DarkGray
+        }
 
         # ================================================================
-        # Phase 2: Build discovery plan
+        # Phase 2: Enumerate metrics per resource (optional)
+        # ================================================================
+        $enumMetrics = $true
+        if ($ctx.Options -and $ctx.Options.ContainsKey('EnumMetrics')) {
+            $enumMetrics = [bool]$ctx.Options.EnumMetrics
+        }
+
+        $metricsMap = @{}  # resourceId -> @( @{Name;Display;Unit;Agg;Type} )
+        if ($enumMetrics) {
+            Write-Host "  Enumerating metric definitions..." -ForegroundColor DarkGray
+            $resIds = @($resourceMap.Keys | Sort-Object)
+            $resCount = 0
+            foreach ($resId in $resIds) {
+                $resCount++
+                $res = $resourceMap[$resId]
+                Write-Progress -Activity 'Azure Metric Enumeration' `
+                    -Status "$resCount / $($resIds.Count) - $($res.Name)" `
+                    -PercentComplete ([Math]::Round(($resCount / $resIds.Count) * 100))
+                try {
+                    $defs = @()
+                    if ($useRest) {
+                        $defUri = "https://management.azure.com${resId}/providers/Microsoft.Insights/metricDefinitions"
+                        $defs = @(Invoke-AzureREST -Uri $defUri -ApiVersion '2024-02-01')
+                    }
+                    else {
+                        $defs = @(Get-AzMetricDefinition -ResourceId $resId -ErrorAction Stop)
+                    }
+
+                    $mList = @()
+                    foreach ($def in $defs) {
+                        if ($useRest) {
+                            $mName = $def.name.value
+                            $mDisplay = $def.name.localizedValue
+                            $mUnit = "$($def.unit)"
+                            $mAgg = if ($def.primaryAggregationType) { "$($def.primaryAggregationType)" } else { 'Average' }
+                        }
+                        else {
+                            $mName = $def.Name.Value
+                            $mDisplay = $def.Name.LocalizedValue
+                            $mUnit = "$($def.Unit)"
+                            $mAgg = if ($def.PrimaryAggregationType) { "$($def.PrimaryAggregationType)" } else { 'Average' }
+                        }
+
+                        # Determine if this metric is numeric (performance) or string-based (active)
+                        $isNumeric = $mUnit -notin @('', 'Unspecified') -or $mAgg -in @('Average', 'Total', 'Count', 'Maximum', 'Minimum')
+
+                        $mList += @{
+                            Name        = $mName
+                            DisplayName = $mDisplay
+                            Unit        = $mUnit
+                            Aggregation = $mAgg
+                            IsNumeric   = $isNumeric
+                        }
+                    }
+                    if ($mList.Count -gt 0) {
+                        $metricsMap[$resId] = $mList
+                    }
+                }
+                catch {
+                    Write-Verbose "No metrics for $($res.Name) ($($res.FullType)): $_"
+                }
+            }
+            Write-Progress -Activity 'Azure Metric Enumeration' -Completed
+            $totalMetrics = ($metricsMap.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
+            Write-Host "  Metric definitions: $totalMetrics across $($metricsMap.Count) resources" -ForegroundColor DarkGray
+        }
+
+        # ================================================================
+        # Phase 2.5: Validate metrics return real data
+        # ================================================================
+        # Azure metric definitions include ALL possible metrics for a
+        # resource type, but many never populate data. Query the actual
+        # metrics API with a recent timespan and drop any that return
+        # empty timeseries or all-null data points.
+        if ($metricsMap.Count -gt 0) {
+            Write-Host "  Validating metrics have real data (querying last 24h)..." -ForegroundColor DarkGray
+            $validatedTotal = 0
+            $droppedTotal   = 0
+            $resIdx   = 0
+            $resTotal = $metricsMap.Count
+
+            foreach ($resId in @($metricsMap.Keys)) {
+                $resIdx++
+                $res = $resourceMap[$resId]
+                $resMets = $metricsMap[$resId]
+                Write-Progress -Activity 'Validating Azure Metrics' `
+                    -Status "$resIdx / $resTotal - $($res.Name)" `
+                    -PercentComplete ([Math]::Round(($resIdx / $resTotal) * 100))
+
+                $validMets = [System.Collections.Generic.List[object]]::new()
+
+                # Batch into groups of 20 (Azure API limit per request)
+                for ($batchStart = 0; $batchStart -lt $resMets.Count; $batchStart += 20) {
+                    $batchEnd = [Math]::Min($batchStart + 19, $resMets.Count - 1)
+                    $batch = @($resMets[$batchStart..$batchEnd])
+                    $batchNames = @($batch | ForEach-Object { $_.Name }) -join ','
+
+                    try {
+                        $namesWithData = @{}
+                        # Build lookup of declared aggregation per metric name
+                        $declaredAgg = @{}
+                        foreach ($bm in $batch) {
+                            $aggField = switch ($bm.Aggregation) {
+                                'Average' { 'average' }
+                                'Total'   { 'total' }
+                                'Count'   { 'count' }
+                                'Maximum' { 'maximum' }
+                                'Minimum' { 'minimum' }
+                                default   { 'average' }
+                            }
+                            $declaredAgg[$bm.Name] = $aggField
+                        }
+
+                        if ($useRest) {
+                            # Single batched call for up to 20 metrics
+                            $valUrl = "https://management.azure.com${resId}/providers/Microsoft.Insights/metrics" +
+                                "?api-version=2024-02-01" +
+                                "&metricnames=$([uri]::EscapeDataString($batchNames))" +
+                                "&timespan=P1D&interval=PT1H" +
+                                "&aggregation=Average,Total,Count,Maximum,Minimum"
+                            $metricResults = @(Invoke-AzureREST -Uri $valUrl)
+
+                            foreach ($mr in $metricResults) {
+                                $mrName = $mr.name.value
+                                $mrUnit = "$($mr.unit)"
+                                if ($mr.timeseries -and @($mr.timeseries).Count -gt 0) {
+                                    $tsData = @($mr.timeseries)[0].data
+                                    if ($tsData -and @($tsData).Count -gt 0) {
+                                        # Determine field check order: declared aggregation first, then others
+                                        $prefField = if ($declaredAgg.ContainsKey($mrName)) { $declaredAgg[$mrName] } else { $null }
+                                        $fieldOrder = @('average', 'total', 'maximum', 'minimum', 'count')
+                                        if ($prefField) {
+                                            $fieldOrder = @($prefField) + @($fieldOrder | Where-Object { $_ -ne $prefField })
+                                        }
+
+                                        # Walk backwards to find most recent data point with a numeric value
+                                        for ($di = @($tsData).Count - 1; $di -ge 0; $di--) {
+                                            $dp = @($tsData)[$di]
+                                            $val = $null
+                                            $foundField = $null
+                                            foreach ($fld in $fieldOrder) {
+                                                if ($null -ne $dp.$fld) {
+                                                    $testVal = $dp.$fld
+                                                    if ($testVal -is [double] -or $testVal -is [int] -or $testVal -is [long] -or $testVal -is [decimal] -or $testVal -is [float] -or $testVal -is [single]) {
+                                                        $val = $testVal
+                                                        $foundField = $fld
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                            if ($null -ne $val) {
+                                                $namesWithData[$mrName] = @{
+                                                    Value     = $val
+                                                    Timestamp = "$($dp.timeStamp)"
+                                                    Unit      = $mrUnit
+                                                    DataField = $foundField
+                                                }
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        else {
+                            # Az module path — query each metric individually
+                            $startTime = (Get-Date).AddDays(-1)
+                            $endTime   = Get-Date
+                            foreach ($bm in $batch) {
+                                try {
+                                    $azMetric = Get-AzMetric -ResourceId $resId -MetricName $bm.Name `
+                                        -TimeGrain 01:00:00 -StartTime $startTime -EndTime $endTime `
+                                        -AggregationType $bm.Aggregation -ErrorAction Stop
+                                    if ($azMetric.Data) {
+                                        # Determine field check order: declared aggregation first, then others
+                                        $prefField = if ($declaredAgg.ContainsKey($bm.Name)) { $declaredAgg[$bm.Name] } else { $null }
+                                        $azFieldOrder = @('average', 'total', 'maximum', 'minimum', 'count')
+                                        if ($prefField) {
+                                            $azFieldOrder = @($prefField) + @($azFieldOrder | Where-Object { $_ -ne $prefField })
+                                        }
+                                        # Az module returns PascalCase properties; map lowercase to PascalCase
+                                        $azFieldMap = @{ 'average' = 'Average'; 'total' = 'Total'; 'maximum' = 'Maximum'; 'minimum' = 'Minimum'; 'count' = 'Count' }
+                                        for ($di = @($azMetric.Data).Count - 1; $di -ge 0; $di--) {
+                                            $dp = @($azMetric.Data)[$di]
+                                            $val = $null
+                                            $foundField = $null
+                                            foreach ($fld in $azFieldOrder) {
+                                                $propName = $azFieldMap[$fld]
+                                                if ($null -ne $dp.$propName) {
+                                                    $testVal = $dp.$propName
+                                                    if ($testVal -is [double] -or $testVal -is [int] -or $testVal -is [long] -or $testVal -is [decimal] -or $testVal -is [float] -or $testVal -is [single]) {
+                                                        $val = $testVal
+                                                        $foundField = $fld
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                            if ($null -ne $val) {
+                                                $namesWithData[$bm.Name] = @{
+                                                    Value     = $val
+                                                    Timestamp = "$($dp.TimeStamp)"
+                                                    Unit      = "$($azMetric.Unit)"
+                                                    DataField = $foundField
+                                                }
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                                catch {
+                                    Write-Verbose "Az metric query failed for $($bm.Name): $_"
+                                }
+                            }
+                        }
+
+                        foreach ($bm in $batch) {
+                            if ($namesWithData.ContainsKey($bm.Name)) {
+                                $valInfo = $namesWithData[$bm.Name]
+                                $bm['LastValue']     = $valInfo.Value
+                                $bm['LastTimestamp']  = $valInfo.Timestamp
+                                if ($valInfo.Unit) { $bm['Unit'] = $valInfo.Unit }
+                                if ($valInfo.DataField) { $bm['DataField'] = $valInfo.DataField }
+                                $validMets.Add($bm)
+                            }
+                        }
+                    }
+                    catch {
+                        # API error on entire batch — skip; only confirmed-numeric metrics pass
+                        Write-Verbose "Metric validation failed for batch on $($res.Name): $_"
+                    }
+                }
+
+                $dropped = $resMets.Count - $validMets.Count
+                $droppedTotal += $dropped
+                if ($validMets.Count -gt 0) {
+                    $metricsMap[$resId] = @($validMets)
+                    $validatedTotal += $validMets.Count
+                }
+                else {
+                    $metricsMap.Remove($resId)
+                }
+                if ($dropped -gt 0) {
+                    Write-Verbose "  $($res.Name): $($validMets.Count)/$($resMets.Count) metrics have data ($dropped dropped)"
+                }
+            }
+
+            Write-Progress -Activity 'Validating Azure Metrics' -Completed
+            Write-Host "  Validated: $validatedTotal metrics with data, $droppedTotal dropped (no data in 24h)" -ForegroundColor DarkGray
+        }
+
+        # ================================================================
+        # Phase 2.6: Strict validation — verify WUG poll URL returns data
+        # ================================================================
+        # WUG polls performance monitors every 10 minutes. Validate using the
+        # EXACT URL pattern WUG will use: PT10M timespan, PT5M interval (returns
+        # 2 data points). The metric must have $.value[0].timeseries[0].data[0].{field}
+        # as a numeric value. Query with the SINGLE aggregation type (not all 5)
+        # because Azure omits the field when only one is requested and there's no data.
+        if ($metricsMap.Count -gt 0 -and $useRest) {
+            Write-Host "  Live-probing metrics (verifying WUG 10-min poll pattern)..." -ForegroundColor DarkGray
+            $liveDropped = 0
+            $liveKept    = 0
+            $resIdx   = 0
+            $resTotal = $metricsMap.Count
+
+            foreach ($resId in @($metricsMap.Keys)) {
+                $resIdx++
+                $res = $resourceMap[$resId]
+                $resMets = $metricsMap[$resId]
+                Write-Progress -Activity 'Live-probing metrics' `
+                    -Status "$resIdx / $resTotal - $($res.Name)" `
+                    -PercentComplete ([Math]::Round(($resIdx / $resTotal) * 100))
+
+                $confirmedMets = [System.Collections.Generic.List[object]]::new()
+                $resDropped = [System.Collections.Generic.List[string]]::new()
+
+                # Group metrics by their aggregation type so we can batch per-aggregation
+                $aggGroups = @{}  # aggType -> list of metrics
+                foreach ($bm in $resMets) {
+                    $aggType = if ($bm.ContainsKey('DataField') -and $bm.DataField) {
+                        switch ($bm.DataField) {
+                            'average' { 'Average' }
+                            'total'   { 'Total' }
+                            'count'   { 'Count' }
+                            'maximum' { 'Maximum' }
+                            'minimum' { 'Minimum' }
+                            default   { 'Average' }
+                        }
+                    } else { 'Average' }
+                    if (-not $aggGroups.ContainsKey($aggType)) {
+                        $aggGroups[$aggType] = [System.Collections.Generic.List[object]]::new()
+                    }
+                    $aggGroups[$aggType].Add($bm)
+                }
+
+                foreach ($aggType in $aggGroups.Keys) {
+                    $aggMets = $aggGroups[$aggType]
+
+                    # Batch into groups of 20 (Azure API limit)
+                    for ($batchStart = 0; $batchStart -lt $aggMets.Count; $batchStart += 20) {
+                        $batchEnd = [Math]::Min($batchStart + 19, $aggMets.Count - 1)
+                        $batch = @($aggMets[$batchStart..$batchEnd])
+                        $batchNames = @($batch | ForEach-Object { $_.Name }) -join ','
+
+                        try {
+                            # Query with EXACT WUG poll pattern: PT10M window, PT5M interval, single aggregation
+                            $probeUrl = "https://management.azure.com${resId}/providers/Microsoft.Insights/metrics" +
+                                "?api-version=2024-02-01" +
+                                "&metricnames=$([uri]::EscapeDataString($batchNames))" +
+                                "&timespan=PT10M&interval=PT5M" +
+                                "&aggregation=$aggType"
+                            $probeResults = @(Invoke-AzureREST -Uri $probeUrl)
+
+                            $passedProbe = @{}
+                            foreach ($mr in $probeResults) {
+                                $mrName = $mr.name.value
+                                if ($mr.timeseries -and @($mr.timeseries).Count -gt 0) {
+                                    $tsData = @($mr.timeseries)[0].data
+                                    if ($tsData -and @($tsData).Count -gt 0) {
+                                        $matchedMet = $batch | Where-Object { $_.Name -eq $mrName } | Select-Object -First 1
+                                        $targetField = if ($matchedMet -and $matchedMet.ContainsKey('DataField')) { $matchedMet.DataField } else { $null }
+                                        if ($targetField) {
+                                            $dp0 = @($tsData)[0]
+                                            # Verify field explicitly exists on the object
+                                            $fieldExists = $dp0.PSObject.Properties.Name -contains $targetField
+                                            if ($fieldExists) {
+                                                $testVal = $dp0.$targetField
+                                                if ($null -ne $testVal -and ($testVal -is [double] -or $testVal -is [int] -or $testVal -is [long] -or $testVal -is [decimal] -or $testVal -is [float] -or $testVal -is [single])) {
+                                                    $passedProbe[$mrName] = $true
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            foreach ($bm in $batch) {
+                                if ($passedProbe.ContainsKey($bm.Name)) {
+                                    $confirmedMets.Add($bm)
+                                } else {
+                                    $resDropped.Add("$($bm.DisplayName) [$aggType -> $($bm.DataField)]")
+                                }
+                            }
+                        }
+                        catch {
+                            Write-Verbose "  Probe failed for batch on $($res.Name) ($aggType): $_"
+                            # On error, keep metrics (benefit of the doubt)
+                            foreach ($bm in $batch) {
+                                $confirmedMets.Add($bm)
+                            }
+                        }
+                    }
+                }
+
+                $dropped = $resMets.Count - $confirmedMets.Count
+                $liveDropped += $dropped
+                $liveKept += $confirmedMets.Count
+                if ($confirmedMets.Count -gt 0) {
+                    $metricsMap[$resId] = @($confirmedMets)
+                } else {
+                    $metricsMap.Remove($resId)
+                }
+                # Per-resource summary
+                if ($dropped -gt 0) {
+                    Write-Host "    $($res.Name): $($confirmedMets.Count)/$($resMets.Count) passed ($dropped dropped)" -ForegroundColor DarkYellow
+                    foreach ($dName in $resDropped) {
+                        Write-Host "      DROPPED: $dName" -ForegroundColor DarkGray
+                    }
+                } else {
+                    Write-Verbose "  $($res.Name): $($confirmedMets.Count)/$($resMets.Count) all passed"
+                }
+            }
+
+            Write-Progress -Activity 'Live-probing metrics' -Completed
+            Write-Host "  Live probe: $liveKept confirmed, $liveDropped dropped (WUG poll pattern returned no data)" -ForegroundColor DarkGray
+        }
+
+        # ================================================================
+        # Phase 3: Build discovery plan
         # ================================================================
         $baseAttrs = @{
-            'Azure.TenantId' = $tenantId
-            'DiscoveryHelper.Azure' = 'true'
-            'DiscoveryHelper.Azure.LastRun' = (Get-Date).ToUniversalTime().ToString('o')
+            'Vendor'                         = 'Azure'
+            'DiscoveryHelper.Azure'          = 'true'
+            'DiscoveryHelper.Azure.LastRun'  = (Get-Date).ToUniversalTime().ToString('o')
         }
 
         foreach ($resId in @($resourceMap.Keys | Sort-Object)) {
@@ -228,46 +743,142 @@ Register-DiscoveryProvider -Name 'Azure' `
             $resName = $res.Name
 
             $resAttrs = $baseAttrs.Clone()
-            $resAttrs['Azure.DeviceType']    = $res.Type
-            $resAttrs['Azure.ResourceName']  = $resName
-            $resAttrs['Azure.ResourceType']  = $res.FullType
-            $resAttrs['Azure.Location']      = $res.Location
-            $resAttrs['Azure.Subscription']  = $res.Subscription
-            $resAttrs['Azure.SubscriptionId']= $res.SubId
-            $resAttrs['Azure.ResourceGroup'] = $res.RG
-            $resAttrs['Azure.State']         = $res.State
-            if ($res.IP) { $resAttrs['Azure.IPAddress'] = $res.IP }
-            if ($res.Kind) { $resAttrs['Azure.Kind'] = $res.Kind }
-            if ($res.Sku)  { $resAttrs['Azure.Sku']  = $res.Sku }
-            if ($res.Tags) { $resAttrs['Azure.Tags'] = $res.Tags }
-
-            # WUG Cloud Resource Monitor attributes
-            $resAttrs['SYS:AzureResourceID'] = $resId
             $shortType = ($res.FullType -split '/')[-1]
-            $resAttrs['SYS:CloudResourceID'] = "AzureRM/$($res.Location)/$shortType/$($res.SubId)/$resName"
 
+            # WUG-standard attribute names (spaces, not dots)
+            $resAttrs['Azure Subscription ID'] = $res.SubId
+            $resAttrs['Azure Resource Group']   = $res.RG
+            $resAttrs['Azure Location']         = $res.Location
+            $resAttrs['Cloud Type']             = $shortType
+            $resAttrs['ComputedDisplayName']    = $resName
+            $resAttrs['HostName']               = $resName
+
+            # SYS attributes used by Cloud Resource Monitor
+            $resAttrs['SYS:AzureResourceID']   = $resId
+            $resAttrs['SYS:CloudResourceID']   = "AzureRM/$($res.Location)/$shortType/$($res.RG){$($res.SubId)}/$resName"
+
+            # Extra discovery-specific attributes (dot-prefixed)
+            if ($res.State) { $resAttrs['Azure.State'] = $res.State }
+            if ($res.IP)    { $resAttrs['Azure.IPAddress'] = $res.IP }
+            if ($res.Kind)  { $resAttrs['Azure.Kind'] = $res.Kind }
+            if ($res.Sku)   { $resAttrs['Azure.Sku']  = $res.Sku }
+            if ($res.Tags)  { $resAttrs['Azure.Tags'] = $res.Tags }
+
+            # Collect available metric names as an attribute for the device
+            $resMetrics = @()
+            if ($metricsMap.ContainsKey($resId)) {
+                $resMetrics = $metricsMap[$resId]
+                $resAttrs['Azure.MetricCount'] = "$($resMetrics.Count)"
+                $metricNames = @($resMetrics | ForEach-Object { $_.DisplayName }) -join '; '
+                if ($metricNames.Length -gt 4000) { $metricNames = $metricNames.Substring(0, 4000) + '...' }
+                $resAttrs['Azure.AvailableMetrics'] = $metricNames
+            }
+
+            # --- Active monitor: REST API Resource Health check ---
+            # Per-device REST API Active Monitor that queries Azure for resource liveness.
+            # Uses the device's REST API credential (OAuth2 client_credentials) for auth.
+            # Down condition: HTTP error codes OR JSONPath comparison.
+            # ComparisonList uses WUG internal format: JsonPathQuery/AttributeType/ComparisonType
+            # AttributeType 3 = String, ComparisonType 14 = Is Null.
+            # Property is probed during discovery: availabilityState > enabled > state > provisioningState > dailyMaxActiveDevices.
+            # If no property was found during probing, fall back to provisioningState.
+            if ($healthTypeSupport.ContainsKey($res.FullType) -and -not $healthTypeSupport[$res.FullType]) {
+                # ARM resource-exists fallback
+                $fallbackApi = '2021-04-01'
+                if ($healthFallbackApi.ContainsKey($res.FullType)) {
+                    $fallbackApi = $healthFallbackApi[$res.FullType]
+                }
+                $healthUrl = "https://management.azure.com${resId}?api-version=$fallbackApi"
+                $armProp = if ($healthJsonProp.ContainsKey($res.FullType)) { $healthJsonProp[$res.FullType] } else { 'provisioningState' }
+                $healthCompare = "[{`"JsonPathQuery`":`"['properties']['$armProp']`",`"AttributeType`":3,`"ComparisonType`":14}]"
+            }
+            else {
+                # Resource Health endpoint (supported type)
+                $healthUrl = "https://management.azure.com$resId/providers/Microsoft.ResourceHealth/availabilityStatuses/current?api-version=2023-07-01-preview"
+                $rhProp = if ($healthJsonProp.ContainsKey($res.FullType)) { $healthJsonProp[$res.FullType] } else { 'availabilityState' }
+                $healthCompare = "[{`"JsonPathQuery`":`"['properties']['$rhProp']`",`"AttributeType`":3,`"ComparisonType`":14}]"
+            }
             $items += New-DiscoveredItem `
-                -Name "Azure - $($res.Type) Status" `
+                -Name "Azure Health - $resName" `
                 -ItemType 'ActiveMonitor' `
-                -MonitorType 'PowerShell' `
+                -MonitorType 'RestApi' `
                 -MonitorParams @{
-                    Description = "Monitors Azure $($res.Type) $resName state"
+                    RestApiUrl                    = $healthUrl
+                    RestApiMethod                 = 'GET'
+                    RestApiTimeoutMs              = 15000
+                    RestApiUseAnonymous           = '0'
+                    RestApiComparisonList         = $healthCompare
+                    RestApiDownIfResponseCodeIsIn = '[401,403,404,500,502,503]'
                 } `
-                -UniqueKey "Azure:$($res.SubId):${resName}:active:status" `
+                -UniqueKey "Azure:$($res.SubId):${resName}:active:health" `
                 -Attributes $resAttrs `
                 -Tags @('azure', $res.Type, $resName, $res.Location)
 
-            # Performance monitor for resources that support metrics
-            $items += New-DiscoveredItem `
-                -Name "Azure - $($res.Type) Metrics" `
-                -ItemType 'PerformanceMonitor' `
-                -MonitorType 'PowerShell' `
-                -MonitorParams @{
-                    Description = "Azure Monitor metrics for $resName"
-                } `
-                -UniqueKey "Azure:$($res.SubId):${resName}:perf:metrics" `
-                -Attributes $resAttrs `
-                -Tags @('azure', $res.Type, $resName, $res.Location)
+            # --- Performance monitors: one per validated metric ---
+            # Uses REST API performance monitor type with Azure Metrics API URL + JSONPath.
+            # The device's REST API credential (OAuth2 client_credentials) handles auth.
+            # JSONPath uses the actual aggregation field discovered during validation
+            # (e.g. average, total, maximum) — WUG uses $.value[0].timeseries[0].data[0].{field}
+            # Only metrics with a confirmed numeric DataField are included.
+            if ($resMetrics.Count -gt 0) {
+                foreach ($m in $resMetrics) {
+                    $mName = $m.Name
+                    $mDisplay = $m.DisplayName
+
+                    # Only create monitors for metrics where validation confirmed a
+                    # specific aggregation field returned a numeric value.
+                    if (-not ($m.ContainsKey('DataField') -and $m.DataField)) {
+                        Write-Verbose "Skipping metric '$mDisplay' on $resName — no confirmed numeric data field"
+                        continue
+                    }
+                    $jsonField = $m.DataField
+
+                    # Map the data field back to the Azure API aggregation parameter name
+                    $urlAgg = switch ($jsonField) {
+                        'average' { 'Average' }
+                        'total'   { 'Total' }
+                        'count'   { 'Count' }
+                        'maximum' { 'Maximum' }
+                        'minimum' { 'Minimum' }
+                        default   { 'Average' }
+                    }
+
+                    # Build Azure Metrics API URL — PT10M matches WUG's 10-minute poll interval
+                    $metricUrl = "https://management.azure.com${resId}/providers/Microsoft.Insights/metrics" +
+                        "?api-version=2024-02-01" +
+                        "&metricnames=$([uri]::EscapeDataString($mName))" +
+                        "&timespan=PT10M&interval=PT5M" +
+                        "&aggregation=$urlAgg"
+
+                    # JSONPath: $.value[0].timeseries[0].data[0].{field}
+                    $jsonPath = "`$.value[0].timeseries[0].data[0].$jsonField"
+
+                    $mParams = @{
+                        RestApiUrl                = $metricUrl
+                        RestApiJsonPath           = $jsonPath
+                        RestApiHttpMethod         = 'GET'
+                        RestApiHttpTimeoutMs      = '15000'
+                        RestApiUseAnonymousAccess = '0'
+                        # Metadata (excluded from WUG API calls, used by dashboards)
+                        _MetricName               = $mName
+                        _MetricDisplayName        = $mDisplay
+                        _Aggregation              = $urlAgg
+                        _JsonField                = $jsonField
+                    }
+                    if ($m.ContainsKey('LastValue'))    { $mParams['LastValue']     = $m.LastValue }
+                    if ($m.ContainsKey('LastTimestamp')) { $mParams['LastTimestamp']  = $m.LastTimestamp }
+                    if ($m.ContainsKey('Unit'))         { $mParams['MetricUnit']     = $m.Unit }
+
+                    $items += New-DiscoveredItem `
+                        -Name "Azure - $($res.Type) - $resName - $mDisplay" `
+                        -ItemType 'PerformanceMonitor' `
+                        -MonitorType 'RestApi' `
+                        -MonitorParams $mParams `
+                        -UniqueKey "Azure:$($res.SubId):${resName}:perf:$mName" `
+                        -Attributes $resAttrs `
+                        -Tags @('azure', $res.Type, $resName, $mName, $res.Location)
+                }
+            }
         }
 
         return $items

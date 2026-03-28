@@ -2323,14 +2323,21 @@ function Invoke-WUGDiscoverySync {
                     $stats.Skipped++
                 }
                 else {
-                    if ($PSCmdlet.ShouldProcess($monName, "Create $($item.MonitorType) Active Monitor")) {
+                    if ($item.MonitorParams.Count -eq 0) {
+                        Write-Verbose "Skipping creation for '$monName' — no params (built-in monitor expected in library)"
+                        $stats.Skipped++
+                    }
+                    elseif ($PSCmdlet.ShouldProcess($monName, "Create $($item.MonitorType) Active Monitor")) {
                         try {
                             $addParams = @{
                                 Type = $item.MonitorType
                                 Name = $monName
                             }
+                            # Copy monitor params, filtering out non-cmdlet keys
                             foreach ($key in $item.MonitorParams.Keys) {
-                                $addParams[$key] = $item.MonitorParams[$key]
+                                if ($key -ne 'Description') {
+                                    $addParams[$key] = $item.MonitorParams[$key]
+                                }
                             }
 
                             $result = Add-WUGActiveMonitor @addParams
@@ -2373,7 +2380,12 @@ function Invoke-WUGDiscoverySync {
 
             # --- Create Performance Monitor ---
             if ($item.ItemType -eq 'PerformanceMonitor') {
-                # Performance monitors are per-device — check if already assigned
+                # Performance monitors are per-device — skip if no valid DeviceId
+                if (-not $item.DeviceId -or $item.DeviceId -eq 0) {
+                    Write-Verbose "Skipping perf monitor '$monName' — no valid DeviceId"
+                    $stats.Skipped++
+                    continue
+                }
                 if ($PSCmdlet.ShouldProcess($monName, "Create $($item.MonitorType) Performance Monitor on device $($item.DeviceId)")) {
                     try {
                         $perfParams = @{
@@ -2387,8 +2399,9 @@ function Invoke-WUGDiscoverySync {
                         else {
                             $perfParams['Name'] = $monName
                         }
+                        # Copy monitor params, filtering out non-cmdlet keys
                         foreach ($key in $item.MonitorParams.Keys) {
-                            if ($key -ne 'Name') {
+                            if ($key -ne 'Name' -and $key -ne 'Description') {
                                 $perfParams[$key] = $item.MonitorParams[$key]
                             }
                         }
@@ -2413,7 +2426,7 @@ function Invoke-WUGDiscoverySync {
             }
 
             # --- Update Device Attributes ---
-            if ($UpdateAttributes -and $item.Attributes -and $item.Attributes.Count -gt 0) {
+            if ($UpdateAttributes -and $item.DeviceId -and $item.DeviceId -ne 0 -and $item.Attributes -and $item.Attributes.Count -gt 0) {
                 foreach ($attrName in $item.Attributes.Keys) {
                     $attrValue = $item.Attributes[$attrName]
                     if ($PSCmdlet.ShouldProcess("Device $($item.DeviceId): $attrName=$attrValue", 'Set device attribute')) {

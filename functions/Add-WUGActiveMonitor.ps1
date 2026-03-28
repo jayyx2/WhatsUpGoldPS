@@ -673,13 +673,17 @@ function Add-WUGActiveMonitor {
         [string]$RestApiUrl,
         [Parameter(ParameterSetName = 'RestApi')]
         [ValidateSet('GET', 'POST', 'PUT', 'DELETE')]
+        [Alias('RestApiHttpMethod')]
         [string]$RestApiMethod = 'GET',
         [Parameter(ParameterSetName = 'RestApi')]
+        [Alias('RestApiHttpTimeoutMs')]
         [int]$RestApiTimeoutMs = 10000,
         [Parameter(ParameterSetName = 'RestApi')]
         [ValidateSet('0', '1')][string]$RestApiIgnoreCertErrors = '0',
         [Parameter(ParameterSetName = 'RestApi')]
-        [ValidateSet('0', '1')][string]$RestApiUseAnonymous = '0',
+        [ValidateSet('0', '1')]
+        [Alias('RestApiUseAnonymousAccess')]
+        [string]$RestApiUseAnonymous = '0',
         [Parameter(ParameterSetName = 'RestApi')]
         [string]$RestApiCustomHeader = '',
         [Parameter(ParameterSetName = 'RestApi')]

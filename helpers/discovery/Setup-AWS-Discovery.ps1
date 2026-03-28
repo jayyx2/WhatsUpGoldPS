@@ -1,41 +1,176 @@
 ﻿<#
 .SYNOPSIS
-    AWS Discovery -- Discover EC2/RDS/ELB and optionally push to WhatsUp Gold.
+    AWS Cloud Discovery — scan all regions, generate dashboard, push to WUG.
 
 .DESCRIPTION
-    Interactive script that discovers AWS resources (EC2 instances, RDS
-    instances, Load Balancers), then lets you choose what to do with the results:
+    Discovers AWS resources (EC2 instances, RDS databases, Load Balancers)
+    across ALL enabled regions by default — just like Azure discovery scans
+    all subscriptions and resource groups automatically.
 
-      [1] Push monitors to WhatsUp Gold (creates devices + monitors)
-      [2] Export discovery plan to JSON
-      [3] Export discovery plan to CSV
-      [4] Show full plan table in console
-      [5] Generate AWS HTML dashboard (live data)
-      [6] Exit
+    =====================================================================
+    QUICK START (3 steps)
+    =====================================================================
 
-    Two collection methods:
-      [1] AWS.Tools PowerShell modules -- uses AWS.Tools.EC2, etc.
-      [2] REST API (direct) -- zero external dependencies, uses SigV4 signing
+    Step 1 — Run interactively ONCE to save your AWS credentials:
 
-    First Run:
-      1. Prompts for collection method, AWS Access Key, Secret Key, Region
-      2. Stores credentials in DPAPI vault (encrypted)
-      3. Discovers EC2/RDS/ELB across specified region(s)
-      4. Shows summary, then asks what to do
+        .\Setup-AWS-Discovery.ps1
 
-    Subsequent Runs:
-      Loads credentials from vault automatically.
+    Step 2 — Schedule it (runs daily at 2 AM, no prompts):
+
+        .\Register-DiscoveryScheduledTask.ps1 -Mode Provider `
+            -Provider AWS -Action Dashboard -TriggerType Daily
+
+    Step 3 — Open the dashboard:
+
+        Start-Process "$env:LOCALAPPDATA\DiscoveryHelpers\Output\AWS-Dashboard.html"
+
+    That's it. The script scans every AWS region your IAM key can access,
+    discovers all EC2/RDS/ELB resources, and generates a searchable HTML
+    dashboard with sortable tables, summary cards, and CSV/JSON export.
+
+    =====================================================================
+    WHAT IT DOES
+    =====================================================================
+
+    1. Authenticates with your AWS Access Key + Secret Key (DPAPI vault)
+    2. Enumerates ALL enabled AWS regions (or specific ones you choose)
+    3. In each region, discovers:
+         - EC2 instances (name, IP, state, type, platform, VPC, AZ)
+         - RDS instances (endpoint, engine, class, state, AZ)
+         - Elastic Load Balancers (DNS, type, state, VPC, AZs)
+    4. Presents an action menu:
+         [1] Push to WhatsUp Gold (create devices + monitors + attributes)
+         [2] Export JSON   [3] Export CSV   [4] Show table
+         [5] Generate HTML dashboard   [6] Exit
+
+    Zero external dependencies when using REST API mode (default).
+    AWS.Tools PowerShell modules are optional for module-based collection.
+
+    =====================================================================
+    WHATSUP GOLD INTEGRATION
+    =====================================================================
+
+    Option [1] PushToWUG does the following automatically:
+      - Creates a WUG device for each AWS resource (by IP)
+      - Sets rich device attributes: AWS.Region, AWS.InstanceType,
+        AWS.State, AWS.VpcId, AWS.Platform, AWS.AZ, etc.
+      - Creates REST API active + performance monitors
+      - Use these attributes in WUG dashboards, reports, and groups
+
+    You can also use the Cloud Resource Monitor in WUG and point it
+    at these attributes for cloud-native monitoring.
+
+    =====================================================================
+    CREDENTIAL SECURITY
+    =====================================================================
+
+    - AWS Access Key + Secret Key stored in DPAPI vault (encrypted to
+      your Windows user account + machine — cannot be read by other users
+      or on other machines)
+    - No credentials in plaintext, ever — not in scripts, logs, or history
+    - First run prompts with masked input, subsequent runs auto-load
+    - Optional AES-256 double encryption via Set-DiscoveryVaultPassword
+
+.PARAMETER Region
+    AWS region(s) to scan. Default: 'all' (every enabled region).
+
+    Examples:
+      -Region 'all'                          # Scan everything (default)
+      -Region 'us-east-1'                    # Single region
+      -Region 'us-east-1','eu-west-1'        # Multiple specific regions
+
+    When set to 'all', the script uses the AWS DescribeRegions API to
+    enumerate every region your IAM key has access to, then scans each one.
+
+.PARAMETER UseRestApi
+    Collection method. Default: $true (REST API, zero dependencies).
+    Pass -UseRestApi:$false to use AWS.Tools PowerShell modules instead.
+
+.PARAMETER Action
+    What to do after discovery. Skips the interactive menu when specified.
+    Valid: PushToWUG, ExportJSON, ExportCSV, ShowTable, Dashboard, None.
+    Non-interactive default: Dashboard.
+
+.PARAMETER WUGServer
+    WhatsUp Gold server address for PushToWUG. Default: 192.168.74.74.
+
+.PARAMETER WUGCredential
+    PSCredential for WhatsUp Gold admin login (non-interactive WUG push).
+
+.PARAMETER OutputPath
+    Output directory for dashboards and exports.
+    Non-interactive default: %LOCALAPPDATA%\DiscoveryHelpers\Output.
+
+.PARAMETER NonInteractive
+    Suppress all prompts. Uses cached vault credentials and defaults.
+    Ideal for scheduled task execution via Register-DiscoveryScheduledTask.ps1.
+
+.EXAMPLE
+    .\Setup-AWS-Discovery.ps1
+    # Interactive mode — scans all regions, prompts for action.
+
+.EXAMPLE
+    .\Setup-AWS-Discovery.ps1 -Action Dashboard
+    # Scan all regions, generate dashboard, no other prompts.
+
+.EXAMPLE
+    .\Setup-AWS-Discovery.ps1 -Region 'us-east-1','us-west-2' -Action Dashboard
+    # Scan only two regions, generate dashboard.
+
+.EXAMPLE
+    .\Setup-AWS-Discovery.ps1 -Action PushToWUG -NonInteractive
+    # Scheduled mode — scan all regions, push to WUG, zero prompts.
+
+.EXAMPLE
+    .\Setup-AWS-Discovery.ps1 -Action Dashboard -NonInteractive
+    # Scheduled mode — scan all regions, generate dashboard only.
 
 .NOTES
-    WhatsUpGoldPS module is only needed if you choose option [1].
-    REST API mode has zero external module dependencies.
+    Author  : jason@wug.ninja
+    Requires: PowerShell 5.1+
+    REST API mode has ZERO external module dependencies.
     Module mode requires: AWS.Tools.EC2, AWS.Tools.RDS,
       AWS.Tools.ElasticLoadBalancingV2, AWS.Tools.CloudWatch.
+    WhatsUpGoldPS module is only needed for PushToWUG.
+
+.LINK
+    https://github.com/jayyx2/WhatsUpGoldPS
 #>
+[CmdletBinding()]
+param(
+    [string[]]$Region = @('all'),
+
+    [switch]$UseRestApi,
+
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [string]$Action,
+
+    [string]$WUGServer = '192.168.74.74',
+
+    [PSCredential]$WUGCredential,
+
+    [string]$OutputPath,
+
+    [switch]$NonInteractive
+)
+
+# --- Output directory (persistent default for scheduled runs) -----------------
+if (-not $OutputPath) {
+    if ($NonInteractive) {
+        $OutputPath = Join-Path $env:LOCALAPPDATA 'DiscoveryHelpers\Output'
+    } else {
+        $OutputPath = $env:TEMP
+    }
+}
+if (-not (Test-Path $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null }
+$OutputDir = $OutputPath
 
 # --- Configuration -----------------------------------------------------------
-$DefaultRegion = 'us-east-1'              # Default AWS region
-$WUGServer     = '192.168.74.74'          # Default WhatsUp Gold server
+
+# Default to REST API if not explicitly set
+if (-not $PSBoundParameters.ContainsKey('UseRestApi')) {
+    $UseRestApi = $true
+}
 
 # --- Load helpers (works from any directory) ----------------------------------
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
@@ -48,13 +183,15 @@ $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 Write-Host "=== AWS Discovery ===" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Collection method choice --------------------------------------------------
-Write-Host "AWS data collection method:" -ForegroundColor Cyan
-Write-Host "  [1] AWS.Tools PowerShell modules (requires AWS.Tools.EC2, etc.)" -ForegroundColor White
-Write-Host "  [2] REST API direct (zero external dependencies, SigV4 signing)" -ForegroundColor White
-Write-Host ""
-$methodChoice = Read-Host -Prompt "Choice [1/2, default: 2]"
-$UseRestApi = ($methodChoice -ne '1')
+# --- Collection method ---------------------------------------------------------
+if (-not $PSBoundParameters.ContainsKey('UseRestApi') -and -not $NonInteractive) {
+    Write-Host "AWS data collection method:" -ForegroundColor Cyan
+    Write-Host "  [1] AWS.Tools PowerShell modules (requires AWS.Tools.EC2, etc.)" -ForegroundColor White
+    Write-Host "  [2] REST API direct (zero external dependencies, SigV4 signing)" -ForegroundColor White
+    Write-Host ""
+    $methodChoice = Read-Host -Prompt "Choice [1/2, default: 2]"
+    $UseRestApi = ($methodChoice -ne '1')
+}
 
 if ($UseRestApi) {
     Write-Host "Using REST API mode (no AWS.Tools modules needed)." -ForegroundColor Green
@@ -67,6 +204,10 @@ else {
         Write-Warning "AWS.Tools.EC2 module not found. Install with:"
         Write-Host "  Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force" -ForegroundColor Yellow
         Write-Host "  Install-AWSToolsModule EC2, RDS, ElasticLoadBalancingV2, CloudWatch -CleanUp" -ForegroundColor Yellow
+        if ($NonInteractive) {
+            Write-Error "AWS.Tools modules not found and cannot install in non-interactive mode."
+            return
+        }
         Write-Host ""
         $installChoice = Read-Host -Prompt "Attempt to install now? [y/N]"
         if ($installChoice -eq 'y' -or $installChoice -eq 'Y') {
@@ -87,25 +228,41 @@ else {
     }
 }
 
-# --- Prompt for region(s) ------------------------------------------------------
-Write-Host "Enter AWS region(s) to scan — e.g. us-east-1, eu-west-1" -ForegroundColor Cyan
-Write-Host "For multiple regions, separate with commas." -ForegroundColor Gray
-$regionInput = Read-Host -Prompt "AWS region(s) [default: $DefaultRegion]"
-if ([string]::IsNullOrWhiteSpace($regionInput)) {
-    $regionInput = $DefaultRegion
+# --- Resolve region(s) ---------------------------------------------------------
+$AWSRegions = @($Region)
+
+# Interactive region selection (if not specified via parameter)
+if (-not $NonInteractive -and -not $PSBoundParameters.ContainsKey('Region')) {
+    Write-Host ""
+    Write-Host "AWS region scope:" -ForegroundColor Cyan
+    Write-Host "  [1] All regions (scans every enabled region — recommended)" -ForegroundColor White
+    Write-Host "  [2] Specific region(s) (e.g. us-east-1, eu-west-1)" -ForegroundColor White
+    Write-Host ""
+    $regionChoice = Read-Host -Prompt "Choice [1/2, default: 1]"
+    if ($regionChoice -eq '2') {
+        $regionInput = Read-Host -Prompt "Enter region(s), comma-separated"
+        if (-not [string]::IsNullOrWhiteSpace($regionInput)) {
+            $AWSRegions = @($regionInput -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        }
+    }
+    else {
+        $AWSRegions = @('all')
+    }
 }
-$AWSRegions = @($regionInput -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-if ($AWSRegions.Count -eq 0) {
-    Write-Error 'No valid region provided. Exiting.'
-    return
-}
-Write-Host "Regions: $($AWSRegions -join ', ')" -ForegroundColor Cyan
+
+if ($AWSRegions.Count -eq 0) { $AWSRegions = @('all') }
+
+$scanLabel = if ($AWSRegions -contains 'all') { 'ALL enabled regions' } else { $AWSRegions -join ', ' }
+Write-Host "Regions: $scanLabel" -ForegroundColor Cyan
 Write-Host ""
 
 # ==============================================================================
 # STEP 2: Credentials (DPAPI vault — encrypted, cached)
 # ==============================================================================
-$AWSCred = Resolve-DiscoveryCredential -Name 'AWS.Credential' -CredType AWSKeys -ProviderLabel 'AWS'
+$credSplat = @{ Name = 'AWS.Credential'; CredType = 'AWSKeys'; ProviderLabel = 'AWS' }
+if ($NonInteractive) { $credSplat.NonInteractive = $true }
+elseif ($Action) { $credSplat.AutoUse = $true }
+$AWSCred = Resolve-DiscoveryCredential @credSplat
 if (-not $AWSCred) {
     Write-Error 'No AWS credentials. Exiting.'
     return
@@ -115,14 +272,19 @@ if (-not $AWSCred) {
 # STEP 3: Discover — authenticate and enumerate AWS resources
 # ==============================================================================
 Write-Host ""
-Write-Host "Scanning AWS regions: $($AWSRegions -join ', ')..." -ForegroundColor Cyan
+Write-Host "Scanning AWS: $scanLabel..." -ForegroundColor Cyan
 
 $bstrAws = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AWSCred.Password)
 try { $plainAwsSK = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrAws) }
 finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrAws) }
+
+# First non-'all' region for initial connection; provider resolves 'all' dynamically
+$connectRegion = ($AWSRegions | Where-Object { $_ -ne 'all' } | Select-Object -First 1)
+if (-not $connectRegion) { $connectRegion = 'us-east-1' }
+
 $plan = Invoke-Discovery -ProviderName 'AWS' `
     -Target $AWSRegions `
-    -Credential @{ AccessKey = $AWSCred.UserName; SecretKey = $plainAwsSK; Region = $AWSRegions[0]; UseRestApi = $UseRestApi }
+    -Credential @{ AccessKey = $AWSCred.UserName; SecretKey = $plainAwsSK; Region = $connectRegion; UseRestApi = $UseRestApi }
 
 if (-not $plan -or $plan.Count -eq 0) {
     Write-Warning "No items discovered. Check AWS credentials and region accessibility."
@@ -161,6 +323,9 @@ $ec2Count = @($devicePlan.Values | Where-Object { $_.Type -eq 'EC2' }).Count
 $rdsCount = @($devicePlan.Values | Where-Object { $_.Type -eq 'RDS' }).Count
 $elbCount = @($devicePlan.Values | Where-Object { $_.Type -eq 'ELB' }).Count
 
+# Discover actual regions from the plan data
+$discoveredRegions = @($devicePlan.Values | Select-Object -ExpandProperty Region -Unique | Sort-Object)
+
 $activeTemplates = @($plan | Where-Object { $_.ItemType -eq 'ActiveMonitor' } |
     Select-Object -ExpandProperty Name -Unique)
 $perfTemplates   = @($plan | Where-Object { $_.ItemType -eq 'PerformanceMonitor' } |
@@ -174,7 +339,7 @@ Write-Host "  RDS Instances:         $rdsCount" -ForegroundColor White
 Write-Host "  Load Balancers:        $elbCount" -ForegroundColor White
 Write-Host "  Resources (with IP):   $($withIP.Count)" -ForegroundColor White
 Write-Host "  Resources (no IP):     $($withoutIP.Count)" -ForegroundColor White
-Write-Host "  Regions scanned:       $($AWSRegions.Count)" -ForegroundColor White
+Write-Host "  Regions with resources:$($discoveredRegions.Count)  ($($discoveredRegions -join ', '))" -ForegroundColor White
 Write-Host ""
 Write-Host "  Active monitor templates:  $($activeTemplates.Count)  ($(@($plan | Where-Object { $_.ItemType -eq 'ActiveMonitor' }).Count) assignments)" -ForegroundColor White
 Write-Host "  Perf monitor templates:    $($perfTemplates.Count)  ($(@($plan | Where-Object { $_.ItemType -eq 'PerformanceMonitor' }).Count) assignments)" -ForegroundColor White
@@ -200,22 +365,44 @@ if ($devicePlan.Count -gt 50) {
 # ==============================================================================
 # STEP 5: Export or push to WUG
 # ==============================================================================
-Write-Host "What would you like to do?" -ForegroundColor Cyan
-Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + monitors)"
-Write-Host "  [2] Export plan to JSON file"
-Write-Host "  [3] Export plan to CSV file"
-Write-Host "  [4] Show full plan table"
-Write-Host "  [5] Generate AWS HTML dashboard (live data)"
-Write-Host "  [6] Exit (do nothing)"
-Write-Host ""
-$choice = Read-Host -Prompt "Choice [1-6]"
+
+# --- Map Action parameter to menu choice number ---
+$choice = $null
+if ($Action) {
+    switch ($Action) {
+        'PushToWUG' { $choice = '1' }
+        'ExportJSON' { $choice = '2' }
+        'ExportCSV' { $choice = '3' }
+        'ShowTable' { $choice = '4' }
+        'Dashboard' { $choice = '5' }
+        'None' { $choice = '6' }
+    }
+}
+
+if (-not $choice -and $NonInteractive) {
+    $choice = '5'  # Default to Dashboard for non-interactive
+}
+
+if (-not $choice) {
+    Write-Host "What would you like to do?" -ForegroundColor Cyan
+    Write-Host "  [1] Push monitors to WhatsUp Gold (creates devices + monitors)"
+    Write-Host "  [2] Export plan to JSON file"
+    Write-Host "  [3] Export plan to CSV file"
+    Write-Host "  [4] Show full plan table"
+    Write-Host "  [5] Generate AWS HTML dashboard (live data)"
+    Write-Host "  [6] Exit (do nothing)"
+    Write-Host ""
+    $choice = Read-Host -Prompt "Choice [1-6]"
+}
 
 switch ($choice) {
     '1' {
-        Write-Host ""
-        $wugInput = Read-Host -Prompt "WhatsUp Gold server [default: $WUGServer]"
-        if ($wugInput -and -not [string]::IsNullOrWhiteSpace($wugInput)) {
-            $WUGServer = $wugInput.Trim()
+        if (-not $NonInteractive) {
+            Write-Host ""
+            $wugInput = Read-Host -Prompt "WhatsUp Gold server [default: $WUGServer]"
+            if ($wugInput -and -not [string]::IsNullOrWhiteSpace($wugInput)) {
+                $WUGServer = $wugInput.Trim()
+            }
         }
 
         Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
@@ -227,7 +414,21 @@ switch ($choice) {
             return
         }
 
-        $wugCred = Get-Credential -Message "WhatsUp Gold admin credentials for $WUGServer"
+        if ($WUGCredential) {
+            $wugCred = $WUGCredential
+        }
+        elseif ($NonInteractive) {
+            $wugResolved = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -NonInteractive
+            if (-not $wugResolved) {
+                Write-Error 'No WUG credentials in vault. Run interactively first to cache them, or pass -WUGCredential.'
+                return
+            }
+            $wugCred = $wugResolved.Credential
+            if ($wugResolved.Server) { $WUGServer = $wugResolved.Server }
+        }
+        else {
+            $wugCred = Get-Credential -Message "WhatsUp Gold admin credentials for $WUGServer"
+        }
         Connect-WUGServer -serverUri $WUGServer -Credential $wugCred -IgnoreSSLErrors
 
         Write-Host ""
@@ -324,12 +525,12 @@ switch ($choice) {
         Write-Host "Done! Monitors pushed to WhatsUp Gold." -ForegroundColor Green
     }
     '2' {
-        $jsonPath = Join-Path (Get-Location) 'aws-discovery-plan.json'
+        $jsonPath = Join-Path $OutputDir 'aws-discovery-plan.json'
         $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath -IncludeParams
         Write-Host "Exported to: $jsonPath" -ForegroundColor Green
     }
     '3' {
-        $csvPath = Join-Path (Get-Location) 'aws-discovery-plan.csv'
+        $csvPath = Join-Path $OutputDir 'aws-discovery-plan.csv'
         $plan | Export-DiscoveryPlan -Format CSV -Path $csvPath
         Write-Host "Exported to: $csvPath" -ForegroundColor Green
     }
@@ -363,7 +564,7 @@ switch ($choice) {
         }
         else {
             $dashReportTitle = "AWS Dashboard"
-            $dashTempPath = Join-Path $env:TEMP 'AWS-Dashboard.html'
+            $dashTempPath = Join-Path $OutputDir 'AWS-Dashboard.html'
 
             $null = Export-AWSDiscoveryDashboardHtml `
                 -DashboardData $dashboardRows `

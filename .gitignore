@@ -5,3 +5,7 @@
 **/Vault/
 **/.vault-*
 *.cred
+
+# Release build output
+release/
+Build-Release.ps1

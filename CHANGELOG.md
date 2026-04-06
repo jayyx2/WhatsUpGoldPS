@@ -229,7 +229,7 @@
     * Plan summary shows metric counts, cloud resource counts, and total plan items
     * ValidateSet for -Action now includes `TestCredential`
   * `Add-WUGDeviceTemplate.ps1` -- Added `-NoDefaultActiveMonitor` switch to suppress default Ping monitor for perf-only cloud resource devices; added `-GroupName` parameter; added Azure and Meraki credential type support in credential objects
-  * `Connect-WUGServer.ps1` -- Integrated DPAPI credential vault; when called with no parameters, checks vault for saved WUG credentials and prompts to reuse/reset/new; successful connections auto-save to vault at `%LOCALAPPDATA%\DiscoveryHelpers\Vault`; warns when plaintext `-Username`/`-Password` parameters used (PSReadLine history exposure); vault integrity now uses HMAC-SHA256 with DPAPI-protected key (was plain SHA-256); legacy SHA-256 fallback for pre-HMAC vault files; ACL restriction warning when directory permissions can't be set
+  * `Connect-WUGServer.ps1` -- Integrated DPAPI credential vault; when called with no parameters, checks vault for saved WUG credentials and prompts to reuse/reset/new; successful connections auto-save to vault at `%LOCALAPPDATA%\WhatsUpGoldPS\DiscoveryHelpers\Vault`; warns when plaintext `-Username`/`-Password` parameters used (PSReadLine history exposure); vault integrity now uses HMAC-SHA256 with DPAPI-protected key (was plain SHA-256); legacy SHA-256 fallback for pre-HMAC vault files; ACL restriction warning when directory permissions can't be set
   * `Disconnect-WUGServer.ps1` -- Restores SSL certificate validation on disconnect (PS Core: removes `SkipCertificateCheck` defaults; PS 5.1: nulls `ServerCertificateValidationCallback`); clears all credential-related globals (`WUGBearerHeaders`, `expiry`, `WhatsUpServerBaseURI`, `tokenUri`, `WUGRefreshToken`, `IgnoreSSLErrors`, `_WUGAllowedSSLHosts`)
   * `Get-WUGPerformanceMonitor.ps1` -- Major rewrite: auto-pagination in library mode (loops on `nextPageId` automatically); view validation with library vs device mode enforcing correct `ValidateSet` values with clear error messages; structured output objects with extracted `ClassId`, `BaseType`, `MonitorTypeName` from `monitorTypeInfo`
   * `Get-WUGActiveMonitor.ps1` -- Device mode now auto-paginates (loops on `nextPageId`); merges template metadata into output objects
@@ -281,7 +281,7 @@
   * Plaintext credential parameter warning in `Connect-WUGServer` (PSReadLine history exposure risk)
   * SSL/TLS state cleanup on `Disconnect-WUGServer` prevents leaking trust-all-certs to subsequent sessions
   * TLS 1.0/1.1 removed from geolocation SSL bypass (TLS 1.2 only)
-  * Geolocation config migrated from repo-local JSON file to DPAPI vault -- refresh tokens, tile API keys, and server connection info now stored in `%LOCALAPPDATA%\DiscoveryHelpers\Vault` with HMAC-SHA256 integrity; no sensitive data in the repo directory
+  * Geolocation config migrated from repo-local JSON file to DPAPI vault -- refresh tokens, tile API keys, and server connection info now stored in `%LOCALAPPDATA%\WhatsUpGoldPS\DiscoveryHelpers\Vault` with HMAC-SHA256 integrity; no sensitive data in the repo directory
   * All 10 dashboard scripts (AWS, Azure, Bigleaf, Certificate, F5, Hyper-V, Lansweeper, Nutanix, Proxmox, VMware) now use `Resolve-DiscoveryCredential` for vault-first credential resolution; if credentials exist in the vault (from a prior Setup run), they are reused automatically; if not, the user is prompted interactively and the credential is saved to the vault for next time
   * Lansweeper PAT prompt now uses `Resolve-DiscoveryCredential` with `-CredType BearerToken` (was plaintext `Read-Host` without `-AsSecureString`)
   * Proxmox dashboard vault fallback added before falling through to plaintext Username/Password prompts
@@ -291,6 +291,13 @@
 * Fixed
   * `Invoke-WUGModuleTest.ps1` -- Passive monitor tests were not cleaning up after themselves; `$script:PassiveMonitorNames` was never initialized causing cleanup loop to silently skip all monitor deletions; now initialized as `List[string]` alongside `$script:PassiveMonitorIds` and populated on each `Add-WUGPassiveMonitor` call; cleanup uses new `Remove-WUGPassiveMonitor` with a catch-all `WhatsUpGoldPS-Test-` search to also remove orphans from prior runs
   * `Invoke-WUGModuleTest.ps1` -- `Get-WUGActiveMonitor (templates)` test returned null because function without `-IncludeAssignments` falls through to global assignments endpoint which can be empty; added `-IncludeAssignments` to the test call
+  * `Add-WUGActiveMonitor.ps1` -- SNMP Table discovery operator enum was incorrectly using monitor comparison values (0-6); fixed to use discovery-specific enum (0=IsOneOf, 1=Range, 2=LessThan, 3=GreaterThan, 4=ContainsOneOf)
+  * NmConsole dashboard files were publicly accessible without authentication; added child `web.config` with `<deny users="?" />` to `NmConsole\dashboards\` subdirectory; centralized `Deploy-DashboardWebConfig` function in `DiscoveryHelpers.ps1`; all 12 Setup scripts and `Update-GeolocationMap.ps1` now deploy the web.config automatically after copying dashboards; added `<customErrors>` redirect to `/NmConsole` for unauthenticated users
+  * Dashboard HTML files were being copied to the NmConsole root directory (risking filename collisions); moved all dashboards to `NmConsole\dashboards\` subdirectory; updated all 14 files (12 Setup scripts, `Copy-WUGDashboardReports.ps1`, `Update-GeolocationMap.ps1`, `Start-WUGDiscoverySetup.ps1`)
+  * Data directory path `%LOCALAPPDATA%\DiscoveryHelpers\` was too generic; relocated to `%LOCALAPPDATA%\WhatsUpGoldPS\DiscoveryHelpers\` (Vault and Output subdirectories) across 19 files -- existing users must move or re-create their vault under the new path
+
+* Added -- Tools
+  * `Build-Release.ps1` -- Generates minimal release zip for deployment; reads version from psd1, stages module files (psd1, psm1, functions/, helpers/, examples/, LICENSE, README, CHANGELOG, NOTICE), excludes dev artifacts (.git, .github, docs, internal); output: `release\WhatsUpGoldPS-<version>.zip`
 
 ## 0.1.19/20 - 2026-03-15 [Released to PowerShell Gallery]
 * Added  -- New Functions (85 total exports; psm1 and psd1 in sync)

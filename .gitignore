@@ -1,2 +1,7 @@
 # Copilot customization (local dev preferences)
 .github/copilot-instructions.md
+
+# DPAPI credential vault (user-specific encrypted secrets)
+**/Vault/
+**/.vault-*
+*.cred

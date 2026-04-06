@@ -184,6 +184,7 @@ function Add-WUGDeviceTemplate {
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $CustomLinks,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $ActiveMonitors,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $PerformanceMonitors,
+        [Parameter()] [ValidateRange(1, 1440)] [int] $PerformanceMonitorPollingIntervalMinutes,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $PassiveMonitors,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $Dependencies,
         [Parameter()] [ValidateNotNullOrEmpty()] [array] $NCMTasks,
@@ -269,10 +270,14 @@ function Add-WUGDeviceTemplate {
     $PerformanceMonitorObjects = @()
     if ($PerformanceMonitors) {
         foreach ($PerformanceMonitor in $PerformanceMonitors) {
-            $PerformanceMonitorObject = New-Object -TypeName PSObject -Property @{
+            $perfProps = @{
                 classId = ''
                 name    = $PerformanceMonitor
             }
+            if ($PerformanceMonitorPollingIntervalMinutes -gt 0) {
+                $perfProps['pollingIntervalMinutes'] = $PerformanceMonitorPollingIntervalMinutes
+            }
+            $PerformanceMonitorObject = New-Object -TypeName PSObject -Property $perfProps
             $PerformanceMonitorObjects += $PerformanceMonitorObject
         }
     }
@@ -581,8 +586,8 @@ function Add-WUGDeviceTemplate {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJMofiNkhELeX/
-# PusPFQdFU4xyB/EAQcQvzNAL4X6W06CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVmD9zgn/zz7xN
+# ScMi8dFc309AZGewlWMsaRAJZZ9M2aCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -682,17 +687,17 @@ function Add-WUGDeviceTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgTP6M+x0kbkLDYYMv3rBRRf3dfoKPRyDU
-# dP1ulABHxe8wDQYJKoZIhvcNAQEBBQAEggIAUxwP7rtwrZtexG+ugkQnp+LkCu/8
-# 3MS5YjWAs6FUu89RfzRbGrbuOzG3ylLOuCU8het1d/ebKRgqvZmy+25Jvf3eKb9H
-# 7T/FM3KSEyLf2CsNoEBsT95HAIwD7+BPfmsf36c+B50SoUY0cHnac2sx5FBkOV7k
-# E+ONmAbhvd/XlI1KV+dtLItQefhlQWIwREN3vP9Kf2HUs8wj9uQauKkS65qrF4fo
-# uqaaPe/3bwXRtcvX3/tXBoaRb9muHivi8jQkORSn3oqAxYwu3WdZx9WsNgQmg3YS
-# /Ee42QxFgfBWSqD3r4fX3rZIpjVWIvADXnVb1kgd2PTFGTuJOsT/N075FBJqSZNF
-# f6d3KU+dGSpNnMqHq+ftfk4RwVupvNiNzmRHQAjg07rKJQRUBXMxwePNYhIqq2C6
-# wbTruF4rqqZwwykwF6/JLa2VNOuCBWpNjLlW507YtEe7SB+APx9QTnPsQc1aH2pc
-# 8wl4RcWN42vDS9AcMvjyEBDnxlkmTcaAbSty/0dhl4BlZK3oh+kflQhLQEntG+LI
-# V+Q/05li77j2s9WuMDSDMLwhTVRDHdnsUw8vGOQCkSvAoXxcGQ2ORiJ07+5D6vVT
-# ODlGHuhiYOG/eb0i35z5C2YdXQN9/sTHu8jZAxY0adCMD56hYaMc/m0EpqW/N61l
-# QVaMrT3Zxs6LT2A=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgcj76LZXdjyqCNEzPeOEHOQCjuJnhA0Lm
+# X3dPn7O7sA4wDQYJKoZIhvcNAQEBBQAEggIAEob0WgtUgYZCsKmd4LOrcK8oJVV+
+# md7ImroSTRGoraRQew+74ZXLy1zZWoV79BAzKLbjKo2HGLhOmTh30/2u8XAeiKwQ
+# f3oYDJX1gI2bRMOcjqtRmY4OFjWNQir6KHesPS6RllAbkF3F4vm0q5oI475fDQiC
+# ad2lUC1eU+LxtxPTI5hLwfcwqDJDKmGs5KRn8tMH6buCF6E2cZwwBMFO18Dbu9DD
+# fFmdl4YggtAfJEJzri/fyw9vGLCSKm432QmxylecoO/iMqL0z7QA6y+Yw+2PpDdE
+# zY0ZrZbb9waIahPocIGRxCoWs/VtKh0PxW5s31S1qfIae+bxtw1/avBdfngf1KtR
+# SdFGH36wOsnwCaTWvdnDGIzkfVahQbkb2Usg+UYcJwD/ryuD6cYbNu8TJEMiUQhX
+# mTgxMkQQhH5KQHv4xJX0R59hkU0H2ZZNuREdxM3odmUqnhtyq0iYpkTCHgDVkLMi
+# vQMuKAj3tZ1efnccH2bfQ/OTNXJxtsd6jedrwiaxELZrjxqA7z2hAQzUVGr8O89c
+# LIwinF1YGzEgpOt3qhyXTr65vjQQ8cfVPsGXnGigrPWDv6IroR2+CmuAvSry77jr
+# nzNhmDx9XUsp+oodKct5fO2FSS2K+x56D7BOzP4OpUAPZivXlpGpjQFSbIV1k2/c
+# 6bRFz8eOgcafn5g=
 # SIG # End signature block

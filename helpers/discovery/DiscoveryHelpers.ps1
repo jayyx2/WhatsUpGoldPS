@@ -646,7 +646,7 @@ function Set-DiscoveryVaultPassword {
         When set, ALL vault operations apply an additional AES-256 layer
         on top of DPAPI. This provides defense-in-depth:
 
-          Layer 1: AES-256 with password-derived key (PBKDF2, 100k iterations)
+          Layer 1: AES-256 with password-derived key (PBKDF2, 600k iterations)
           Layer 2: DPAPI (tied to Windows user + machine)
 
         Even if an attacker compromises the user session (DPAPI alone
@@ -675,15 +675,31 @@ function Set-DiscoveryVaultPassword {
         $Password = Read-Host -AsSecureString -Prompt 'Enter vault password'
     }
 
-    # Derive AES key from password using PBKDF2 (100,000 iterations)
+    # Derive AES key from password using PBKDF2 (600,000 iterations per OWASP 2023+ guidance)
     $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password)
     try {
         $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-        # Use a fixed salt derived from the machine + user so it's stable
-        # but different per user/machine
-        $saltInput = "$($env:COMPUTERNAME)|$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)|DiscoveryVault"
-        $saltBytes = [System.Text.Encoding]::UTF8.GetBytes($saltInput)
-        $deriveBytes = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($plain, $saltBytes, 100000)
+        # Salt: deterministic component (machine+user) + random component (persisted)
+        # The random component prevents precomputation attacks against known machine/user combos
+        $saltFile = Join-Path $script:DiscoveryVaultPath '.vault-salt.bin'
+        if (Test-Path $saltFile) {
+            $randomSalt = [System.IO.File]::ReadAllBytes($saltFile)
+        }
+        else {
+            Initialize-DiscoveryVault
+            $randomSalt = New-Object byte[] 16
+            $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::Create()
+            $rng.GetBytes($randomSalt)
+            $rng.Dispose()
+            [System.IO.File]::WriteAllBytes($saltFile, $randomSalt)
+            Write-Verbose "Generated random salt component for vault."
+        }
+        $deterministicPart = "$($env:COMPUTERNAME)|$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)|DiscoveryVault"
+        $detBytes = [System.Text.Encoding]::UTF8.GetBytes($deterministicPart)
+        $saltBytes = New-Object byte[] ($detBytes.Length + $randomSalt.Length)
+        [System.Array]::Copy($detBytes, 0, $saltBytes, 0, $detBytes.Length)
+        [System.Array]::Copy($randomSalt, 0, $saltBytes, $detBytes.Length, $randomSalt.Length)
+        $deriveBytes = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($plain, $saltBytes, 600000)
         $script:VaultAESKey = $deriveBytes.GetBytes(32)  # 256 bits
         $deriveBytes.Dispose()
     }
@@ -749,6 +765,85 @@ function Initialize-DiscoveryVault {
     }
 }
 
+function Get-VaultHmacKey {
+    <#
+    .SYNOPSIS
+        Returns a 32-byte HMAC key for vault integrity, creating it on first use.
+    .DESCRIPTION
+        Internal function. The HMAC key is a random 32-byte secret protected with
+        DPAPI and stored in .vault-hmac.key in the vault directory. Only the same
+        Windows user on the same machine can decrypt it, making integrity hashes
+        unforgeable by anyone else.
+    #>
+    [CmdletBinding()]
+    param()
+
+    Initialize-DiscoveryVault
+    $keyFile = Join-Path $script:DiscoveryVaultPath '.vault-hmac.key'
+
+    if (Test-Path $keyFile) {
+        try {
+            $encrypted = [System.IO.File]::ReadAllText($keyFile).Trim()
+            $ss = ConvertTo-SecureString -String $encrypted
+            $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss)
+            try {
+                $b64 = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+                return [Convert]::FromBase64String($b64)
+            }
+            finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        }
+        catch {
+            Write-Verbose "Could not read HMAC key, regenerating: $_"
+        }
+    }
+
+    # Generate new random 32-byte key
+    $keyBytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::Create()
+    $rng.GetBytes($keyBytes)
+    $rng.Dispose()
+
+    # DPAPI-protect and save
+    $b64 = [Convert]::ToBase64String($keyBytes)
+    $ss = ConvertTo-SecureString $b64 -AsPlainText -Force
+    $encrypted = ConvertFrom-SecureString -SecureString $ss
+    $Utf8Bom = New-Object System.Text.UTF8Encoding($true)
+    [System.IO.File]::WriteAllText($keyFile, $encrypted, $Utf8Bom)
+    $b64 = $null
+    Write-Verbose "HMAC key generated and saved to vault."
+    return $keyBytes
+}
+
+function Get-VaultHmac {
+    <#
+    .SYNOPSIS
+        Computes HMAC-SHA256 over the given data using the vault HMAC key.
+    .DESCRIPTION
+        Internal function. Returns a hex-encoded HMAC-SHA256 string.
+        Used for tamper-proof integrity verification on credential files.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Data
+    )
+    $keyBytes = Get-VaultHmacKey
+    if (-not $keyBytes) {
+        Write-Warning "Could not obtain HMAC key; falling back to unsigned hash."
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Data))
+        $sha.Dispose()
+        return [BitConverter]::ToString($hashBytes) -replace '-', ''
+    }
+    $hmac = New-Object System.Security.Cryptography.HMACSHA256
+    $hmac.Key = $keyBytes
+    $hashBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Data))
+    $hmac.Dispose()
+    # Zero the local copy of the key
+    for ($i = 0; $i -lt $keyBytes.Length; $i++) { $keyBytes[$i] = 0 }
+    return [BitConverter]::ToString($hashBytes) -replace '-', ''
+}
+
 function Write-VaultAuditLog {
     <#
     .SYNOPSIS
@@ -774,6 +869,19 @@ function Write-VaultAuditLog {
 
     $logPath = Join-Path $script:DiscoveryVaultPath '.vault-audit.log'
 
+    # Read last line's hash for chain integrity
+    $prevHash = '0'
+    try {
+        if (Test-Path $logPath) {
+            $lastLine = Get-Content $logPath -Tail 1 -ErrorAction SilentlyContinue
+            if ($lastLine) {
+                $lastObj = $lastLine | ConvertFrom-Json -ErrorAction SilentlyContinue
+                if ($lastObj.Hash) { $prevHash = $lastObj.Hash }
+            }
+        }
+    }
+    catch { }
+
     $entry = [ordered]@{
         Timestamp = (Get-Date).ToUniversalTime().ToString('o')
         Action    = $Action
@@ -783,6 +891,13 @@ function Write-VaultAuditLog {
         PID       = $PID
         Detail    = $Detail
     }
+
+    # Compute chain hash: SHA-256(prevHash | timestamp | action | name)
+    $chainInput = "$prevHash|$($entry.Timestamp)|$($entry.Action)|$($entry.Name)"
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $chainBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($chainInput))
+    $sha.Dispose()
+    $entry['Hash'] = [BitConverter]::ToString($chainBytes) -replace '-', ''
 
     $line = ($entry | ConvertTo-Json -Compress)
     $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -821,6 +936,9 @@ function Protect-VaultData {
     $encryptor = $aes.CreateEncryptor()
     $plainBytes = [System.Text.Encoding]::UTF8.GetBytes($Data)
     $cipherBytes = $encryptor.TransformFinalBlock($plainBytes, 0, $plainBytes.Length)
+
+    # Zero plaintext byte array before releasing
+    for ($i = 0; $i -lt $plainBytes.Length; $i++) { $plainBytes[$i] = 0 }
 
     $encryptor.Dispose()
 
@@ -875,7 +993,11 @@ function Unprotect-VaultData {
     $decryptor.Dispose()
     $aes.Dispose()
 
-    return [System.Text.Encoding]::UTF8.GetString($plainBytes)
+    $result = [System.Text.Encoding]::UTF8.GetString($plainBytes)
+    # Zero decrypted byte array before releasing
+    for ($i = 0; $i -lt $plainBytes.Length; $i++) { $plainBytes[$i] = 0 }
+
+    return $result
 }
 
 function Save-DiscoveryCredential {
@@ -1034,7 +1156,7 @@ Or use: Request-DiscoveryCredential -Name '$Name'
         $expiresUtc = (Get-Date).ToUniversalTime().AddDays($ExpiresInDays).ToString('o')
     }
 
-    # Compute integrity hash over all encrypted material
+    # Compute HMAC-SHA256 integrity over all encrypted material (keyed, unforgeable)
     $integritySource = if ($credType -eq 'Bundle') {
         ($encryptedFields.Values | Sort-Object) -join '|'
     }
@@ -1042,10 +1164,7 @@ Or use: Request-DiscoveryCredential -Name '$Name'
         $encryptedData
     }
     $integrityInput = "$integritySource|$($env:COMPUTERNAME)|$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($integrityInput))
-    $sha.Dispose()
-    $integrityHash = [BitConverter]::ToString($hashBytes) -replace '-', ''
+    $integrityHash = Get-VaultHmac -Data $integrityInput
 
     $credObject = [ordered]@{
         Name        = $Name
@@ -1203,7 +1322,7 @@ function Get-DiscoveryCredential {
         }
     }
 
-    # Verify integrity hash
+    # Verify HMAC-SHA256 integrity
     if ($obj.Integrity) {
         $integritySource = if ($credType -eq 'Bundle') {
             $fieldValues = @()
@@ -1216,13 +1335,10 @@ function Get-DiscoveryCredential {
             if ($obj.Encrypted) { $obj.Encrypted } else { '' }
         }
         $integrityInput = "$integritySource|$($env:COMPUTERNAME)|$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($integrityInput))
-        $sha.Dispose()
-        $expectedHash = [BitConverter]::ToString($hashBytes) -replace '-', ''
+        $expectedHash = Get-VaultHmac -Data $integrityInput
         if ($obj.Integrity -ne $expectedHash) {
             Write-VaultAuditLog -Action 'IntegrityFailed' -CredentialName $Name
-            Write-Error "INTEGRITY CHECK FAILED for credential '$Name'. The vault file may have been tampered with. Delete it with Remove-DiscoveryCredential and re-save."
+            Write-Error "INTEGRITY CHECK FAILED for credential '$Name'. The vault file may have been tampered with or was saved before HMAC migration. Delete it with Remove-DiscoveryCredential and re-save."
             return
         }
         Write-Verbose "Integrity check passed for '$Name'"
@@ -2964,8 +3080,8 @@ function Start-WUGDiscovery {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBG0Gnz7n8xEIxT
-# nx17htFmN6fpL4EX617DOdF7ivKtCqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAC2796iq7S65Sd
+# HKiIm3AUe3aexQs18yRfP+HRmTL8MaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -3065,17 +3181,17 @@ function Start-WUGDiscovery {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg94hHLKKf4fjkrV5WhEcWyJC2RJTRz2Zt
-# 7wjYivJsxNYwDQYJKoZIhvcNAQEBBQAEggIAsGXbpw/HAF9gJhLTTPfhhYx8ehwe
-# UKxiKq4TKwqbAO1xbmd1BDD5IRURGd4sKaPzU82BIq85nqMsHbPPEV5GBWEl3q7U
-# o5S/DwYnvIUAKAFlfx0Jbtnx+QpyzAhcws8mBDymJOQW0258hOK5JfkbWb9jhve7
-# /wT3hTPQupFL8uKE2uXkneUijvFpat1eUC1o02v68vmcWzI+DT5fUHTTFkbfMu+f
-# EmFDGlVGcwV9ubMNUdLa3n3Z4MhdaUz6MFbtES8FWPez1jbAMhisuZzmtfJUJSRA
-# yz4EZSBiYDZ2g4lDN5+Gnp6N72T6NcgLf8xvOw62uYAxCk1ZBjNClsNVQdtRF5vO
-# yfWL6/M9HEw6LreGOaNgtxUqGVjIPVuhSJ6VpJUjCW4wu2H+/ILx3d68BvWCc3HY
-# GgNEbnO10y6Fyp3Xf/HJ5swCm2fNfmuJKxXWAQGYZIPzSYSACnqS3EY6K+52tUMq
-# Y07dsP8MTl5A+yIKE7OrR6OvlKbRLBbxP7eVCnfZo/wctsvpdVbRnN87HBH4i8aH
-# pHQS4RIQcG4KBhR0YLp97JAJbsBT7AjfoxZ8O2sRcDaT0U5jnHPTTZh1dSxCX3CS
-# /P2Z2URZCjjJeJwb6fgEuLdWJsplV4zbkkHT5joNcDRuNfIcohPWVPvwhSeG6QlU
-# aD5XLWu9XJArO7Q=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgrqFeFzjpkZDXS/AKdgAgsTLOpAz8DCo7
+# wZ9IQPCe6cowDQYJKoZIhvcNAQEBBQAEggIAao8PuGWXv3DaBFI+0q2zuEnVPRMJ
+# 1WQcar5KAPo/aCvVSaX+fyK73gnqIWKutKL7qbzLs9Fr8uplaNDblVtQ/6poIOqk
+# /MBF/juROp58zD20RlLh17tmXrtUd7usS1XUW5dUSenazglqwX+Wq/qoR4dGmqr8
+# a8/r/UrfK4ddgJd48ROs5Tc59q2TrWnbH5icoH7kqhzGhXtGVYTg2+HtjUCXSN/5
+# kwzq02dHBSC4mXkjiDuEZ6i+akHyt+sLeplfgC+R+NBiC6oUOdbmtDvhsLjAXQST
+# 9y6wtIEhLgsJIIUPxluWKtVlEfq0ww8QYx8YnDB1uNjPNWfakdWRg6ryRkajpgTa
+# 7Ta101j2Vsc6qE20CzQY6zzDvgWC4iNOJRpvAQSXf1nOVqynRdyxE+MUFGtb+AOp
+# jayVP0SC5vWSE0j8K3fWgppNMLo/nW853UQSgIQR8pjxY6JpTwc2FjFSZcmfxL8W
+# Aq0pZwAAmudg+Jah8vXp2OdhMDS8BdCrAuPhFmQvelOOBuOMt/ZMlDQ6dfiMkvCy
+# VMpXudtSZUsqTtByPx/SX4TgzoqKs/ugFuDuEE3WJMbS1fRO3Gb2kAKX2QP6jbvo
+# yg8g/gD1gcnSQvh2EGHwOSjjVWG4pUOrIMXaUOqcdmrRiaphx6Hw9j4JFEqpTVqx
+# swP+ygYlLlROJic=
 # SIG # End signature block

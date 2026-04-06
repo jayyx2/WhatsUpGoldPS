@@ -86,7 +86,7 @@
 param(
     [string[]]$Target = @('lb1.corp.local', 'lb2.corp.local'),
 
-    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
     [string]$Action,
 
     [int]$ApiPort = 443,
@@ -190,6 +190,7 @@ if ($Action) {
         'ShowTable'  { $choice = '4' }
         'Dashboard'  { $choice = '5' }
         'None'       { $choice = '6' }
+        'DashboardAndPush' { $choice = '7' }
     }
 }
 
@@ -206,16 +207,35 @@ if (-not $choice) {
     Write-Host "  [4] Show full plan table"
     Write-Host "  [5] Generate F5 HTML dashboard"
     Write-Host "  [6] Exit (do nothing)"
+    Write-Host "  [7] Dashboard + Push to WUG"
     Write-Host ""
-    $choice = Read-Host -Prompt "Choice [1-6]"
+    $choice = Read-Host -Prompt "Choice [1-7]"
 }
 
-switch ($choice) {
+# Handle DashboardAndPush: run Dashboard then PushToWUG sequentially
+if ($choice -eq '7') {
+    $actionsToRun = @('5', '1')
+} else {
+    $actionsToRun = @($choice)
+}
+
+foreach ($currentChoice in $actionsToRun) {
+switch ($currentChoice) {
     '1' {
         # ----------------------------------------------------------------
         # Push to WUG
         # ----------------------------------------------------------------
-        Import-Module WhatsUpGoldPS
+        Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
+        try {
+            $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+            $repoPsd1 = Join-Path $repoRoot 'WhatsUpGoldPS.psd1'
+            if (Test-Path $repoPsd1) { Import-Module $repoPsd1 -Force -ErrorAction Stop }
+            else { Import-Module WhatsUpGoldPS -ErrorAction Stop }
+        }
+        catch { Write-Error "Could not load WhatsUpGoldPS module: $_"; return }
+        # Dot-source internal helper so scripts can call Get-WUGAPIResponse directly
+        $apiResponsePath = Join-Path $PSScriptRoot '..\..\functions\Get-WUGAPIResponse.ps1'
+        if (Test-Path $apiResponsePath) { . $apiResponsePath }
 
         if ($WUGCredential) {
             $wugCred = $WUGCredential
@@ -349,12 +369,13 @@ switch ($choice) {
         Write-Host "Invalid choice." -ForegroundColor Red
     }
 }
+} # end foreach actionsToRun
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDer3D4nCQ8+XpS
-# UXRCVt8uHZdbwG5Y8LjpcrVTMmiT0qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4oUWjQYgnZ9A4
+# w4rX7yZtbupcs5D2WEMx/OD24BY8kqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -454,17 +475,17 @@ switch ($choice) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgc4Fkldw0iP/6rFR1yz0E8zSmNGQttBZp
-# o5GWxRwHl40wDQYJKoZIhvcNAQEBBQAEggIA2OGoIQ7JU08oaJEL4ZPP0tAsYFrg
-# kimoChBAAHkNKmGTPkPA12El1ie1P0sRDuWBStQnEzRJ6hmLu4TV+5ZwA7aT1tgX
-# HOAr39S8DgJRMvdWPO2BYAOOVWSkfvt1m2GrGRYes6kgOQdd/O0lLNG6lVjgXm3U
-# dWuBN882bXZoVLqOU3Jhp+bpWh2GN/qnPq7peBVHi1lnl3dxW71VYy0FujIR6IZd
-# 1lgPu0kIriA56OdNgbbYXknVWy7K6oIXQ1nSXQWB6v9EbIxErwRWM7wuotFPhXlU
-# w37lBiQnvTRPw9ejByIoOQ8F6df8G8x/pb4rvsL34cX2byJg3rDSF/iWTgflD+BT
-# N4siB+GhuNEQozq44V1+3z7huuRuZgJYU5fnMf+VBEtatjVmVEHQZlSRs00A9qTG
-# ElL5H+lUi0xZ0PId+Y3QnME38EC7dLnwP4lsxAAidOE2l4HvpmGK3pBq8b2vMM3s
-# tCjqxfaCklmFVSM+nw3qSbA94tED4qKwL3F+TKK+kizlsVI+lWypNpbyMuSxK2sU
-# dmpopTzH26E97oBYlETvRupej+TuGjurlVrk/q41RCM9kOj23JDEK2GOKW0rAHGa
-# CkMvVGQ/tIrSeyfWW+79GoNguBXERFd9q28r/IUaHDyrggCs3CZ8fywsEiILEavo
-# 2ndnFNR9sKlc35s=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgAjRxBRkTBdKNk+IvhF9xRQ4EtBvicfCv
+# ZA8tZEleacwwDQYJKoZIhvcNAQEBBQAEggIAyKEjTk0IwKWy4cB3dY+UMV7vkyJc
+# k+y/sRyXaoca1mv389RE8chc7w1AOEmkXQPXWgHrtCfz88m1rjx4cdrbrZ74xZ40
+# 2lfwNyaUSu54s6LehVBZyGwOZk68D6QKvvgMmt1bdEh0FpcaCRhr9R6CvOIP37p2
+# gO84F+VZADYS6aHHfAJzy/PFYztEdBGm3B1N1aFvWqi5n7Mi0ky5Q22T7mB2Pvup
+# WC6i9wUiebqw3lnA38ajqH3W6eQFg3a0f8m8QZDcoQD2Gs64dyLtUIj5aqtNhmJB
+# Ri7MY73XlWWoHaCVgFZsDE86cLMk62U49LACeIVOrty12o4x73Oy/IvOpfnZ4Aaz
+# 7qJpgscFpAGmq2D6P5CzSLoUGQqmNSCYJz+8l8v1ZbBXetzl6Naqnlb+DjfpYc9Y
+# QRbmavCcGYOUyq09Z44zjOT6wgnlYcy0X4Oj7CKJs6k4eZ56k0HALypejUV9wOlh
+# NyvsL4J9BDpVifYlxgavGH/6UcOHdq8SkoUjuzc5X4ChVnA9J0VdsBqiAQRtcksV
+# FCqSE7eCY4CInbO8Kxp62P7Qzk50bXoIajhMUxJ0t51DSlHZRJmMZ6HKby6LbcMU
+# zqxAWmAVO342kfeHq0+gl0GfSDCdKJU1KCQACfKTe/7bliYkQkoFxfAoGycNnHl2
+# BHvjbZECYGjsGOA=
 # SIG # End signature block

@@ -65,6 +65,10 @@ else {
     throw "NutanixHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
         Import-Module -Name WhatsUpGoldPS
@@ -86,7 +90,11 @@ if (-not $NutanixClusters -or $NutanixClusters.Count -eq 0) {
 }
 
 if (-not $NutanixCredential) {
-    $NutanixCredential = Get-Credential -Message "Enter Nutanix Prism credentials"
+    $vaultName = "Nutanix.$($NutanixClusters[0]).Credential"
+    $NutanixCredential = Resolve-DiscoveryCredential -Name $vaultName -CredType PSCredential -ProviderLabel 'Nutanix Prism' -AutoUse
+}
+if (-not $NutanixCredential) {
+    throw "Nutanix Prism credentials are required."
 }
 
 # Output paths
@@ -148,8 +156,8 @@ Write-Host "`nDone." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCXaiLRE+mA4bid
-# 8wXv0qtHxALfwy5/xOHVhHF/GK6FSaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4X0kwhZ6jkm5b
+# 1tauqFGLz1WANKBl0jllhFrpYDsrU6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -249,17 +257,17 @@ Write-Host "`nDone." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgtQhfprVAXqUySfpILI4N/YUVdrVsfeb5
-# BvOwZi5EihUwDQYJKoZIhvcNAQEBBQAEggIAh4c/vwi6Xp+9qm9oGQOguTmZ13Mw
-# C6bXAdYRciM/7xXslsglIc/er6WyTGmNVwlFrYIAn7y+PJ9LeCc7tA2+F1NQ7evy
-# L5RovU9sj45Ct2Z3yl1EJS5sLTLocU+WLZXzF3S/dRMNtGJEsBeySKy3mTzejfus
-# EUWOjBV5E7uk9fVC7xtLhDwGHeYlDfNA6MdnqHzjhAKRydWPA53sfc2x2MmE4MGK
-# Xfn4YK27prOtRbYey16YSGrh4e+BBO5EY632Wu49Pgve7hFgRSdq9pmL53bCvdyp
-# gNggAM5ToiMqt+x58G/ksxj3Y9ESjooNBgNygjpUpUWTTiydzhBL35yInEACtrXn
-# X6IQ6N3wUpe5beNJ2r/6KG5Y+jdVbUQbhWTw2byF1pnbvt+InlvR1KeEp3x6p/My
-# G1oYed8oH8+l3thyDRC/svsKA7nYnn81fh1yQnC3mTDT2pzti9FHwpKQloJPcKSk
-# i36Icp+VxWyQ2hrKKTyoX3PpX6/6/gX7bwbe89eSLP8H0NHx6OW02hvtEv5xj7bq
-# bzt1RyTnhJFZFPaMkQ07g93W7yCZv2Nb2pfM0pGKByYNQMlWp153qc0/vhKIVLmp
-# S2XyT6yRq1tfLlJD8Hq/6C61AET2yUZgJ17VVPxXswyrlnTmYah9iWCFEr2jCsJK
-# 5XkEgGn34OcjSBg=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg31CeOiBta5Iy/t0/2AM5kC7kIlBmKyD4
+# 0jSQn7tLkekwDQYJKoZIhvcNAQEBBQAEggIAwPj61Mx188Pi4gL/sItXOGCrDNnn
+# QH6efW2m/E93OwMtPk/8HsHX20pDIvS75e1QTBx5OZUFpwTQ2d5u9TT8qMvzXgGH
+# U44lGzBHEEZLPA+WYiFLv/ICDNObwbYsJ0pTnUDsYf6hV9VsB9tG9mm1q+oKb/gK
+# Fw1eJS8eTN/SMoKFZtQwGWFUdQupQEN3s/QdTne/ZD5x2zweRBq1mBjg+fxoWVpC
+# fcMr2g9KlR8c4PBdeEogDYcjPBCNXsaKdX6R7nVvuRjGUt8Rxq9tJSuKaewRuQ4n
+# bslmibEiMRY/YptTXb+DY0X9VoKRsV8SWP65nk+/8PMFM3sorL9Jx7c7ruJOIf0R
+# MqOfH1pBkdVYOdJHlWnTpRzCPRZ1rfvAf6fmcDd6f7z3Cv1XmckQK3WAvmQoC8N6
+# itntnRIvRN6/mlmQeaZO99iteH89mxiaWzHCIfzy9f5XB8jLbgixF4r+npluOVL/
+# 3ch9SAx54CGqzRiZtTistsHvXNgUQ+r+2KEJTZNT4LQk81X+zQiMvy7g+UUnqEZ5
+# uDLyN2CJfqaIJHHT/qfYDteq0SamPNtLYNkhZzl1Wzkx1JHAaByzbd4WirXOcpqd
+# lAKz309g1gXGJ0MDstHwSAnpPoLz+a6768og01Ke3dvUFeBVOkV0ccXDGlveYF6j
+# RwRGPUBQsheMaBg=
 # SIG # End signature block

@@ -1,0 +1,6 @@
+DeviceName,IP,Latitude,Longitude
+core-switch-nyc,10.1.1.1,40.7128,-74.0060
+fw-chicago,10.2.1.1,41.8781,-87.6298
+dc-server-la,10.3.1.1,34.0522,-118.2437
+ap-seattle,10.4.1.1,47.6062,-122.3321
+router-dallas,10.5.1.1,32.7767,-96.7970

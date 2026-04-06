@@ -24,8 +24,7 @@ public static class SSLValidator {
             new RemoteCertificateValidationCallback(OnValidateCertificate);
         ServicePointManager.Expect100Continue = false;
         ServicePointManager.DefaultConnectionLimit = 64;
-        ServicePointManager.SecurityProtocol =
-            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
     }
 }
 "@
@@ -498,8 +497,8 @@ function Export-NutanixDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDkLWVrbHxM24hg
-# uq9aEuk37W32zy+zZFGOD1UfnWwyUqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAZGNydbNT9JyJ
+# luOKAmVcnjHHiM6nTaWHv3dQxxEqa6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -599,17 +598,17 @@ function Export-NutanixDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgt1YDQ+m1vCQczoioSR2ODKGF0uEX2pOS
-# nxflGxV/n3EwDQYJKoZIhvcNAQEBBQAEggIAXtgmEJAjltLN72v5N6cwmQX7+zY7
-# C8zAWUn6QeYrJIpfILa6qDQg0kPGArhnTcn/nlyUybGyIAChFDKHiLVBG4MX4dC5
-# 2Y9vOuRBEBJEj1m5u3r6WpXZdZmDP7uvozKWZTJDRd5+AHvmJqo2Wrupm9xga+oC
-# dVOKCpK7Se1ojlJsro6nwgctDqaEfrC862mcHnXEz9ihKXKBuw2Hs/+l4tkbwNaR
-# BBGeBLM60NY1xQq/CuQXu2NhrgPF/1z4fF+lo8wnA0RSI4rWrIlUoCBDkrhI/oiD
-# 4EqE2/A3eQytUc1ev+H7r2sF8insYmsVxHfdJvMB37TnUu3kTgbSqvoeKgvJJcfk
-# Morn781ZtV77zOBhR0WdMHFyXhi8MKG1jmylwoH7QdogcDhYvmRL/yIPjsmgbPYq
-# Al/10Ax2VQGjrOH9hOe/g57lJUtRc9JBKNu8MJrwog1ZS/0F3Xnzj2y2BLrfER8G
-# +HUFuI/u5T3wokm3UHzMlbY8NEyeqTBgC3BkJqjfVJoG2Q3Zk3x2xW7Hu0kc6I+V
-# SCROGsTHZBZUKPq5ocmR3QSh+g7Ue0f7J67Zhn4emvzrYrGp8a1QeZuIEwHjdVzG
-# 83d8Ll1R6bmzZRcGV3vlbGxM/ueRoM6cOT1CDhwc3n/KP/rFb2YuARUGHDZxUxK7
-# +j3SXYfV+A1nvkc=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg40GhOxya71+7jNaxtbmpkrWpKpg0ZxJm
+# lF7trl4oM58wDQYJKoZIhvcNAQEBBQAEggIAnyMIsHFl06YwFxrbnwdoR4ezX145
+# PvpIPEoUjqnOwKBJJdT0cG1+t5J4bM6OwFODJUbMoFCUTCgdTnhvfMC2f2eRuEVb
+# khNI6fWPF636GD3uoBLiWF8omBOB4Wbt+EJ6HwpMWkt7ruWqnaEgdZgs0hqbCW/L
+# YlyY3h+2DHXMHowAI70Zw8KSBoYtpZ+/jRDyuF1Qy1LAoC6edqOR4chKgETk3e1M
+# DhTS3fQ5j7tBhy4sy6A5uG8lzOPycH5j4Vbpm5gRJJ8yYN3zOb3PLqmkZdVS1AWt
+# MIFEs06H0W6pi1XH5Fzg++MNrYvJdFRMZasx+xyPtUCr4YQQ/RASB1I20osuZk7M
+# xRPN0bnd0/Fa5xIZB6BGg2uF/3R55yhXrVbGf/UawM/0/T8OYuw3F5U8eo9hF41i
+# p0S2fgnh5DWXrcD+d/rxRy1KBEV9NeRI5l8SDjHGtu8VN6FKehOBptu2JfpubFIz
+# 0RYEXuAH3FUJCezBSSPhtN108id8tezJOrwdGr6kq4OV8EyOl/maLTKp1i0GHgz6
+# 1JbQsQdy262l6UsH8NoiwVO9ae6SZvkMO0g+FFo48vpJxlgy2crS5IGBr86dew54
+# V2Bq1/gFjVshvdoJp9Rj5z/PpNY0NmmW6qINaQ0j1FRtomuNBgDRkMTIvwQA6VFb
+# LBve6DngqYEfHgY=
 # SIG # End signature block

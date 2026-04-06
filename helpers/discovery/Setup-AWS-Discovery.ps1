@@ -142,7 +142,7 @@ param(
 
     [switch]$UseRestApi,
 
-    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
     [string]$Action,
 
     [string]$WUGServer = '192.168.74.74',
@@ -376,6 +376,7 @@ if ($Action) {
         'ShowTable' { $choice = '4' }
         'Dashboard' { $choice = '5' }
         'None' { $choice = '6' }
+        'DashboardAndPush' { $choice = '7' }
     }
 }
 
@@ -391,11 +392,20 @@ if (-not $choice) {
     Write-Host "  [4] Show full plan table"
     Write-Host "  [5] Generate AWS HTML dashboard (live data)"
     Write-Host "  [6] Exit (do nothing)"
+    Write-Host "  [7] Dashboard + Push to WUG"
     Write-Host ""
-    $choice = Read-Host -Prompt "Choice [1-6]"
+    $choice = Read-Host -Prompt "Choice [1-7]"
 }
 
-switch ($choice) {
+# Handle DashboardAndPush: run Dashboard then PushToWUG sequentially
+if ($choice -eq '7') {
+    $actionsToRun = @('5', '1')
+} else {
+    $actionsToRun = @($choice)
+}
+
+foreach ($currentChoice in $actionsToRun) {
+switch ($currentChoice) {
     '1' {
         if (-not $NonInteractive) {
             Write-Host ""
@@ -407,12 +417,18 @@ switch ($choice) {
 
         Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
         try {
-            Import-Module WhatsUpGoldPS -ErrorAction Stop
+            $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+            $repoPsd1 = Join-Path $repoRoot 'WhatsUpGoldPS.psd1'
+            if (Test-Path $repoPsd1) { Import-Module $repoPsd1 -Force -ErrorAction Stop }
+            else { Import-Module WhatsUpGoldPS -ErrorAction Stop }
         }
         catch {
             Write-Error "Could not load WhatsUpGoldPS module. Is it installed? $_"
             return
         }
+        # Dot-source internal helper so scripts can call Get-WUGAPIResponse directly
+        $apiResponsePath = Join-Path $PSScriptRoot '..\..\functions\Get-WUGAPIResponse.ps1'
+        if (Test-Path $apiResponsePath) { . $apiResponsePath }
 
         if ($WUGCredential) {
             $wugCred = $WUGCredential
@@ -608,6 +624,7 @@ switch ($choice) {
         Write-Host "No action taken." -ForegroundColor Gray
     }
 }
+} # end foreach actionsToRun
 
 Write-Host ""
 Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cyan
@@ -615,8 +632,8 @@ Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4VcBSj1sI54mm
-# XUkbyOl9CakecHRzltFBMkmtwmrHb6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDie2WYw0XHDn0H
+# 1NwYYJCHX7G1mwnV7gfJ4eByR59osaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -716,17 +733,17 @@ Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cyan
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgSjuOW0b6Ozvid8gk5BFaChtWzvJ24kuA
-# uY8i2X4KTO4wDQYJKoZIhvcNAQEBBQAEggIAXtG2zJL/7LEEmscht7w2h8Wp9qco
-# +JdwDRlsmY/KVWZt3W9BHX/y73sOKKolHwVx2V8XauHF7ThlAeR2Ylm73R6bj0OF
-# 9Zlxj3Kd7nBq0D2/BvNrZ6fApScYxrCnWXcuonWAJICh8kUwuu+00y428HJNtEwj
-# XyEPrXSutTb4PwIp7pM7Mt6+PGD60Ff6wnn7g7znFYlwX4AEtGmGmerAsAkztqV3
-# cigNG88Cvncp8Svqc19UPi8UDGsHMeBa6kYjMYP5E8cAC0B0HnpDAZXYx/t1Rujc
-# ksBm1tHnph+WaKk58T5ubtssdBy3QN3GdNk18PLmT5GaN12vJDU4fHL6Ms5JpII/
-# OQmWGugGr+ehWhW4zpdBv5FGcPxUvMxwhahqXtDDZoW9eZKSB9Yd8stUjzyXcbxg
-# XzR415qDF529DePPJzPbj6Uf2Efwbz33Z+1YfjJStC1i52EZ2u7CA7P9ljOqAwEn
-# Y5fl0zJ4mhp77Ey2kAdeNJSdPvTnBupfBTbFioWxDyuk7+2t42zEjgybLyjah0Fz
-# L43FaM/HgSyc194nP+XUvmtJ4Aztw4eQnfs3+k4qNPUpMxTIkCjvZg9VVXsgUEi3
-# nIfpXKbTxTEr9+LH4o8TfRwT2pL2v9XdmKfCg9LwRclTizcDsni0RJSHt70zW7tB
-# evk/+J0pSlDXtjg=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgcwIRXwnrmurdXap3/ThKW2aFa6tBy9Ho
+# QbLWDnxojhowDQYJKoZIhvcNAQEBBQAEggIAHijHUHYRYFUjW4tSW1Hf6Uo3lGbA
+# 7R4EFfqSAZ67bZJoZ1xwWTbpTwLD61fdbOdgiDLlWWjbEiI0Zi2K4bHkgGSnxRHq
+# c+MZB6WfzO5JF4FsD7umk8AgIBItxVddNvb6gqJDy2fqq6uS4w0/+yPPLMzVB8CF
+# l30gNp9gM5fqAV7eXvgeLLmYOlqI7cwx7V0LqGvHN+cE+YHSnpVUgjuOxhoTv4la
+# 9NG1Lm7QW0Ja6hz7IMiNLa1HerbKkQhaXFft9QcresfrlfcTIN4YvjpyneB0hhoJ
+# LRQxQVPfsNNpzLJ2nUpYj2yctyJzaPxdp/W+SWOcy7hpiyk5cw5SlTdF6yv8upgl
+# Z1gpTMoZ4EpcNIZzWViIwShVLhp1pnacfHX84eeHRVFrS5PWlXy8BapUasq6vjw9
+# pOuSsoybPBosNLVBjEUqiDQeSa5ltih7FvNhvXOFbSG5s3/sDR/fFzMhu+gxlYSA
+# YwAdxvy4OCwN/AjAdQOvgZlQ93AeyLxZQOLHmEDEuT2xCuRMc6WrspXu5svJZxET
+# dj/BAElG+0JrRiEqtFp0Ln8hRgAL2A12xlhKFgcIGXqV5/NYt39xZyIZfQzuKbWD
+# BX027rVzK2JFaYX+KuuvP6jacFiHi40FbNnEkzPsBghIuQCsCTiJv0t6aW1jwjH8
+# Amn/DDpwe5iyeSM=
 # SIG # End signature block

@@ -21,22 +21,16 @@ JSON body for batch polling configuration operations.
 .PARAMETER Body
 A JSON string containing the full polling configuration object.
 
-.PARAMETER PollInterval
-The polling interval in seconds.
-
-.PARAMETER FailedPollRetries
-Number of retries after a failed poll.
-
-.PARAMETER FailedPollInterval
-Interval between failed poll retries in seconds.
+.PARAMETER PollingIntervalSeconds
+The device-level default for how often active monitors are polled, in seconds.
 
 .EXAMPLE
 # Update polling interval using parameters
-Set-WUGDevicePollingConfig -DeviceId "123" -PollInterval 300
+Set-WUGDevicePollingConfig -DeviceId "123" -PollingIntervalSeconds 300
 
 .EXAMPLE
 # Update polling config using a raw JSON body
-$config = @{ pollInterval = 300; failedPollRetries = 3; failedPollInterval = 30 } | ConvertTo-Json
+$config = @{ pollingIntervalSeconds = 300 } | ConvertTo-Json
 Set-WUGDevicePollingConfig -DeviceId "123" -Body $config
 
 .EXAMPLE
@@ -66,13 +60,7 @@ function Set-WUGDevicePollingConfig {
         [string]$Body,
 
         [Parameter(ParameterSetName = 'ByProperties')]
-        [int]$PollInterval,
-
-        [Parameter(ParameterSetName = 'ByProperties')]
-        [int]$FailedPollRetries,
-
-        [Parameter(ParameterSetName = 'ByProperties')]
-        [int]$FailedPollInterval,
+        [int]$PollingIntervalSeconds,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'Batch')]
         [switch]$Batch,
@@ -111,9 +99,7 @@ function Set-WUGDevicePollingConfig {
         }
         else {
             $bodyHash = @{}
-            if ($PSBoundParameters.ContainsKey('PollInterval')) { $bodyHash.pollInterval = $PollInterval }
-            if ($PSBoundParameters.ContainsKey('FailedPollRetries')) { $bodyHash.failedPollRetries = $FailedPollRetries }
-            if ($PSBoundParameters.ContainsKey('FailedPollInterval')) { $bodyHash.failedPollInterval = $FailedPollInterval }
+            if ($PSBoundParameters.ContainsKey('PollingIntervalSeconds')) { $bodyHash.pollingIntervalSeconds = $PollingIntervalSeconds }
 
             if ($bodyHash.Count -eq 0) {
                 Write-Warning "No properties specified to update."
@@ -148,8 +134,8 @@ function Set-WUGDevicePollingConfig {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsY6aLlBwSsqI0
-# Zc/K0nXGEVrPFA51g5MLYpYQ4WfYXKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5HhqP0lRmRDrM
+# FTsj8eL6D5OBo9iOJ4ON5hNZTPkZaqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -249,17 +235,17 @@ function Set-WUGDevicePollingConfig {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgvhwThgXsUkt0kxKeEgz6Uw7b1+pfbLiP
-# zRpGxzNIQfMwDQYJKoZIhvcNAQEBBQAEggIAgJGy4Jo+CsdhYW2MT8AFGalbfP/r
-# SK+hSFUjN2l457pabhDM8/XL/t4/Y1SmrFPw04JcvZaAV5X4bgkZPlw0S2DQWeKA
-# KNS9546iF/DE7KW/IAhtcnncVxUrcGXLD/FORvaPI+ZE91hvdLWNym4vd+FOKhV5
-# FHspb7eMo44pczM5X3ea8uv32hyXtUup1fyGzP9poGKsMYdMGUyylW9Qnau2HcBj
-# oko0/jPcDdI+0V/LaEqx5eQ9RgHx/8RD8KD8sqISuBMMMRLz1hZv8Xo/cuj3Hv6a
-# si7srYC72MA/4JSOVQyAVqgwbN8M1aKCcYRP1e0MRm+JLOEDNIYzjOR4ywx4CqTN
-# wgKsN+Kc3ASiZughCI/uon7zPkEa4wuuBSiPrv1u9VeCf7FLgv6rfCitdYaLuvXt
-# wFV/o/+c8qW2a3jX7eQqmaTYz7cu8Tp9lV6T0mOT0uhRNuObkuzvaIfAEMpXD14V
-# bgGrB6CGDgCdB4uFVSOmjvvyvAtLfCFkUjthSy4J+XBgfkfsMFXRGZTbRyHPset7
-# wxKAOeThB5o+DcoW+QD7OlNNrXVYjUKVtUXSGa2uSV5Ko1DAYg0UpRU9FiEzAO3n
-# 36Z0aMhzcats9GnjI1b18LJYyzlWsP7Xal8vs239qKaC4nyxySzki4UWnkt9dp0Z
-# hu4ojvKYpQi0F9w=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg1ymu1Pt3p7gHAv/JW6YiP7V2xYS1JnC+
+# dKDk4QtLp2UwDQYJKoZIhvcNAQEBBQAEggIAThhRaH2vBlw/j1XbyCQJzywIVGbA
+# vtmYFGYuxot1cUqQ5eHJaU4h1L+tnw8VoowM271/ix6qCX7dJd2ZW8gjDZzkBoAk
+# CmhEYLmsYWi3ETO9gEZDQeTvcg+eWCKJ/xvxp5+vfqkAhyA2IbQVEPjLo81CATH3
+# NBloVhzcs+dfZ9YNi0We6n09gIerP+tTGoT+Ag8H6DxuxD2+9sCNAzSWYlTKPPnB
+# H8WYoje+Btzfn+kjRjToc7ggwnC93CgvUemTGAee2XyWmqRHuR1jplwfEugoRoLR
+# u4ak9fTbqrry7s16fAz4NqnxPgxtjYEheuIih8p52b2CHDKeaUDMwQ+ooAYlZZqy
+# YtrdJgU2/PmTMOTMR0n1JDGz7peaR7mwdLErFrEDamN35SXa1wdd0vUAzrpyp4Jf
+# eSgngF05VK29AeHd0FfQY7osp6VNDVJn/NZO7dW9KQzzGVOzjHdSp75kTMvB5V2d
+# YNcYLbXgtgV9WPTKOpO2EvUbEkkuTf4oOWn9lzFgWFdkQroqdIydCG1kse7bJ2wA
+# HuWSO42yhXeBnIMIG5+UClVNcBpMNqPP8glVOt2961z07j2TgmKtVhrFk/tmltGA
+# aKwib10d5Y4rMbXBsMCgTyI/ok9zBlpYADUHtGAUXocGMs/4LPURyZprG0NUJX7i
+# jxtUYrCbqpYWnAI=
 # SIG # End signature block

@@ -33,10 +33,14 @@ function Set-WUGDeviceTemplate {
 
     process {
         if (-not $PSCmdlet.ShouldProcess("Device ${DeviceId}", 'Set device template')) { return }
-        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/config/template"
+        $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/-/config/template"
         try {
-            $jsonBody = $Template | ConvertTo-Json -Depth 10
-            $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $jsonBody
+            $body = @{
+                options   = @("all")
+                templates = @($Template)
+            }
+            $jsonBody = $body | ConvertTo-Json -Depth 10
+            $result = Get-WUGAPIResponse -Uri $uri -Method 'PATCH' -Body $jsonBody
             return $result.data
         }
         catch {
@@ -61,8 +65,8 @@ function Set-WUGDeviceTemplate {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC784QzaVxA5dZT
-# VCERaIooSB1+i9VelrQxkRfpiFuuWqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzrQ5RDVgcjRYD
+# qsikLmxbu+6Kb5PKAUlW+CrjJqGdfqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -162,17 +166,17 @@ function Set-WUGDeviceTemplate {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgYJGpO/tboysQpoVj7BnbRQgRE5HrQH1l
-# PAUW2vpE6UEwDQYJKoZIhvcNAQEBBQAEggIAu6D0U0i/ptS5DQG/OcSKPz1vBsmH
-# 6d3SWHjnx48vBoQwAth8vEm5EZNDwR2W0u4+xPYx8//VmSDIC5bjVPX+lXGhBhwh
-# 6UiNVoL2NwvRj7sPOP0az5BrEjs1bp2YCxz/Ce8JJ8NwT8eKcB8t1EFMDd3rq3/b
-# cF6NUO8xzvv7GU1vHAS055LphlMGsE3Z6M9QJwpsfD9diBde9u5RQ8MOubGe9T3Z
-# O8IVqXemjpdvnRDgzTUXnVdrMN/jO0RYHWCM4vPE7iKeRA6xlvsG1GQX+krWkaDE
-# 30WntKIWql48kVM7lXWVvJ3vCvQ/nXUtoHMOaCF0Bg/1i6JbSh7MB/wbBtGCiB5W
-# oQSYpu/2KCzhRqpHfQbTqmwS1aCK7xSkCix6+rPOgTlP5GFtWle9wtacMgJGOH/l
-# AESv28+/SqqgsTWG2to6EVkivwDx+Pw3jZaOika01OK/M5+XKEuGxixjrcprGYwI
-# cPDgegC4KXIG3LiAxEw4p78IHJedgsjasmtV+pKvfzLa1w3ap+pIE0yPzmSFeLiW
-# sQjmyT8JrS6hjgc68a+jXUi0ZXwYYsf0id8qFGeka3w6nmxh1h/1nFQoRRrIsffx
-# ILciWrhGUomatm2yKA1C0yImhqXaz/A5TOBAcMmlsvOob10qr09LW8fPLc3v+Ss6
-# W6FE1dnnZW3IZxg=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgDyJMzGT8WuC30f091wyjyXxnjOFzFm6B
+# nMHiTPgPFuowDQYJKoZIhvcNAQEBBQAEggIAdYCLEhIWuGmousduDrkCC3CazmW9
+# TKJGENiOfdQ5A9mvv1Dq0Ba3rWbUukQ7lz0JeMXClOskqWS6uDvgSeY2ItiX9wBo
+# 3Uw6F17tcRRd5/xFmTWBqyXMolwcR7veoadKq+eKiPmBBpP+6GzkeAuz0vgOxnB3
+# 4sPeDKCbq22fZk2dTkGgLrf1Yi7gzEueKnxFfYvgbor5YeWuJxgSO3M79OOIa1CN
+# WvGKO5LAyUZhltCvTu14/q/DURV442Xr+4QKZWodFGdzGofFCwiWfYBnW+RixuUI
+# GHGwdRRhQs5Pu7YFp3FL7RvST+iZ/C3jT8cucy/P9wdMWLWw5HZRqScYPmt9r/AH
+# dCbMrmzjtOcoQ/gtjtO3V5WczBE84lpDVPta0JJlrUDke/JSPb5gjV8sGzdlEwyp
+# gofquHc5r/vR1u2IAcdVK+s8ruyq7Ncq4lIrHxMKpchzdMzA84Wuu+VxzBomZy2E
+# sDBrz7aArQrwjnhXeUTm5ScRGJl93eeFOacJyIh++Tzj4rDM6AZS6AO9w5LMGIAp
+# RAWVCmye/REYT7Caz7qbwzw3TKe0cIT4Sz456xg5Cklx3+8yklhHwbDzRMrIWImM
+# P8HyachWQXIZTibFn/4Ua9Vut3c0CggEkXwmWFVyF5vjJDh/kCHU55mflXtKP285
+# oiiYZFa3tmtL0jM=
 # SIG # End signature block

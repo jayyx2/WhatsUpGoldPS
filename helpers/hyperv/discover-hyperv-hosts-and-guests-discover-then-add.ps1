@@ -1,16 +1,23 @@
 ﻿# Configuration
 $HypervHosts = @("192.168.1.10", "192.168.1.11")  # Hyper-V host IPs or hostnames
-$WUGServer   = "192.168.74.74"
-
-# Credentials
-if (!$HypervCred) { $HypervCred = Get-Credential -Message "Enter credentials for Hyper-V host(s)" }
-if (!$WUGCred)    { $WUGCred    = Get-Credential -Message "Enter credentials for WUG server" }
 
 # Check if the WhatsUpGoldPS module is loaded
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
 
 # Load helper functions
 . "$PSScriptRoot\HypervHelpers.ps1"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# Resolve credentials from vault
+$hvHost0 = $HypervHosts[0]
+if (!$HypervCred) { $HypervCred = Resolve-DiscoveryCredential -Name "HyperV.$hvHost0.Credential" -CredType PSCredential -ProviderLabel 'Hyper-V' -AutoUse }
+if (!$HypervCred) { throw "Hyper-V credentials are required. Store them in the vault first." }
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
 
 # ========================
 # Discover Hyper-V Hosts and VMs
@@ -92,8 +99,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALJCRwAcrdpUn6
-# X2RrxRmgPinChKQ6iJrLzOx05Xs116CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAC5Y/PncktsINt
+# Pf0wUqh8yu0cmjL+tB0ynlemKCSV8qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -193,17 +200,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgAoKwJ/UH33BQBmxeMqcGFpKmzijoTrSM
-# 0c/BS1wb7TswDQYJKoZIhvcNAQEBBQAEggIACfOjhD2OLJCIQ3m351xMkRuW4R0u
-# 6Zl8BPb2S8QBlZ4cNaXhGIOp1tV0GKAKsOzyvXaUUvNy0lLCMCAf455Yoyd+PdVd
-# OiCgetNnP37hz2VhlkGprk9FbAIBnno0pxp2motLcXlSg31GgZYeFWAsdjCTRKzl
-# A96I4Jmog64yDAtp5Cuci4QPp3sIFpI2ifL3HsFXcIIUFyOZ69QGIIsb5yOYAqyd
-# zLN5Oe7yKUKe8PoeaHonYx9jNo2pYqMfj58mT1654/X0VCV+UyzT0rrFps9UqlaU
-# DOo1Em9sdE7Z0+YxEMzF2+c8nHW4FK0lzVNiT+p7Bw2YiAUzpeahKKNugAAEGVOZ
-# /iWZWqGBnGCC0/WU2p8sxcEpRrz+aWF8/iVM4QLiykOFtT8b9ABLZiRJmIbg/qg3
-# Bdp305D4a/6mFDvnXsYZ41qlmICEqPRzeuzu3e1ch5W96ZvXZALNOOkgRYxOYGvS
-# 3rurhtmeznMnX7+w7A8ywUEeo+8o1mDGMlwNQq4ocjzngPKsa7VNJukYpnLfrjAA
-# Dui1bXjgZEXb/QNOHmpBxbsyLeP3QbWlRS/bGcdRifbkzLilQeP1K5PrN4mwlCTX
-# oS3AZs4CnAFGZwY7inKCUi0NOs1U+y2P42/9ak2jtCCxGhxVKZjU+kxtP7B66Ntn
-# xGW7S80fTk8Q4XE=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgmXYHUY9hd/glNW5Mz+j1mKfyqLJhGVRN
+# sO1pO8lyUe4wDQYJKoZIhvcNAQEBBQAEggIAWEkFPE1PsinsvpXTte+lStUr1Usj
+# kYXYK/yaIxBGYhlX+H6yJbgH3KAqfMf3ATh01twtDxaelHE4IttRgf7i4WDubxXH
+# Y+bVkzy/hQE1sx9kq7im1Do2on9na8I3ZlDYEt9omuaJ+tO5R2Qz84oNjkHW5rHb
+# 432zqRGKl1TiogfmH82+vGSKwsW4alDrhkLEM1XK6V8ag2r/Z/ICCy/cXPODCibM
+# QPvo2AmLjHLUfHyXyfMljmo2WlsCD4lvVl5olnvaOb/mJiobKubGQgeUySiAk3UV
+# y1y4Z7tg/wzhdIdVPTdUNTjIdcR+IgSTcPXMOoM4vordvyu1jHrADpqIXnJ8xIff
+# Ci0MxDWXsHE1lS1wwc40sU+QImkMIT0MfCuhP71YX3r155uUi2h+nq/Sm8GtDiEl
+# s1itqYj+QqYPn4GQhBQRFlOG9ExaUe6e7SdRWPzqOuQNjp7D5GKlKOixLdpALgi2
+# 5ivhNIZyCN8d9glpHM8RPagFp4oj9R/5CAYwIKWyNRYwDfVbEzAcnqMerUzxsLxl
+# hrqAhNu4KegTsMtw7mwXmYoTRc2mebDNCOfFdxVKV0aIananRH/KU7WcJ2rU059X
+# F7c3RvR5i1/mvu2T3gBWU80ONT0x7BMLv03s/LU766pwBcpdEptUBtKTpeDpfUZH
+# +demzlghZ2Yn9LA=
 # SIG # End signature block

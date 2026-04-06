@@ -101,6 +101,14 @@ Register-DiscoveryProvider -Name 'Azure' `
             $useRest = $ctx.Credential.UseRestApi
         }
 
+        # Determine metrics timespan window (default P1D)
+        # Wider windows (P7D) help idle resources that produce sparse data.
+        # The interval always matches the timespan so we get 1 aggregated bucket.
+        $metricsTimespan = 'P1D'
+        if ($ctx.Credential -and $ctx.Credential.MetricsTimespan) {
+            $metricsTimespan = $ctx.Credential.MetricsTimespan
+        }
+
         # ================================================================
         # Phase 1: Authenticate and enumerate resources
         # ================================================================
@@ -123,6 +131,7 @@ Register-DiscoveryProvider -Name 'Azure' `
         $healthTypeSupport = @{}   # FullType -> $true/$false
         $healthFallbackApi = @{}   # FullType -> API version string for ARM GET
         $healthJsonProp    = @{}   # FullType -> property name found in response (e.g. 'availabilityState','enabled','provisioningState')
+        $healthJsonValue   = @{}   # FullType -> actual observed value of the health property (e.g. 'Succeeded','Enabled','Active')
         $providerCache = @{}       # namespace -> provider info (for API version lookup)
 
         try {
@@ -229,17 +238,22 @@ Register-DiscoveryProvider -Name 'Azure' `
                                     $props = $healthResp.properties
                                     if ($null -ne $props.availabilityState) {
                                         $healthJsonProp[$r.ResourceType] = 'availabilityState'
+                                        $healthJsonValue[$r.ResourceType] = "$($props.availabilityState)"
                                     } elseif ($null -ne $props.enabled) {
                                         $healthJsonProp[$r.ResourceType] = 'enabled'
+                                        $healthJsonValue[$r.ResourceType] = "$($props.enabled)"
                                     } elseif ($null -ne $props.state) {
                                         $healthJsonProp[$r.ResourceType] = 'state'
+                                        $healthJsonValue[$r.ResourceType] = "$($props.state)"
                                     } elseif ($null -ne $props.provisioningState) {
                                         $healthJsonProp[$r.ResourceType] = 'provisioningState'
+                                        $healthJsonValue[$r.ResourceType] = "$($props.provisioningState)"
                                     } elseif ($null -ne $props.dailyMaxActiveDevices) {
                                         $healthJsonProp[$r.ResourceType] = 'dailyMaxActiveDevices'
+                                        $healthJsonValue[$r.ResourceType] = "$($props.dailyMaxActiveDevices)"
                                     }
                                     if ($healthJsonProp.ContainsKey($r.ResourceType)) {
-                                        Write-Verbose "  Resource Health property for $($r.ResourceType): $($healthJsonProp[$r.ResourceType])"
+                                        Write-Verbose "  Resource Health property for $($r.ResourceType): $($healthJsonProp[$r.ResourceType]) = $($healthJsonValue[$r.ResourceType])"
                                     }
                                 }
                             }
@@ -309,17 +323,22 @@ Register-DiscoveryProvider -Name 'Azure' `
                                             # Check in priority order: availabilityState > enabled > state > provisioningState > dailyMaxActiveDevices
                                             if ($null -ne $armProps.availabilityState) {
                                                 $healthJsonProp[$r.ResourceType] = 'availabilityState'
+                                                $healthJsonValue[$r.ResourceType] = "$($armProps.availabilityState)"
                                             } elseif ($null -ne $armProps.enabled) {
                                                 $healthJsonProp[$r.ResourceType] = 'enabled'
+                                                $healthJsonValue[$r.ResourceType] = "$($armProps.enabled)"
                                             } elseif ($null -ne $armProps.state) {
                                                 $healthJsonProp[$r.ResourceType] = 'state'
+                                                $healthJsonValue[$r.ResourceType] = "$($armProps.state)"
                                             } elseif ($null -ne $armProps.provisioningState) {
                                                 $healthJsonProp[$r.ResourceType] = 'provisioningState'
+                                                $healthJsonValue[$r.ResourceType] = "$($armProps.provisioningState)"
                                             } elseif ($null -ne $armProps.dailyMaxActiveDevices) {
                                                 $healthJsonProp[$r.ResourceType] = 'dailyMaxActiveDevices'
+                                                $healthJsonValue[$r.ResourceType] = "$($armProps.dailyMaxActiveDevices)"
                                             }
                                             if ($healthJsonProp.ContainsKey($r.ResourceType)) {
-                                                Write-Verbose "  ARM fallback property for $($r.ResourceType): $($healthJsonProp[$r.ResourceType])"
+                                                Write-Verbose "  ARM fallback property for $($r.ResourceType): $($healthJsonProp[$r.ResourceType]) = $($healthJsonValue[$r.ResourceType])"
                                             } else {
                                                 Write-Verbose "  ARM fallback: no known health property found for $($r.ResourceType)"
                                             }
@@ -606,12 +625,14 @@ Register-DiscoveryProvider -Name 'Azure' `
         # Phase 2.6: Strict validation — verify WUG poll URL returns data
         # ================================================================
         # WUG polls performance monitors every 10 minutes. Validate using the
-        # EXACT URL pattern WUG will use: PT10M timespan, PT5M interval (returns
-        # 2 data points). The metric must have $.value[0].timeseries[0].data[0].{field}
-        # as a numeric value. Query with the SINGLE aggregation type (not all 5)
-        # because Azure omits the field when only one is requested and there's no data.
+        # EXACT URL pattern WUG will use: PT1H timespan, PT1H interval (returns
+        # 1 aggregated data point over the last hour). This wider window is more
+        # resilient than PT10M for resources with sporadic or low-frequency metrics.
+        # The metric must have $.value[0].timeseries[0].data[0].{field} as a numeric
+        # value. Query with the SINGLE aggregation type (not all 5) because Azure
+        # omits the field when only one is requested and there's no data.
         if ($metricsMap.Count -gt 0 -and $useRest) {
-            Write-Host "  Live-probing metrics (verifying WUG 10-min poll pattern)..." -ForegroundColor DarkGray
+            Write-Host "  Live-probing metrics (verifying WUG poll pattern with ${metricsTimespan} window)..." -ForegroundColor DarkGray
             $liveDropped = 0
             $liveKept    = 0
             $resIdx   = 0
@@ -657,11 +678,12 @@ Register-DiscoveryProvider -Name 'Azure' `
                         $batchNames = @($batch | ForEach-Object { $_.Name }) -join ','
 
                         try {
-                            # Query with EXACT WUG poll pattern: PT10M window, PT5M interval, single aggregation
+                            # Query with EXACT WUG poll pattern: configurable window + interval, single aggregation.
+                            # Returns 1 aggregated bucket. Wider windows (P7D) catch idle resources.
                             $probeUrl = "https://management.azure.com${resId}/providers/Microsoft.Insights/metrics" +
                                 "?api-version=2024-02-01" +
                                 "&metricnames=$([uri]::EscapeDataString($batchNames))" +
-                                "&timespan=PT10M&interval=PT5M" +
+                                "&timespan=${metricsTimespan}&interval=${metricsTimespan}" +
                                 "&aggregation=$aggType"
                             $probeResults = @(Invoke-AzureREST -Uri $probeUrl)
 
@@ -779,7 +801,7 @@ Register-DiscoveryProvider -Name 'Azure' `
             # Uses the device's REST API credential (OAuth2 client_credentials) for auth.
             # Down condition: HTTP error codes OR JSONPath comparison.
             # ComparisonList uses WUG internal format: JsonPathQuery/AttributeType/ComparisonType
-            # AttributeType 3 = String, ComparisonType 14 = Is Null.
+            # AttributeType 1 = String, ComparisonType 3 = DoesNotContain.
             # Property is probed during discovery: availabilityState > enabled > state > provisioningState > dailyMaxActiveDevices.
             # If no property was found during probing, fall back to provisioningState.
             if ($healthTypeSupport.ContainsKey($res.FullType) -and -not $healthTypeSupport[$res.FullType]) {
@@ -790,13 +812,36 @@ Register-DiscoveryProvider -Name 'Azure' `
                 }
                 $healthUrl = "https://management.azure.com${resId}?api-version=$fallbackApi"
                 $armProp = if ($healthJsonProp.ContainsKey($res.FullType)) { $healthJsonProp[$res.FullType] } else { 'provisioningState' }
-                $healthCompare = "[{`"JsonPathQuery`":`"['properties']['$armProp']`",`"AttributeType`":3,`"ComparisonType`":14}]"
+                # Use the ACTUAL observed value from the ARM probe as the "healthy" baseline.
+                # This handles resource-specific values like 'Enabled' (smartDetectorAlertRules.state)
+                # vs 'Active' (other .state), 'Succeeded' (provisioningState), etc.
+                $armSuccessValue = if ($healthJsonValue.ContainsKey($res.FullType)) {
+                    $healthJsonValue[$res.FullType]
+                } else {
+                    # Fallback for unprobed resources
+                    switch ($armProp) {
+                        'provisioningState' { 'Succeeded' }
+                        'enabled'           { 'true' }
+                        'state'             { 'Active' }
+                        'availabilityState' { 'Available' }
+                        default             { $null }
+                    }
+                }
+                if ($armSuccessValue) {
+                    # Down if property Does Not Contain the healthy value (AT:1=String, CT:3=DoesNotContain)
+                    $healthCompare = "[{`"JsonPathQuery`":`"['properties']['$armProp']`",`"AttributeType`":1,`"ComparisonType`":3,`"CompareValue`":`"$armSuccessValue`"}]"
+                } else {
+                    # Numeric or unknown property — fall back to IsNotNull (AT:3, CT:14)
+                    $healthCompare = "[{`"JsonPathQuery`":`"['properties']['$armProp']`",`"AttributeType`":3,`"ComparisonType`":14}]"
+                }
             }
             else {
                 # Resource Health endpoint (supported type)
+                # Down condition: availabilityState does not contain "Available" OR contains "Unknown"
+                # AttributeType 1 = String, ComparisonType 3 = DoesNotContain, ComparisonType 2 = Contains
                 $healthUrl = "https://management.azure.com$resId/providers/Microsoft.ResourceHealth/availabilityStatuses/current?api-version=2023-07-01-preview"
                 $rhProp = if ($healthJsonProp.ContainsKey($res.FullType)) { $healthJsonProp[$res.FullType] } else { 'availabilityState' }
-                $healthCompare = "[{`"JsonPathQuery`":`"['properties']['$rhProp']`",`"AttributeType`":3,`"ComparisonType`":14}]"
+                $healthCompare = "[{`"JsonPathQuery`":`"['properties']['$rhProp']`",`"AttributeType`":1,`"ComparisonType`":3,`"CompareValue`":`"Available`"},{`"JsonPathQuery`":`"['properties']['$rhProp']`",`"AttributeType`":1,`"ComparisonType`":2,`"CompareValue`":`"Unknown`"}]"
             }
             $items += New-DiscoveredItem `
                 -Name "Azure Health - $resName" `
@@ -843,11 +888,15 @@ Register-DiscoveryProvider -Name 'Azure' `
                         default   { 'Average' }
                     }
 
-                    # Build Azure Metrics API URL — PT10M matches WUG's 10-minute poll interval
+                    # Build Azure Metrics API URL — configurable timespan/interval returns
+                    # 1 aggregated bucket.  Wider windows (P7D) make polling resilient to idle
+                    # resources / sparse metrics.  WUG polls periodically; each poll gets the
+                    # window aggregated into a single data point so JSONPath $.data[0] always
+                    # hits as long as the metric had ANY data in the window.
                     $metricUrl = "https://management.azure.com${resId}/providers/Microsoft.Insights/metrics" +
                         "?api-version=2024-02-01" +
                         "&metricnames=$([uri]::EscapeDataString($mName))" +
-                        "&timespan=PT10M&interval=PT5M" +
+                        "&timespan=${metricsTimespan}&interval=${metricsTimespan}" +
                         "&aggregation=$urlAgg"
 
                     # JSONPath: $.value[0].timeseries[0].data[0].{field}
@@ -870,7 +919,7 @@ Register-DiscoveryProvider -Name 'Azure' `
                     if ($m.ContainsKey('Unit'))         { $mParams['MetricUnit']     = $m.Unit }
 
                     $items += New-DiscoveredItem `
-                        -Name "Azure - $($res.Type) - $resName - $mDisplay" `
+                        -Name "$mDisplay - $resName ($($res.Type))" `
                         -ItemType 'PerformanceMonitor' `
                         -MonitorType 'RestApi' `
                         -MonitorParams $mParams `
@@ -881,6 +930,152 @@ Register-DiscoveryProvider -Name 'Azure' `
             }
         }
 
+        # ================================================================
+        # Phase 4: Billing monitors — discover Azure Budgets per subscription
+        # ================================================================
+        # Azure Budgets API (GET) returns currentSpend, forecastSpend, and
+        # the budget limit — all clean numeric values extractable via JSONPath.
+        # Requires a Budget to exist (created in portal or via API).
+        if ($useRest) {
+            Write-Host "  Discovering Azure Budgets for billing monitors..." -ForegroundColor DarkGray
+            $budgetCount = 0
+
+            foreach ($sub in $subscriptions) {
+                $subId = $sub.SubscriptionId
+                $subName = $sub.SubscriptionName
+
+                try {
+                    $budgetsUrl = "https://management.azure.com/subscriptions/${subId}/providers/Microsoft.Consumption/budgets?api-version=2024-08-01"
+                    $budgets = @(Invoke-AzureREST -Uri $budgetsUrl)
+                }
+                catch {
+                    Write-Verbose "Could not query budgets for subscription ${subName}: $_"
+                    continue
+                }
+
+                # Auto-create a catch-all budget if none exist
+                if ($budgets.Count -eq 0 -or (-not $budgets[0].name)) {
+                    $autoBudgetName = "WUG-Discovery-Monitor"
+                    Write-Host "    No budgets in '$subName' -- creating '$autoBudgetName' (monthly, `$1000 limit)..." -ForegroundColor Yellow
+                    # Start date = 1st of current month (Azure requires this format)
+                    $startDate = (Get-Date -Day 1).ToUniversalTime().ToString('yyyy-MM-01T00:00:00Z')
+                    $budgetBody = @{
+                        properties = @{
+                            category   = 'Cost'
+                            amount     = 1000
+                            timeGrain  = 'Monthly'
+                            timePeriod = @{ startDate = $startDate }
+                            filter     = @{}
+                        }
+                    }
+                    try {
+                        $createUrl = "https://management.azure.com/subscriptions/${subId}/providers/Microsoft.Consumption/budgets/${autoBudgetName}?api-version=2024-08-01"
+                        $created = Invoke-AzureREST -Uri $createUrl -Method PUT -Body $budgetBody
+                        if ($created -and $created.name) {
+                            $budgets = @($created)
+                            Write-Host "    Created budget '$autoBudgetName' successfully." -ForegroundColor Green
+                        }
+                        else {
+                            Write-Warning "    Budget creation returned no result. Skipping billing monitors for '$subName'."
+                            continue
+                        }
+                    }
+                    catch {
+                        Write-Warning "    Could not create budget for '$subName': $_"
+                        Write-Host "    To create manually: Azure Portal > Subscriptions > $subName > Budgets > Add" -ForegroundColor DarkGray
+                        continue
+                    }
+                }
+
+                foreach ($budget in $budgets) {
+                    $budgetName = $budget.name
+                    if (-not $budgetName) { continue }
+                    $budgetCount++
+                    Write-Verbose "  Found budget '$budgetName' in subscription '$subName'"
+
+                    $budgetUrl = "https://management.azure.com/subscriptions/${subId}/providers/Microsoft.Consumption/budgets/$([uri]::EscapeDataString($budgetName))?api-version=2024-08-01"
+
+                    # Build device-compatible attributes so the billing monitors group
+                    # under a subscription-level device in the plan.
+                    $billingDeviceName = "Azure Budget - $budgetName"
+                    $billingAttrs = $baseAttrs.Clone()
+                    $billingAttrs['Azure Subscription']    = $subName
+                    $billingAttrs['Azure Subscription ID'] = $subId
+                    $billingAttrs['Azure Resource Group']   = ''
+                    $billingAttrs['Azure Location']         = 'global'
+                    $billingAttrs['Azure Budget Name']      = $budgetName
+                    $billingAttrs['Cloud Type']             = 'budget'
+                    $billingAttrs['ComputedDisplayName']    = $billingDeviceName
+                    $billingAttrs['HostName']               = $billingDeviceName
+
+                    # Monitor 1: Current month-to-date spend
+                    $items += New-DiscoveredItem `
+                        -Name "Azure Billing - Current Spend - $budgetName ($subName)" `
+                        -ItemType 'PerformanceMonitor' `
+                        -MonitorType 'RestApi' `
+                        -MonitorParams @{
+                            RestApiUrl                = $budgetUrl
+                            RestApiJsonPath           = '$.properties.currentSpend.amount'
+                            RestApiHttpMethod         = 'GET'
+                            RestApiHttpTimeoutMs      = '15000'
+                            RestApiUseAnonymousAccess = '0'
+                            _MetricName               = 'CurrentSpend'
+                            _MetricDisplayName        = "Current Spend - $budgetName"
+                            _Aggregation              = 'Total'
+                            _JsonField                = 'amount'
+                        } `
+                        -UniqueKey "Azure:${subId}:billing:${budgetName}:currentSpend" `
+                        -Attributes $billingAttrs `
+                        -Tags @('azure', 'billing', $subName, $budgetName, 'currentSpend')
+
+                    # Monitor 2: Budget limit amount
+                    $items += New-DiscoveredItem `
+                        -Name "Azure Billing - Budget Limit - $budgetName ($subName)" `
+                        -ItemType 'PerformanceMonitor' `
+                        -MonitorType 'RestApi' `
+                        -MonitorParams @{
+                            RestApiUrl                = $budgetUrl
+                            RestApiJsonPath           = '$.properties.amount'
+                            RestApiHttpMethod         = 'GET'
+                            RestApiHttpTimeoutMs      = '15000'
+                            RestApiUseAnonymousAccess = '0'
+                            _MetricName               = 'BudgetLimit'
+                            _MetricDisplayName        = "Budget Limit - $budgetName"
+                            _Aggregation              = 'Total'
+                            _JsonField                = 'amount'
+                        } `
+                        -UniqueKey "Azure:${subId}:billing:${budgetName}:budgetLimit" `
+                        -Attributes $billingAttrs `
+                        -Tags @('azure', 'billing', $subName, $budgetName, 'budgetLimit')
+
+                    # Monitor 3: Forecasted spend (may be null if Azure hasn't computed it yet)
+                    $items += New-DiscoveredItem `
+                        -Name "Azure Billing - Forecast Spend - $budgetName ($subName)" `
+                        -ItemType 'PerformanceMonitor' `
+                        -MonitorType 'RestApi' `
+                        -MonitorParams @{
+                            RestApiUrl                = $budgetUrl
+                            RestApiJsonPath           = '$.properties.forecastSpend.amount'
+                            RestApiHttpMethod         = 'GET'
+                            RestApiHttpTimeoutMs      = '15000'
+                            RestApiUseAnonymousAccess = '0'
+                            _MetricName               = 'ForecastSpend'
+                            _MetricDisplayName        = "Forecast Spend - $budgetName"
+                            _Aggregation              = 'Total'
+                            _JsonField                = 'amount'
+                        } `
+                        -UniqueKey "Azure:${subId}:billing:${budgetName}:forecastSpend" `
+                        -Attributes $billingAttrs `
+                        -Tags @('azure', 'billing', $subName, $budgetName, 'forecastSpend')
+                }
+            }
+
+            if ($budgetCount -gt 0) {
+                Write-Host "  Discovered $budgetCount budget(s) ($($budgetCount * 3) billing monitors)" -ForegroundColor DarkGray
+            }
+        }
+
+        $secret = $null; $tenantId = $null; $appId = $null
         return $items
     }
 
@@ -957,8 +1152,8 @@ function Export-AzureDiscoveryDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBx3E/8RdXLiM0c
-# FD4Ltc2M4AtmTocir/MfD7jZzWosnqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDclhsd/EUwXxK4
+# XTZLoEslrOiRds1PRUbgLMl1giol2aCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1058,17 +1253,17 @@ function Export-AzureDiscoveryDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgSnLWcUjWbZaocO7d49BKnyQtBfaZkQFk
-# mtfOwjqHOLQwDQYJKoZIhvcNAQEBBQAEggIA0ubnjtLM49Qup4IglCyM84HIEZ+m
-# +K7yW3+xWcM8S1CrzrgqdDy3i58+Hq0kId/m/f9bwcIYTtB3EGnKi4BkGjgPdgjv
-# h55qEiThfnbDqg6oZWhhvDMrFqk+Q98lNpcVEnG9i1rJMJxJHMOHToFvMJHtO/po
-# JLwOMg6jNZY/gx3xcXlfRteHo8W6XEIik3aH6itFw2mkiWQlDk2ftn6Z5pkT1XnS
-# N9EwmuQa69oJwceZDwJCLjGUc5IQReolTLvgrfiPuK34xskrTl098ZRwpLHwISZ7
-# 0aM/VMeQ5omPkxVBiUN2mzkzwvL0beo2joKUiXbd7TmfdLD4QtWviMbnFiOXvtI2
-# nNuGTAFGwRJfkUNOc+Qfj8JKZ8eQwBgvIUHESSzWng9goVGpJaWdnkohLmTFBbhs
-# hrH8r5yzUwKrwcfhV2GNAa5EZ8811+qafvejNL/KVW5abFHnIs6dHvd4WPPXiARf
-# TwbD0HD/R0lPGZC0w8OqANwG57uDj4OO8p5qXE41fdM9IY3fkHB/jeC7MOkW2tAg
-# mmiEh1g9dfVxfysIP/r9EnAuUIrAlqciWyZfSUYc6JLF9GXe6rqrYyj1tQcCOpWv
-# NoOw1nGuwgGJIQ8+I4lTZztP0dHlzZPySOlpRRsiRgk4sO1wxhMQ9v/EGehL6xBX
-# uAcoaCarPcoO94s=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgkB/OBW/rrGsP9qygFdGXr7UZBZZXJlZ0
+# 8b3NFBj/L4kwDQYJKoZIhvcNAQEBBQAEggIArXfrSXy8MvnePwew/WMb2JNUGBcs
+# JF8Rp3XQ6KH2UY24zotUzJO1BBQqPOHEaRCRGAiSjmD4egOaPySQ8cAQyAZeiH1o
+# OLRjKK20NuVCRBHkhTog1sldV9Mr8bFymXRTrbHGq0cFmT05dkyQOJd5sjZgOYAC
+# EhyKEOQQBMkCI8x9NiBNRoLoIwOb9Sx2ReXVOnQFc8Ne+kAGoU01rZQF7F5o816W
+# BvJCpAuGDGm64JfqMXzOxczWMK/PnJqe1UTUI0Cx+c4vHEDFXP9XUl2vZbax3NkB
+# LbJlzjRVROPh0dsFHYMTrCthtDxhLxTl4PRq256ppd68g7+sOEaUTyX1k64TYiF9
+# Ls/SIF0/eAofVwPFqTRChdjGfh6wpJPOnGLLCqignxdktlyOY1R5z0TqsFvFCmag
+# B1krZURqvWelRTa3uwaGxUwfU2KZexg4fGlKGO3SP5mCBcSqGjLQir0qBkRmb9lu
+# fIJrLwuBjBgcPFn7KbJ7tfCBUsLnXQYQmzciTEPNMS3zWtDvhLXhRpGOuNQ5uwuo
+# 26Om4jcbak2ENiRCvUfY9OC76lB1Nb17d2At9rgAYw51pz/oxdyoPypdV4KSKzSk
+# Nrdpjc5LSKR67jrQTsLx7yZxakM7af2/erPLiW4T5DqB6dOmBFdVZ1UJycdoZI2v
+# 6Ik6yQvLrAxdoVA=
 # SIG # End signature block

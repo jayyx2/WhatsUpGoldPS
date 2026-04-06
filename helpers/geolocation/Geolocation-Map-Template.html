@@ -3,19 +3,61 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WhatsUp Gold - Geolocation Map</title>
+  <title>WhatsUpGoldPS Geolocation</title>
+  <link rel="icon" type="image/x-icon" href="https://wug.ninja/favicon.ico">
   <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous" />
   <!-- Leaflet JS -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
-          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
-  <!-- Leaflet-providers (tile layer shortcuts) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-providers/2.0.0/leaflet-providers.min.js"
-          integrity="sha256-TSSC0RjVO3PVqNbJpnAaEBOx/FGY7KZxLRkcRUrCP/0=" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body, #map { width: 100%; height: 100%; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    /* Map fills full viewport (minus info bar) */
+    #layout { position: relative; width: 100%; height: calc(100% - 24px); }
+    #map { width: 100%; height: 100%; }
+    /* ===== Floating Settings Panel (gray mode) ===== */
+    #settings-panel {
+      position: absolute; top: 10px; right: 10px;
+      width: 290px; max-height: calc(100% - 20px);
+      z-index: 1000;
+      background: rgba(42,42,48,0.94);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06);
+      display: flex; flex-direction: column;
+      transform: translateX(calc(100% + 20px));
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+      opacity: 0; pointer-events: none;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+    #settings-panel.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
+    #settings-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.1); flex-shrink: 0;
+    }
+    #settings-header h3 {
+      margin: 0; font-size: 13px; font-weight: 700; color: #ddd;
+      letter-spacing: 0.3px; text-transform: uppercase;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    #settings-close {
+      width: 28px; height: 28px; border: none; background: transparent;
+      cursor: pointer; font-size: 16px; color: #888; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s; line-height: 1;
+    }
+    #settings-close:hover { background: rgba(255,255,255,0.12); color: #eee; }
+    #settings-body {
+      flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    /* Settings gear button (Leaflet control) */
+    .settings-gear-btn a {
+      display: flex !important; align-items: center; justify-content: center;
+      width: 34px !important; height: 34px !important;
+      font-size: 20px; color: #555; text-decoration: none;
+    }
+    .settings-gear-btn a:hover { color: #222; background: #e8e8e8; }
     /* Tooltip styling - matches original WUG geolocation look */
     .leaflet-tooltip { padding: 2px 6px; background: #111; color: goldenrod; border: none; box-shadow: none; font-size: 13px; }
     .leaflet-tooltip-bottom::before { display: none; }
@@ -27,22 +69,124 @@
       font-family: 'Segoe UI', Arial, sans-serif;
     }
     #info-bar a { color: #6cf; text-decoration: none; }
-    /* Legend */
+    /* Legend (gray mode) */
     .legend {
-      background: rgba(255,255,255,0.92); padding: 8px 12px; border-radius: 6px;
-      box-shadow: 0 1px 5px rgba(0,0,0,0.3); font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 12px; line-height: 20px;
+      background: rgba(42,42,48,0.92); padding: 8px 12px; border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.35); font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 12px; line-height: 20px; color: #ddd;
     }
     .legend i { width: 14px; height: 14px; display: inline-block; margin-right: 6px; border-radius: 50%; vertical-align: middle; }
     .legend div { margin: 2px 0; }
+    .legend label { cursor: pointer; display: flex; align-items: center; }
+    .legend label input[type="checkbox"] {
+      margin: 0 6px 0 0; width: 14px; height: 14px;
+      accent-color: #2E7D32; cursor: pointer;
+    }
+    /* ========== CHIP CONTROL PANELS (gray mode) ========== */
+    .geo-box {
+      background: rgba(55,55,62,0.9); border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .geo-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 10px; cursor: pointer; user-select: none;
+      font-weight: 600; font-size: 12px; color: #ccc;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .geo-header:hover { background: rgba(255,255,255,0.06); border-radius: 8px 8px 0 0; }
+    .geo-header .arrow { font-size: 9px; transition: transform 0.2s; display: inline-block; }
+    .geo-header .arrow.collapsed { transform: rotate(-90deg); }
+    .geo-body { padding: 6px 8px; overflow-y: auto; overflow-x: hidden; }
+    .geo-body.collapsed { display: none; padding: 0; }
+    /* Tile group rows */
+    .tile-row { display: flex; align-items: flex-start; gap: 4px; margin-bottom: 3px; }
+    .tile-label {
+      font-size: 10px; color: #999; min-width: 52px; text-align: right;
+      padding: 4px 2px 0 0; white-space: nowrap; flex-shrink: 0;
+      line-height: 1.2; font-weight: 600; letter-spacing: -0.2px;
+    }
+    .tile-chips { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; }
+    .tile-divider { border: none; border-top: 1px dashed rgba(255,255,255,0.15); margin: 4px 0; }
+    /* Chip buttons (gray mode) */
+    .chip {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 3px 9px; border-radius: 14px; font-size: 11px;
+      cursor: pointer; border: 1.5px solid rgba(255,255,255,0.25); background: transparent;
+      color: #bbb; transition: all 0.15s ease; white-space: nowrap;
+      user-select: none; -webkit-tap-highlight-color: transparent;
+      line-height: 1.3; min-height: 24px;
+    }
+    .chip:hover { border-color: rgba(255,255,255,0.5); color: #eee; background: rgba(255,255,255,0.08); }
+    .chip:active { transform: scale(0.96); }
+    .chip.active-tile    { background: #1976D2; border-color: #1976D2; color: #fff; }
+    .chip.active-overlay { background: #E65100; border-color: #E65100; color: #fff; }
+    .chip.active-marker  { background: #2E7D32; border-color: #2E7D32; color: #fff; }
+    /* API Keys form (gray mode) */
+    .api-key-row {
+      display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+    }
+    .api-key-row label {
+      font-size: 10px; color: #999; min-width: 78px; text-align: right;
+      white-space: nowrap; font-weight: 600; letter-spacing: -0.2px;
+    }
+    .api-key-row input {
+      flex: 1; min-width: 0; padding: 4px 6px; border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.08);
+      color: #ddd; font-size: 11px; font-family: 'Consolas', 'Courier New', monospace;
+      outline: none; transition: border-color 0.15s;
+    }
+    .api-key-row input:focus { border-color: rgba(100,180,255,0.5); }
+    .api-key-row input::placeholder { color: #666; }
+    .api-key-actions {
+      display: flex; gap: 6px; margin-top: 6px;
+    }
+    .api-key-actions button {
+      flex: 1; padding: 5px 0; border-radius: 6px; border: none;
+      font-size: 11px; font-weight: 600; cursor: pointer;
+      transition: all 0.15s; font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    .btn-save-keys { background: #1976D2; color: #fff; }
+    .btn-save-keys:hover { background: #1565C0; }
+    .btn-clear-keys { background: rgba(255,255,255,0.1); color: #bbb; }
+    .btn-clear-keys:hover { background: rgba(255,255,255,0.15); color: #eee; }
+    .api-key-status {
+      font-size: 10px; color: #6c6; text-align: center; margin-top: 4px;
+      min-height: 14px; transition: opacity 0.3s;
+    }
+    /* Responsive: panel becomes bottom sheet on narrow screens */
+    @media (max-width: 700px) {
+      #settings-panel {
+        top: auto; left: 0; right: 0; bottom: 0;
+        width: 100%; max-height: 70vh;
+        border-radius: 16px 16px 0 0;
+        transform: translateY(100%);
+      }
+      #settings-panel.open { transform: translateY(0); opacity: 1; }
+      .geo-box { min-width: 200px; flex: 1; }
+      .chip { padding: 4px 8px; font-size: 11px; min-height: 28px; }
+      .tile-label { min-width: 40px; font-size: 9px; }
+    }
+    /* Thin scrollbar (WebKit, gray mode) */
+    #settings-body::-webkit-scrollbar, .geo-body::-webkit-scrollbar { width: 4px; }
+    #settings-body::-webkit-scrollbar-thumb, .geo-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+    #settings-body::-webkit-scrollbar-track, .geo-body::-webkit-scrollbar-track { background: transparent; }
   </style>
 </head>
 <body>
 
-<div id="map"></div>
+<div id="layout">
+  <div id="map"></div>
+  <div id="settings-panel">
+    <div id="settings-header">
+      <h3>&#9881; Map Settings</h3>
+      <button id="settings-close" title="Close settings">&#10005;</button>
+    </div>
+    <div id="settings-body"></div>
+  </div>
+</div>
 <div id="info-bar">
-  <span>WhatsUp Gold Geolocation Map - Generated %%GENERATED_AT%%</span>
-  <span>Devices + Groups: <strong id="marker-count">0</strong></span>
+  <span>&#x1F977; <a href="https://github.com/jayyx2/WhatsUpGoldPS" target="_blank" rel="noopener">WhatsUpGoldPS</a> Geolocation &mdash; Generated %%GENERATED_AT%%</span>
+  <span>Markers: <strong id="marker-count">0</strong></span>
 </div>
 
 <script>
@@ -50,65 +194,442 @@
   'use strict';
 
   // ========== DATA (injected by PowerShell) ==========
-  var markerData    = JSON.parse('%%MARKER_DATA%%');
-  var defaultLat    = parseFloat('%%DEFAULT_LAT%%');
-  var defaultLng    = parseFloat('%%DEFAULT_LNG%%');
-  var defaultZoom   = parseInt('%%DEFAULT_ZOOM%%', 10);
-  var wugBaseUrl    = '%%WUG_BASE_URL%%';
+  var markerData  = JSON.parse('%%MARKER_DATA%%');
+  var defaultLat  = parseFloat('%%DEFAULT_LAT%%');
+  var defaultLng  = parseFloat('%%DEFAULT_LNG%%');
+  var defaultZoom = parseInt('%%DEFAULT_ZOOM%%', 10);
+  var wugBaseUrl  = '%%WUG_BASE_URL%%';
+  var embeddedKeys = JSON.parse('%%API_KEYS%%' === '' ? '{}' : '%%API_KEYS%%');
+
+  // ========== LOCAL STORAGE KEY MANAGEMENT ==========
+  var LS_KEY = 'wugps_geo_apikeys';
+  function loadSavedKeys() {
+    try { var s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : {}; } catch (e) { return {}; }
+  }
+  function saveBrowserKeys(keys) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(keys)); } catch (e) {}
+  }
+  function clearBrowserKeys() {
+    try { localStorage.removeItem(LS_KEY); } catch (e) {}
+  }
+  // Merge: localStorage keys override embedded (embedded = opt-in plaintext on disk)
+  function getEffectiveKeys() {
+    var saved = loadSavedKeys();
+    var merged = {};
+    var provs = ['thunderforest','stadia','maptiler','here','mapbox','jawg','tomtom','openweathermap'];
+    for (var i = 0; i < provs.length; i++) {
+      var p = provs[i];
+      if (saved[p]) merged[p] = saved[p];
+      else if (embeddedKeys[p]) merged[p] = embeddedKeys[p];
+    }
+    return merged;
+  }
+
+  // ========== SETTINGS PERSISTENCE (localStorage) ==========
+  var LS_PREFS_KEY = 'wugps_geo_prefs';
+  function loadPrefs() {
+    try { var s = localStorage.getItem(LS_PREFS_KEY); return s ? JSON.parse(s) : {}; } catch (e) { return {}; }
+  }
+  function savePref(key, val) {
+    var prefs = loadPrefs();
+    prefs[key] = val;
+    try { localStorage.setItem(LS_PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
+  }
 
   // ========== MAP INIT ==========
-  var map = L.map('map').setView([defaultLat, defaultLng], defaultZoom);
+  var map = L.map('map', { zoomControl: true }).setView([defaultLat, defaultLng], defaultZoom);
 
-  // Base layers - free tile providers (no API key required)
-  var baseLayers = {
-    'OpenStreetMap':       L.tileLayer.provider('OpenStreetMap.Mapnik'),
-    'OSM Hot':             L.tileLayer.provider('OpenStreetMap.HOT'),
-    'CartoDB Positron':    L.tileLayer.provider('CartoDB.Positron'),
-    'CartoDB Dark Matter': L.tileLayer.provider('CartoDB.DarkMatter'),
-    'CartoDB Voyager':     L.tileLayer.provider('CartoDB.Voyager'),
-    'OpenTopoMap':         L.tileLayer.provider('OpenTopoMap'),
-    'USGS Imagery':        L.tileLayer.provider('USGS.USImagery'),
-    'USGS Topo':           L.tileLayer.provider('USGS.USTopo'),
-    'Stadia Smooth':       L.tileLayer.provider('Stadia.AlidadeSmooth'),
-    'Stadia Dark':         L.tileLayer.provider('Stadia.AlidadeSmoothDark'),
-    'CyclOSM':             L.tileLayer.provider('CyclOSM')
-  };
+  // ========== TILE PROVIDER REGISTRY ==========
+  var tileGroups    = {};
+  var allTiles      = {};
+  var groupOrder    = [];
+  var activeBaseKey = null;
+  var freeGroupCount = 0;
+  var weatherLayers = {};
 
-  // Default layer
-  baseLayers['OpenStreetMap'].addTo(map);
+  function addTile(group, name, layer) {
+    if (!tileGroups[group]) { tileGroups[group] = {}; groupOrder.push(group); }
+    tileGroups[group][name] = layer;
+    allTiles[group + '|' + name] = layer;
+  }
 
-  // Overlay layer groups
-  var deviceLayerGroup = L.layerGroup();
-  var groupLayerGroup  = L.layerGroup();
-  var overlays = {
-    'WhatsUp Gold - Devices': deviceLayerGroup,
-    'WhatsUp Gold - Groups':  groupLayerGroup
-  };
+  function registerFreeProviders() {
+    addTile('CartoDB',  'Voyager',  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>', subdomains: 'abcd', maxZoom: 20 }));
+    addTile('CartoDB',  'Positron', L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',           { attribution: '&copy; CARTO &copy; OSM', subdomains: 'abcd', maxZoom: 20 }));
+    addTile('CartoDB',  'Dark',     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',            { attribution: '&copy; CARTO &copy; OSM', subdomains: 'abcd', maxZoom: 20 }));
+    addTile('Esri',     'Street',   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',            { attribution: 'Esri', maxZoom: 18 }));
+    addTile('Esri',     'Imagery',  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',               { attribution: 'Esri', maxZoom: 18 }));
+    addTile('Esri',     'Topo',     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',              { attribution: 'Esri', maxZoom: 18 }));
+    addTile('Esri',     'Dark Gray',L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri', maxZoom: 16 }));
+    addTile('Esri',     'NatGeo',   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}',            { attribution: 'Esri, National Geographic', maxZoom: 16 }));
+    addTile('Esri',     'Ocean',    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',      { attribution: 'Esri, GEBCO, NOAA', maxZoom: 13 }));
+    addTile('USGS',     'Imagery',  L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',             { attribution: 'USGS', maxZoom: 16 }));
+    addTile('USGS',     'Topo',     L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}',                    { attribution: 'USGS', maxZoom: 16 }));
+    addTile('OpenTopo', 'Map',      L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',                                                            { attribution: '&copy; <a href="https://opentopomap.org">OpenTopoMap</a> &copy; OSM', maxZoom: 17 }));
+    freeGroupCount = groupOrder.length;
+  }
 
-  // Layer control
-  L.control.layers(baseLayers, overlays, { collapsed: true, sortLayers: false }).addTo(map);
+  function registerKeyedProviders(keys) {
+    // Remove old keyed groups from map + registry
+    for (var gi = groupOrder.length - 1; gi >= freeGroupCount; gi--) {
+      var gName = groupOrder[gi];
+      var variants = tileGroups[gName];
+      for (var v in variants) {
+        var key = gName + '|' + v;
+        if (key === activeBaseKey) { map.removeLayer(variants[v]); activeBaseKey = null; }
+        delete allTiles[key];
+      }
+      delete tileGroups[gName];
+    }
+    groupOrder.length = freeGroupCount;
+    // Remove old weather overlays
+    for (var wk in weatherLayers) { if (map.hasLayer(weatherLayers[wk])) map.removeLayer(weatherLayers[wk]); }
+    weatherLayers = {};
+
+    // Register keyed tile providers
+    if (keys.thunderforest) {
+      var tf = keys.thunderforest;
+      addTile('Thunderforest', 'Cycle',         L.tileLayer('https://tile.thunderforest.com/cycle/{z}/{x}/{y}.png?apikey='          + tf, { attribution: '&copy; <a href="https://thunderforest.com/">Thunderforest</a> &copy; OSM', maxZoom: 22 }));
+      addTile('Thunderforest', 'Transport',     L.tileLayer('https://tile.thunderforest.com/transport/{z}/{x}/{y}.png?apikey='      + tf, { attribution: '&copy; Thunderforest &copy; OSM', maxZoom: 22 }));
+      addTile('Thunderforest', 'Landscape',     L.tileLayer('https://tile.thunderforest.com/landscape/{z}/{x}/{y}.png?apikey='      + tf, { attribution: '&copy; Thunderforest &copy; OSM', maxZoom: 22 }));
+      addTile('Thunderforest', 'Outdoors',      L.tileLayer('https://tile.thunderforest.com/outdoors/{z}/{x}/{y}.png?apikey='       + tf, { attribution: '&copy; Thunderforest &copy; OSM', maxZoom: 22 }));
+      addTile('Thunderforest', 'Atlas',         L.tileLayer('https://tile.thunderforest.com/atlas/{z}/{x}/{y}.png?apikey='          + tf, { attribution: '&copy; Thunderforest &copy; OSM', maxZoom: 22 }));
+      addTile('Thunderforest', 'Neighbourhood', L.tileLayer('https://tile.thunderforest.com/neighbourhood/{z}/{x}/{y}.png?apikey='  + tf, { attribution: '&copy; Thunderforest &copy; OSM', maxZoom: 22 }));
+    }
+    if (keys.stadia) {
+      var sd = keys.stadia;
+      addTile('Stadia', 'Smooth',     L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png?api_key='       + sd, { attribution: '&copy; <a href="https://stadiamaps.com/">Stadia</a> &copy; OSM', maxZoom: 20 }));
+      addTile('Stadia', 'Dark',       L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key='  + sd, { attribution: '&copy; Stadia &copy; OSM', maxZoom: 20 }));
+      addTile('Stadia', 'Satellite',  L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_satellite/{z}/{x}/{y}{r}.png?api_key='    + sd, { attribution: '&copy; Stadia &copy; OSM', maxZoom: 20 }));
+      addTile('Stadia', 'OSM Bright', L.tileLayer('https://tiles.stadiamaps.com/tiles/osm_bright/{z}/{x}/{y}{r}.png?api_key='           + sd, { attribution: '&copy; Stadia &copy; OSM', maxZoom: 20 }));
+      addTile('Stadia', 'Watercolor', L.tileLayer('https://tiles.stadiamaps.com/tiles/stamen_watercolor/{z}/{x}/{y}.jpg?api_key='       + sd, { attribution: '&copy; Stadia &copy; Stamen', maxZoom: 16 }));
+      addTile('Stadia', 'Toner',      L.tileLayer('https://tiles.stadiamaps.com/tiles/stamen_toner/{z}/{x}/{y}{r}.png?api_key='         + sd, { attribution: '&copy; Stadia &copy; Stamen', maxZoom: 20 }));
+    }
+    if (keys.maptiler) {
+      var mt = keys.maptiler;
+      addTile('MapTiler', 'Streets',   L.tileLayer('https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key='  + mt, { attribution: '&copy; <a href="https://www.maptiler.com/">MapTiler</a> &copy; OSM', maxZoom: 20, tileSize: 512, zoomOffset: -1 }));
+      addTile('MapTiler', 'Satellite', L.tileLayer('https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key='   + mt, { attribution: '&copy; MapTiler', maxZoom: 20, tileSize: 512, zoomOffset: -1 }));
+      addTile('MapTiler', 'Topo',      L.tileLayer('https://api.maptiler.com/maps/topo-v2/{z}/{x}/{y}.png?key='     + mt, { attribution: '&copy; MapTiler &copy; OSM', maxZoom: 20, tileSize: 512, zoomOffset: -1 }));
+      addTile('MapTiler', 'Winter',    L.tileLayer('https://api.maptiler.com/maps/winter-v2/{z}/{x}/{y}.png?key='   + mt, { attribution: '&copy; MapTiler &copy; OSM', maxZoom: 20, tileSize: 512, zoomOffset: -1 }));
+    }
+    if (keys.here) {
+      var hk = keys.here;
+      addTile('HERE', 'Day',       L.tileLayer('https://{s}.base.maps.ls.hereapi.com/maptile/2.1/maptile/newest/normal.day/{z}/{x}/{y}/256/png8?apiKey='     + hk, { attribution: '&copy; <a href="https://developer.here.com/">HERE</a>', subdomains: '1234', maxZoom: 20 }));
+      addTile('HERE', 'Night',     L.tileLayer('https://{s}.base.maps.ls.hereapi.com/maptile/2.1/maptile/newest/normal.night/{z}/{x}/{y}/256/png8?apiKey='   + hk, { attribution: '&copy; HERE', subdomains: '1234', maxZoom: 20 }));
+      addTile('HERE', 'Satellite', L.tileLayer('https://{s}.aerial.maps.ls.hereapi.com/maptile/2.1/maptile/newest/satellite.day/{z}/{x}/{y}/256/png8?apiKey=' + hk, { attribution: '&copy; HERE', subdomains: '1234', maxZoom: 20 }));
+      addTile('HERE', 'Terrain',   L.tileLayer('https://{s}.aerial.maps.ls.hereapi.com/maptile/2.1/maptile/newest/terrain.day/{z}/{x}/{y}/256/png8?apiKey='   + hk, { attribution: '&copy; HERE', subdomains: '1234', maxZoom: 20 }));
+      addTile('HERE', 'Hybrid',    L.tileLayer('https://{s}.aerial.maps.ls.hereapi.com/maptile/2.1/maptile/newest/hybrid.day/{z}/{x}/{y}/256/png8?apiKey='    + hk, { attribution: '&copy; HERE', subdomains: '1234', maxZoom: 20 }));
+    }
+    if (keys.mapbox) {
+      var mb = keys.mapbox;
+      addTile('Mapbox', 'Streets',   L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token='            + mb, { attribution: '&copy; <a href="https://www.mapbox.com/">Mapbox</a>', maxZoom: 22, tileSize: 512, zoomOffset: -1 }));
+      addTile('Mapbox', 'Outdoors',  L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/{z}/{x}/{y}?access_token='           + mb, { attribution: '&copy; Mapbox', maxZoom: 22, tileSize: 512, zoomOffset: -1 }));
+      addTile('Mapbox', 'Light',     L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/{z}/{x}/{y}?access_token='              + mb, { attribution: '&copy; Mapbox', maxZoom: 22, tileSize: 512, zoomOffset: -1 }));
+      addTile('Mapbox', 'Dark',      L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token='               + mb, { attribution: '&copy; Mapbox', maxZoom: 22, tileSize: 512, zoomOffset: -1 }));
+      addTile('Mapbox', 'Satellite', L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token='  + mb, { attribution: '&copy; Mapbox', maxZoom: 22, tileSize: 512, zoomOffset: -1 }));
+    }
+    if (keys.jawg) {
+      var jw = keys.jawg;
+      addTile('Jawg', 'Streets', L.tileLayer('https://tile.jawg.io/jawg-streets/{z}/{x}/{y}{r}.png?access-token=' + jw, { attribution: '&copy; <a href="https://jawg.io/">Jawg</a> &copy; OSM', maxZoom: 22 }));
+      addTile('Jawg', 'Terrain', L.tileLayer('https://tile.jawg.io/jawg-terrain/{z}/{x}/{y}{r}.png?access-token=' + jw, { attribution: '&copy; Jawg &copy; OSM', maxZoom: 22 }));
+      addTile('Jawg', 'Sunny',  L.tileLayer('https://tile.jawg.io/jawg-sunny/{z}/{x}/{y}{r}.png?access-token='   + jw, { attribution: '&copy; Jawg &copy; OSM', maxZoom: 22 }));
+      addTile('Jawg', 'Dark',   L.tileLayer('https://tile.jawg.io/jawg-dark/{z}/{x}/{y}{r}.png?access-token='    + jw, { attribution: '&copy; Jawg &copy; OSM', maxZoom: 22 }));
+      addTile('Jawg', 'Light',  L.tileLayer('https://tile.jawg.io/jawg-light/{z}/{x}/{y}{r}.png?access-token='   + jw, { attribution: '&copy; Jawg &copy; OSM', maxZoom: 22 }));
+    }
+    if (keys.tomtom) {
+      var tt = keys.tomtom;
+      addTile('TomTom', 'Basic', L.tileLayer('https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key='  + tt, { attribution: '&copy; <a href="https://developer.tomtom.com/">TomTom</a>', maxZoom: 22 }));
+      addTile('TomTom', 'Night', L.tileLayer('https://api.tomtom.com/map/1/tile/basic/night/{z}/{x}/{y}.png?key=' + tt, { attribution: '&copy; TomTom', maxZoom: 22 }));
+    }
+
+    // Weather overlays
+    if (keys.openweathermap) {
+      var owm = keys.openweathermap;
+      var owmAttr = '&copy; <a href="https://openweathermap.org/">OpenWeatherMap</a>';
+      var owmOpts = function (a) { return { attribution: a, maxZoom: 19, opacity: 0.5 }; };
+      weatherLayers['Clouds']   = L.tileLayer('https://tile.openweathermap.org/map/clouds_new/{z}/{x}/{y}.png?appid='        + owm, owmOpts(owmAttr));
+      weatherLayers['Rain']     = L.tileLayer('https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=' + owm, owmOpts(owmAttr));
+      weatherLayers['Wind']     = L.tileLayer('https://tile.openweathermap.org/map/wind_new/{z}/{x}/{y}.png?appid='          + owm, owmOpts(owmAttr));
+      weatherLayers['Temp']     = L.tileLayer('https://tile.openweathermap.org/map/temp_new/{z}/{x}/{y}.png?appid='          + owm, owmOpts(owmAttr));
+      weatherLayers['Pressure'] = L.tileLayer('https://tile.openweathermap.org/map/pressure_new/{z}/{x}/{y}.png?appid='      + owm, owmOpts(owmAttr));
+      weatherLayers['Snow']     = L.tileLayer('https://tile.openweathermap.org/map/snow_new/{z}/{x}/{y}.png?appid='          + owm, owmOpts(owmAttr));
+    }
+
+    // Ensure a base layer is active
+    if (!activeBaseKey || !allTiles[activeBaseKey]) {
+      var prefs = loadPrefs();
+      var saved = prefs.tile;
+      activeBaseKey = (saved && allTiles[saved]) ? saved : 'CartoDB|Voyager';
+      allTiles[activeBaseKey].addTo(map);
+    }
+    // Restore active weather overlays from preferences
+    var wxPrefs = loadPrefs().weather || [];
+    for (var wp = 0; wp < wxPrefs.length; wp++) {
+      if (weatherLayers[wxPrefs[wp]]) weatherLayers[wxPrefs[wp]].addTo(map);
+    }
+  }
+
+  // Initial registration
+  registerFreeProviders();
+  registerKeyedProviders(getEffectiveKeys());
+
+  // ----- Marker layer groups -----
+  var deviceLayerGroup = L.layerGroup().addTo(map);
+  var groupLayerGroup  = L.layerGroup().addTo(map);
+
+  // =========================================================================
+  //  CUSTOM CHIP CONTROLS  (replaces default L.control.layers)
+  // =========================================================================
+  // Provider display names for the key form
+  var keyProviders = [
+    { id: 'thunderforest', label: 'Thunderforest' },
+    { id: 'stadia',        label: 'Stadia Maps' },
+    { id: 'maptiler',      label: 'MapTiler' },
+    { id: 'here',          label: 'HERE' },
+    { id: 'mapbox',        label: 'Mapbox' },
+    { id: 'jawg',          label: 'Jawg' },
+    { id: 'tomtom',        label: 'TomTom' },
+    { id: 'openweathermap',label: 'OpenWeather' }
+  ];
+
+  function buildControls() {
+    var root = document.getElementById('settings-body');
+    root.innerHTML = '';
+
+    // ---- MAP TILES BOX ----
+    var tilesBox = makeBox('Map Tiles', false);
+    tilesBox.body.style.maxHeight = '60vh';
+
+    var addedDivider = false;
+    for (var gi = 0; gi < groupOrder.length; gi++) {
+      var gName = groupOrder[gi];
+      if (!addedDivider && gi >= freeGroupCount) {
+        tilesBox.body.appendChild(makeDivider());
+        addedDivider = true;
+      }
+      var row = document.createElement('div');
+      row.className = 'tile-row';
+      var lbl = document.createElement('span');
+      lbl.className = 'tile-label';
+      lbl.textContent = gName;
+      row.appendChild(lbl);
+
+      var wrap = document.createElement('div');
+      wrap.className = 'tile-chips';
+      var variants = tileGroups[gName];
+      var vNames = Object.keys(variants);
+      for (var vi = 0; vi < vNames.length; vi++) {
+        var key = gName + '|' + vNames[vi];
+        var chip = makeChip(vNames[vi]);
+        chip.dataset.key = key;
+        if (key === activeBaseKey) chip.classList.add('active-tile');
+        chip.addEventListener('click', handleTileClick);
+        wrap.appendChild(chip);
+      }
+      row.appendChild(wrap);
+      tilesBox.body.appendChild(row);
+    }
+    root.appendChild(tilesBox.el);
+
+    // ---- WEATHER BOX (only if OWM key) ----
+    var wNames = Object.keys(weatherLayers);
+    if (wNames.length > 0) {
+      var wxBox = makeBox('Weather Overlays', false);
+      var wxWrap = document.createElement('div');
+      wxWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px';
+      for (var wi = 0; wi < wNames.length; wi++) {
+        var wChip = makeChip(wNames[wi]);
+        wChip.dataset.key = wNames[wi];
+        if (map.hasLayer(weatherLayers[wNames[wi]])) wChip.classList.add('active-overlay');
+        wChip.addEventListener('click', handleWeatherClick);
+        wxWrap.appendChild(wChip);
+      }
+      wxBox.body.appendChild(wxWrap);
+      root.appendChild(wxBox.el);
+    }
+
+    // ---- API KEYS BOX ----
+    var keysBox = makeBox('API Keys', false);
+    var effKeys = getEffectiveKeys();
+    var savedKeys = loadSavedKeys();
+    for (var ki = 0; ki < keyProviders.length; ki++) {
+      var prov = keyProviders[ki];
+      var kRow = document.createElement('div');
+      kRow.className = 'api-key-row';
+      var kLbl = document.createElement('label');
+      kLbl.textContent = prov.label;
+      kLbl.setAttribute('for', 'key-' + prov.id);
+      kRow.appendChild(kLbl);
+      var kInput = document.createElement('input');
+      kInput.type = 'password';
+      kInput.id = 'key-' + prov.id;
+      kInput.placeholder = effKeys[prov.id] ? '(saved)' : 'paste key';
+      kInput.autocomplete = 'off';
+      kInput.spellcheck = false;
+      // If saved in browser storage, show masked; if only embedded, show hint
+      if (savedKeys[prov.id]) {
+        kInput.value = savedKeys[prov.id];
+      }
+      kRow.appendChild(kInput);
+      keysBox.body.appendChild(kRow);
+    }
+    // Action buttons
+    var actWrap = document.createElement('div');
+    actWrap.className = 'api-key-actions';
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'btn-save-keys';
+    saveBtn.textContent = 'Save Keys';
+    saveBtn.addEventListener('click', handleSaveKeys);
+    actWrap.appendChild(saveBtn);
+    var clearBtn = document.createElement('button');
+    clearBtn.className = 'btn-clear-keys';
+    clearBtn.textContent = 'Clear All';
+    clearBtn.addEventListener('click', handleClearKeys);
+    actWrap.appendChild(clearBtn);
+    keysBox.body.appendChild(actWrap);
+    // Status message area
+    var statusDiv = document.createElement('div');
+    statusDiv.className = 'api-key-status';
+    statusDiv.id = 'key-status';
+    keysBox.body.appendChild(statusDiv);
+    root.appendChild(keysBox.el);
+  }
+
+  function handleSaveKeys() {
+    var keys = {};
+    for (var i = 0; i < keyProviders.length; i++) {
+      var input = document.getElementById('key-' + keyProviders[i].id);
+      var val = (input.value || '').trim();
+      if (val) keys[keyProviders[i].id] = val;
+    }
+    saveBrowserKeys(keys);
+    registerKeyedProviders(getEffectiveKeys());
+    buildControls();
+    showKeyStatus('Keys saved to browser storage');
+  }
+
+  function handleClearKeys() {
+    clearBrowserKeys();
+    registerKeyedProviders(getEffectiveKeys());
+    buildControls();
+    showKeyStatus('Browser keys cleared');
+  }
+
+  function showKeyStatus(msg) {
+    var el = document.getElementById('key-status');
+    if (el) { el.textContent = msg; setTimeout(function () { el.textContent = ''; }, 3000); }
+  }
+
+  /* --- UI helpers --- */
+  function makeBox(title, startOpen) {
+    var el = document.createElement('div');
+    el.className = 'geo-box';
+    var hdr = document.createElement('div');
+    hdr.className = 'geo-header';
+    hdr.innerHTML = '<span>' + title + '</span><span class="arrow' + (startOpen ? '' : ' collapsed') + '">&#9660;</span>';
+    var body = document.createElement('div');
+    body.className = 'geo-body' + (startOpen ? '' : ' collapsed');
+    hdr.addEventListener('click', function () {
+      body.classList.toggle('collapsed');
+      hdr.querySelector('.arrow').classList.toggle('collapsed');
+    });
+    el.appendChild(hdr);
+    el.appendChild(body);
+    return { el: el, body: body };
+  }
+
+  function makeChip(text) {
+    var s = document.createElement('span');
+    s.className = 'chip';
+    s.textContent = text;
+    return s;
+  }
+
+  function makeDivider() {
+    var hr = document.createElement('hr');
+    hr.className = 'tile-divider';
+    return hr;
+  }
+
+  /* --- Tile click: radio behavior (one active at a time) --- */
+  function handleTileClick(e) {
+    var key = e.currentTarget.dataset.key;
+    if (key === activeBaseKey) return;
+    if (activeBaseKey && allTiles[activeBaseKey]) map.removeLayer(allTiles[activeBaseKey]);
+    allTiles[key].addTo(map);
+    activeBaseKey = key;
+    var prev = document.querySelectorAll('.chip.active-tile');
+    for (var i = 0; i < prev.length; i++) prev[i].classList.remove('active-tile');
+    e.currentTarget.classList.add('active-tile');
+    savePref('tile', key);
+    // Re-stack weather overlays above the new base layer
+    for (var wk in weatherLayers) {
+      if (map.hasLayer(weatherLayers[wk])) weatherLayers[wk].bringToFront();
+    }
+  }
+
+  /* --- Weather click: toggle behavior (multiple allowed) --- */
+  function handleWeatherClick(e) {
+    var layer = weatherLayers[e.currentTarget.dataset.key];
+    if (map.hasLayer(layer)) {
+      map.removeLayer(layer);
+      e.currentTarget.classList.remove('active-overlay');
+    } else {
+      layer.addTo(map);
+      e.currentTarget.classList.add('active-overlay');
+    }
+    // Persist active weather state
+    var active = [];
+    for (var wk in weatherLayers) { if (map.hasLayer(weatherLayers[wk])) active.push(wk); }
+    savePref('weather', active);
+  }
+
+  /* --- Marker layer toggle (via legend checkboxes) handled inline --- */
+
+  buildControls();
   L.control.scale().addTo(map);
 
-  // Default overlays on
-  deviceLayerGroup.addTo(map);
-  groupLayerGroup.addTo(map);
+  // ========== SETTINGS PANEL TOGGLE ==========
+  var settingsPanel = document.getElementById('settings-panel');
+  var settingsClose = document.getElementById('settings-close');
+
+  function closeSettings()  { settingsPanel.classList.remove('open'); }
+  function toggleSettings() { settingsPanel.classList.toggle('open'); }
+
+  settingsClose.addEventListener('click', closeSettings);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSettings(); });
+
+  // Gear button (Leaflet control, top-right)
+  var SettingsBtn = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd: function () {
+      var c = L.DomUtil.create('div', 'leaflet-bar leaflet-control settings-gear-btn');
+      var a = L.DomUtil.create('a', '', c);
+      a.href = '#'; a.title = 'Map Settings';
+      a.innerHTML = '&#9881;';
+      a.setAttribute('role', 'button');
+      a.setAttribute('aria-label', 'Open map settings');
+      L.DomEvent.disableClickPropagation(c);
+      L.DomEvent.on(a, 'click', function (e) { L.DomEvent.preventDefault(e); toggleSettings(); });
+      return c;
+    }
+  });
+  new SettingsBtn().addTo(map);
 
   // ========== STATUS ICON (SVG data URIs) ==========
   function stateColor(item) {
-    // Devices: check WorstState / BestState
     if (item.Type === 'Device') {
       var w = (item.WorstState || '').toLowerCase();
       var b = (item.BestState  || '').toLowerCase();
-      if (w === 'down' || b === 'down') return '#e74c3c';       // red
-      if (w === 'maintenance' || b === 'maintenance') return '#f39c12'; // orange
-      if (b === 'up' || w === 'up') return '#2ecc71';            // green
-      return '#95a5a6'; // grey - unknown
+      if (w === 'down' || b === 'down') return '#e74c3c';
+      if (w === 'maintenance' || b === 'maintenance') return '#f39c12';
+      if (b === 'up' || w === 'up') return '#2ecc71';
+      return '#95a5a6';
     }
-    // Groups: check State
     var s = (item.State || '').toLowerCase();
-    if (s === 'down' || s === '1')          return '#e74c3c';
-    if (s === 'maintenance' || s === '2')   return '#f39c12';
-    if (s === 'up' || s === '3')            return '#2ecc71';
+    if (s === 'down' || s === '1')        return '#e74c3c';
+    if (s === 'maintenance' || s === '2') return '#f39c12';
+    if (s === 'up' || s === '3')          return '#2ecc71';
     return '#95a5a6';
   }
 
@@ -116,19 +637,19 @@
     var svg;
     if (shape === 'circle') {
       svg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">'
-          + '<circle cx="10" cy="10" r="8" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
-          + '</svg>';
+          + '<circle cx="10" cy="10" r="8" fill="' + color + '" stroke="#fff" stroke-width="2"/></svg>';
     } else {
-      // square for groups
       svg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">'
-          + '<rect x="2" y="2" width="16" height="16" rx="3" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
-          + '</svg>';
+          + '<rect x="2" y="2" width="16" height="16" rx="3" fill="' + color + '" stroke="#fff" stroke-width="2"/></svg>';
     }
-    return L.icon({
-      iconUrl:    'data:image/svg+xml;base64,' + btoa(svg),
-      iconSize:   [20, 20],
-      iconAnchor: [10, 10]
-    });
+    return L.icon({ iconUrl: 'data:image/svg+xml;base64,' + btoa(svg), iconSize: [20, 20], iconAnchor: [10, 10] });
+  }
+
+  function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
   }
 
   // ========== ADD MARKERS ==========
@@ -142,38 +663,53 @@
     var color = stateColor(m);
     var isDevice = (m.Type === 'Device');
     var icon  = makeSvgIcon(color, isDevice ? 'circle' : 'square');
-    var label = m.Name || 'Unknown';
+    var label = esc(m.Name || 'Unknown');
 
     var popupHtml = '<strong>' + label + '</strong><br>'
-                  + 'Type: ' + m.Type + '<br>'
+                  + 'Type: ' + esc(m.Type) + '<br>'
                   + 'Lat/Lng: ' + lat.toFixed(6) + ', ' + lng.toFixed(6) + '<br>';
 
     if (isDevice) {
-      popupHtml += 'Best State: ' + (m.BestState || 'N/A') + '<br>'
-                 + 'Worst State: ' + (m.WorstState || 'N/A');
+      popupHtml += 'Best State: ' + esc(m.BestState || 'N/A') + '<br>'
+                 + 'Worst State: ' + esc(m.WorstState || 'N/A') + '<br>';
+      var totalMon = m.TotalMonitors || 0;
+      var downMon  = m.DownMonitors  || 0;
+      if (totalMon > 0) {
+        var upMon = totalMon - downMon;
+        popupHtml += 'Monitors: <span style="color:#2ecc71">' + upMon + ' up</span>';
+        if (downMon > 0) popupHtml += ' / <span style="color:#e74c3c">' + downMon + ' down</span>';
+        popupHtml += ' (of ' + totalMon + ')<br>';
+      }
+      var downDetails = m.DownMonitorDetails || [];
+      if (downDetails.length > 0) {
+        popupHtml += '<details style="margin:4px 0"><summary style="cursor:pointer;color:#e74c3c;font-weight:600">'
+                   + downDetails.length + ' down monitor(s)</summary><ul style="margin:2px 0 0 16px;padding:0;font-size:12px">';
+        for (var j = 0; j < downDetails.length && j < 10; j++) {
+          popupHtml += '<li>' + esc(downDetails[j].monitorTypeName || downDetails[j].MonitorTypeName || 'Monitor') + '</li>';
+        }
+        if (downDetails.length > 10) popupHtml += '<li>... +' + (downDetails.length - 10) + ' more</li>';
+        popupHtml += '</ul></details>';
+      }
       if (wugBaseUrl && m.DeviceId) {
-        popupHtml += '<br><a href="' + wugBaseUrl
-          + '/NmConsole/#v=Wug_view_dashboard_DeviceStatus/p=%7B%22deviceId%22%3A' + m.DeviceId + '%7D'
-          + '" target="_blank">Open in WhatsUp Gold</a>';
+        popupHtml += '<br><a href="' + esc(wugBaseUrl)
+          + '/NmConsole/#v=Wug_view_dashboard_DeviceStatus/p=%7B%22deviceId%22%3A' + encodeURIComponent(m.DeviceId) + '%7D'
+          + '" target="_blank" rel="noopener" style="color:#1976D2">Open in WhatsUp Gold &#8599;</a>';
       }
     } else {
-      popupHtml += 'State: ' + (m.State || 'N/A');
+      popupHtml += 'State: ' + esc(m.State || 'N/A');
       if (wugBaseUrl && m.GroupId) {
-        popupHtml += '<br><a href="' + wugBaseUrl
-          + '/NmConsole/#home/p=%7B%22groupId%22%3A' + m.GroupId + '%2C%22autoLayout%22%3Atrue%7D'
-          + '" target="_blank">Open in WhatsUp Gold</a>';
+        popupHtml += '<br><a href="' + esc(wugBaseUrl)
+          + '/NmConsole/#home/p=%7B%22groupId%22%3A' + encodeURIComponent(m.GroupId) + '%2C%22autoLayout%22%3Atrue%7D'
+          + '" target="_blank" rel="noopener" style="color:#1976D2">Open in WhatsUp Gold &#8599;</a>';
       }
     }
 
     var marker = L.marker([lat, lng], { icon: icon })
-      .bindTooltip(label, { permanent: true, direction: 'auto' })
+      .bindTooltip(label, { permanent: true, direction: 'auto', offset: [4, 0] })
       .bindPopup(popupHtml);
 
-    if (isDevice) {
-      deviceLayerGroup.addLayer(marker);
-    } else {
-      groupLayerGroup.addLayer(marker);
-    }
+    if (isDevice) { deviceLayerGroup.addLayer(marker); }
+    else          { groupLayerGroup.addLayer(marker); }
     count++;
   }
 
@@ -185,43 +721,90 @@
     deviceLayerGroup.eachLayer(function (l) { allLayers.push(l); });
     groupLayerGroup.eachLayer(function (l)  { allLayers.push(l); });
     if (allLayers.length > 1) {
-      var group = L.featureGroup(allLayers);
-      map.fitBounds(group.getBounds().pad(0.1));
+      map.fitBounds(L.featureGroup(allLayers).getBounds().pad(0.1));
     }
   }
 
-  // ========== LEGEND ==========
+  // ========== LEGEND (with layer checkboxes) ==========
   var legend = L.control({ position: 'bottomright' });
   legend.onAdd = function () {
     var div = L.DomUtil.create('div', 'legend');
+    L.DomEvent.disableClickPropagation(div);
+    var lp = loadPrefs();
+    var dChk = lp.showDevices !== false ? ' checked' : '';
+    var gChk = lp.showGroups !== false ? ' checked' : '';
+    var lChk = lp.showLabels !== false ? ' checked' : '';
     div.innerHTML =
         '<div><i style="background:#2ecc71"></i> Up</div>'
       + '<div><i style="background:#e74c3c"></i> Down</div>'
       + '<div><i style="background:#f39c12"></i> Maintenance</div>'
       + '<div><i style="background:#95a5a6"></i> Unknown</div>'
-      + '<hr style="margin:4px 0;border-color:#ddd">'
-      + '<div><i style="background:#888;border-radius:50%"></i> Device</div>'
-      + '<div><i style="background:#888;border-radius:3px"></i> Group</div>';
+      + '<hr style="margin:4px 0;border-color:rgba(255,255,255,0.15)">'
+      + '<label><input type="checkbox" id="chk-devices"' + dChk + ' /><i style="background:#888;border-radius:50%"></i> Devices</label>'
+      + '<label><input type="checkbox" id="chk-groups"' + gChk + ' /><i style="background:#888;border-radius:3px"></i> Groups</label>'
+      + '<label><input type="checkbox" id="chk-labels"' + lChk + ' /> Labels</label>';
     return div;
   };
   legend.addTo(map);
 
+  // Apply initial legend preferences
+  (function () {
+    var lp = loadPrefs();
+    if (lp.showDevices === false) map.removeLayer(deviceLayerGroup);
+    if (lp.showGroups === false) map.removeLayer(groupLayerGroup);
+    if (lp.showLabels === false) {
+      function hideTooltips(group) {
+        group.eachLayer(function (marker) {
+          if (!marker.getTooltip) return;
+          var tip = marker.getTooltip();
+          if (tip) { var el = tip.getElement(); if (el) el.style.display = 'none'; }
+        });
+      }
+      hideTooltips(deviceLayerGroup);
+      hideTooltips(groupLayerGroup);
+    }
+  })();
+
+  // Wire up legend checkboxes to layer groups
+  document.getElementById('chk-devices').addEventListener('change', function () {
+    if (this.checked) { deviceLayerGroup.addTo(map); } else { map.removeLayer(deviceLayerGroup); }
+    savePref('showDevices', this.checked);
+  });
+  document.getElementById('chk-groups').addEventListener('change', function () {
+    if (this.checked) { groupLayerGroup.addTo(map); } else { map.removeLayer(groupLayerGroup); }
+    savePref('showGroups', this.checked);
+  });
+  // Toggle label (tooltip) visibility
+  document.getElementById('chk-labels').addEventListener('change', function () {
+    var show = this.checked;
+    function setTooltips(group) {
+      group.eachLayer(function (marker) {
+        if (!marker.getTooltip) return;
+        var tip = marker.getTooltip();
+        if (!tip) return;
+        var el = tip.getElement();
+        if (el) el.style.display = show ? '' : 'none';
+      });
+    }
+    setTooltips(deviceLayerGroup);
+    setTooltips(groupLayerGroup);
+    savePref('showLabels', show);
+  });
+
   // ========== PERSIST VIEW ==========
   map.on('moveend', function () {
-    try {
-      sessionStorage.setItem('geo_lat',  map.getCenter().lat);
-      sessionStorage.setItem('geo_lng',  map.getCenter().lng);
-      sessionStorage.setItem('geo_zoom', map.getZoom());
-    } catch (e) {}
+    var prefs = loadPrefs();
+    prefs.lat = map.getCenter().lat;
+    prefs.lng = map.getCenter().lng;
+    prefs.zoom = map.getZoom();
+    try { localStorage.setItem(LS_PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
   });
-  try {
-    var sLat  = sessionStorage.getItem('geo_lat');
-    var sLng  = sessionStorage.getItem('geo_lng');
-    var sZoom = sessionStorage.getItem('geo_zoom');
-    if (sLat && sLng && sZoom) {
-      map.setView([parseFloat(sLat), parseFloat(sLng)], parseInt(sZoom, 10));
+  (function () {
+    var p = loadPrefs();
+    if (p.lat != null && p.lng != null && p.zoom != null) {
+      map.setView([parseFloat(p.lat), parseFloat(p.lng)], parseInt(p.zoom, 10));
     }
-  } catch (e) {}
+  })();
 
 })();
 </script>

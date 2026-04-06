@@ -1,11 +1,4 @@
 ﻿# Configuration
-$TenantId      = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # Azure AD tenant ID
-$ApplicationId = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # App Registration (client) ID
-$ClientSecret  = "your-client-secret-here"               # Client secret value
-$WUGServer     = "192.168.1.250"
-
-# Credentials
-if (!$WUGCred) { $WUGCred = Get-Credential -Message "Enter credentials for WUG server" }
 
 # Check if required modules are installed and loaded
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
@@ -20,6 +13,25 @@ foreach ($mod in $requiredAzModules) {
 
 # Load helper functions
 . "$PSScriptRoot\AzureHelpers.ps1"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# ========================
+# Resolve credentials from vault
+# ========================
+$azCred = Resolve-DiscoveryCredential -Name 'Azure.ServicePrincipal' -CredType AzureSP -ProviderLabel 'Azure' -AutoUse
+if ($azCred -and $azCred.TenantId) {
+    $TenantId      = $azCred.TenantId
+    $ApplicationId = $azCred.ApplicationId
+    $ClientSecret  = $azCred.ClientSecret
+} else {
+    throw "Azure Service Principal credentials are required. Store them in the vault using Setup-Azure-Discovery.ps1"
+}
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
 
 # ========================
 # Connect to Azure
@@ -191,8 +203,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWKBa7+3RCLn4T
-# gDFxt9QvoIzN+bl4bZ1U0FTIp4us7qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLQFkEjjOIGFLG
+# 7n1fpnKnSBoe07khwVmLpcBWzdmKCqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -292,17 +304,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg+9oJ6gTOTnA2wzBk7QLYXMqhMMjgE5r7
-# Qqdt2g2EXJswDQYJKoZIhvcNAQEBBQAEggIAv8LRSlxSIra5oRw2MXy6DKKL2RfM
-# wEiNVFWVrdXptYSkXXDp8Q4igearO4YYOtoAlyO3ndMr4xBjXBmqOyODfBwId7A8
-# gyXMJbw3I5Kycvb3xUzWGfk6uXblPGIRk2q55eoycVtAsMrWE5AWoyKPtdd807/x
-# ypGFh5iXLUlXfBllwOgXSR80Tx49LIap1IdKH2MP4Yzwvl8bUdrEOUc1gMVfbcE9
-# uo0sf+d8P+aNeKfP6/93l9cpOK06GVBB8t1AAlOi9CzJKReDZUsgROU5t8a6U1kk
-# 8CyLNWE+AjAUdumE2536haHK6o4C7e/sFD7u1DcSLUUT0nljG31uVDOd/f4O9CjF
-# qc9mhpzrZCsUBzppZHW9FHhVc+RNhin3F6SYP2VatR5W/oK+xQcdmwhE6CfPCsUa
-# PBZu4RGYnJmn+AlVDuiQwKFmom0MB5HnAiQYt7Owkg+XFjMApQWsmm2SL2IthC5P
-# XD5loNqGcNtumULIEBFtSg3UDAxGKVY1mkwxVakXLtdkzYAwmDBaBF97Q+RiMkUv
-# Fe1Kgy4pJKMxFB9P+U9wl17ZMXoKQ5cWfx39OLOdsuKWzRIs2d4ruOuuZidgSuJg
-# 7BxCM/+4Sbs+ijeMxdQw4UeVXpqXZpHCPqJ/sYA1wcyOEk+Vm1uX3G58KE9Tpi2o
-# R8OqSWIhgWHmae4=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCL1fZ2RXbpvKdEtaQhnsXhwnqOd2pbnO
+# Bl4zz2aK27AwDQYJKoZIhvcNAQEBBQAEggIAEWsyQQ6q2lpYiuD5+XZYLAAZt5fg
+# XZtJOv758t39uRIJRu+qrv0/NYioFzcI6JPQ2qPUQO6vqFMTTEHVZJqtGxyE3DS0
+# vWZACtwj1Embu58o/B7zxgvPEYkAJRnuYJFvFVknVWXP9ZL7o0lxQ8qg14b9DcFw
+# KZshAwj5MesBpeszbc+tvkIHYaP/Qhb4H7/Hi9hqDl0IVnSQh4u/tjOADhOiMaew
+# xqCaA2baPy7JBkMafZcsnKCLQ46+aEEp5I7h4/4/6Z1iEub4QGPhpZCjep1cu8or
+# HqGB6uOt9Nsa34WlC9psbcu6fDi+0Fgnlmh13yCg3GhPOJf0OTO5rg4kiU2ddmYw
+# jGbQZvZyBLrmy8l2JfEMse8oUMWqaWUqEP3P37F9bX5LNhuz7L5CXm+Ui4Cycr5B
+# M8DhRl/Xv//8A/FNgxuoNaeZiFgCYxHOw24qr0OLTtDpzFqq9GmP1DqhGdIcZC2T
+# J7Pip/TSOGKg2ztCf492rr4K3ReJG0+H5JUthu98PWPN6C+TDsDaOBoTrcNXeuaI
+# sxz3h+dlWjn+PimGPHC8pwz1z1HFU9UnFdyux+hciKgvYQPI1zzer9hGlx7g5HVa
+# PP5d0W4Ogh1DniakIlxsULuDClhVtCK8lQcK1+XThChh4EaN466oox5XGS/Jwx5K
+# TMjv+GKc5RuqPJo=
 # SIG # End signature block

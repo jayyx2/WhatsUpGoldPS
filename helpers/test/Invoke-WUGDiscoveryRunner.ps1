@@ -25,12 +25,22 @@
     Include AWS provider. Default: all run.
 .PARAMETER RunAzure
     Include Azure provider. Default: all run.
+.PARAMETER RunBigleaf
+    Include Bigleaf SD-WAN provider. Default: all run.
+.PARAMETER RunDocker
+    Include Docker provider. Default: all run.
 .PARAMETER RunF5
     Include F5 BIG-IP provider. Default: all run.
 .PARAMETER RunFortinet
     Include Fortinet FortiGate provider. Default: all run.
+.PARAMETER RunGCP
+    Include Google Cloud Platform provider. Default: all run.
 .PARAMETER RunHyperV
     Include Hyper-V provider. Default: all run.
+.PARAMETER RunNutanix
+    Include Nutanix AHV provider. Default: all run.
+.PARAMETER RunOCI
+    Include Oracle Cloud Infrastructure provider. Default: all run.
 .PARAMETER RunProxmox
     Include Proxmox VE provider. Default: all run.
 .PARAMETER RunVMware
@@ -66,9 +76,14 @@
 param(
     [bool]$RunAWS,
     [bool]$RunAzure,
+    [bool]$RunBigleaf,
+    [bool]$RunDocker,
     [bool]$RunF5,
     [bool]$RunFortinet,
+    [bool]$RunGCP,
     [bool]$RunHyperV,
+    [bool]$RunNutanix,
+    [bool]$RunOCI,
     [bool]$RunProxmox,
     [bool]$RunVMware,
     [string]$OutputPath,
@@ -79,7 +94,7 @@ param(
 # ============================================================================
 # region  Smart Selective Mode
 # ============================================================================
-$runParams = @('RunAWS','RunAzure','RunF5','RunFortinet','RunHyperV','RunProxmox','RunVMware')
+$runParams = @('RunAWS','RunAzure','RunBigleaf','RunDocker','RunF5','RunFortinet','RunGCP','RunHyperV','RunNutanix','RunOCI','RunProxmox','RunVMware')
 $anyExplicit = $runParams | Where-Object { $PSBoundParameters.ContainsKey($_) }
 if ($anyExplicit) {
     foreach ($p in $runParams) {
@@ -116,9 +131,14 @@ $helpersRoot  = Split-Path $scriptDir -Parent
 $providerScripts = @{
     AWS      = Join-Path $discoveryDir 'DiscoveryProvider-AWS.ps1'
     Azure    = Join-Path $discoveryDir 'DiscoveryProvider-Azure.ps1'
+    Bigleaf  = Join-Path $discoveryDir 'DiscoveryProvider-Bigleaf.ps1'
+    Docker   = Join-Path $discoveryDir 'DiscoveryProvider-Docker.ps1'
     F5       = Join-Path $discoveryDir 'DiscoveryProvider-F5.ps1'
     Fortinet = Join-Path $discoveryDir 'DiscoveryProvider-Fortinet.ps1'
+    GCP      = Join-Path $discoveryDir 'DiscoveryProvider-GCP.ps1'
     HyperV   = Join-Path $discoveryDir 'DiscoveryProvider-HyperV.ps1'
+    Nutanix  = Join-Path $discoveryDir 'DiscoveryProvider-Nutanix.ps1'
+    OCI      = Join-Path $discoveryDir 'DiscoveryProvider-OCI.ps1'
     Proxmox  = Join-Path $discoveryDir 'DiscoveryProvider-Proxmox.ps1'
     VMware   = Join-Path $discoveryDir 'DiscoveryProvider-VMware.ps1'
 }
@@ -126,9 +146,14 @@ $providerScripts = @{
 $helperScripts = @{
     AWS      = Join-Path $helpersRoot 'aws\AWSHelpers.ps1'
     Azure    = Join-Path $helpersRoot 'azure\AzureHelpers.ps1'
+    Bigleaf  = Join-Path $helpersRoot 'bigleaf\BigleafHelpers.ps1'
+    Docker   = Join-Path $helpersRoot 'docker\DockerHelpers.ps1'
     F5       = Join-Path $helpersRoot 'f5\F5Helpers.ps1'
     Fortinet = Join-Path $helpersRoot 'fortinet\FortinetHelpers.ps1'
+    GCP      = Join-Path $helpersRoot 'gcp\GCPHelpers.ps1'
     HyperV   = Join-Path $helpersRoot 'hyperv\HypervHelpers.ps1'
+    Nutanix  = Join-Path $helpersRoot 'nutanix\NutanixHelpers.ps1'
+    OCI      = Join-Path $helpersRoot 'oci\OCIHelpers.ps1'
     Proxmox  = Join-Path $helpersRoot 'proxmox\ProxmoxHelpers.ps1'
     VMware   = Join-Path $helpersRoot 'vmware\VMwareHelpers.ps1'
 }
@@ -252,6 +277,34 @@ $ProviderConfig = [ordered]@{
         DashboardFile = 'Azure-Dashboard.html'
         GetDashData   = $null
     }
+    Bigleaf = @{
+        Toggle        = [ref]$RunBigleaf
+        Targets       = @('bigleaf')                 # Uses Bigleaf API (cloud-based)
+        Port          = $null
+        Protocol      = $null
+        VaultName     = 'Bigleaf.Credential'
+        CredType      = 'PSCredential'
+        Modules       = @()
+        HelperFile    = 'Bigleaf'
+        ProviderFile  = 'Bigleaf'
+        DashboardFunc = 'Export-DynamicDashboardHtml'
+        DashboardFile = 'Bigleaf-Dashboard.html'
+        GetDashData   = $null
+    }
+    Docker = @{
+        Toggle        = [ref]$RunDocker
+        Targets       = @('docker1.corp.local')      # Docker host(s)
+        Port          = 2375
+        Protocol      = 'http'
+        VaultName     = $null                        # Docker API typically unauthenticated or TLS
+        CredType      = $null
+        Modules       = @()
+        HelperFile    = 'Docker'
+        ProviderFile  = 'Docker'
+        DashboardFunc = 'Export-DynamicDashboardHtml'
+        DashboardFile = 'Docker-Dashboard.html'
+        GetDashData   = $null
+    }
     F5 = @{
         Toggle        = [ref]$RunF5
         Targets       = @('lb1.corp.local')
@@ -280,6 +333,20 @@ $ProviderConfig = [ordered]@{
         DashboardFile = 'Fortinet-Dashboard.html'
         GetDashData   = $null
     }
+    GCP = @{
+        Toggle        = [ref]$RunGCP
+        Targets       = @('gcp')                     # Uses gcloud CLI / service account
+        Port          = $null
+        Protocol      = $null
+        VaultName     = 'GCP.Credential'
+        CredType      = 'GCPServiceAccount'
+        Modules       = @()                          # Requires gcloud CLI
+        HelperFile    = 'GCP'
+        ProviderFile  = 'GCP'
+        DashboardFunc = 'Export-DynamicDashboardHtml'
+        DashboardFile = 'GCP-Dashboard.html'
+        GetDashData   = $null
+    }
     HyperV = @{
         Toggle        = [ref]$RunHyperV
         Targets       = @('192.168.74.30')
@@ -292,6 +359,34 @@ $ProviderConfig = [ordered]@{
         ProviderFile  = 'HyperV'
         DashboardFunc = 'Export-HypervDiscoveryDashboardHtml'
         DashboardFile = 'HyperV-Dashboard.html'
+        GetDashData   = $null
+    }
+    Nutanix = @{
+        Toggle        = [ref]$RunNutanix
+        Targets       = @('nutanix-cluster.corp.local')
+        Port          = 9440
+        Protocol      = 'https'
+        VaultName     = 'Nutanix.Credential'
+        CredType      = 'PSCredential'
+        Modules       = @()
+        HelperFile    = 'Nutanix'
+        ProviderFile  = 'Nutanix'
+        DashboardFunc = 'Export-DynamicDashboardHtml'
+        DashboardFile = 'Nutanix-Dashboard.html'
+        GetDashData   = $null
+    }
+    OCI = @{
+        Toggle        = [ref]$RunOCI
+        Targets       = @('oci')                     # Uses OCI CLI config
+        Port          = $null
+        Protocol      = $null
+        VaultName     = 'OCI.Credential'
+        CredType      = 'OCIConfig'
+        Modules       = @()                          # Requires OCI CLI or SDK
+        HelperFile    = 'OCI'
+        ProviderFile  = 'OCI'
+        DashboardFunc = 'Export-DynamicDashboardHtml'
+        DashboardFile = 'OCI-Dashboard.html'
         GetDashData   = $null
     }
     Proxmox = @{
@@ -733,8 +828,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDYkjlcUD7ZgSL7
-# GDw/rAYFWqcYpkrF40NQDTOTDPUfR6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDYpD0mfQzZftcJ
+# ys+RorBNchEoB0Mf/m172eCYv1wocaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -834,17 +929,17 @@ Write-Host ''
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgxqXzDkYNkMUlqxAznhNKKY6P4cXHCCtF
-# LI2ajzKVYbMwDQYJKoZIhvcNAQEBBQAEggIAb0TlUjy2oES4W49XOMY/nzmXNS4R
-# 3TQ5MTPY1cMMmPP+PaKuwYanSIynyQ+aj5YnMSzuHKCyjPxeYFPDK4ql4/yENc9f
-# NxEKDVgasiESHxK0bz5whcXk241VtqpVesbfeMC+rbYiyEKLiNtDQV8LBvOwuu+W
-# mhtiC6HISK8oQM3c5mvIQeMOeNrsdPysopqk1w8X5zHFmDS1CSJMqgS4fNktwdM7
-# wLABKaZoCfzZfV3DTpUgAVRoEgLXv2BY8WMiUnh860dtRy27xacPrIFfv5CIIsor
-# 1bKg+71Wnkll2fNZFX9trhStsPPyekmbhnJXhyQKC1juDpRdJFdznzAa7Gt+1aa2
-# rrYM9zCoXj04Y15rJL22lHG3lM+dkA+Pi1CLGVoI6gu6JdwLL7HEq5r5WjM5jVS0
-# CkHLNZDmGAHQ61zMbbYK0ZrnLdPn4H83nlh0kFk44TnpqQaf8dRSNamoBCWADuiF
-# UVD6J0D58vQ7oQ+SncOQBKGXRSVN8hbTtmo0DN6FD0Feb7Qrg06Q3kTv26l4tnVE
-# 6P7XQuCDxuQTs7tGw2AYMP8++wPF/CQgVQyb1LAL+rqj17OblbPLoO2vecMc6JGs
-# 353Nmqy/nlch6+HamXbz+eTPnfWjXOfhUxBpFEjfT14stoL9k0XwdyyZK8krz2Je
-# HC7MN6BRwND+og0=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgbbZfk37mlvWLENYNsKC/H2WzHlWnnuV+
+# p4DBQ+RAY8AwDQYJKoZIhvcNAQEBBQAEggIATT90GydWYPY2vJuwPovSOIDLxav5
+# 62BIzPFQEsOGVfYY1Qp0G70OIScsohKjWQO31k/DT80D7jl1jpfxOqM/T2tH/2LK
+# mdmqhkh02zFsvzxPefb6BEnDkBcVpMYNqGK7v42ap7BkTp69X4pLNFoGknbpSx29
+# dwL6VnLATrocnr5hD/3GspgZjOriNEGzMmVh4RjFazawsC9Enx2mVBOYG93rWf2a
+# LK7A7o6XjbTSYmPymacZQfilh6ktgVgbnSvfR9o6NHf/xivsUWaYf4sb0BJ437RK
+# uDC26nhz06wRXXrgMn9CF6sSC3jEKLfFn+5YdVcHo2qT7OA0Z8/Yj83fgS9hfGq3
+# dprQd9sTe0fcjF6ZMsIEQAL3315FVIpqSeRTDiRpvtapF5NbHwJVqkXAZQUOAMIO
+# Inqf/ox1MFHQtQOYECVBHDMyg2/KG/xURmZGHJ4lkwnJ8IzcthB2If8XNFPjiGH/
+# Cr7CPQT4Jlk6yWEhp7CSMqYgMVp7Px8nWLqhzWJ+2sGgA1ZAAUkpBsGXsGTCderS
+# qDRnabGhwqkPI29k4REqNGzQKqSmOI3xtTYg/uRBmeWYjM2SC7IcBP84wiu3VX60
+# iPEmgVSoAUHucbD/+55yKPyYeRRNdPecb9ujENW+cwz3TNfqDf801zZPFGOK8QYG
+# UXReieT6soausGU=
 # SIG # End signature block

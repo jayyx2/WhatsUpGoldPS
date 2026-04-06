@@ -1,9 +1,21 @@
 ﻿#Import module if we have to
 if (!(Get-Module -Name WhatsUpGoldPS)) { Import-Module -Name WhatsUpGoldPS }
-#Set your credential
-if (!$Credential) { $Credential = Get-Credential }
-#Enter your server name or IP
-$ServerIpOrHostName = "192.168.74.74"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+#Resolve credential from vault
+if (!$Credential) {
+    $vaultCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+    if ($vaultCred) {
+        $Credential = $vaultCred
+        $ServerIpOrHostName = $vaultCred.UserName
+    } else {
+        throw "WhatsUp Gold credentials are required. Store them in the vault first."
+    }
+}
+if (!$ServerIpOrHostName) { $ServerIpOrHostName = "192.168.74.74" }
 #Enter a filename
 $jsonFilePath = "C:\temp\json.json"
 #This uses WhatsUpGoldPS Connect-WUGServer function to authenticate
@@ -56,8 +68,8 @@ Write-Information "${outputFilePath} created."
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBkd0fLN5QmQQp
-# QOA4LAKMTjIG2BJauUuQBmATOKQdxqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCABNKQFrIbHKTR8
+# cve01fvXig3/9PLT1A4CEzzguFufjKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -157,17 +169,17 @@ Write-Information "${outputFilePath} created."
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgJvZjA6pmm8DiuLdQg1es+zeVJEKoc6iB
-# g39YDNdZ23MwDQYJKoZIhvcNAQEBBQAEggIAXYjRjYkdB2y7P/iizoud0/4jPsEb
-# mdHUbNRD8ItrwOiYYbkCo1/n3uGZ+903oxKp3xPOCY1uYtE0DFA++G4StZCYkYFA
-# uWF5hbsmS06xsOKQi81UQKMMFd+LDc8K6LqOa9f2pG9zfYrW410GDU7Nh6o667MD
-# e3hKyKyv5oducs6Z4ItmTW8KjXJ7y48X4cLj7mNl2kgOSFOh99hnlZyLnozGtb+q
-# NXFMl5kOKBoiv/byf3MOEaMyMM2z93TlGah6OyxOkVzcrA1kdMhVzDjlypclGJHw
-# pQCtYUs4HHtcrvt96MpbCw/6UE/RMl26HJKsEOMIgIMPa1BqFVW8oGyILXIyeSgl
-# CMlySJNMKDfR8DuELgULlMPRu0apwM7Z3j0rZ2VG1MHCqY9IdGoH/YKrUuyJuZas
-# biVAxzQ9CCJuCW4cgmFsRQRGTsr8id/0yYHf4LsSRY/ZuMSWBXT4uaiBk66jzvrJ
-# et/4Cd82BBpCTvIsOr54TmdPK4VxhRCrAZXkzTPaFrNQ7kdikaQAx0ncVJ9A+Mi9
-# bI4v697uVXJK/rExnneyaKf97tjmA31ZKAwDi1zc6LM28KHpBsYWZqOICE8ZN3Rr
-# lAgqu5rAsaYBsngzWFGtY9yh8vos372Y0iH8ABUVODa4MLy5GF/h6qNB1DgBjL3S
-# PIq12OQnU3Om7fs=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgciYk6jAWn0T1cxDAVGxNVe1/fJ2FTZzW
+# 1FUTsv/dJqowDQYJKoZIhvcNAQEBBQAEggIACfUVzzPCbAbMrJ2GiKEp8asXznZU
+# Vsb3hEA2Jnb/1bncMwb3SDpP7+PpHPNHPJd2nf2vGKIjmVWUfIano2iNnqKdC6br
+# WsROsdznPlV21N8KYZ6Fx37COYVNdQOjfG2C/xeig/WDFvIoULqgbqDUbxT4CGAH
+# n2j1PXVD99pEq7i8cnfixgr9c1rMHQkfGxZNhZGWaq2l+sjoqgLzr7okQ8S3dcwt
+# RQkt/tvOOW+udPLTyrWZT16J4WLAFgIS74HZUs2nVqr0BGq7kSBR3yWQ2e3eQjc2
+# qYbnBK5iCcvHdcKVgeOF059byogQLtyoacoa0j1aVVAo8vJ6ulnjqt1lMKEo+1Hb
+# CnFRam4C7LssGBwAxvtSJiJE/FDrbbFuK7Gou6zlFs884CHRA29u++3OzyK2zUQl
+# ykLoBsescHRmNI85voGUkInz+d+utw7fTGsP622OFInKlWC6imHW7XfPiHa+YtoI
+# i6Hf1eGrlM4t0oofcahShT2R4NelghfdsC51H70kWFqJUePrE1iHNppbefNacg5d
+# nRrHcqT34aVfqo39rlN05pZvUDP8kJLtUMAQbOk00sXb1Op0ZBokzG8IknlmL/MZ
+# X4caqYKdALbmwQC2WC/JmACKx6FQBqjPuv/0o2ARfFo+210sJp8tkOdSdYGDtHOK
+# FGjBP+7i3XEjsOk=
 # SIG # End signature block

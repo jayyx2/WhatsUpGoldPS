@@ -75,6 +75,10 @@ else {
     throw "AzureHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
         Import-Module -Name WhatsUpGoldPS
@@ -86,13 +90,24 @@ if ($TenantId -and $ApplicationId -and $ClientSecret) {
     Connect-AzureServicePrincipal -TenantId $TenantId -ApplicationId $ApplicationId -ClientSecret $ClientSecret
 }
 else {
-    Write-Host "No service principal specified. Using existing Azure session..." -ForegroundColor Yellow
-    try {
-        Get-AzContext -ErrorAction Stop | Out-Null
-    }
-    catch {
-        Write-Host "No active Azure session. Running Connect-AzAccount..." -ForegroundColor Cyan
-        Connect-AzAccount
+    # Try vault
+    $vaultName = if ($TenantId) { "Azure.$TenantId.ServicePrincipal" } else { 'Azure' }
+    $azCred = Resolve-DiscoveryCredential -Name $vaultName -CredType AzureSP -ProviderLabel 'Azure' -AutoUse
+    if ($azCred) {
+        $parts = $azCred.UserName -split '\|', 2
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($azCred.Password)
+        try { $plainSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+        finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        Connect-AzureServicePrincipal -TenantId $parts[0] -ApplicationId $parts[1] -ClientSecret $plainSecret
+    } else {
+        Write-Host "No service principal specified. Using existing Azure session..." -ForegroundColor Yellow
+        try {
+            Get-AzContext -ErrorAction Stop | Out-Null
+        }
+        catch {
+            Write-Host "No active Azure session. Running Connect-AzAccount..." -ForegroundColor Cyan
+            Connect-AzAccount
+        }
     }
 }
 
@@ -144,8 +159,8 @@ Write-Host "Done." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwVHum238oaEnI
-# rJ1VEoEZj/5omqMmbv35LSk04Wa7lqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVtOp3w6sDhFJg
+# KcUZoO0I8QTGQmGjOm6iP3PzZ1r9r6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -245,17 +260,17 @@ Write-Host "Done." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg0+0uGiN+nd3tSPF3b72w/FgETV8NWT+a
-# P/DHQ3o0a50wDQYJKoZIhvcNAQEBBQAEggIASXSUCxVNay1PgsLez5xHS4cHsBhg
-# 5XzCqCDmd33fPr8gM5quNc77JiVx2FaOvvb3+PkdwaoG+ujxez95Ld2vBLopqux3
-# /Sq4b9/LzICCZoQoDlJnDyRf+eiNO8oI0SfzC5qEuh0tMpxJLmQ+OEbwHFwPg0h/
-# cTaM0XESMvgQfu1ftw7H1SU/eDF5jCLQXBxqLPC3gy/x/bE14195742zaBZYQfzy
-# HWRyk4tIKNwr0Z94WL/WWZhlLUkMIHClznX4/o2Yz++QyIvhKXx/1Ujj1UagPw4Y
-# sgJfZWaXC1ZrK+hFO09aXfp39kMq12XEo8Dk0CaHFunMs83uRgRxFCw2/QxtdB7a
-# 9HXu2Ocl3DgJRMPehyStztuy3tPid9Qn99XCp8srtcmEUcEd7Nu0CKN4RwlUO56v
-# ezCUHDzLwxje9niZDmqH49FcfLTjDDUTjQokBFDyXyGhjiv0mnTno+4EKblHiwZF
-# 51Sq7RMwV8mdyCIOFZjlQPtzsJ/i5IcJIV06St8Zcek4ny++W6Y7G9mkkAAmpZhc
-# dI92dnLaCCDP/hsP6vm8oTOednSeQXktNTUla976ZoM4ZfqA7Sb+tpsnkP3S4R4w
-# Mkw1aVZz7FTtcpQlNZwD95IweEcpV45R1/MLM5hqc0U2ZSbwMSHkGNAqczeHfiXy
-# gwUxRvOKYmmOulU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgVvJdWKQb81+fTylcWclb5JciGKSgDK0G
+# fGmcsf848i4wDQYJKoZIhvcNAQEBBQAEggIAQKyfDcPFg7y7qOsfqXl0dvsZjkV5
+# wVSM8kQDSnOrM4QplfAH9kNv2jj/EWyKGWyqJykqgoA/fN8yfuObQ5+UwNp5Y3hw
+# sCOsT8sjay28M9gPoevOiShCfyrCaxFI/naX5+R7xcU6vAXcBJQxVLq6/ccDrKny
+# HKCcrlmhcTCiIE0Cj89OtlT6RWL8Obws5RLbJWYKy4VPyp8EDKmjtyWHLhaedIGF
+# H7eG9hLg6pXNafWV3dMgUpNa819MEwK9vNj0Vez8i5Hli+WJ2mJOxq168M3W3EsK
+# oLmQco8fg5JM3v9ZmG/B9DiZqHL95AwvUvRpYCxElBhXIxZf3+zx8OLvOk9y0kNp
+# Zxh+8oZ7KVCmD2wJ/dKlFkgkGwfA9V08vQkCipTWBM7OVQOD893l7cSB4D4DhzKT
+# AU6qxr1kYwFgPdyx9uzAUgToUpulkyh82KRU0Db5uT4EjmNVwC8meSHZsxsadd2B
+# cp7fecid2Zpqqlf+IXYK2Wy/wu6zfKTYNkzMCtbHFHmDyT66TituYLABTWBWGVQh
+# JlDXRf0lddwYBF4m+c1RF+fQDMLY175aDT9o7nJ8Lp9QpUhR867EQRCzgKzzqsZQ
+# iPFOdAX5ZEk0lkoR4XPJXRnvOxwexDGESIgJsC/MmwVTTrz7HKvPJnG7cET0FDqj
+# p+MLPWjtnotzejk=
 # SIG # End signature block

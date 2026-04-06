@@ -1,11 +1,5 @@
 ﻿# Configuration
-$AWSAccessKey = "your-access-key-here"   # AWS IAM access key ID
-$AWSSecretKey = "your-secret-key-here"   # AWS IAM secret access key
-$AWSRegions   = @("us-east-1")           # Regions to scan (add more as needed)
-$WUGServer    = "192.168.1.250"
-
-# Credentials
-if (!$WUGCred) { $WUGCred = Get-Credential -Message "Enter credentials for WUG server" }
+$AWSRegions = @("us-east-1")  # Regions to scan (add more as needed)
 
 # Check if required modules are installed and loaded
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
@@ -21,6 +15,26 @@ foreach ($mod in $requiredAWSModules) {
 
 # Load helper functions
 . "$PSScriptRoot\AWSHelpers.ps1"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# ========================
+# Resolve credentials from vault
+# ========================
+$awsCred = Resolve-DiscoveryCredential -Name 'AWS.Credential' -CredType AWSKeys -ProviderLabel 'AWS' -AutoUse
+if ($awsCred) {
+    $AWSAccessKey = $awsCred.UserName
+    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($awsCred.Password)
+    try { $AWSSecretKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+    finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+} else {
+    throw "AWS credentials are required. Store them in the vault using Setup-AWS-Discovery.ps1"
+}
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
 
 # ========================
 # Connect to AWS
@@ -120,8 +134,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9OBZRMgVzcgFt
-# 7Yo1wqwfE2bvF+cU0anyB8la7b23lqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCARIpHk7PzMVWBb
+# b0r90vnutKubTkC7IhBnvQ8EukAgZqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -221,17 +235,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgqFLjmgPzIV9c3DeAsFGIAAZGfJXI5j85
-# QQj9wGUOk2kwDQYJKoZIhvcNAQEBBQAEggIAvHaTUXrqCCv462mK2AeLfOvoeCE5
-# fMFxUs2PPP5uKa8tBsfXRfq34RFheEU9rRJSab4AJ8Zd62J1rCd36s1aDGc/XMkj
-# fs+42apIEYoIXD80Y3gGF7KbaslNUjbEDTgCxZog2kezWuI/7Som/JAmGmKN6G16
-# Nv3b+hByCmNjrhddLQH4X9WOMJFD5cGbESDwih/k41r8c0zo0Mzr59B4OfZNNQsl
-# YJFtpcP5BsbSgXZ+BrNHZ3YkmzaTB54iB3SMUSI7T5udq2mGx3mVW/RZnMDr1JiC
-# wlCQE+QSMnedzJmjJw6y6Wa8LO1miwLpPVKRY9Cn95CebHBDUzcfJ00Ie3rDIlns
-# ziNyeX3wDCMj0noJU7qU/oB2spaz3Gi0ShX7PmvKLS19xJrB6EXJVRbOWft8rJD8
-# BpxYwfSwrNKYa0K57th0+ab7NH5Zw0V9Qr7IRcWSssq3LVIuie8IPj1SqKx7UiLz
-# lBkc/C+prEfZvc7y5Mt6O2DZRxhhACm9aNvw7KdQcNW8SJcOrcl7rGvImnh1zG+m
-# DdvnebXaM08bs6Eux5l3l8ioHNnZPGOjFnVSg+L4kVTQIprkc1BlgvOzhJSP3hLr
-# XyjR5vUfjBANCSaVxZk0fsgq/zVz62oIGWwUY0WSW3hCDOQ6HqkoTxaQSzStzNzT
-# xE/TgLfKvlBMrV8=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgVGyrTD3yHVUZDywA0zmn/ZIeBpq5OVl3
+# vudBI+c9r8gwDQYJKoZIhvcNAQEBBQAEggIAxNLlkOLIQAz6nwLE6hKczpjaubYL
+# 2yFM/rkNG+UoeEBdomAjlZlATFEmOPbQjG8JY5hKiOYGNdxbiBAz2YwsTvPWcyHB
+# cvBkeGFfOa9qtFNJ29FaIorUdJ/uU63b4Hvk3hpBFfs03KoosA3E02/h8ticT7hG
+# 0E+vyTxQr0rO/zhZ/E+L+IN2AT0X4OF4r6dMv/TBXHv7ODj2CxDgJ4mFC5UkRa8y
+# uFTYEwxlokJrcxq5DdqX3e5rTGwiirey2tBQUijF0jSIe4Z3YuxgDe9kCpppdRBE
+# WtrgEj3BTLFYmyM+7cOcCZx6Glca9hKrNGDOy17II2BNe8m40sSabJMUfuQPfPrW
+# cYeRxAyo1inuxZn0bDMcwqhlOKXlZ/9oXAveWQtqzyctBkbl5wvvt8o4TFJgmh3n
+# NlsSHxW/54AhCaS0KsKoaeFNxRVfp3rCJ6965OJj40tsi5sgB6GVTKV5LMr3K8Bv
+# 8CBAoTwTLMnQ8qzVwdvq1X+0GerY+MwzvrPk+in9oqaNpyrN+jyvtx1MBooPchOI
+# NZU1T1YOmD8SBPXHRnGJYs3TKzLa/9p7PVvaz9w+YbPbylSUy/Sy43HBt8TR4G/m
+# 9CCi6Nb98aDBEXIpW8tSJB6vFcvGX3NC+GPpms8d3uuY08zyY1KaltIJ+vycB5Ht
+# 2GKhCZ4JFoAS+S4=
 # SIG # End signature block

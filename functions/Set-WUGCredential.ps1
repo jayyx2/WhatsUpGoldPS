@@ -121,7 +121,7 @@ function Set-WUGCredential {
 
             'UpdateBody' {
                 Write-Debug "PUT URI: $uri"
-                Write-Debug "Body: $Body"
+                Write-Debug "Body: [REDACTED - credential payload]"
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $Body
                     if ($result.success) {
@@ -147,7 +147,7 @@ function Set-WUGCredential {
 
                 $Body = $updateObject | ConvertTo-Json -Depth 5
                 Write-Debug "PUT URI: $uri"
-                Write-Debug "Body: $Body"
+                Write-Debug "Body: [REDACTED - credential payload]"
 
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method 'PUT' -Body $Body
@@ -182,7 +182,7 @@ function Set-WUGCredential {
                 $templateUri = "${baseUri}/-/config/template"
                 if (-not $PSCmdlet.ShouldProcess('Credential templates', 'Apply')) { return }
                 Write-Debug "PATCH URI: $templateUri"
-                Write-Debug "Body: $TemplateBody"
+                Write-Debug "Body: [REDACTED - credential template payload]"
                 try {
                     $result = Get-WUGAPIResponse -Uri $templateUri -Method 'PATCH' -Body $TemplateBody
                     if ($result.data) { return $result.data }
@@ -203,8 +203,8 @@ function Set-WUGCredential {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCb2BOUnHSSDHS4
-# kh/lJ2Whn74FXrJ1ODVk1GXDFo2wUaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClkTemFXy8zzNZ
+# YI/NqVwLsbeOe9wRwKEbNL4NATRAvaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -304,17 +304,17 @@ function Set-WUGCredential {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgbQTjqgJQ0G/Hyh0Ri75ukyFznw3qgjxk
-# hBAyUlxDMsowDQYJKoZIhvcNAQEBBQAEggIA1hWNZj+7c/nrtHFZCx3w0IesTJKj
-# Ti/CEhIUsBxjBlZKFTQg4dCpHYqArG34QaWgy2JxTnLAzaKTCuhb8JMI1EexM8+E
-# YGxv/WfwCCGrXgxtZDrIrj4wDmtqW11xg4HdNl3rEU0G6UhjIKkzMujEYSkLpGow
-# D/yB0rS5QTB4RSi74RtXzv94XacJpBVp9b6N8cdHT4bfFUfU+aDbKqiyaJSExCJl
-# A4wJ9xYYUkTj4vIwrXODjMQiAYz29yIhI8NmQCZttNV5dbfMa5dYSaNjQsyuNPvv
-# i2d/P3bwa4cTCxWakFav5KRda39DbVze3UmpcJdDpPBUcZx4+L4L0eWp++T0CPDX
-# 1jJ3rfkddKMbwffp76BElo2wVorFWa4PBj7ZA4bz38kxRe7wfeb3wjLK921Gsls/
-# 9RVhxNQOy5uKan++f7Zqz+bUFLcprJ+OjXK1m7FLasJEWaf2h9mcOD/YX6FtnE5X
-# C+MVarxH0JOe0OPg8ROVHWuIVmia7LqtnrtAgmEm20w+FPWvcXdokJ6IIfGc73F1
-# IRGdpQRkAt4BCMubLzS5JkaMQsg9WHt7P+O8L7vCKAI0eXS+GfYe3HOQb1fj3ocp
-# gBrUrXPDS53uqOPOlnl6N4BsEaBa6lOz3l0TO3BzrnUfhWsoeajthFfDcwXWA9PF
-# VR+8RTEcfxonfJQ=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgdz8exGqcjLdi2ALHZjQ/0KhtkzMRdbSv
+# wP802RfwlEowDQYJKoZIhvcNAQEBBQAEggIAnp/hke5ymkeZaLjvfDBMtij1QsTn
+# D92EUx2MFlALVT7QmK64xsJJGIP6ayHOE9eDisWpDkrgy3RWolOzKeM1fYG5Ld54
+# /xO5rDwP9FGkTGd86TTlFKaDsUxgw0k4XhFUoF3tqTH4/suRYvMI7NXhZ35lp79s
+# a//2IU36i2rJXqDMGv1X9DLKaqzpSsgDbYbLmkoMmpxMw1Hk7o4wm0+hZgzFdxX/
+# Q7E4FlLH+fH3c22eTWP1o14dXjGHGjgeu9KntvI0UggrMq7nI/+/CiN2KtwdklCY
+# HWiEQL0w35GoZd5/D3KSxZjLXjmS4/e7/v6Rx4PwENkQYL352qk7MboblW6NjIJ3
+# nC9aicAZr5j//9TQsjiZOMr8Jyu83qmFFWdPOutGhNlCSD/ZfM/s6gtdB9yPlFMg
+# cHfCWGWLQCZ3YwIlmwxYYuIombZ+L65SvMBWq+qcjfYz8FOyyKqOAZ04USy4UWIJ
+# 4WHMDgawtYWfyIJ2Di+Ou+84/XRVzvf/eeMF7BuXxhNAyUVPzzLfny0wnDOrsR4X
+# JkgTVpjpVPdvOADvjuFcWM6bhqFN4z0ChCxIQ200SlsTyquQpruduz5upKgPWmW5
+# XmIm+TP3JQbpMhuBlRsTqgQMtqiriFEwoMoBe1lefQ0r0BhKyfkV71KIFxmms75a
+# 85Y1YR7CMxPD3Fw=
 # SIG # End signature block

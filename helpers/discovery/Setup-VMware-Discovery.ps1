@@ -72,7 +72,7 @@ param(
 
     [switch]$UseRestApi,
 
-    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
     [string]$Action,
 
     [string]$WUGServer = '192.168.74.74',
@@ -318,6 +318,7 @@ if ($Action) {
         'ShowTable' { $choice = '4' }
         'Dashboard' { $choice = '5' }
         'None' { $choice = '6' }
+        'DashboardAndPush' { $choice = '7' }
     }
 }
 
@@ -329,11 +330,20 @@ if (-not $choice) {
     Write-Host "  [4] Show full plan table"
     Write-Host "  [5] Generate VMware HTML dashboard (from discovery data)"
     Write-Host "  [6] Exit (do nothing)"
+    Write-Host "  [7] Dashboard + Push to WUG"
     Write-Host ""
-    $choice = Read-Host -Prompt "Choice [1-6]"
+    $choice = Read-Host -Prompt "Choice [1-7]"
 }
 
-switch ($choice) {
+# Handle DashboardAndPush: run Dashboard then PushToWUG sequentially
+if ($choice -eq '7') {
+    $actionsToRun = @('5', '1')
+} else {
+    $actionsToRun = @($choice)
+}
+
+foreach ($currentChoice in $actionsToRun) {
+switch ($currentChoice) {
     '1' {
         # --- Multi-device push to WUG -----------------------------------------
         if (-not $NonInteractive) {
@@ -346,12 +356,18 @@ switch ($choice) {
 
         Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
         try {
-            Import-Module WhatsUpGoldPS -ErrorAction Stop
+            $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+            $repoPsd1 = Join-Path $repoRoot 'WhatsUpGoldPS.psd1'
+            if (Test-Path $repoPsd1) { Import-Module $repoPsd1 -Force -ErrorAction Stop }
+            else { Import-Module WhatsUpGoldPS -ErrorAction Stop }
         }
         catch {
             Write-Error "Could not load WhatsUpGoldPS module. Is it installed? $_"
             return
         }
+        # Dot-source internal helper so scripts can call Get-WUGAPIResponse directly
+        $apiResponsePath = Join-Path $PSScriptRoot '..\..\functions\Get-WUGAPIResponse.ps1'
+        if (Test-Path $apiResponsePath) { . $apiResponsePath }
 
         if ($WUGCredential) {
             $wugCred = $WUGCredential
@@ -617,6 +633,7 @@ switch ($choice) {
         Write-Host "No action taken." -ForegroundColor Gray
     }
 }
+} # end foreach actionsToRun
 
 Write-Host ""
 Write-Host "Re-run anytime to discover new VMware hosts/VMs." -ForegroundColor Cyan
@@ -624,8 +641,8 @@ Write-Host "Re-run anytime to discover new VMware hosts/VMs." -ForegroundColor C
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHTNJO2QcmU9WT
-# 1LcTQxKiWhpPfv+HKCJhJpUEgkZKrqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzGg9iiGoOva1w
+# M/EC+cVOX1Ui3bv31ZmgS/ssv8xdcaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -725,17 +742,17 @@ Write-Host "Re-run anytime to discover new VMware hosts/VMs." -ForegroundColor C
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgeKbZt4EBGeuXR2xXYP2YT9YH1KlzdNZw
-# tExt5nq+xtowDQYJKoZIhvcNAQEBBQAEggIAKm47iBfSQE+1csPdLVQPnW3fWrJR
-# MyjEyE2m7uPa8o6rZs38WSY2covMMJV0ZrnvPckH1n+3Z+HbZHFDl948qFrwDUwt
-# IodXyqRAVFNeDzFKP8g6s2vkQjRhMO4hsFQUV6Eb0YXvXLntuhncxmiodmB1jlKN
-# R17D1HuPCd2pcC4n+00SKh5eeRv8XAaUbS8ezEbbbqV+ooau9MJ6fAJQop0c69Su
-# UAYEwcUaRlgpF4hfluEWgyOcstEKYoJ3kYcLnTRISeJUUEF6pPY3iYu2NhJcm/od
-# uDCzhZLFAZs8jffE7xS3yC10RdjTrqh7lk3FeNWYaJyEmIwSATMjlITeVpsqgT/H
-# A+ccLsjNQe5iQJs+EIRNKcDbsStXxwPSnuS1n/nhECGfGSxKv5B42orNPb4KGf4l
-# jBdPfBSbC7MscqHrynLmzUM0pqV3NUoSXQ4FvoZdAWpsgQXFD+DZKglD/AOlot7n
-# csFalCoJnRz5a9L3WaRKEwkVx22q3aYJc7c6csG+atznwjk/sP4STrWQHQye4mGJ
-# zwnTaUsQJPY3BZDwDxaPH5KHWr3XxQ4w/vb2i5S99zeiA1VEQG54dfCTQP8jtY77
-# NHM92UDakWQz61FfpLQ0LWm9kf5Pmj/L5nXXBa5V7SGPq7moGmHyAF0KlWMCpYad
-# lqcDKNJVJ84Oqok=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgDDSzD2bYsdL8CdADYgRXIm6E3rbA9v++
+# FU4ZqOBXp7kwDQYJKoZIhvcNAQEBBQAEggIAU64cwI0wd1xrIExKxdw2PlcQQ+Hj
+# 1DwuvXYQh6xvK2bIrHEEEmtrvE6fcUNuerUu9dv6aBx4o+2LSFQcL8UAYY/0ECwo
+# 9izYuKBQDfBg4MlOo8MLo7P3RTrl9hLC9+t2XHFuOFD1UGHM+/NL8Hf8BB3lSNm/
+# K0/+DCfVwnuuaMrtXMs4jtTb2FmGvUiczeDLAPOwdsbkiw8ZcO69ihaHxhZUKZvo
+# F45PWUGNepDTI7iZ7q/VTvVGcVbKO68tEuHv+2MFZF/CS7WkPp3h/ZZeFB+bY+tQ
+# dWM95H0PO31GwBoTuBpc155u6rrN6yAMV6ZBR+6BWFf67ZfoMxFyueYu4U8a9uoT
+# bdrhd2sHsJG8ebaNdRipVBUEMkTEUP98W4Zcdejz/t5s+zh90C8jmbDzPNuAaEpB
+# pAdBzIz/Xjvq4BbQQbCyPJ6XZDtfKPLCFsOScYtU62HCqrYvfobUEjqrZzvVDbT8
+# 99TUgEixBLRM6j4P+gDMQOTwELo4cgeH1K5tGpVIcRSGMBjHVbL75Niy+7qt1xqm
+# N2N9S/oTfRjUjSZe/z6hkI7EoxCqxWIik80yx2JzbAN0RBXcT7z3S846f8Y09v6P
+# 4/tI4ZBNVOiIc+Ldscdtd9v1kjEM3xnXZDZNC6fUMgxboveFvbxBbk4J2BlAoyHE
+# c0Z7CptEskvsa+0=
 # SIG # End signature block

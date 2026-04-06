@@ -2,21 +2,25 @@
 $ProxmoxHost = "192.168.1.39"
 $ProxmoxPort = "8006"
 $ProxmoxUri = "https://${ProxmoxHost}:${ProxmoxPort}"
-# Specify the WhatsUp Gold IP Address or Hostname
-$WUGServer = "192.168.74.74"
-
-# Set your Proxmox Cred
-if (!$ProxmoxCred) { $ProxmoxCred = Get-Credential -Message "Enter credentials for Proxmox server" }
-$ProxmoxUsername = $ProxmoxCred.UserName
-$ProxmoxPassword = $ProxmoxCred.GetNetworkCredential().Password
-# Set your WhatsUp Gold Cred
-if (!$WUGCred) { $WUGCred = Get-Credential -Message "Enter credentials for WUG server" }
 
 # Check if the WhatsUpGoldPS module is loaded, and if not, import it
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
 
 # Load helper functions
 . "$PSScriptRoot\ProxmoxHelpers.ps1"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# Resolve credentials from vault
+$ProxmoxCred = Resolve-DiscoveryCredential -Name "Proxmox.$ProxmoxHost.Credential" -CredType PSCredential -ProviderLabel 'Proxmox' -AutoUse
+if (-not $ProxmoxCred) { throw "Proxmox credentials are required. Store them in the vault first." }
+$ProxmoxUsername = $ProxmoxCred.UserName
+$ProxmoxPassword = $ProxmoxCred.GetNetworkCredential().Password
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
 
 # Ignore SSL cert validation (self-signed)
 Initialize-SSLBypass
@@ -197,8 +201,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZyOcUqVtdVtbX
-# PILYQvT/mYXGy7nwm1L3IswBVn3yFaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVaLj5pr03no3c
+# OXScBlu38uWSUi10jpeDFillTPFi+aCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -298,17 +302,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgtmcu5Ln+k0zATECDlrMn5l6FFYoxgqNs
-# 4ZzeKu5rCaEwDQYJKoZIhvcNAQEBBQAEggIA8hnwbEtSDEafYYngxp++rTLnC+R4
-# C1W5kuIU2lxWiSGz/fJ/b9UCyM1XxJKzzJLjxMWCyV3bZaXXxABm5BiqvjUCY2jA
-# nIob2Pt184DpY/1i8he++HBtp0ke3a7zph+yQhtDAC9sWEHGwipvI9YEpLFBXt/A
-# xuaSKFI20BwqVJnKC3yoMJ6zjLU1jo4GHhMsr54vqXGRc2IR0njE65cXLEDR76MW
-# VwMIdaY4hqhOfRuK3fF8FpjeSbnPKaypPWF2PVRSweKCLlDZkLynYEoG1lMKStIZ
-# yOCcO+wHEXVZm/eJEsymHCh7xCx0I0OYxsFumEpk5uTUVjM9I7r8Y+1YizVFav0R
-# uXe8Z63UAA8wFmrskaUyC/+C7wxzZq3woyFMK0vUhomTkpDeEWErH5WDmG0Y6tff
-# 9UWLIcnVNPp2iKxO6iklDclRR2Ke4AQoICqSe4i+Tk4icgDGlwnWBklDkzcJormP
-# Sqpl0DmlePO2WrgevzbBjGlVBaCvqa3ardZzf7OpWSle3FySUquLuXwSoiR6BtxP
-# vzC+SUr9W2GHpBGEcnP/7hTKoTz6fgTyoeiiMDCE8kUw7qAliEZgUzKzlzGiPtam
-# pJfWzKP5AGM/7rn874DWnY1FxfEFNQBe6VtSmNgnvaUQcrTX8P2wssIdXfwhXsX9
-# jEtjKR8asGd6UFc=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg1xObAL921lEmqqwmc/sxHVPNV93rTRmr
+# 6TWL/6iFLUIwDQYJKoZIhvcNAQEBBQAEggIAJO34Ix/k0deP/UqZe9u1alxCIr+K
+# mHl0/ogY/ldvsd8c+TAE593aXIzdrW9aHlmd1H+oFuJF8QN+9Xd39ZAgQxnLjNcm
+# pGfzoIdzIjh4y5eHJtdOGa6LlmWY6i/C2NJ+WYCguutoAdTaLM2VtlPsFCYkUh+j
+# rm4uSHoXLwQ0GGy36mWKjVZDpm4YZZkeRa6brH2d4QHMXIKYxsbPKJmiukYjZx5L
+# AdC47CdT//idHaxdGPLW8UiHYxE+/zW3zYL9feSgHhylyJ8JAKC5dV+xXjCWXrJw
+# qYrV/ON0BXZaXcTVVPpk6AVr3ECwPXKR76NtEQfPDud1QO8PRg67abfYIamHolH0
+# difoGB2WjzljIQgmK98g8SJN9KteZgtFfnIObFe0MyEnnGVbGFW+0foqqugjgwDI
+# 19Gq7aZwRwCEOmegAlj56CORJDvu2JENPrhPEUqAt8dNqy6D59TehqVuACiwEs8u
+# TgKCy9BK0hFDlfyjwCzQ94eZAtuzHoUaWX7VoB+RmymNcYPaW+tMgnRRWnX5GuI5
+# bTmzfqEToFbrbbDW/w/S6E8Ui3be5zvDU3VMO8UtpsQfO7qs4DI7V56VgwvQ3MZd
+# /oVVOqndmfsoQolMuc4DlANo+HSV7IQqXDYCB2cc83sqsIvAyrDWVy0vuiKqPbIB
+# DxZbDSf4wl9pN9o=
 # SIG # End signature block

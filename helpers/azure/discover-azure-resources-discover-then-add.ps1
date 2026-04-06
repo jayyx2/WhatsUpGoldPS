@@ -1,11 +1,4 @@
 ﻿# Configuration
-$TenantId      = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # Azure AD tenant ID
-$ApplicationId = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # App Registration (client) ID
-$ClientSecret  = "your-client-secret-here"               # Client secret value
-$WUGServer     = "192.168.1.250"
-
-# Credentials
-if (!$WUGCred) { $WUGCred = Get-Credential -Message "Enter credentials for WUG server" }
 
 # Check if required modules are installed and loaded
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
@@ -20,6 +13,25 @@ foreach ($mod in $requiredAzModules) {
 
 # Load helper functions
 . "$PSScriptRoot\AzureHelpers.ps1"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# ========================
+# Resolve credentials from vault
+# ========================
+$azCred = Resolve-DiscoveryCredential -Name 'Azure.ServicePrincipal' -CredType AzureSP -ProviderLabel 'Azure' -AutoUse
+if ($azCred -and $azCred.TenantId) {
+    $TenantId      = $azCred.TenantId
+    $ApplicationId = $azCred.ApplicationId
+    $ClientSecret  = $azCred.ClientSecret
+} else {
+    throw "Azure Service Principal credentials are required. Store them in the vault using Setup-Azure-Discovery.ps1"
+}
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
 
 # ========================
 # Connect to Azure
@@ -106,8 +118,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDx0KBM9M8TXFTV
-# TUeTd2QMfplwdkhxWzIMsoKUQJ5oI6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACkIqN7ddsao86
+# hOo/Eeh6UiuWovNMjQtCtKrVIMMNCaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -207,17 +219,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgVP0a6iuE00Gck1VODyehv2chR1hcEXUH
-# Od8Yc3vEa1IwDQYJKoZIhvcNAQEBBQAEggIAKm2Nkwnty5ta6ymmkaUXWcXXHLuv
-# bmdjo7pCgEo2TjlHgS5ygLwm2iw74C3ObGl0PV5h60YcDKijHU7NsJ1qrh3hQzKY
-# QQdVVrLlPbId8J66QhDDOlP/9vITb/U1l+13gUzKH0e2/x6/W2h5QF7hJkgb9+vm
-# VkKjnY/uWkkopwluVAi5i7vTXVTMY8pJ9aDICJSo00dVyBAhlB2T/u5wNeFGAMIv
-# 0ftOfeBH/BDP1rrL5ZAuCVA4QjtnghlMs41pq7DMLIZwAxXdIFIbRON63WjB2Pn9
-# 8+PoOMUmR7Gs0d4FXBapss0/M5qceX2ConWrzArCP7Cxw599K9Ngkr6/sUO6kUif
-# qm5een1LCqqSCvq7O5sM+ovePwh7Kuec8y956rp6D4xAASUfXJ6kNC6WK05jZ0na
-# Q93DK0ynwM39Cm2cXgOcKgETMdl6mzuEhkLkshXI/duuK/Zl6QD93XeTQdiNO/ln
-# AgHECJb1ANPqr3nuRE9dyhtFGOkkErQwqDZXIczu+BXpHhdasV0RsyOoxDRToVEx
-# OSBHkIASL/2gFCGSMiB92pp6ocn7aMvEr1bsSefzRCXdjSqkdP1X/BsS1kyvmOfI
-# XEsCrzPw7ap7eooMxo2vlvI761nk/bUPIkOW4mHCuD4/hH5BW0MTix9Hn19lcfSz
-# FSyfDsXdvn7CCeA=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgqRtk/Qo0++52wCaD5eVuKCWM0roDgdeb
+# a/7a23gdd3IwDQYJKoZIhvcNAQEBBQAEggIAfGr1XfxdzLtNINcGbjNqiKg0S5IB
+# 8E9dAxS/B7Y0zF8htCY49YnXydCCCZydn0Z6gdism1EqxStvj5xV1togdxhOei0c
+# 6C7ll5F7kyifzAtZ16nNnAqhLMuTmUpqAfo6uYmo2w/qPFfNKRejJmleLH3MLQ10
+# 3ZVit1f8ISnJue5H5fTReJis4Ik3LcSKSyGR9j6Wdc10bpN/WGCZ8HzQnuWJ7sGQ
+# cthQPK512LAR3FRgXQA23AU4wFTP/J7df1+4ZjBKIfn/RNNWafs65gWtNeZWsfP9
+# ECq+KgyDT6/rg7mVhZX7AMM17xTpwe5VUmsJ5Yt6S6KS9W3UsyfoJN61oLW25V8T
+# ggTreIivJYoEBR4eGvEwUCXOngVueqy6WVbGmjbCjQ7IOMSA3u4UXLXPlnxLBEjd
+# DocTK9bzJAlsXkSmUyUzbUrhR3rEnR8323hrB3UkjP6n1NcrS7NkiKz1zEzEmt3z
+# T5JU9vJLBvko9hfEplP8jpr2JfRYu07Aek9k4OcMbS4ZMmZ0H49RFCAJZ8SaNr/0
+# CFYyyRCXmJ0rgXIQiO2G7Rkx1B6pOsM7icdMKncTF9pnlKFH9u5EKUboD/hN7ewi
+# qnoeqgWnX7NK8JR25XEaJ1Laz3Sf03PkAysR2DmMdzdUp/w2bwYnimIbyVZi7p6S
+# nRXfa8PfxK9kgU8=
 # SIG # End signature block

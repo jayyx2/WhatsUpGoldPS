@@ -334,6 +334,7 @@ The `helpers/` directory contains automation examples and discovery tools.
 
 | Directory | Description |
 |---|---|
+| helpers/discovery | Unified discovery framework with DPAPI credential vault |
 | helpers/vmware | VMware vSphere discovery |
 | helpers/proxmox | Proxmox VE discovery |
 | helpers/hyperv | Hyper-V discovery |
@@ -342,6 +343,13 @@ The `helpers/` directory contains automation examples and discovery tools.
 | helpers/aws | AWS resource discovery |
 | helpers/gcp | GCP resource discovery |
 | helpers/oci | Oracle Cloud discovery |
+| helpers/f5 | F5 BIG-IP discovery and dashboard |
+| helpers/fortinet | Fortinet FortiGate/FortiManager dashboard suite |
+| helpers/bigleaf | Bigleaf SD-WAN dashboard |
+| helpers/certificates | TLS certificate scanning dashboard |
+| helpers/lansweeper | Lansweeper asset discovery (GraphQL) |
+| helpers/docker | Docker container dashboard |
+| helpers/geolocation | Interactive Leaflet geolocation maps |
 | helpers/reports | HTML report templates and `Export-DynamicDashboardHtml` universal dashboard generator |
 | helpers/test | End-to-end integration test harness |
 

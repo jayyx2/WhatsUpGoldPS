@@ -68,6 +68,10 @@ else {
     throw "ProxmoxHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
         Import-Module -Name WhatsUpGoldPS
@@ -82,6 +86,17 @@ if (-not $ProxmoxServers -or $ProxmoxServers.Count -eq 0) {
 
 if (-not $ProxmoxServers -or $ProxmoxServers.Count -eq 0) {
     throw "At least one Proxmox VE server must be specified."
+}
+
+if (-not $Username -and -not $Password) {
+    $vaultName = "Proxmox.$($ProxmoxServers[0]).Credential"
+    $proxCred = Resolve-DiscoveryCredential -Name $vaultName -CredType PSCredential -ProviderLabel 'Proxmox' -AutoUse
+    if ($proxCred) {
+        $Username = $proxCred.UserName
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($proxCred.Password)
+        try { $Password = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+        finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+    }
 }
 
 if (-not $Username) {
@@ -161,8 +176,8 @@ Write-Host "Done." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAENQw+zKMFo8b4
-# tVNpIlMRYKukMYYpWTt1R+AFKijcNaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCARHDjP/n6wW9jB
+# mACl7F3IrHb73hQJfBemd0TP0TSAJaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -262,17 +277,17 @@ Write-Host "Done." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg/vOpHCHPBU+/WT+m49kO3TCmOV9LHGBQ
-# Pn4fweQ2p3owDQYJKoZIhvcNAQEBBQAEggIAi5ytv7ioko8+fFam0UMCYyhbYwWG
-# MEaDeOoPW3i2r9d7g59F+QFFfV7n9MIqwds7AbWcG00R7SYolCzkQZm0Tr8PJNj5
-# 82CVoWCDuR55VwID04d5C4J/Wo+g62Gfg4d/uI+woY/e2gpWwBcwfuVd4uJw/BuT
-# pWAZgK9QURxJWYHxtAEYdhR/LjPd1hq5gUgeAzHj1W7p5kP47gb5X1VtmHwF3a21
-# RX+K28NZQpmxYLfzIsoHkUIdY0uGX9NYHGAjKs8aIUqOorixZSh6QvPlzOuz7Vjn
-# qwp9SnAWObzZUtYS7ds0oBmPe0s2XNeDPj88gv5bgwxPu5ipVGIi4UEFdiX5PmEf
-# SsCABB8hsRiaUo74uCNEHTAF5S7fTlQHMlFk5yEiSjSjkDtaiSeP/ySnu2beo73v
-# XeDZAp32Sa6OU2Ojbn219JGct7X708GSlYcPjGoxk1Y1zqvHi9rrduP4sXeYxZYH
-# iIHckdUbNA7pcfvSkBLuZVhjwGl23KwpCvC9sg0BgMfpk/uYW9n42ByorKqA84zM
-# b1Q6pglq8XP4DJv4F8B10e8QgPv2yHlVpHw3EhUnZxsVgstaOdIGXjEaMWkevZm8
-# XDMq5X3PswWe4ijYJx9hrQWF76bTzR3WDz0wOP+HTLQXdsqSvBvsMS74Jt5JqTwe
-# DGE7pbdbiTpK1Tw=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgXph5yhfjO575+oiNdgMUfsMqt6lrghXh
+# J7ZAomUMFlQwDQYJKoZIhvcNAQEBBQAEggIAW4rEb5IDFnVJxdPEx1u2k4ig065W
+# KP0kpR0f4HkSABAWtYxZouwXHJS87x9HNRV36PoAdsM8C8muSezRTHQK1fLMOfKd
+# M3evJNZzlHor9GEAs3//xzJo35KizEIhqIv33mgJlA+ogtr/H1EWMYy6z+Qh10DX
+# kGmd8fXeM+gKaXr0uUjsL4Qo3acK0ql9TvftxH+Otd13YgNsUdqhuulO8FEgI8BR
+# m7TNtyqKWuCUejxaz5cuSAIjY+TGR9gq1zcCUeKCdwR+lhu+gehMHxpgt+4pN0B/
+# JX+Nkt9+g61DN36MlE2riFY6gP5mCtvraSlPRYLhQRcmiJi7d1uOK49+dHGXBK7z
+# qXnekAPBiqTAQv3bFkqPKHsTgHVhnGNhRAqZMM8AgjFMfeNO4nAFpzJrJtd26Cly
+# Wlm5EcS2phS+oLjOScSm8UR3hD9JqSZL0I2mL5Hn42GN8v0wh90CCMaGuT336Z3R
+# 11BBwHnfmV7T/zEiBc6Ny3yEY/OLA6TEQxyamldSwQsIUysZW+oMUKatIMSWz8AY
+# PFoXsgc81RHliEg61zauWsLSQq1Es7M5EugXMSVo/Q5Uwes868Yc+OA6hvZ3yU0I
+# JpYdvxdxoRozvlG0DNG4+PvJaEMG61dYbCAtZ+dBTFjjWVw4huhfnCIQVnlQZ06z
+# +nwnqLi7rBIUzyc=
 # SIG # End signature block

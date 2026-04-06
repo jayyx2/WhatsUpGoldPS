@@ -55,6 +55,10 @@ else {
     throw "CertificateHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 # Import WhatsUpGoldPS module if available (for WUG integration)
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
@@ -66,13 +70,12 @@ if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
 if ($UseWUGDevices) {
     # Connect to WUG if not already connected
     if (-not $global:WUGBearerHeaders) {
-        if (-not $WUGServerUri) {
-            $WUGServerUri = Read-Host -Prompt "Enter WhatsUp Gold server URI (e.g. 192.168.1.100)"
+        $wugInfo = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -AutoUse
+        if ($wugInfo) {
+            Connect-WUGServer -serverUri $wugInfo.Server -Credential $wugInfo.Credential -IgnoreSSLErrors -Protocol $wugInfo.Protocol -Port $wugInfo.Port
+        } else {
+            throw "WUG credentials are required when using -UseWUGDevices."
         }
-        if (-not $WUGCredential) {
-            $WUGCredential = Get-Credential -Message "Enter WhatsUp Gold credentials"
-        }
-        Connect-WUGServer -serverUri $WUGServerUri -Credential $WUGCredential -IgnoreSSLErrors -Protocol https
     }
 
     Write-Host "Retrieving device list from WhatsUp Gold..." -ForegroundColor Cyan
@@ -167,8 +170,8 @@ Write-Host "`nDone." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLxDLaIzA4yZ4B
-# BdkoVdKmYNnBvI1dk8gHTxnXjv52nKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUtSyVSFhv3IhD
+# 8UVs03ylPYB4ywF3UO0iML01Egy0NqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -268,17 +271,17 @@ Write-Host "`nDone." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgJtQoj4a5Q2xKHBK+mK4Y+2A19IkPeXa2
-# lVNNzxATyvswDQYJKoZIhvcNAQEBBQAEggIAi+ZtMqidrcQ25dr+j0ki5R0MIqUu
-# F9egt/+jcA6GzWAgxN8rfQaPqxdOvOMJx/JMpaOOjXFOYCqXrNxxw7h5ecelVhVJ
-# dVoynnxrhTc8g8yRpg+4b1lwwTbvnTHqanxy9jB4BrIJkaEeXrKz/xMUsC2HWrDu
-# SQJKf7x5K7Gpdyp5GCFXiR8B9tYVropsMqztiV0uf2u0Dnnbuof6wQkOjk+9itxa
-# PlmwN+lK8uMHRosMXex3Y8JC68EEYnE97PywKqcmMLrcbcByl7QyZfNgP4nvSgz8
-# Wd4Pu7c6jkm0x91ZAS9lAYOC7XqKDzMbMI/pNSkjGAzEJHW/7v1BPoetNmLn5lzT
-# si3uJJaop0T+dYtoN0+1lvMiEGEfJqq8HhzM0ttvyDG0QQuxOYO5z4YdtM3LNS4p
-# ye/Dg6QMoB/1D01sK02pOSYDAqwrPm/9pg69RBaVD1rc+tCOBXT4YKPj1iIobdRV
-# xFpO9rZZ3IEpX8AORsNr85IAS03wgWwxU7z7SPIMvlcqjTyMggvaIlI9Up5TFUNC
-# 12oS+JOdLbggECGgPqvkfyo5rT9BRLwJjFw1glLjOGM+nRIrcjBbTDID+Z/2lq1D
-# kiWLCNiLmolsja0XxNZT7I9d1phXteKySeJjHYIBLWkx0Bq+3zL0MSwzg3IoyweT
-# z1pLN+b2tL2Hvx4=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgLbVY3L4qUHIaJSqUeQe9XYVHXQ/MYpv8
+# nOz17K6rM+UwDQYJKoZIhvcNAQEBBQAEggIA5GzcnPkiadv1LWyIlYdWarBUrmQ+
+# rkeWJR9AvOyMloXrVuHzkCkZqWC9zldRDcbdtpcEt4E7Qay4MQJTuhtCFjZt+Bkk
+# i+5xR7mK4/O4QYVhI+5NssvOk+jQqcZI5Mbyik+WE6M3mYWOV/p0ARceOk0h6PQI
+# /tcHB105DMIGbs42GcWjBCadZk8XGLAkrxfmRgtEUxrOkAylc+Y7UmciOCLUKdXw
+# rJBUaLibxSZfP8ksu58mZszLTGIdLVcGBvJkE3dF1O+hvBwTlo3RmBC+ZGWKuV1U
+# w3vD10jn9ZM5e72pdJLE6dah4mbsuHojv3n721Xy3GYRKtM0fodSSxzs1TDCS6Ro
+# EfruKT8R+RsUGE56lc1mBfLH3/g/O9lQhpIwywqA1Knsu4clBRUcSc2MllBPbCXf
+# Z6qvrECfcvp7MhJrfQHM2lGYJP/nfokLPygWg6JokkEbtbIT5gA0Drpfi5N3qeMG
+# HIqdqnCstPICIVWPxQ5ZLfmi8vEiN2qahkyXMJfs/aEE8SjDcJzF5FxcfBYo7Oqj
+# 8jNX6KSStnsalL+3VPVaHt7zK2gkp0kbQDNK7BwqHM7i3Ub/5rrzdbG26dPDdiK1
+# AdVYIDs3N1jDKjlhcr2dMVTxIL2gz4OGGFeeIjFTYxhPT3dKNFr9dOwWdFf49TuT
+# 4LInp/kcejvWYlU=
 # SIG # End signature block

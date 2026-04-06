@@ -24,10 +24,14 @@ if (-not (Test-Path $helpersPath)) {
 }
 . $helpersPath
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 # ---- Authentication ----
 if (-not $script:LansweeperSession.Connected) {
     if (-not $Token) {
-        $Token = Read-Host -Prompt 'Enter your Lansweeper Personal Access Token'
+        $Token = Resolve-DiscoveryCredential -Name 'Lansweeper.PAT' -CredType BearerToken -ProviderLabel 'Lansweeper PAT' -AutoUse
     }
     if (-not $Token) {
         Write-Error "A Lansweeper PAT is required."
@@ -107,8 +111,8 @@ if ($openBrowser -eq 'Y' -or $openBrowser -eq 'y') {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfRnYXpfhW6MaN
-# 6xsGrdVXdoB0IliOtmZReexgE42eaKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmNWaN7gNmfxUt
+# GUMtIjukV+eJXVpuNf+kYmNZNMOtgaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -208,17 +212,17 @@ if ($openBrowser -eq 'Y' -or $openBrowser -eq 'y') {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgiUH/enoOFpTwsUcJvhpY83yaW7OHXqUz
-# /2MGP97ya5swDQYJKoZIhvcNAQEBBQAEggIAZ+TqQcsIFDVI7yEhmkHQaSrjA4zD
-# 0aeXHPw2OWs7ylO3+JSJF/DCOpdkemrob7IUSlsbiS06OITzYYfXBW+F0aPiqrVN
-# Ao4xJForHJN5BdhWRr6wGG0lwKF2Xr+648pU618ZjYBnWmSq47WqihzSpYq75AcX
-# ZIrA+hf9AxNh1nYKAQqaUFqo6NhxbkdW2ZvDFwyN7xMn4IqXKtdx6njb6Y6qOO/r
-# IqWRFAckeuv2cvr7bIDovAVC/4rcRGOK9TmaS1c0NGNzS6m42g/jcY6cCywrVBrq
-# ldTIu8p/fpphylvEFfR6R3dSvEz7VT4zGcEOw66pbVdaVTaD9ESiosT0avLj4rVR
-# WQOtJPewYQ2IfaMTyAinY3Tc8//W/1ZAhhxyq6LmfxUTHIc7rDd2w/7wwH6HS0ay
-# qZ0wLup3ZS2Sv0GaIHdvgj/KBABvFUYqxYHx6E9nsN1fbM0Fc8n1DwtWRQzBHd8x
-# wHPZpQ0kT3oz9SG5K6ECe3FYiM9H3BVtPGoroij5WHBgRJSCC5PcmYkKZY/PYeyC
-# 8GeOCXFJ0I5+nBjGei+Qpvrg1T+fM0BEg6tKeuC9fQ8HITsI5Ih2SRrFxJZrjmYV
-# 5BUm3gdUVXuAYiisQofDejJN0EdyueBJ63yzmV7ryaHse8fpztbJ+wQVqzHu1jPh
-# iv8lxodlMTFB6Ok=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgtp4NdgPN/eM7hmkhaTWxRGZxA4eA/D1w
+# W1oT6Gs/ptYwDQYJKoZIhvcNAQEBBQAEggIAaghodPIxMn+mN8GbXLr9NtlOfOCc
+# WApOERwiij7VLI5ovkVrE0M5ayCVKGJzUrVluNiMpz+Q+Duh2d20Lehkudm0tdAd
+# 0aq8i6uNqLTAdbB3R0tSgaa2cLpduXfj7ifz/RhrJaXwDKwGtuLZS8VGruHMuP9c
+# OV+p+bH5A5pi3WOIXjOMcnk3jYj2aFZDecNCRiws5nd1umBWru8cuQb8/sp8Xv2I
+# ic/CV+5w8gl2T+jpzmYrLRU8Dkpb4RYW2nJKmVsyCgjjutivNilAp7Bnya0DKh7v
+# /KvychB3ONY2jUsKAJX+ev0q9Saw9mG9kVxHVo1k0BNyoM1FXFdqAmRDjbN4ci5d
+# Nxy0EtphSUeMXG/2U3UgSvFSrJ7DT8LQKg33QMhRLIX3+hFMTfZ3Iv0agKkVepCe
+# w5EsZ4y2xA5ikxstzJs2p8o0uZNUC1uJx7csZsn0CkxF/kJh4ZpnxgwqEUaSOapX
+# 76jTCMcreANXLnuwNENhQmXif5sY72E2PpJmZaJoLvUuT7HlbYHyPar/TjZOn3cq
+# PS3V6QdMM4eMVu8CJmWJ2V4gUFw6sWg3p8Z5UAKN5HX/wuRkR3cG/ctB6GteaZcf
+# elYlocKUDuKl6uqAbpZfo0fhg6pt3/HCYGiHu2oCUPuefLhwhEjQfXjX4Kzy1MMZ
+# YyWLXPb/sO04yPM=
 # SIG # End signature block

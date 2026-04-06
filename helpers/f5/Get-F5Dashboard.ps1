@@ -38,6 +38,10 @@ else {
     throw "F5Helpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 # Import WhatsUpGoldPS module if available (for WUG integration)
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
@@ -57,7 +61,11 @@ if (-not $F5Hosts -or $F5Hosts.Count -eq 0) {
 
 # Credential (reused across all devices)
 if (-not $F5Credential) {
-    $F5Credential = Get-Credential -Message "Enter F5 BIG-IP credentials"
+    $vaultName = "F5.$($F5Hosts[0]).Credential"
+    $F5Credential = Resolve-DiscoveryCredential -Name $vaultName -CredType PSCredential -ProviderLabel 'F5 BIG-IP' -AutoUse
+}
+if (-not $F5Credential) {
+    throw "F5 BIG-IP credentials are required."
 }
 
 # Output paths
@@ -153,8 +161,8 @@ Write-Host "`nDone." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9I/FFh6U8ZiUc
-# aL4juNuFUzsHRNz6LZM+igGJ4O/fg6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDDUTHgDLIHLFah
+# osIXvn5hItrMZZKu4Rq6X65+NkPjkKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -254,17 +262,17 @@ Write-Host "`nDone." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgrk5bh3RgQpDfwQUsSERhIUEqoV9CD9OI
-# DLTYRurUrpcwDQYJKoZIhvcNAQEBBQAEggIAWsNELA+zEZMYOZAOJHI88nHd2UBd
-# B1kInp0sJyX87mGknC2rPTVLBCzGGXRQJRWLIhnTpc8+3OkevpX5Du3JDnLLlKYK
-# tCdvpPdmLtQoKbn7/07KuJYT4CIneAIClxbUTgqJcrECHfXAbfoMenAyjkNZNqSl
-# bzhI6mNPpz57F1ebTToVLryHLXS3Cnd/1Gs+W8AHe2fno3wduPR+9PAvO+Nda1/H
-# 4ENZvzO6gPo+mhP/d4ML2R/M3Z5VwA2VfRQ1/aaWEhajNckWaBNkgSaoYnFMN3sC
-# cW2MvhGpP3pUTq/ZwuJ0bqd0lG4ckUxktATyMMFB7n9IBArKxn0TykxZ/R3BckJa
-# Y/p4h0SLS0OS7XIiVIfNUXnHD0Fks+khPpZ5rNMUExkYxFqN/O+F+kDjbd/n0xc3
-# APMHzH6g3QbF/XpjXHTc0XzomtHD05ycj3j16Sh6yMBAFTpardX+DL4jhD0Csg/e
-# +VVuj+7cCRWBfmTTUcrZkCr3MwBh05ZmLdIvzqRI3N3jko4gviOep5Z5chT31EnT
-# DBB6YDBLAoMkqqMA3WGRfIfwOSEzjo3m8/VSGFnM6JXib4rfsIOBCF2qn42iCjFn
-# mpMmDfgus1Uzcxm1sLd+gQxTzSoQrjLloHvguNU1cV+kqyTL7iNTAv1mfrOeIB/C
-# i/0rQ6gtX/wCP4Y=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgii8C7wTP+8nqBOEVBVh1xbGl43VC6/Mu
+# ChrdSOyCYcMwDQYJKoZIhvcNAQEBBQAEggIAXZ0xVyO72UtXuytJmt/z8ofhmMUg
+# br9BtL4Vo2tony1sSvZHXO0JrhjPHYQV/UYG6QD2ZDbeAxP1OZ8px8uQkx86q9n/
+# ZebSuD0yurZSGFg8pVtG3maFr/thqC6AbNmbpwiPVWd+ZxOZMrpXKQmp/PBFQS7M
+# XfrGcB821/E9vVaST3Zy73i8rzCIJI4NcIrHxX3O+0C/YbVtzan9XaoiufPNlNV0
+# UQmiyZogf11PaQTOJ9YP+c1+MfR4wYuRlnFmzai4Jp1k4fNaC6vGn+e69bJH3NEM
+# 2DNp1mK9tTpRfNPfrAQQCgY5FodDQRyxyXLzXPBxgwPR6maTDOXaKjHhZRIriDcF
+# 8n4i0/8QjMNLfvWIzCJgeKRbOkwkJnYlCaoIC3oG3uJ8pXWfnE5aPVbpGlRdWOFt
+# y5yXGF7b8y7UZFJQcX26DMZfeCRkoVk6le6kmrU7VtfX8F6+yiHh5ko+kugw4U2N
+# sgptzlgre0coMs0x9RULSUZNA7eX1m/Wz+TSgAapxJXw+V3Q1fvwlUWf2vjxfEzZ
+# kI441/CVSLXXWQMR52PKcSz0kL9cyTad6fZOQPfxH24EnBobDe5DFWFsQRJ2dOB8
+# 8h1pfgd4WMW15hAom2Vqi1GMNPva4uQK8+phGJRIBcA7V7gPmr2EgiBLmQzdvDEf
+# AY0VTa4Ocw1Tbgw=
 # SIG # End signature block

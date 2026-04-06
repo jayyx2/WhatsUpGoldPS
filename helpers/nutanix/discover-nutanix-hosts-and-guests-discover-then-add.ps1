@@ -1,16 +1,23 @@
 ﻿# Configuration
 $NutanixServer = "https://192.168.1.50:9440"  # Prism Element or Prism Central URI
-$WUGServer     = "192.168.74.74"
-
-# Credentials
-if (!$NutanixCred) { $NutanixCred = Get-Credential -UserName "admin" -Message "Enter credentials for Nutanix Prism" }
-if (!$WUGCred)     { $WUGCred     = Get-Credential -Message "Enter credentials for WUG server" }
 
 # Check if the WhatsUpGoldPS module is loaded
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
 
 # Load helper functions
 . "$PSScriptRoot\NutanixHelpers.ps1"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# Resolve credentials from vault
+$nxHost = ([System.Uri]$NutanixServer).Host
+if (!$NutanixCred) { $NutanixCred = Resolve-DiscoveryCredential -Name "Nutanix.$nxHost.Credential" -CredType PSCredential -ProviderLabel 'Nutanix' -AutoUse }
+if (!$NutanixCred) { throw "Nutanix credentials are required. Store them in the vault first." }
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
 
 # Ignore SSL cert validation (self-signed)
 Initialize-SSLBypass
@@ -102,8 +109,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAllDtkxL8Ng5Vg
-# LmlZcu7i8V27s4L2A/IRya8DYpqp5aCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDU3+kVEofBnpNs
+# zFwqUWG0YiSQjPejB+UHQTsVUT53+qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -203,17 +210,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgZQLbSjAtP9WGMEXPi1Urj3+hlU5jjuMB
-# ExtgRSqy/X4wDQYJKoZIhvcNAQEBBQAEggIAiBY8b2mVQ4a9BQoIb0xJqnJa2WUy
-# EezGLErYmhLRVWf8dK4VwN7XlZcbT+II5pK0J4aJRYIfjydz6Y2QpatB+IvMg9UJ
-# E+HooG09hsU1luz/dF1SmZA6RIK+v8Ba6kOsknlFvzM2ukC5V2a8yeDMFRcGEG/1
-# 8QHC5I66nh6LAL+TvH9UFbHiBAVF0udF395+/itTVND59/mkKeDCfFg8fNWDseI4
-# 2hLi7bTOw2Xkky/VoQ5N3D7XUBX0BPmj/I2MODIPr0Re6SLvffyCdDLL2zyxguCF
-# NCZ/LBDn1jSGPWeQ4p4UdMC8z7hdtHusOU3lkma+7RIi6EblE0jHvGoqIEG6QUPb
-# TN74YFdTKTaamgSkwEWLfFnLdNq94yrouUv+PMgEZTkO5U99f9INr6cX/wQvdot9
-# 4qhyIQHQqpsdt5TUkFbUDP8trhCGwWr78UHwyxp8pooI0ZgtGadf9dW6JV1ku05E
-# 2Ths2eE2LpduHwapBGOg9aKWBhwEiPbzaJbztTHPraiIRiwjzL+leiBzzo1Eqpgk
-# korD+VKLq03zgvOLFrxAf6SSIYQATtnhEuVHC32UnPgc4pL/PDLr2mMhKjRTs8kS
-# Z1WFwH4Ytct2+mdZVwhGTnHx62r27jNn1ZUjJBsd5FjFZiK7Uo2DojGvqNhJb1Ts
-# WrZ45MZuF6zSqoY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgfBTuzTmWOQXMzYePVm9kXhNbScPWloZc
+# ou7TuJ/PtwkwDQYJKoZIhvcNAQEBBQAEggIAJAEYq/ESV6r2Lxp/WCSQ2TaCr1I+
+# wp+GBBIcDv85lZ4nxV3xlwJtoiycwfOqZ+xfhyWTL3My4LmDOzPNailHDnqw2ozs
+# xnBgilQlTSxdG7ProAyoE4SG/6PepMhIaWtl9+UZL5MGEtM9OLI+53GQrkba4A/R
+# TMyGvUpozXcZceYPLvOLOTy4KxvmbLsIT8MiOK2HFbwYdM8+Gv8YbWcoUihDC6FL
+# P2yr6R7nd3H8a+C6Dm0Tu1YDJ2h84rRXy6KvWd67Kg6C/hRLjdkgWwr3MclE0iA9
+# aLs0vxh/D+/K5sCnWyYQwksoDiV8Ypg8g90wRuY4QrRQTUUP2+jSwvrrL/YOGWkG
+# KcWWxICYOl1UWq4B4W6cAn+vQZWgH8UghP2QICx0L6gw4EFPPy/Hcnwra6C0jGD7
+# K2pUpdfnjJEAns1luijUr8gJezX+CkBFX6dyBHMuhaGYvS3nQvTrZSWnEm+sKtSz
+# vuqKq42YVeYZmfx9wGecvvAj3DGC5au9oEzf3swLZdxZxZUngGTBbP2Gqdl/KIT1
+# B5EtMVCrlOaJ5XQfQD6DZz/8/V/xLWIOzowROm+7sETZBMrqXB3eLfNTmSAxtB2N
+# 7ovz4Crm5vQuJ9iFyWSYtwUBL5qsRM8xBjeIiONIgnkZ38Ud94jdaxzfECqBs13j
+# Zdhh8WTuGAc2zPs=
 # SIG # End signature block

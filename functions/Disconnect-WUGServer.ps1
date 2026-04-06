@@ -35,18 +35,30 @@ function Disconnect-WUGServer {
         # Inform the user about the disconnection
         if ($global:WhatsUpServerBaseURI) {
             Write-Information "Disconnecting from $global:WhatsUpServerBaseURI"
-            # Clear global variables
-            Write-Debug "Clearing global variables related to the WUG server connection"
-            $global:WUGBearerHeaders = $null
-            $global:expiry = $null
-            $global:WhatsUpServerBaseURI = $null
-            $global:tokenUri = $null
-            $global:WUGRefreshToken = $null
-            $global:IgnoreSSLErrors = $null
         }
-        else {
-            Write-Information "No active connection found."
+
+        # Restore SSL certificate validation if it was bypassed
+        if ($global:IgnoreSSLErrors) {
+            if ($PSVersionTable.PSEdition -eq 'Core') {
+                $Script:PSDefaultParameterValues.Remove("Invoke-RestMethod:SkipCertificateCheck")
+                $Script:PSDefaultParameterValues.Remove("Invoke-WebRequest:SkipCertificateCheck")
+            }
+            else {
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null
+            }
+            Write-Verbose "Restored default SSL certificate validation."
         }
+
+        # Always clear all credential-related global variables, even if
+        # WhatsUpServerBaseURI was manually nulled, to prevent token leakage
+        Write-Debug "Clearing global variables related to the WUG server connection"
+        $global:WUGBearerHeaders = $null
+        $global:expiry = $null
+        $global:WhatsUpServerBaseURI = $null
+        $global:tokenUri = $null
+        $global:WUGRefreshToken = $null
+        $global:IgnoreSSLErrors = $null
+        $global:_WUGAllowedSSLHosts = $null
     }
 
     end {
@@ -56,8 +68,8 @@ function Disconnect-WUGServer {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCeucLCC5OcPYFs
-# /2YEf10+Yp6djh/2YX34IX+L8d5iK6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJ2lBHxCoZhjgu
+# 1OX7LIrXTk1uFZRHtCkZAWwQwFv5w6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -157,17 +169,17 @@ function Disconnect-WUGServer {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQguYEeiiYgpbCPYpMlC8zPrWbsZVWn+B/o
-# dsbsOpWrQ+kwDQYJKoZIhvcNAQEBBQAEggIARYhXAK1PwsquY2ospJ8NzFzxX2Ah
-# qLQYBybVXt1lOZY8kqANThYamraDf/JJ7/1RnkI1EqpC5XOz5ZpiR8MfSSSuOR2T
-# RyvF664QKe3TU7QK0HA78E/kmPmEkE5Qdq8z8N6pYame8Vqc4mi7UqCvY+es4qpg
-# wMUihJ7ecyY3Kcb0vVZGuygUEh7LVP7v/0pCSnqtb8o0kpEk8xp674cCTB6kPL/6
-# 2jKVDd5KuGkDGuH4VGvhg1877q2Z18kiXJULJPNZiVa8C4ir53DkYlLnkcx+75w1
-# zngMCTtr9mjfeSh1CxErgNwPWSeYF1m+pHRqn7i3B1lpri9c/g7JysJgNKm4G8s8
-# I54alFaxdSndmugIFsSwy0LODVerCZ3OrUcSVW+rV3svqPphJHeN05KiLHqNPi3L
-# E1bWp1W8oDvPXWqGIQpHKLN+0gB2UMC7TVhsVhyUr78zt+xoSgdrHXJqK3ceocDt
-# ZVAHz8tWbH1ZoJdl1WwptPjD/vR+6VHkHLczJADoWXfADiUkvznyhW0wXN6n1be0
-# /ipLkvuXvQ5Z8nyRokE5/CU/Eb8sr5x6BA7o5m4W1KNwOUL7i6Af34Kaq3qW1df5
-# 5PhtXLk6MQZ2c6YSDHy4zpZYHsWLJs7M91TQlPh7XFE5KUUgHGHlXp3WZ5YDJbXQ
-# 6Js9wOpPbRqMXt0=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgjep0q/8JCt7/H+FyTY6947OA5Cnx4fhu
+# Qod5xTlqdkUwDQYJKoZIhvcNAQEBBQAEggIANVj366c1XfM9L4Bg+GYAMGsrZZUx
+# lnrU8ajuNZXSQG2nO4RP2rVeokoZdSoiwt4GdtKWpL//5YJs0rayGkE9FueHGD18
+# Kf3bvo2S3AhLdiwfk4T/GM9b8t894WzF8/z1NTTxjanAWF7ctr0RRYiJRLhVauJe
+# GPqre7yr6JoyfTo4iknLfh9lncVq4b67d7+Qg6cfi2egEMYsWg3Be8eNIRRuMExM
+# fqqaC2I2e0j6dCA2711/APn6dbs+k/YWwP6kvpk9YPCTYC3jeBGUtmYAc+jVK3t/
+# 5KQciRAHS/UEpcfwkFHQ+bsZV9SBR/ynuNFFuY7AbM8cRM3EacQBHl7Ow3kweK+O
+# FTxkxjeMIoxG1JlEQ+w5Mt8i9x4by3dZVGCVXE9YBX0QK6a/Q+bXKM5VxF4oXWYc
+# VZ1Lx0W6I6WdC690ktPwxF57fnYxjzykASRt1qKz5hcFuHKy4m7M+MtErT6tzDc0
+# gTue/axETEhADn8dD9099FAAT8LKrWXHzvwNAbjni0pLVJMphgtMBNvt8vjOyn1y
+# yTIDL/rut0fWIEs3U3x06ZtUYNuX32upWJyPaL20CYnbIxQZLx7iNeXzdGSbrmaa
+# Ee05OFE/6fn3RkGLqv2Gdb9GtMvYm4+qQ8Ts7bmVsUBhLTxyg1GPoBp/FouaM2JX
+# ytbyEROaKZDcLtw=
 # SIG # End signature block

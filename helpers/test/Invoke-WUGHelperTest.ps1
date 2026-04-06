@@ -71,6 +71,8 @@ param(
     [bool]$TestF5,
     [bool]$TestDocker,
     [bool]$TestGeolocation,
+    [bool]$TestBigleaf,
+    [bool]$TestLansweeper,
     [bool]$TestDiscovery,
     [switch]$IncludeSkipped,
     [string]$AWSRegion,
@@ -79,7 +81,7 @@ param(
 )
 
 # If any Test* parameter was explicitly specified, only run those; otherwise run all.
-$testParams = @('TestAWS','TestAzure','TestGCP','TestOCI','TestProxmox','TestHyperV','TestNutanix','TestFortinet','TestVMware','TestCertificates','TestF5','TestDocker','TestGeolocation','TestDiscovery')
+$testParams = @('TestAWS','TestAzure','TestGCP','TestOCI','TestProxmox','TestHyperV','TestNutanix','TestFortinet','TestVMware','TestCertificates','TestF5','TestDocker','TestGeolocation','TestBigleaf','TestLansweeper','TestDiscovery')
 $anyExplicit = $testParams | Where-Object { $PSBoundParameters.ContainsKey($_) }
 if ($anyExplicit) {
     foreach ($p in $testParams) {
@@ -295,6 +297,20 @@ $script:GeolocationCmdletList = @(
     'Connect-GeoWUGServer','Get-GeoDevicesWithLocation','Get-GeoGroupsWithLocation',
     'Get-GeolocationData','Export-GeolocationMapHtml'
 )
+$script:BigleafCmdletList = @(
+    'Connect-BigleafAPI','Get-BigleafSites','Get-BigleafSiteStatus',
+    'Get-BigleafCircuitStatus','Get-BigleafDeviceStatus','Get-BigleafSiteRisks',
+    'Get-BigleafAccounts','Get-BigleafCompanies','Get-BigleafMetadata',
+    'Get-BigleafDashboard','Export-BigleafDashboardHtml',
+    'Bigleaf Session Cleanup'
+)
+$script:LansweeperCmdletList = @(
+    'Connect-LansweeperPAT','Get-LansweeperCurrentUser','Get-LansweeperSites',
+    'Get-LansweeperSiteInfo','Get-LansweeperAssetTypes','Get-LansweeperAssetGroups',
+    'Get-LansweeperAssets','Get-LansweeperAssetDetails',
+    'Get-LansweeperSources','Get-LansweeperAccounts',
+    'Disconnect-Lansweeper'
+)
 $script:FortinetCmdletList = @(
     'Connect-FortiGate',
     # System
@@ -372,6 +388,8 @@ $helperFiles = @{
     F5       = Join-Path $helpersRoot 'f5\F5Helpers.ps1'
     Docker   = Join-Path $helpersRoot 'docker\DockerHelpers.ps1'
     Geolocation = Join-Path $helpersRoot 'geolocation\GeolocationHelpers.ps1'
+    Bigleaf  = Join-Path $helpersRoot 'bigleaf\BigleafHelpers.ps1'
+    Lansweeper = Join-Path $helpersRoot 'lansweeper\LansweeperHelpers.ps1'
 }
 
 $providerToggle = @{
@@ -383,6 +401,8 @@ $providerToggle = @{
     F5       = [ref]$TestF5
     Docker   = [ref]$TestDocker
     Geolocation = [ref]$TestGeolocation
+    Bigleaf  = [ref]$TestBigleaf
+    Lansweeper = [ref]$TestLansweeper
 }
 
 foreach ($provider in $helperFiles.Keys) {
@@ -478,6 +498,8 @@ if ($TestCertificates) { $activeProviders += 'Certificates' }
 if ($TestF5)      { $activeProviders += 'F5' }
 if ($TestDocker)  { $activeProviders += 'Docker' }
 if ($TestGeolocation) { $activeProviders += 'Geolocation' }
+if ($TestBigleaf) { $activeProviders += 'Bigleaf' }
+if ($TestLansweeper) { $activeProviders += 'Lansweeper' }
 
 if ($activeProviders.Count -eq 0) {
     Write-Error "All providers are disabled or unavailable. Nothing to test."
@@ -2174,6 +2196,187 @@ $script:CertIPs = $null; $script:CertPorts = $null
 $script:F5Cred = $null; $script:F5Host = $null
 $script:DockerConnection = $null; $script:DockerHost = $null
 $script:GeoConfig = $null; $script:GeoCred = $null; $script:GeoServer = $null
+$script:BigleafApiKey = $null; $script:BigleafApiKeySS = $null
+$script:LansweeperPAT = $null; $script:LansweeperPATSS = $null
+#endregion
+
+###############################################################################
+#region -- Bigleaf ------------------------------------------------------------
+###############################################################################
+$script:BigleafHtmlOutPath = $null; $script:BigleafDashboardData = $null
+
+if ($TestBigleaf) {
+    Write-Host "`nBigleaf Cloud Connect Authentication:" -ForegroundColor Cyan
+    Write-Host "  [1] API Key (HTTP Basic)  [S] Skip"
+    $blChoice = Read-Host "Selection"
+    if ($blChoice.Trim().ToUpper() -eq '1') {
+        $script:BigleafApiKeySS = Resolve-DiscoveryCredential -Name 'Bigleaf.Credential' -CredType BearerToken -ProviderLabel 'Bigleaf' -DeferSave
+    } else { $TestBigleaf = $false }
+    if (-not $TestBigleaf) { Skip-ProviderTests -Provider 'Bigleaf' -Reason 'User skipped' -Cmdlets $script:BigleafCmdletList }
+} else { Skip-ProviderTests -Provider 'Bigleaf' -Reason 'Disabled' -Cmdlets $script:BigleafCmdletList }
+
+if ($TestBigleaf) {
+    $currentSection++
+    Write-Host "`n[$currentSection/$sectionCount] Testing Bigleaf ..." -ForegroundColor Cyan
+
+    Invoke-Test -Cmdlet 'Connect-BigleafAPI' -Endpoint 'Bigleaf / Auth / Connect-BigleafAPI' -Test {
+        Connect-BigleafAPI -ApiKey $script:BigleafApiKeySS -ErrorAction Stop
+    }
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:BigleafApiKeySS) {
+        Save-ResolvedCredential -Name 'Bigleaf.Credential' -CredType BearerToken -Value $script:BigleafApiKeySS
+    }
+    if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        Remove-DiscoveryCredential -Name 'Bigleaf.Credential' -Confirm:`$false -ErrorAction SilentlyContinue
+        Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
+        $TestBigleaf = $false
+        Skip-ProviderTests -Provider 'Bigleaf' -Reason 'Auth failed' -Cmdlets ($script:BigleafCmdletList | Where-Object { $_ -ne 'Connect-BigleafAPI' })
+    }
+
+    if ($TestBigleaf) {
+        $script:FirstBigleafSite = $null
+
+        Invoke-Test -Cmdlet 'Get-BigleafSites' -Endpoint 'Bigleaf / Sites / Get-BigleafSites' -Test {
+            $sites = Get-BigleafSites -ErrorAction Stop
+            Assert-NotNull $sites
+            if (@($sites).Count -gt 0) { $script:FirstBigleafSite = $sites[0] }
+        }
+
+        if ($script:FirstBigleafSite) {
+            Invoke-Test -Cmdlet 'Get-BigleafSiteStatus' -Endpoint 'Bigleaf / Sites / Get-BigleafSiteStatus' -Test {
+                Get-BigleafSiteStatus -SiteId $script:FirstBigleafSite.id -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-BigleafCircuitStatus' -Endpoint 'Bigleaf / Circuits / Get-BigleafCircuitStatus' -Test {
+                Get-BigleafCircuitStatus -SiteId $script:FirstBigleafSite.id -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-BigleafDeviceStatus' -Endpoint 'Bigleaf / Devices / Get-BigleafDeviceStatus' -Test {
+                Get-BigleafDeviceStatus -SiteId $script:FirstBigleafSite.id -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-BigleafSiteRisks' -Endpoint 'Bigleaf / Risks / Get-BigleafSiteRisks' -Test {
+                Get-BigleafSiteRisks -SiteId $script:FirstBigleafSite.id -ErrorAction Stop | Out-Null
+            }
+        } else {
+            foreach ($c in @('Get-BigleafSiteStatus','Get-BigleafCircuitStatus','Get-BigleafDeviceStatus','Get-BigleafSiteRisks')) {
+                Record-Test -Cmdlet $c -Endpoint 'Bigleaf / (skipped)' -Status 'Skipped' -Detail 'No sites found'
+            }
+        }
+
+        Invoke-Test -Cmdlet 'Get-BigleafAccounts' -Endpoint 'Bigleaf / Accounts / Get-BigleafAccounts' -Test {
+            Get-BigleafAccounts -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-BigleafCompanies' -Endpoint 'Bigleaf / Companies / Get-BigleafCompanies' -Test {
+            Get-BigleafCompanies -ErrorAction Stop | Out-Null
+        }
+        Invoke-Test -Cmdlet 'Get-BigleafMetadata' -Endpoint 'Bigleaf / Metadata / Get-BigleafMetadata' -Test {
+            Get-BigleafMetadata -ErrorAction Stop | Out-Null
+        }
+
+        Invoke-Test -Cmdlet 'Get-BigleafDashboard' -Endpoint 'Bigleaf / Dashboard / Get-BigleafDashboard' -Test {
+            $script:BigleafDashboardData = Get-BigleafDashboard -ErrorAction Stop
+            Assert-NotNull $script:BigleafDashboardData
+        }
+
+        $blTpl = Join-Path $helpersRoot 'bigleaf\Bigleaf-Dashboard-Template.html'
+        if ($script:BigleafDashboardData -and @($script:BigleafDashboardData).Count -gt 0 -and (Test-Path $blTpl)) {
+            Invoke-Test -Cmdlet 'Export-BigleafDashboardHtml' -Endpoint 'Bigleaf / Export / Export-BigleafDashboardHtml' -Test {
+                $script:BigleafHtmlOutPath = Join-Path $outDir "Get-BigleafDashboardResult-$(Get-Date -Format 'yyyy-MM-dd').html"
+                Export-BigleafDashboardHtml -DashboardData $script:BigleafDashboardData -OutputPath $script:BigleafHtmlOutPath -TemplatePath $blTpl -ErrorAction Stop
+                if (-not (Test-Path $script:BigleafHtmlOutPath)) { throw "File not created" }
+            }
+        } else { Record-Test -Cmdlet 'Export-BigleafDashboardHtml' -Endpoint 'Bigleaf / Export' -Status 'Skipped' -Detail 'No data or template missing' }
+
+        Invoke-Test -Cmdlet 'Bigleaf Session Cleanup' -Endpoint 'Bigleaf / Auth / Disconnect-BigleafAPI' -Test {
+            Disconnect-BigleafAPI -ErrorAction Stop
+        }
+    }
+}
+#endregion
+
+###############################################################################
+#region -- Lansweeper ---------------------------------------------------------
+###############################################################################
+$script:LansweeperSiteId = $null
+
+if ($TestLansweeper) {
+    Write-Host "`nLansweeper Authentication:" -ForegroundColor Cyan
+    Write-Host "  [1] Personal Access Token (PAT)  [S] Skip"
+    $lsChoice = Read-Host "Selection"
+    if ($lsChoice.Trim().ToUpper() -eq '1') {
+        $script:LansweeperPATSS = Resolve-DiscoveryCredential -Name 'Lansweeper.Credential' -CredType BearerToken -ProviderLabel 'Lansweeper' -DeferSave
+    } else { $TestLansweeper = $false }
+    if (-not $TestLansweeper) { Skip-ProviderTests -Provider 'Lansweeper' -Reason 'User skipped' -Cmdlets $script:LansweeperCmdletList }
+} else { Skip-ProviderTests -Provider 'Lansweeper' -Reason 'Disabled' -Cmdlets $script:LansweeperCmdletList }
+
+if ($TestLansweeper) {
+    $currentSection++
+    Write-Host "`n[$currentSection/$sectionCount] Testing Lansweeper ..." -ForegroundColor Cyan
+
+    Invoke-Test -Cmdlet 'Connect-LansweeperPAT' -Endpoint 'Lansweeper / Auth / Connect-LansweeperPAT' -Test {
+        Connect-LansweeperPAT -PersonalAccessToken $script:LansweeperPATSS -ErrorAction Stop
+    }
+    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:LansweeperPATSS) {
+        Save-ResolvedCredential -Name 'Lansweeper.Credential' -CredType BearerToken -Value $script:LansweeperPATSS
+    }
+    if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
+        Remove-DiscoveryCredential -Name 'Lansweeper.Credential' -Confirm:`$false -ErrorAction SilentlyContinue
+        Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
+        $TestLansweeper = $false
+        Skip-ProviderTests -Provider 'Lansweeper' -Reason 'Auth failed' -Cmdlets ($script:LansweeperCmdletList | Where-Object { $_ -ne 'Connect-LansweeperPAT' })
+    }
+
+    if ($TestLansweeper) {
+        Invoke-Test -Cmdlet 'Get-LansweeperCurrentUser' -Endpoint 'Lansweeper / User / Get-LansweeperCurrentUser' -Test {
+            $user = Get-LansweeperCurrentUser -ErrorAction Stop
+            Assert-NotNull $user
+        }
+
+        $script:LansweeperSites = $null
+        Invoke-Test -Cmdlet 'Get-LansweeperSites' -Endpoint 'Lansweeper / Sites / Get-LansweeperSites' -Test {
+            $script:LansweeperSites = Get-LansweeperSites -ErrorAction Stop
+            Assert-NotNull $script:LansweeperSites
+            if (@($script:LansweeperSites).Count -gt 0) {
+                $script:LansweeperSiteId = $script:LansweeperSites[0].id
+            }
+        }
+
+        if ($script:LansweeperSiteId) {
+            Invoke-Test -Cmdlet 'Get-LansweeperSiteInfo' -Endpoint 'Lansweeper / Sites / Get-LansweeperSiteInfo' -Test {
+                Get-LansweeperSiteInfo -SiteId $script:LansweeperSiteId -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-LansweeperAssetTypes' -Endpoint 'Lansweeper / Assets / Get-LansweeperAssetTypes' -Test {
+                Get-LansweeperAssetTypes -SiteId $script:LansweeperSiteId -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-LansweeperAssetGroups' -Endpoint 'Lansweeper / Assets / Get-LansweeperAssetGroups' -Test {
+                Get-LansweeperAssetGroups -SiteId $script:LansweeperSiteId -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-LansweeperAssets' -Endpoint 'Lansweeper / Assets / Get-LansweeperAssets' -Test {
+                $assets = Get-LansweeperAssets -SiteId $script:LansweeperSiteId -Limit 5 -ErrorAction Stop
+                Assert-NotNull $assets
+                if (@($assets).Count -gt 0) { $script:FirstLansweeperAsset = $assets[0] }
+            }
+            if ($script:FirstLansweeperAsset -and $script:FirstLansweeperAsset.assetBasicInfo -and $script:FirstLansweeperAsset.assetBasicInfo.key) {
+                Invoke-Test -Cmdlet 'Get-LansweeperAssetDetails' -Endpoint 'Lansweeper / Assets / Get-LansweeperAssetDetails' -Test {
+                    Get-LansweeperAssetDetails -SiteId $script:LansweeperSiteId -AssetKey $script:FirstLansweeperAsset.assetBasicInfo.key -ErrorAction Stop | Out-Null
+                }
+            } else {
+                Record-Test -Cmdlet 'Get-LansweeperAssetDetails' -Endpoint 'Lansweeper / Assets' -Status 'Skipped' -Detail 'No assets found'
+            }
+            Invoke-Test -Cmdlet 'Get-LansweeperSources' -Endpoint 'Lansweeper / Sources / Get-LansweeperSources' -Test {
+                Get-LansweeperSources -SiteId $script:LansweeperSiteId -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-LansweeperAccounts' -Endpoint 'Lansweeper / Accounts / Get-LansweeperAccounts' -Test {
+                Get-LansweeperAccounts -SiteId $script:LansweeperSiteId -ErrorAction Stop | Out-Null
+            }
+        } else {
+            foreach ($c in @('Get-LansweeperSiteInfo','Get-LansweeperAssetTypes','Get-LansweeperAssetGroups','Get-LansweeperAssets','Get-LansweeperAssetDetails','Get-LansweeperSources','Get-LansweeperAccounts')) {
+                Record-Test -Cmdlet $c -Endpoint 'Lansweeper / (skipped)' -Status 'Skipped' -Detail 'No sites found'
+            }
+        }
+
+        Invoke-Test -Cmdlet 'Disconnect-Lansweeper' -Endpoint 'Lansweeper / Auth / Disconnect-Lansweeper' -Test {
+            Disconnect-Lansweeper -ErrorAction Stop
+        }
+    }
+}
 #endregion
 
 ###############################################################################
@@ -2286,6 +2489,7 @@ foreach ($p in @($script:AWSHtmlOutPath, $script:AzureHtmlOutPath, $script:GCPHt
                  $script:CertHtmlOutPath, $script:F5HtmlOutPath,
                  $script:DockerHtmlOutPath,
                  $script:GeoHtmlOutPath,
+                 $script:BigleafHtmlOutPath,
                  $script:DiscoveryRunnerReportPath)) {
     if ($p -and (Test-Path $p)) { $reportFiles += $p }
 }
@@ -2306,8 +2510,8 @@ $displayResults
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBp/0/Fbomqc9QF
-# nlD0KOhvxKKi7hXt8R7Pry/Fr/U+bKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUVXyqh/lHdPCv
+# HXs9JcAG6zUhai4Pvv1zuqbfE0AStaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -2407,17 +2611,17 @@ $displayResults
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgTkqgWfpZBzAMsBW/Y6AJ4dfDXUFeP3fE
-# O40qXSd+h8QwDQYJKoZIhvcNAQEBBQAEggIA1Pj+vhWbN3Zl0Gjo9Fww1Tr+XUIb
-# 8A7D7S4j26r7XgGYreIHFiVtLj9T1SOsKa3D1cyGVP5QcHgkOEL1holej9M/MIMw
-# Pn81MEcX0YJE42IWXlvwuFfscV7D2wX9pm5k26SwJx/VisZjeYMfbZXIn2QTM+66
-# FYrlEVGab0gYkE/0DfkFPE9jDFAcdGGQtFT8gWtj4YOdCe7NriIRWS2Zo2cF8iVT
-# YAeQSNEE/1Ai0wwHDgLGM/8aBSHrzeTYO7x0ciVH3nq/066uGGbpAwBKUPmovDWG
-# QfDmallNPhkNo28spWKtUmzEwM38AyhXZWwWWWsSP3gu/5e3ZJ06w4rqQn+Vj9A0
-# eXFowcLJijeHtURNXosXY5qE60qcAYHAbNp5FMtzYIRvnfersDafcNuEH4yJLMCP
-# 8ma9xroo9D2SbBKnMnPBHp6stO/B37ewU38vVmIfWD4nKMo+f79F5o7h5X7QI7at
-# 1qQISI0M6tzSLmVQ0RfUCHgml6fp8SZCXQZWNBo2bhY3g7u8B5J6dEilbJN7mMaF
-# fFGr6QaJutVLztn4U/3DwsyiUUg/c7jQ/Pf26+AJDuUmMIbPVURRLOw7P2bkoP4p
-# 6/s8RdAxQl54LwBn9l890cq6+xUKKhraAfal8kOXwStUkGCR3e4OVzXwRGeMRCcu
-# NqG5h2HG7IY7cKk=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgLyTkY3ZoftdAw+au1dhRLgl0b1AsyYOU
+# IiYpmpUJnlswDQYJKoZIhvcNAQEBBQAEggIA4VDh4aAOgQV8mGJjaK9aFbMzAfvz
+# jzyd7u7ja5uxePviSknQRp18HSdMEuL9p2QwQSkF/LuB3Hp7699pLHKX1wQTMpTl
+# Li5wGN0HNBh2uFoMnEWrXdBJwCLZ1T/jeKamoc+PkRCXSO/Td3D/2mI0SKyoyXEy
+# h9ASPbPhrtCU6ICm69hkHdETR3qlJAMKh7AHz1tmpOIlU+2+NOk9OzgLaZXXrBcJ
+# cjIHOWT7OanqQaO6A8+OrSbDJge9w4/QaG6WFJ3n/g8vNU9vDQXKtbHUCSU48Edz
+# gtYjYXxmGPYMwREuKNMdJzYRCRItmeT+qebM2DQdeX88ASb/0Lj+ADbZJLE0EiNB
+# KIFPvFSZA4FYG28I2NWU9+1NRBb2J5cFNFXsfnO2r1o4P5Lc6F0lidBU8a67F1Zf
+# RHq7zqaVTju8KjbppeolvqLdTcFvG2lq0CkF/s5Y1SM5wg1HQurt2SNUP4OJaN04
+# MSenPBqfEeJwRim0sbfWn+CpecLGBqdqmGRvXlrBDoLw83zGVbWA8Jm8UXEUECgQ
+# +98xrDyiIN49N1/5o+d6QZEPWOeXwXa8EIS/iDZI/wsKxrm/3qBMy8mD+wY0/A6t
+# mBVOXxQRoYexw301wp4Dj+QiKTcck5WU3n1IiRQGe/gXfCWSDAgXL7D/C0V7noTy
+# zPsJP/SjvKrGseI=
 # SIG # End signature block

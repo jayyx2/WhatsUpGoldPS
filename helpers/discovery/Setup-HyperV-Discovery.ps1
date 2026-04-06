@@ -59,7 +59,7 @@
 param(
     [string[]]$Target,
 
-    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
     [string]$Action,
 
     [string]$WUGServer = '192.168.74.74',
@@ -245,6 +245,7 @@ if ($Action) {
         'ShowTable' { $choice = '4' }
         'Dashboard' { $choice = '5' }
         'None' { $choice = '6' }
+        'DashboardAndPush' { $choice = '7' }
     }
 }
 
@@ -256,11 +257,20 @@ if (-not $choice) {
     Write-Host "  [4] Show full plan table"
     Write-Host "  [5] Generate Hyper-V HTML dashboard (live metrics)"
     Write-Host "  [6] Exit (do nothing)"
+    Write-Host "  [7] Dashboard + Push to WUG"
     Write-Host ""
-    $choice = Read-Host -Prompt "Choice [1-6]"
+    $choice = Read-Host -Prompt "Choice [1-7]"
 }
 
-switch ($choice) {
+# Handle DashboardAndPush: run Dashboard then PushToWUG sequentially
+if ($choice -eq '7') {
+    $actionsToRun = @('5', '1')
+} else {
+    $actionsToRun = @($choice)
+}
+
+foreach ($currentChoice in $actionsToRun) {
+switch ($currentChoice) {
     '1' {
         if (-not $NonInteractive) {
             Write-Host ""
@@ -272,12 +282,18 @@ switch ($choice) {
 
         Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
         try {
-            Import-Module WhatsUpGoldPS -ErrorAction Stop
+            $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+            $repoPsd1 = Join-Path $repoRoot 'WhatsUpGoldPS.psd1'
+            if (Test-Path $repoPsd1) { Import-Module $repoPsd1 -Force -ErrorAction Stop }
+            else { Import-Module WhatsUpGoldPS -ErrorAction Stop }
         }
         catch {
             Write-Error "Could not load WhatsUpGoldPS module. Is it installed? $_"
             return
         }
+        # Dot-source internal helper so scripts can call Get-WUGAPIResponse directly
+        $apiResponsePath = Join-Path $PSScriptRoot '..\..\functions\Get-WUGAPIResponse.ps1'
+        if (Test-Path $apiResponsePath) { . $apiResponsePath }
 
         if ($WUGCredential) {
             $wugCred = $WUGCredential
@@ -798,6 +814,7 @@ switch ($choice) {
         Write-Host "No action taken." -ForegroundColor Gray
     }
 }
+} # end foreach actionsToRun
 
 Write-Host ""
 Write-Host "Re-run anytime to discover new Hyper-V hosts/VMs." -ForegroundColor Cyan
@@ -805,8 +822,8 @@ Write-Host "Re-run anytime to discover new Hyper-V hosts/VMs." -ForegroundColor 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEQtKQ5Rj3RzGf
-# 3ip9/H8IsqVkHDf4uiWhDzwbd/hsIqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAo5CJnPBbm3a12
+# IyJ+fzP0QlylEQgTWYDRjFPQFp1cy6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -906,17 +923,17 @@ Write-Host "Re-run anytime to discover new Hyper-V hosts/VMs." -ForegroundColor 
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg4vldMj0OyC28V9noaTa4Bz3BlV/DoKaj
-# dDt9U3CCXB0wDQYJKoZIhvcNAQEBBQAEggIALEP4csh5y31CBoBkUliftCV3FQF9
-# rdZFGJwmfegZSyPgyR1/IsmQljWoGpMhVHX0VCG9FlyLi95yRRQy7LuroTl5fsVf
-# O8LYGloQa7QJuDRKHCShFOpN0FuNoC9it3rc8WKXi3dKOSOpvFgZNyXGxgEIR7R0
-# 37nB7P4CwnbONr6yJSHADTNSMzcy66pgS7jBJ2UDc5JVDpncVBMvGV4M11Uj7P1s
-# vr37RB3Bjl26AFgafTuVsZxuQcCs5rOfmxDPw2bgISSu6F/6+J2KVamjFj6lci/K
-# Nh6BUAV9kVWMbiIOEsfnO21Kq+P2xx0Dvkzs9h3o8NUGBfveCv91VZQ73AHr8BaM
-# Uaexsija6P8HYiCelZpVHIiptCrJ+qbHLBw81l55OFgYL91O57QGsSyRILkVzxul
-# z7Wf31LYQzJJZukg8MUcvY4u2gou/FcdYMjCvy587CH80caaBx4thLCQb3YsMK2H
-# PjAMZnDZn0kPWacq+BEhC51goC5OisPtkxGsUcJijTJ11RByXZPU1ukhgvYEe6od
-# LBOoguUlEX68mEsmnbzicnIg9Ma3Tb0c0Ugbq2QnuH11g4SD8o+dbcVcmrOrOhiU
-# 7SXmsFB+9U56buWvJc7prwBEgd6yLQJmD3+DyOqMSQuKDrX2I6GtjlK8kQvevwZa
-# xT2OugJhoLM+vcE=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgGgLfNxePdh0ZWLoMNLNk/XguUcLQKs/j
+# oMx+bb1wFQcwDQYJKoZIhvcNAQEBBQAEggIAWSUZs+KS8WyXRmUYHU0XLPYxG6+3
+# 6qr3UNjVKvEgcgohZTp/NBhPMBYo4LHkginhZKlRcpeh9ief59dmei/biTeUnHzW
+# NYPdZ+hKeLKqS/tlDzN/036l2uleC2ZBscmJGfKDlaRim2eBYtGHIgzXdQ4woP/e
+# /MriiwefHMeR0ZpV4mHYGefwPMfPBNlGwUTaI53NRJl7IyAPkuteZGXGzkMi65/K
+# NkhNNTApHOtL1JzdrHP4o2QI06Lnt21cUT6sTB1YDcgUI9yw2zoGZ3JZwQZUhaX0
+# 8N2y058l6N/y0tSMOqG84A4yKkrFcJQzhLNFZ//xDGzLhkR8KU2hNtLVA+bJr3j7
+# iD7bkcWWd7tUVsE26GxrgPb72dQaVMnwkZ5NIg8znetCsVfix6eCs++5lc4LM73k
+# +RqHoBnAhbbvSkt7b2tbsDmmMl5XENMD7EJJ8I+kQoKBWbbyowvG/EXTcG2nAxr2
+# LqJV3EylcxLd1OuH+aGxqoj2wp9yYGWQeHdKErhhpsRpzehRMAHdctEfkSFrLHSD
+# hwaBOXMGEy24cnhzVIQRUYdDxrymh97C9tFi2cX48fhD99IdhUExhUjrQpJUvp4H
+# R0uuU/N31IvBdEDVv/cGI9PxjgOCz4CDcNJP2gE/TdInmACFDoiB1evk9rNdBv5g
+# pBBeZFUWSywe3WQ=
 # SIG # End signature block

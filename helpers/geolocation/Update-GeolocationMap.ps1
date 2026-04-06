@@ -3,18 +3,15 @@
     Generates an interactive Leaflet HTML map showing geolocated WhatsUp Gold devices and groups.
 .DESCRIPTION
     Scheduled-task–friendly script that reads the saved configuration from
-    Setup-GeolocationConfig.ps1, authenticates to the WhatsUp Gold REST API
-    using the stored (DPAPI-encrypted) refresh token, queries devices and groups
-    for location data, and produces a self-contained HTML file with an interactive
-    Leaflet map.
+    the DPAPI vault (created by Setup-GeolocationConfig.ps1), authenticates to
+    the WhatsUp Gold REST API using the stored refresh token, queries devices
+    and groups for location data, and produces a self-contained HTML file with
+    an interactive Leaflet map.
 
     Designed to be run unattended via Windows Task Scheduler.
 
     If the refresh token has expired or is invalid, the script will exit with a
     clear error telling the administrator to re-run Setup-GeolocationConfig.ps1.
-.PARAMETER ConfigPath
-    Path to the configuration JSON file created by Setup-GeolocationConfig.ps1.
-    Default: geolocation-config.json in the same directory as this script.
 .PARAMETER OutputPath
     Full path for the generated HTML map file.
     Default: Geolocation-Map.html in the system temp directory.
@@ -36,18 +33,16 @@
     Author  : jason@wug.ninja
     Version : 1.0.0
     Date    : 2025-07-15
-    Requires: PowerShell 5.1+, configuration file from Setup-GeolocationConfig.ps1
+    Requires: PowerShell 5.1+, DPAPI vault configured by Setup-GeolocationConfig.ps1
 #>
 
 param(
-    [string]$ConfigPath,
     [string]$OutputPath,
     [switch]$OpenBrowser
 )
 
 # ----- Resolve paths -----
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
-if (-not $ConfigPath) { $ConfigPath = Join-Path $scriptDir 'geolocation-config.json' }
 if (-not $OutputPath) { $OutputPath = Join-Path ([System.IO.Path]::GetTempPath()) 'Geolocation-Map.html' }
 
 # ----- Load helpers -----
@@ -57,22 +52,15 @@ if (-not (Test-Path $helpersPath)) {
 }
 . $helpersPath
 
-# ----- Load config -----
-if (-not (Test-Path $ConfigPath)) {
-    throw "Configuration file not found: $ConfigPath`nRun Setup-GeolocationConfig.ps1 first."
+# Load vault functions
+$discoveryHelpersPath = Join-Path (Split-Path $scriptDir -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (-not (Test-Path $discoveryHelpersPath)) {
+    throw "DiscoveryHelpers.ps1 not found at: $discoveryHelpersPath"
 }
-$savedConfig = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
+. $discoveryHelpersPath
 
-# ----- Decrypt refresh token -----
-try {
-    $secureToken = ConvertTo-SecureString -String $savedConfig.EncryptedRefresh -ErrorAction Stop
-    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
-    $refreshToken = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-}
-catch {
-    throw "Failed to decrypt refresh token. You may need to re-run Setup-GeolocationConfig.ps1 as the same user on the same machine.`nError: $($_.Exception.Message)"
-}
+# ----- Load config from vault -----
+$savedConfig = Import-GeolocationConfig
 
 # ----- SSL bypass -----
 if ($savedConfig.IgnoreSSL) { Initialize-GeoSSLBypass }
@@ -81,7 +69,7 @@ if ($savedConfig.IgnoreSSL) { Initialize-GeoSSLBypass }
 $baseUri  = "$($savedConfig.Protocol)://$($savedConfig.ServerUri):$($savedConfig.Port)"
 $tokenUri = "$baseUri/api/v1/token"
 $headers  = @{ "Content-Type" = "application/json" }
-$body     = "grant_type=refresh_token&refresh_token=$refreshToken"
+$body     = "grant_type=refresh_token&refresh_token=$($savedConfig.RefreshToken)"
 
 Write-Host "Authenticating to $baseUri..." -ForegroundColor Yellow
 
@@ -109,10 +97,9 @@ Write-Host "Authenticated. Token expires at $($config._Expiry)." -ForegroundColo
 
 # ----- Update stored refresh token for next run -----
 try {
-    $newSecure = ConvertTo-SecureString -String $token.refresh_token -AsPlainText -Force
-    $newEncrypted = ConvertFrom-SecureString -SecureString $newSecure
-    $savedConfig.EncryptedRefresh = $newEncrypted
-    $savedConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
+    $ssNewRefresh = ConvertTo-SecureString -String $token.refresh_token -AsPlainText -Force
+    Save-DiscoveryCredential -Name 'Geolocation.RefreshToken' -SecureSecret $ssNewRefresh -Force `
+        -Description 'WUG refresh token for geolocation scripts'
     Write-Verbose "Updated stored refresh token for next run."
 }
 catch {
@@ -124,8 +111,8 @@ Write-Host "Querying devices and groups for location data..." -ForegroundColor Y
 
 $geoParams = @{
     Config         = $config
-    IncludeDevices = if ($null -ne $savedConfig.IncludeDevices) { $savedConfig.IncludeDevices } else { $true }
-    IncludeGroups  = if ($null -ne $savedConfig.IncludeGroups)  { $savedConfig.IncludeGroups }  else { $true }
+    IncludeDevices = $savedConfig.IncludeDevices
+    IncludeGroups  = $savedConfig.IncludeGroups
 }
 if ($savedConfig.GroupName -and $savedConfig.GroupName -ne 'All') {
     $geoParams.GroupName = $savedConfig.GroupName
@@ -147,12 +134,18 @@ else {
 $exportParams = @{
     Data        = @($geoData)
     OutputPath  = $OutputPath
-    DefaultLat  = if ($savedConfig.DefaultLat)  { $savedConfig.DefaultLat }  else { 39.8283 }
-    DefaultLng  = if ($savedConfig.DefaultLng)  { $savedConfig.DefaultLng }  else { -98.5795 }
-    DefaultZoom = if ($savedConfig.DefaultZoom) { $savedConfig.DefaultZoom } else { 5 }
+    DefaultLat  = $savedConfig.DefaultLat
+    DefaultLng  = $savedConfig.DefaultLng
+    DefaultZoom = $savedConfig.DefaultZoom
 }
 if ($savedConfig.WugConsoleUrl) {
     $exportParams.WugBaseUrl = $savedConfig.WugConsoleUrl
+}
+
+# Tile provider API keys (already decrypted from vault)
+if ($savedConfig.TileApiKeys.Count -gt 0) {
+    $exportParams.TileApiKeys = $savedConfig.TileApiKeys
+    Write-Verbose "Loaded $($savedConfig.TileApiKeys.Count) tile provider API key(s)."
 }
 
 Export-GeolocationMapHtml @exportParams
@@ -167,8 +160,8 @@ Write-Host "Done. Map generated at: $OutputPath" -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVuOss2ol0Y7bP
-# 2bMDmP29b50uKQ0ubo4K3iqL1GpkZKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA5elvf9Pii+cBE
+# I0pp/az1h/+G19yHXarf6z6MAOo1Z6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -268,17 +261,17 @@ Write-Host "Done. Map generated at: $OutputPath" -ForegroundColor Cyan
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgcLcJ2lxuCI890o64WKTHgLZltYxjNzeV
-# SWYqA2HYKqAwDQYJKoZIhvcNAQEBBQAEggIA4WZichMimpdUFARpKxOT9+1iy6Yp
-# nTmz5KmgCxggJ/AzvYADpzODXqcvNfVub6jMEdAL2KOJq3IaFOYOOF9QAgr58lDA
-# 3MWcPyJ3V05NN+pvNDlaYdB9kGPq3rzOJGrobXlelumEZdGuFCtZw/DkQA5Y6c8x
-# OE8CfisBQQE/Ig/8V+TuMdaQ+GjQXVUC22SCAif2HQAKZ6zt8790gvmkipIn8CQe
-# yK6R8Oe1ZK6fPEEp4aVfJRXvf5f/lhjZkfbR+co2HTg+SpetMZG6pgCcXd9rh70j
-# SrCYPhlsHnpw2P3G0MMoiyK5LOaOpXgug9d+NZUWljt8Ew+kglvwHxQxGylmZTfm
-# EzFtfC7aCk6f9K5NG35ZWxEiiAo5fJVeGP1ZzMwfvkAQp08UwqOMN5FEgsOvFvBk
-# aXuiEpyJJyhRNJbctePpHkY6gKSxT/wpz9ugteDGSBY0130Kgw7QBs24EJwdSbpc
-# tsc3tRptztR1e+rytPmKCov957XXcDDMS7hpJ7jh3lxf/rvMEyXMjhv2yxYol5c5
-# UV2Nodrplr4sBuYf/66bUlAPRg2b9va4ExcRrIaUI3sxw/dKZvmuamt67efF7FRU
-# bjWcz7gJ4bijJ2hd46ZH4RZDTGLZgFqvhhxWwGMlViR3D74zUDbMM7rPaB47lPOM
-# w+Aw334+DqCczQ4=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgVxZUMW9qIf90IZmTWJPVrqdAHvglOdtO
+# K6jp7PVpiyowDQYJKoZIhvcNAQEBBQAEggIAvOmP0Kf/Nji78UCJMRhA7t7KxdkQ
+# uqSAanyH8lB+4OPAPmbMOcT0zDCkgN8HL87jSBcl1lnyun6o51jpW+uR88yVoQ7k
+# y1xnnIiYNSEFL8Rwj4xkJ8J3c2IDBLoDKAngJZJBUhEmvos8msX2NHzC1SwLrOgE
+# xF4U+4BF4Qip2VEobp8L2nRmb0y3NoE4fusw3PPCEmfBFtrLRp9IYz0lyTZLgqeU
+# I/i+wQsxYNvVDryXXKFkOVau7of7Ltifz+pIJS4YmS3XUk9ZGopzp3ZKIePK+CFJ
+# t6b08saoJE+plZz+pPqnQZjWzVeVLXikrGm/wu2DKFUpO5VbTB0yFgRhIuqWlfiO
+# M5eem3h6Slx9hE6rw/his3/1j/6hnIAiJWFIqICsVbIUnirzYxiz6Cp92+R9pVhC
+# MvMzzmDFyDdRaHhkE2oCCQYV+YuIOvkbWYcwvwLJgtuoOA0w9MIIjkLY4eaGBkoc
+# CBZBY8B1L93ZBS34kG2TvOd1tRT2+C0YoOp6aOLMX22tZSHj4dJnvrENBZv4tul2
+# +P76gzaSOlR9i2L0Yk4+2OqrT73DO9NFWHBRv9RDSjWj3hgPaG5hIVo45JpKS8R6
+# IIHUIjiXsQl5isnkix6zTI/S0aHpbr6r3BNP0/7oURhgpCE4Aahue2ukZ49ioJr/
+# 4w+li2h9a7ds01U=
 # SIG # End signature block

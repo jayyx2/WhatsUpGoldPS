@@ -42,13 +42,27 @@ Required for SetDeviceRoleKind, BatchDeviceRole, and GroupRole.
 The kind of role to remove when using RemoveDeviceRoles. Valid values: all, role, brand, os, subRole.
 Default: all.
 
+.PARAMETER RoleValue
+The role name or identifier to assign. Required for SetDeviceRoleKind with
+brand, os, or primary kinds. For sub-role, use Body instead.
+
 .PARAMETER Body
-The JSON body for the request.
+The JSON body for the request. Required for sub-role assignments
+(e.g., @{ operation = "add"; subroles = @("role-name") } | ConvertTo-Json)
+and for AssignDeviceRole, BatchDeviceRole, GroupRole operations.
+
+.EXAMPLE
+# Assign a primary role to a device (uses query parameter)
+Set-WUGDeviceRole -SetDeviceRoleKind -DeviceId "123" -RoleKind primary -RoleValue "Server"
 
 .EXAMPLE
 # Assign a brand role to a device
-$body = @{ roleId = "brand-role-id" } | ConvertTo-Json
-Set-WUGDeviceRole -SetDeviceRoleKind -DeviceId "123" -RoleKind brand -Body $body
+Set-WUGDeviceRole -SetDeviceRoleKind -DeviceId "123" -RoleKind brand -RoleValue "Cisco"
+
+.EXAMPLE
+# Assign sub-roles to a device (uses JSON body)
+$body = @{ operation = "add"; subroles = @("Web Server", "Database") } | ConvertTo-Json
+Set-WUGDeviceRole -SetDeviceRoleKind -DeviceId "123" -RoleKind sub-role -Body $body
 
 .EXAMPLE
 # Remove all role assignments from a device
@@ -104,7 +118,10 @@ function Set-WUGDeviceRole {
         [ValidateSet('all', 'role', 'brand', 'os', 'subRole')]
         [string]$DeleteKind = 'all',
 
-        [Parameter(Mandatory = $true, ParameterSetName = 'SetDeviceRoleKind')]
+        [Parameter(ParameterSetName = 'SetDeviceRoleKind')]
+        [string]$RoleValue,
+
+        [Parameter(ParameterSetName = 'SetDeviceRoleKind')]
         [Parameter(Mandatory = $true, ParameterSetName = 'AssignDeviceRole')]
         [Parameter(Mandatory = $true, ParameterSetName = 'BatchDeviceRole')]
         [Parameter(Mandatory = $true, ParameterSetName = 'GroupRole')]
@@ -121,6 +138,38 @@ function Set-WUGDeviceRole {
             'SetDeviceRoleKind' {
                 $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/${DeviceId}/roles/${RoleKind}"
                 $method = 'PUT'
+
+                # brand, os, primary use query parameters; sub-role uses a JSON body
+                if ($RoleKind -ne 'sub-role') {
+                    if (-not $RoleValue -and $Body) {
+                        # Backward compat: extract value from Body JSON if RoleValue not specified
+                        try {
+                            $parsed = $Body | ConvertFrom-Json -ErrorAction Stop
+                            $RoleValue = if ($parsed.id) { $parsed.id } elseif ($parsed.roleId) { $parsed.roleId } elseif ($parsed.name) { $parsed.name } else { $null }
+                        } catch { }
+                    }
+                    if (-not $RoleValue) {
+                        Write-Error "RoleValue is required for role kind '${RoleKind}'. Provide -RoleValue with the role name or ID."
+                        return
+                    }
+                    # Each kind has its own query parameter name per the API spec
+                    $queryParamName = switch ($RoleKind) {
+                        'brand'   { 'brand' }
+                        'os'      { 'osName' }
+                        'primary' { 'primary' }
+                    }
+                    $uri = "${uri}?${queryParamName}=$([uri]::EscapeDataString($RoleValue))"
+                    # These kinds send no body
+                    $Body = $null
+                }
+                else {
+                    # sub-role requires a JSON body with operation + subroles
+                    if (-not $Body) {
+                        Write-Error "Body is required for role kind 'sub-role'. Provide a JSON body with 'operation' and 'subroles'."
+                        return
+                    }
+                }
+
                 Write-Debug "Setting ${RoleKind} role on device ${DeviceId}. URI: $uri"
                 if (-not $PSCmdlet.ShouldProcess("Device $DeviceId role ${RoleKind}", "Set")) { return }
             }
@@ -168,16 +217,19 @@ function Set-WUGDeviceRole {
             }
         }
 
-        # Handle Body-based operations
-        if ($Body) {
-            try {
+        # Execute the API call
+        try {
+            if ($Body) {
                 $result = Get-WUGAPIResponse -Uri $uri -Method $method -Body $Body
-                if ($result.data) { return $result.data }
-                return $result
             }
-            catch {
-                Write-Error "Error in Set-WUGDeviceRole ($($PSCmdlet.ParameterSetName)): $_"
+            else {
+                $result = Get-WUGAPIResponse -Uri $uri -Method $method
             }
+            if ($result.data) { return $result.data }
+            return $result
+        }
+        catch {
+            Write-Error "Error in Set-WUGDeviceRole ($($PSCmdlet.ParameterSetName)): $_"
         }
     }
 
@@ -189,8 +241,8 @@ function Set-WUGDeviceRole {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBN2BCLmV14yeLg
-# mMB4e2zVjh1Ou4unIBaPZljOZBjCxaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHFcPw3dWeCqDH
+# jr61OZEdi/fSUxrvwQwsA4F7/FSW1KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -290,17 +342,17 @@ function Set-WUGDeviceRole {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgw+Y5u93dzIVITgcNgoprjQfxXXdwg9F0
-# CMHSNo5SuLAwDQYJKoZIhvcNAQEBBQAEggIAZDEabvVc2WfUU4qbmNv4RCInVqtd
-# /UEM/Xv7o529vb04XpCqcW7UrcqOLXLvSPGnnt2U4E5iuWVos9H50XIrinGVXHRj
-# 2TZAXyXTMY9AJ2j/xYw49vYI6udo+Kmv6udkCNH89mP46tqFh+ZgSom4R65h6Q5p
-# R4n46ZigAFmx39Ku8ASfbtOp//mftCd0UxcQxDP1wtjuJnusIOl5gjvY5f1WHdee
-# 0wD/DcLwMHeAL15az+vdKBQNhi7ik6GpL/GzzrSoE5gsF8ewzxpGyFlWNgd8roVx
-# oNhgDUS7kabu/JktUco9OzI2H0LMKM2Wxv1ZqOGtEDnd9Mg+YuLpRkFWnMo/pCbG
-# sKF89UQIsFcljAjFto5ZlyG30hK1XfbZjEpq6PENn02o4b0Z7D9TLtUejoDr9hvh
-# au+o3f84MZfcU/5v6wW84q1d8uTBVRetaQoKYBPnPh7Og5ZE0YRJixZD37d199hI
-# ekYP0GuND2N9EwYYzi6vVKb+HGwRFe1txtnwDbDRP2sJL1bwIwmHbJ+tDK9qdHtN
-# kk/aPD4RBskAi0scGfz2YApW9SQG62VQT3+aAhem5/PROVIw38fjmYLSBiJi8rNR
-# 3P2SEy7z1DZPywN5nctUMWLccAKjv9n0U/DtQbGIDu0YOqXDnQ5NuUKEJZ5ylI26
-# kPZEMqRilgKg2N0=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgSCAMzxlaXwnaWLGJzIoJX942Yv4wqmIP
+# vzZqmVCbEmwwDQYJKoZIhvcNAQEBBQAEggIA1dL35buu8jSdR9Us7Nz+OV8Zd/uS
+# cmsbYYqmtNN1/Y/e12ROtWEkhPUHHqaynUKiREs+mqr236OY00bd2IFUpuYcVHxC
+# v0fv8sbmuktFEhy9Be0KDICZxIGFEvYC5xPsn7wVb4XPhPj849lx9qxkEF69YVJV
+# J2N96pH+fumzszimomTx2UOTq2I7PqMaEQn5IxKunDqDTIRTeQqdX8dZb6l9OJ+O
+# eJmV7ANqH47PymPCD54ILjv4EUj6hDEDYz/5UmclUxUwDpwQEfuiofmaYJssSi6d
+# gbPNcX3zZNvMkIbzFepvYuJ6Fh2X1LS9KHz9H4yWkz660e0rmuTjWYlX/b3p/rLZ
+# VTM0kCnCE1Ce3Rc4IQQKOosmPtZctkL2gGkfKqdtUEGcUgHIPfcxYKFOaM/JLkws
+# dE4xbqSp4huCDX9qjipCC+x4XVQCX8Hty2nQ4/RmvaB1E/2J4hvl34SYgSBv616g
+# rYW1s4xQhwAVzGqM7kgaFcnt8ruO9k1q/V1qZOXOiDL+nvTuk55cisqZklqyrqto
+# e+/u6w9m4B8IrmteADKMjWppVS4Eaf9Jf/J4I0GKJrPgo7gw6luATFulEM/cu9xn
+# Kyt0GbwRO8uRoF9D1KAERcaibnJICcmXf63cvT6j4lbF7azJGthPZvdC4nXFCD4A
+# rnkGI9SiOWqQ1RM=
 # SIG # End signature block

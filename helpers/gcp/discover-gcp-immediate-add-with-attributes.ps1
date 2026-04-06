@@ -1,10 +1,5 @@
 ﻿# Configuration
-$GCPKeyFilePath = "C:\path\to\service-account-key.json"  # Path to GCP service account JSON key
-$GCPProjects    = @("your-project-id")                   # GCP project IDs to scan
-$WUGServer      = "192.168.1.250"
-
-# Credentials
-if (!$WUGCred) { $WUGCred = Get-Credential -Message "Enter credentials for WUG server" }
+$GCPProjects = @("your-project-id")  # GCP project IDs to scan
 
 # Check if required modules are installed and loaded
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
@@ -16,6 +11,23 @@ if (-not (Get-Module -Name GoogleCloud)) { Import-Module GoogleCloud }
 
 # Load helper functions
 . "$PSScriptRoot\GCPHelpers.ps1"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# ========================
+# Resolve credentials from vault
+# ========================
+$gcpCred = Resolve-DiscoveryCredential -Name 'GCP.Credential' -CredType PSCredential -ProviderLabel 'GCP' -AutoUse
+if ($gcpCred) {
+    $GCPKeyFilePath = $gcpCred.UserName
+} else {
+    throw "GCP key file path is required. Store it in the vault using Setup-GCP-Discovery.ps1"
+}
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
 
 # ========================
 # Connect to GCP
@@ -299,8 +311,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCByeCJq2O1iax3w
-# AccbrVgZE+itdghiX1WBa7g6aFhN9KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1f38/9FTF2CRP
+# I02inDz9GWZlgiaVg8QxvLYdIKTxRqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -400,17 +412,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCs7q66RWFhcT6NKH2ZMBQ7bXAa8ERo9q
-# VpdbCanwz6wwDQYJKoZIhvcNAQEBBQAEggIAnqkHEzh8LUDivx7CsEAU4jUdq6X6
-# zqiS8lv6BpryYeuflOB4WFHu9Te6dwIK+nQlJmwguNyrg1syJidP3q/RmBnobu6u
-# PU0Iye38/kkwB2OiYfC/thdL/WvKtpKPzfmVR7XK77pQ50WzEsHbpAwlkqABhTAi
-# NdDHkOaLeBrNc1YobSOhLHp8YWkQffvSw2idlrr1VuYDAdix96YkOC9ZuiOvAsAw
-# Zd1P+cNORJdGFac7IIABHDhoQonnzWU3JGHPSIw/ARvx0lizt+Go8OU023DBIMof
-# DJmJog5klQSoqEeLEwCqzrQPt7m/DouhsK8wmX5WW2g6ZeQYua76SW0dyU+7rLlR
-# hziMSQUrNd08fE6XwVsq5aUQVTAmmK+bSX+yLBNRy5dRdeG81FLeWnvoZTpqo4nT
-# +pYmxLfF+eI83RRpX9uLO8DV+lDosbdcSZK1GhqiLtTIOFG4WyLsrghMekvMjGVk
-# 2dpjs0aG+TdJ97g0Wljin2ypoLsPWKrjJXr+gwXRLXT5jmYIOq+L1m/YZWcg9/tc
-# UxHPzqka8zeSLPXT2M0M6ekR82hNoY41qlPFUB2HGlplc4hj0oPoi8YRJeMsxQ/j
-# waWYCRQ+CYh0tetyZtP4flw0GsV1J1g+mhPwjQ3MOeyKn/Epoqgu+u0GQPCw9dpf
-# V0eYrkkszrNQUYE=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgqqJLBWXprGhXG8boEILX+hl2Jh4K0R2t
+# HaW7ge4ZMbUwDQYJKoZIhvcNAQEBBQAEggIA6eLksPw/cZLqDcKRsNprmQXXzOSI
+# X55ujItmmgofmiexQt8iBR9L+R5L8RCkarsfZciCG9H6pzaEDFCZ1f0gOVh3EbVn
+# tHqYme5T4PFxvjHjufe/C8MECq1wzoqCgpROKrRUOzx2kgBlcGL76dGSukkbIk+h
+# 61WQ517zChSii5AlrwuOvgFyBAqHRdg2kApZGHY1luvKWvQE7bcdZ7SnAVBOpwiR
+# d+UOmaO+yarJF5BFp8uKz0KWCrAwOF2XXqjQopWq/PfMi9wTKpKd/a6tDLTTThnL
+# Bbc/Ytyp+8jsqS+nQ7P3effzImFhVLtsMWp3OVYQi36GSU4kTa9gjpVY6U5CcrXF
+# 63YkfKvtSI+YCCMZ0+IqKx0BP5p4gZ52k/s/0uE6TrYsLsQ8Ocf5JJYtK51nsLqN
+# NjeFPnLQKzqkkrz6orRwyczBWiCFufpNBW7hom0cmKJbm6i5y5wByvUiAL8Z9Vch
+# hLU2JazDoNstfqL89UOTXkhsQzZ5mqTrs5+Na0goMwcbsdHb7Fe0VuyZhJeN38ac
+# 7F/wByF8F9aLfODXEluuBEMaDtR5h1nojFvJkPNlEfZnkty7+a4uFiEigc420WxF
+# vfw8Dc9i1Wogbibpms46WXsJnG2KyCfnRFtsin7zB4XTgR0ty5+qfHXvCNFN73ym
+# nEwQFgeAoA14EIo=
 # SIG # End signature block

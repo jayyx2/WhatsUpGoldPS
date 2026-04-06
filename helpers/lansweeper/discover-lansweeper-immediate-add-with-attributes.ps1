@@ -25,12 +25,21 @@ if (-not (Test-Path $helpersPath)) {
 }
 . $helpersPath
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 # ---- Authenticate to Lansweeper ----
 if (-not $LansweeperToken) {
-    $LansweeperToken = Read-Host -Prompt 'Enter your Lansweeper Personal Access Token'
+    $lsCred = Resolve-DiscoveryCredential -Name 'Lansweeper.PAT' -CredType BearerToken -ProviderLabel 'Lansweeper' -AutoUse
+    if ($lsCred) {
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($lsCred.Password)
+        try { $LansweeperToken = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+        finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+    }
 }
 if (-not $LansweeperToken) {
-    Write-Error "A Lansweeper PAT is required."
+    Write-Error "A Lansweeper PAT is required. Store it in the vault first."
     return
 }
 Connect-LansweeperPAT -Token $LansweeperToken
@@ -42,7 +51,9 @@ if (-not $script:LansweeperSession.Connected) {
 
 # ---- Authenticate to WhatsUp Gold ----
 Write-Host "`nConnecting to WhatsUp Gold at $WUGServer..." -ForegroundColor Cyan
-$WUGCred = Get-Credential -Message "Enter WhatsUp Gold credentials"
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if ($WUGCred) { $WUGServer = $WUGCred.UserName }
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
 Connect-WUGServer -serverUri $WUGServer -Credential $WUGCred -Protocol https -IgnoreSSLErrors
 
 # ---- Select Lansweeper site ----
@@ -256,8 +267,8 @@ Write-Host "`nDone." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrEe4WU5ywDoEZ
-# ITc3afZubS4FzuRU+fc3coVUzNOtD6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAEPzcBZWq4J9QU
+# UPwaeIFwP2US6PNKgtA5xinqbSqgSaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -357,17 +368,17 @@ Write-Host "`nDone." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgxnobMLSmu/6PGFt0vPCTBXn//lQqWPjI
-# b1xHmDd8kCwwDQYJKoZIhvcNAQEBBQAEggIAfabLlLbm/Zz+go9WXE8PQol9vuWn
-# YfV+W/+Uv82sjoWttM0vd46IlHb2YuyvcwBPF8mgD3q8v5rSQlXy7d32K7t/Tl5k
-# c2BoR3zCxpcOTh4GxEW9Hv756elyeiaWEXqJM41Ynnl+IFSVSwbaPPs69LLDePfG
-# JHMjn5DLVO3opOLdqkbHAjI4KE2rIhekKC8WqYIV9RB4vbC+eJhd2pTH0UgTAcIw
-# k10QIuAUXXzQz48vjDprMXr5ZN4oviyhrfzKKoHhHU1cT4g2zaX/d61xQWdDriu3
-# F/C84Ew/EXmwSEaN0t7yA+ewHN1Ng1RU0qTLRSnMmHYjUoOANXiFiJ3xVvvexBv0
-# eUIlOub4NXXmnZbJMjITX5uxZ+KCGUWlZekWQ6WINJDW5NPdbTPoyro0OZX/a7kG
-# f22bGF/56RhTMbb9OjduwBuY3Dg9tfTAE3PN6dvTbkaoPkVDABm4xdYOBZ/SqLTz
-# fHoAV45VcGZWFe0yfbudinhJP4Fz0jBO6k+6Y0zNA5S5xZ5DXLQ9wdh+ZlbmeavD
-# nsssBMWg/HUqGxqeK1zaL9K1d6kxsMXzWCvaUgQfRP9w6WtoPjY3YflUP4wdJmxp
-# ca6CZ0BlGzxlbzyl2P62Wq64CX8El3lxTTwbkXE5ZXWKp0hFCHeDTeaKw5CvcRDT
-# T+nLYdhvqzPZ/YY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgMYpwi5izC5905uVQEDRQEV2tosoI5B5M
+# FR6fled5LPYwDQYJKoZIhvcNAQEBBQAEggIABIoYFQubQzFNJd+P2Y+2vS0gOnHf
+# 3gHRpXTQPkUiTbTIBv8MBLCcNuMuSWT3ZJKa3MUntpPKRNH/iNtcpXvXfYYpLamu
+# V3L3MMD2wn/eeKE5ne6RzJpJke0ofy6d1jCYGZThmhc8FIFbUf6Tmlmpbv5MtG30
+# nfny5YjdKeMF1diObLhbp5/Xts0GF0C0V/U0WQhCQhNKjw8xQZ+uxw3CUzpv6hlQ
+# j2Er0PoCkU3NOC3qUfcEx1KJJRIk6sfqajTI8uV1M/QZ245w27SZoEIg5dEqDoRM
+# 89WhP32LKD5b/OkGgoAHbYCiVW1aGsCWypqTzAvz/nQlnEshU3Vr7bH1slIlyHZs
+# E8ZsC2FEhYrxbYS+jXOTNw1DC1Yu9eLAp+eAhwlGODIIwH1Ddr59dJ6h0mUrvSru
+# 2rzcaGti63jTRSE4OYvFMuy8XcHmxJcsO3FKL33v+d/D89X56pWBfGPOM4NEHPS1
+# f290ziV18d25/Y9p7FC1RDi2HA4uO5kIWq1FatKr/bakg5pkuwHQxa/y2Q6q/zgn
+# KE36Jxc5XH/HumvvnRH8cv3uNklYzD+CJZWFWlE5fEeUIbwRqqG9i7Reld0UwwZk
+# BWQt0+KJL76Bu55WkylRuudLJ9fW5WTDYjDNCqK2t4pxVukRCvPdZUEbBIbKbQu0
+# GUetlnGU3vytiOM=
 # SIG # End signature block

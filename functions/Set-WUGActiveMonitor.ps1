@@ -124,7 +124,7 @@ function Set-WUGActiveMonitor {
             if ($PSBoundParameters.ContainsKey('UseInDiscovery')) { $body.useInDiscovery = $UseInDiscovery }
             if ($PSBoundParameters.ContainsKey('Enabled'))        { $body.enabled = [System.Convert]::ToBoolean($Enabled) }
 
-            $uri = "${global:WhatsUpServerBaseURI}/api/v1/monitors/${MonitorId}"
+            $uri = "${global:WhatsUpServerBaseURI}/api/v1/monitors/${MonitorId}?type=active"
             $jsonBody = $body | ConvertTo-Json -Depth 10
 
             if (-not $PSCmdlet.ShouldProcess("Monitor ${MonitorId}", 'Update library configuration')) { return }
@@ -235,8 +235,8 @@ function Set-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRqIm9urfztM5n
-# OTcRvw0a7zvDJUYY8g90OuM9skfAPKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBnw1feLuG2LrNM
+# r3E32nccwCE1t4Hoj6aa3HOwxcoSIqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -336,17 +336,17 @@ function Set-WUGActiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgU7KHXGGom1TvjRqmg40QpeBGjG7VlP4r
-# woNMHg6vJqswDQYJKoZIhvcNAQEBBQAEggIAbX9oRuax+NClzpa0j4nNz9BgrstH
-# ycfRtSELIgBBNUL5MGAWpF9/cZjEjX2513ISERIhlHlHVdgeIjkKUSOWU8F7GGZ6
-# UcjuPryc6LcaP2rLY/WUGtqq+QNIkhkpcpQBp1APrWep30Kr6hs5iouXg4W6sq/A
-# d8LGDcenUEQg3ptXV2vbVS9BWCumKEElLWsgCCunU94KMD8WUplfCzLbs5mEknoX
-# WdyLc/fl6sGn8lzwOOpI1CpEcTCTpM/97VEjksgVDyqR440J+G4ow/RbQtK1wd6V
-# uzpTItHeuE6fxb7DsWMNiolrlR2WrIaz2huFULNcD0wyGsZjg9Hbu/Oumu/Dvxj6
-# B2ezmCUJIN3Rfjec2EvD8ksNh/NNQHjhbQC9IaIsMbd2PnoRhCiwTHzjbqswDzhC
-# L2Cz00pvjY9nxM0Jc4yGQ1xEdsY5yeWM8ZTk7GgDq8kTZGfhu6g+/wKn7vyNL4WI
-# oZb2eSSDxAiXk92nOmWMxsgnxv5jjJ251CXO+BUzkp7UQ+aDCc5A7BrJHAfNvOr4
-# jkCDWkLGZV9Md5QUc1SxPWItSYvZtZNW5eDDmtmt2UlZqe/Fou3YcGAjHi1P4k4/
-# FIeKc9olA/Kv4ljX38Da/2vX4wdPm6NypJWPfkZ8xw4TKrOGASPDvzvncN7pHStE
-# wklZGp+6Brq6xVQ=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgMS0mAettAckNdu9042VYYgiim6V7ZZc6
+# hckDAn5IPEowDQYJKoZIhvcNAQEBBQAEggIABewtdbqMjV9qlTIGkKM7quAk+25U
+# EpW/G4iEZmYSbmnvQyLQemaXAHMY1JBT8weMN2a/eXWh2J/y2f66IZ06xJFq/hHP
+# WtH6naaCwIR4IHH4HDIpi3BuOhfyelE3ierLYOWGNUPFwxUtiUDYvyc7aPB0b9DB
+# 3wWfxLIIRchRPLdv6l+m3cUUMzaypd6M0rIBKFlw4gTDmh2wBBBUhBPmacq1ThUr
+# xD8uTTN+u82ZDAW+bBclb+9s0+pGkpTeLnr9GGYvSPQgil9cXxb4GQA+oPFiitMD
+# sbyvj/qCnuUB/wYNszWncUIOXOtC/igswIgM/mS5wTYyBpu1MraJZZuwmy3lbulk
+# m8h2LGQo5n/myEyRxBXEY388I7SqKJxNM+8jPkiMoP9INEh06zkp4swJBigHvXQO
+# YspordSgfiSq/btpLQnFjFBlbGqSSKK76SooB1fwAcQTqXoaNAIYjt42jsfyhokC
+# kXpuucDK/90mQtEJzL2U2/wXebgOIv5rpIRRIojAXoKNFcVoKrfEk1lBKUNwIH0g
+# nNqlzNqyWNXPe6u2J7djz4OMlNjr2/xH1NZDR3vZyrglptbjX5r7AlViE60bcCtn
+# Vxw1UGB+KYJSbepuMjQQsQeTvfoOe+sRjiQ4kmTBQ+3e4yYHjDoRwhBW59jIpsn2
+# 1vPrEAJk3T80Xh4=
 # SIG # End signature block

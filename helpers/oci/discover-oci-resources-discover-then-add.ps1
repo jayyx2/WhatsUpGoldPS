@@ -1,12 +1,7 @@
 ﻿# Configuration
-$OCIConfigFile = ""                                             # Path to OCI config file (leave empty for default ~/.oci/config)
-$OCIProfile    = "DEFAULT"                                      # OCI config profile name
-$OCITenancyId  = "ocid1.tenancy.oc1..your-tenancy-ocid-here"   # Your tenancy OCID
-$OCIRegions    = @("us-ashburn-1")                              # Regions to scan (add more as needed)
-$WUGServer     = "192.168.1.250"
-
-# Credentials
-if (!$WUGCred) { $WUGCred = Get-Credential -Message "Enter credentials for WUG server" }
+$OCIProfile   = "DEFAULT"          # OCI config profile name
+$OCITenancyId = ""                  # Your tenancy OCID (resolved from vault or prompt)
+$OCIRegions   = @("us-ashburn-1")   # Regions to scan (add more as needed)
 
 # Check if required modules are installed and loaded
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
@@ -22,6 +17,25 @@ foreach ($mod in $requiredOCIModules) {
 
 # Load helper functions
 . "$PSScriptRoot\OCIHelpers.ps1"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# Resolve credentials from vault
+$ociCred = Resolve-DiscoveryCredential -Name 'OCI.Credential' -CredType PSCredential -ProviderLabel 'OCI' -AutoUse
+$OCIConfigFile = ''
+if ($ociCred) {
+    $cfgPath = $ociCred.UserName
+    if ($cfgPath -and $cfgPath -ne '~/.oci/config') { $OCIConfigFile = $cfgPath }
+}
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
+if (-not $OCITenancyId) {
+    $OCITenancyId = Read-Host -Prompt "Enter OCI Tenancy OCID"
+    if (-not $OCITenancyId) { throw "Tenancy OCID is required." }
+}
 
 # ========================
 # Validate OCI Connectivity
@@ -154,8 +168,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJ/cMjIBCXwBH0
-# c/RthnXxJUgAB0+nIkNsklZzLnAc/qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAiwZ5jnEJUtVce
+# FP0U2Sf330AI5dGJtvS6eZC6wyoa3aCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -255,17 +269,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgFKlUG4K3fLZHXyaFkxBvLkrqsgJPRSh5
-# lsWjjqLaJe4wDQYJKoZIhvcNAQEBBQAEggIAcjv6NEgk+tyqRQs6gsI9+myDKAyo
-# Un2kROiJAKpPhLN/912hLAyJ/YyaSM4TDvNKfcZoXbVbog0dB00KR3zWlO1iL0KA
-# 83g8sP+jd99YI8mrF0AaA+4Gy2t//nv3TICvFviTEIgQJylml1bvVX33L2Evs59n
-# FAOMr1U98h+gbaMxHB1XBRJWPIX3f3/pXX6FfuhKJuNIIIoJIugNRW+qcSiuIvHj
-# p9IDM8PIiIk8eCLu9zgmQcGBSa8G0fypFglaUjOJgEN7P/QWADKgWJpFir9g6/JJ
-# nr2W/l2hqiRJFOeFXlluTmDrenOsI34VL4jfmDvigBWyWunc6vlOQg0mdotr282a
-# C/gTzutZv3uLdXwWEsCzIgjsMnCIfArDW6bmtY84K9jxJR7E5bDoPzxAc7QKZyll
-# 6UWu2dUrXGSjLZS5R+GHVKJuGFK5MntG45H59rh/FXnTR1d4TNYhtKlQbJRyXays
-# UHPszJ2bdG6Anvw74eHje8bweOFTkHELqT0YVPzghyInxn8umogzE4rqphslthVG
-# nNwcZWhKWP95aXKmQERvCpPqDBnzR5OcAWt46/Nn2CQfdsrneAe+ZPTsw/0t8JqI
-# tg0SP8AK/a8Fuv6Jdud0VLnx8tmKyT+LXAL58KU/p7V0tw7cKIuS7RKFEiSH0M4/
-# 5RYqab810WJZO0E=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgPq5m4vugrZDQY0okSBLueSd3Fm2hefNe
+# cFkBsLxbBwAwDQYJKoZIhvcNAQEBBQAEggIAHiXSH8DBUXnFsH+OzZTNf10Oucz0
+# JwpDqPP0XCwNmNSCHWHUas7w/ZPFpyF1npA5RM+pEA4T1MJ3MnLntfufCDhM4NPI
+# hw9eqfJ2aLQfeAEqjN3INIlx3ny8yVQOUY5Gou9AZZBvfbTLtVSe85HLaW4ujceX
+# umvMAQnWukTb9wWx+nRjUpo7Bu0NhSSngNsdN/eemm2e9BYrkvCIHMv5DErteU1c
+# Fpv9bWrHcIRIhiiPCYzZuHr/OGIDsTIZVNjGpxuPq2FLGDulkhV2AQCBdizhGaF9
+# CUmcyaJGlH6nXJHXM6XxZF4nkJztaSHb8Q4lO0a7q6mBGhXyrFJcwbTAEQuyLlxf
+# tZlhHf42JxBZRMWzOXdGvgBM+5p9to1fuwWT9YmffsaOo0sBW9yaAEbw3kbuzBv3
+# JQS4fxpNh04IvPHsmRWeGs+ggG2iXvYMjQXC1Py+24eqBrrkLHfsbfx0L1UUT3+L
+# 4slG8oUwLvrvpEn3t5ETRyPkYEOLHh4qzoa0bKMAEYz14uFdd6fa1hlY8O//4KBl
+# lKu5bStA9R2A4aRaA/0lxeqxoNdgpm/3JdElorljZBwHZnKVE0RLr1jh0WYYaGQW
+# 04oVqvZzLFCjIaPE3E1jgwPbhJzasRh3GLfi9FgJGAghp+SahxElLFd3tGubruKB
+# QrjMU6uz98Nv7nU=
 # SIG # End signature block

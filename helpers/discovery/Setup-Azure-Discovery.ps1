@@ -74,6 +74,14 @@
     without -NonInteractive. Use -NonInteractive to error instead of prompt when
     vault credentials are missing.
 
+.PARAMETER MetricsTimespan
+    How far back Azure Monitor looks when polling metrics.
+    Wider windows help idle or lab environments where resources have sparse data.
+    The interval always matches the timespan so a single aggregated bucket is returned.
+    Valid values: PT1H (1 hour), PT6H (6 hours), PT12H (12 hours),
+    P1D (1 day, default), P7D (7 days).
+    In interactive mode the script prompts; pass this parameter to skip the prompt.
+
 .NOTES
     WhatsUpGoldPS module is only needed for options [1] and [7] (WUG push/test).
     REST API mode has zero external module dependencies.
@@ -95,7 +103,7 @@ param(
 
     [switch]$UseRestApi,
 
-    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'MetricsDashboard', 'TestCredential', 'None')]
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'MetricsDashboard', 'TestCredential', 'None')]
     [string]$Action,
 
     [string]$WUGServer = '192.168.74.74',
@@ -103,6 +111,11 @@ param(
     [PSCredential]$WUGCredential,
 
     [string]$OutputPath,
+
+    [int]$MaxPerformanceMonitorsPerDevice = 10,
+
+    [ValidateSet('PT1H', 'PT6H', 'PT12H', 'P1D', 'P7D')]
+    [string]$MetricsTimespan = 'P1D',
 
     [switch]$NonInteractive
 )
@@ -207,11 +220,45 @@ else {
     }
 }
 
+# --- Metrics timespan window --------------------------------------------------
+# Controls how far back Azure Monitor looks when polling metrics.
+# Wider windows help idle / lab environments where resources have sparse data.
+if (-not $PSBoundParameters.ContainsKey('MetricsTimespan') -and -not $NonInteractive -and -not $Action) {
+    Write-Host ""
+    Write-Host "Azure metrics lookback window:" -ForegroundColor Cyan
+    Write-Host "  [1] PT1H  - 1 hour   (busy production, frequent data)" -ForegroundColor White
+    Write-Host "  [2] PT6H  - 6 hours" -ForegroundColor White
+    Write-Host "  [3] PT12H - 12 hours" -ForegroundColor White
+    Write-Host "  [4] P1D   - 1 day    (default, good for most environments)" -ForegroundColor White
+    Write-Host "  [5] P7D   - 7 days   (idle labs with sparse / no traffic)" -ForegroundColor White
+    Write-Host ""
+    $tsChoice = Read-Host -Prompt "Choice [1-5, default: 4]"
+    $MetricsTimespan = switch ($tsChoice) {
+        '1' { 'PT1H' }
+        '2' { 'PT6H' }
+        '3' { 'PT12H' }
+        '5' { 'P7D' }
+        default { 'P1D' }
+    }
+}
+Write-Host "Metrics lookback window: $MetricsTimespan" -ForegroundColor Green
+
 # --- Load helpers (works from any directory) ----------------------------------
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 $moduleRoot = Split-Path (Split-Path $scriptDir -Parent) -Parent
 . (Join-Path $scriptDir 'DiscoveryHelpers.ps1')
 . (Join-Path $scriptDir 'DiscoveryProvider-Azure.ps1')
+
+# --- Load WhatsUpGoldPS module (repo-first, fallback to installed) ------------
+try {
+    $repoPsd1 = Join-Path $moduleRoot 'WhatsUpGoldPS.psd1'
+    if (Test-Path $repoPsd1) { Import-Module $repoPsd1 -Force -ErrorAction Stop }
+    else { Import-Module WhatsUpGoldPS -ErrorAction Stop }
+}
+catch { Write-Warning "Could not load WhatsUpGoldPS module: $_ — WUG actions will fail." }
+# Dot-source internal helper so scripts can call Get-WUGAPIResponse directly
+$apiResponsePath = Join-Path $scriptDir '..\..\functions\Get-WUGAPIResponse.ps1'
+if (Test-Path $apiResponsePath) { . $apiResponsePath }
 
 # ==============================================================================
 # STEP 1: Gather target info
@@ -321,7 +368,7 @@ finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrAz) }
 $azParts = $AzureCred.UserName -split '\|'
 $plan = Invoke-Discovery -ProviderName 'Azure' `
     -Target @($SubscriptionFilter) `
-    -Credential @{ TenantId = $azParts[0]; ApplicationId = $azParts[1]; ClientSecret = $plainAzSecret; UseRestApi = $UseRestApi }
+    -Credential @{ TenantId = $azParts[0]; ApplicationId = $azParts[1]; ClientSecret = $plainAzSecret; UseRestApi = $UseRestApi; MetricsTimespan = $MetricsTimespan }
 
 if (-not $plan -or $plan.Count -eq 0) {
     Write-Warning "No items discovered. Check service principal permissions and connectivity."
@@ -378,7 +425,7 @@ Write-Host "  Resource Groups:       $($uniqueRGs.Count)" -ForegroundColor White
 Write-Host "  Locations:             $($uniqueLocs.Count)" -ForegroundColor White
 Write-Host ""
 Write-Host "  Active monitors (health):           $activeCount  ($($devicePlan.Count) assignments)" -ForegroundColor White
-Write-Host "  Performance monitors (metrics):     $perfCount" -ForegroundColor White
+Write-Host "  Performance monitors (confirmed):   $perfCount  (idle metrics with no data in P1D window were dropped)" -ForegroundColor White
 Write-Host "  Total plan items:                   $($plan.Count)" -ForegroundColor White
 Write-Host ""
 
@@ -418,6 +465,7 @@ if ($Action) {
         'MetricsDashboard'  { $choice = '8' }
         'TestCredential'    { $choice = '7' }
         'None'              { $choice = '6' }
+        'DashboardAndPush'  { $choice = '9' }
     }
 }
 
@@ -433,11 +481,20 @@ if (-not $choice) {
     Write-Host "  [6] Exit (do nothing)"
     Write-Host "  [7] Test Azure credential in WUG (add + verify + remove)"
     Write-Host "  [8] Generate Validated Metrics HTML dashboard"
+    Write-Host "  [9] Dashboard + Push to WUG"
     Write-Host ""
-    $choice = Read-Host -Prompt "Choice [1-8]"
+    $choice = Read-Host -Prompt "Choice [1-9]"
 }
 
-switch ($choice) {
+# Handle DashboardAndPush: run Dashboard then PushToWUG sequentially
+if ($choice -eq '9') {
+    $actionsToRun = @('5', '1')
+} else {
+    $actionsToRun = @($choice)
+}
+
+foreach ($currentChoice in $actionsToRun) {
+switch ($currentChoice) {
     '1' {
         # ==================================================================
         # PUSH TO WHATSUP GOLD
@@ -581,7 +638,7 @@ switch ($choice) {
                     -Description "Azure OAuth2 client_credentials for tenant $TenantId (auto-created by discovery)" `
                     -Type restapi `
                     -RestApiAuthType '1' `
-                    -RestApiGrantType '2' `
+                    -RestApiGrantType '0' `
                     -RestApiTokenUrl "https://login.microsoftonline.com/$($restAzParts[0])/oauth2/v2.0/token" `
                     -RestApiClientId $restAzParts[1] `
                     -RestApiClientSecret $plainRestAzSecret `
@@ -1079,6 +1136,12 @@ switch ($choice) {
                     }
                 }
 
+                # Cap performance monitors per device if limit is set
+                if ($MaxPerformanceMonitorsPerDevice -gt 0 -and $perfNames.Count -gt $MaxPerformanceMonitorsPerDevice) {
+                    Write-Verbose "Capping perf monitors for '$displayName': $($perfNames.Count) -> $MaxPerformanceMonitorsPerDevice"
+                    $perfNames = $perfNames | Select-Object -First $MaxPerformanceMonitorsPerDevice
+                }
+
                 # Skip devices with no monitors at all
                 if ($actNames.Count -eq 0 -and $perfNames.Count -eq 0) {
                     Write-Verbose "Skipping '$displayName' — no monitors to assign."
@@ -1108,7 +1171,10 @@ switch ($choice) {
                 }
 
                 if ($perfNames.Count -gt 0) {
-                    $splat['PerformanceMonitors'] = $perfNames
+                    # Don't include perf monitors in the device template — the template API
+                    # doesn't support pollingIntervalMinutes, so monitors get the default 10 min.
+                    # Instead we assign them separately after creation using
+                    # Add-WUGPerformanceMonitorToDevice which properly sets the polling interval.
                 }
 
                 try {
@@ -1124,6 +1190,24 @@ switch ($choice) {
                         }
                         if ($newDeviceId) {
                             $wugDeviceMap[$key] = $newDeviceId
+
+                            # Assign perf monitors separately with 60-min interval
+                            if ($perfNames.Count -gt 0) {
+                                $perfMonIds = @()
+                                foreach ($pn in $perfNames) {
+                                    if ($existingPerfNames.ContainsKey($pn)) {
+                                        $perfMonIds += [int]$existingPerfNames[$pn]
+                                    }
+                                }
+                                if ($perfMonIds.Count -gt 0) {
+                                    try {
+                                        Add-WUGPerformanceMonitorToDevice -DeviceId $newDeviceId -MonitorId $perfMonIds -PollingIntervalMinutes 60 -ErrorAction Stop
+                                    }
+                                    catch {
+                                        Write-Verbose "Perf monitor assign error for new device $newDeviceId`: $_"
+                                    }
+                                }
+                            }
                         }
                         $stats.DevicesCreated++
                         if (-not $dev.IP) { $stats.CloudDevices++ }
@@ -1203,9 +1287,14 @@ switch ($choice) {
                         $perfMonitorIds += [int]$existingPerfNames[$perfItem.Name]
                     }
                 }
+                # Cap performance monitors per device if limit is set
+                if ($MaxPerformanceMonitorsPerDevice -gt 0 -and $perfMonitorIds.Count -gt $MaxPerformanceMonitorsPerDevice) {
+                    Write-Verbose "Capping perf monitors for existing device $deviceId`: $($perfMonitorIds.Count) -> $MaxPerformanceMonitorsPerDevice"
+                    $perfMonitorIds = $perfMonitorIds | Select-Object -First $MaxPerformanceMonitorsPerDevice
+                }
                 if ($perfMonitorIds.Count -gt 0) {
                     try {
-                        Add-WUGPerformanceMonitorToDevice -DeviceId $deviceId -MonitorId $perfMonitorIds -PollingIntervalMinutes 5 -ErrorAction Stop
+                        Add-WUGPerformanceMonitorToDevice -DeviceId $deviceId -MonitorId $perfMonitorIds -PollingIntervalMinutes 60 -ErrorAction Stop
                     }
                     catch {
                         if ($_.Exception.Message -notmatch 'already|assigned|exists|duplicate') {
@@ -1551,6 +1640,7 @@ switch ($choice) {
         Write-Host "No action taken." -ForegroundColor Gray
     }
 }
+} # end foreach actionsToRun
 
 Write-Host ""
 Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cyan
@@ -1558,8 +1648,8 @@ Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cy
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZ7K9zl+Qbkk7A
-# jQx0B2tOaTMykXqIRWoXhR9xvXr7e6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCByImqR+dFigsHA
+# 5FzaFyMocJpWD2MBZRN5cj8sc/hvxqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1659,17 +1749,17 @@ Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cy
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgLqJ+RW9PJsrmvb8M8HzIwPPX7vhGuJRK
-# NwAS+eJ+VOkwDQYJKoZIhvcNAQEBBQAEggIAS3RdCz6qjOUxxJESo6HvCOGHO+8u
-# WDx5OiS8kv7SY0zL+uRLImFotsZO1ZOKjizBfyrYjcwKHt8/YlBR5T5QZC7F3Dvk
-# B79A2HyKRS6qE5DytCzdkTUWw3ySBRGg87O/5r0WOBS2L27tVWCtN3Ch7edHrOF8
-# FwvH5DwGLwS0hhKDbb9X0KGy00EAjDPKhhDDx/8mPFKRuB6f/bIyTuGuGrsTFZ/6
-# KX/R0CTKQkwIAK4J8qESCOJ3l0J7Qsu5X2jfIn7/2u4zH9yE+VT6kLepQrc7Sr/P
-# jEydFub8KNsOpwwg9AxMwP4qmwm0IRtvLTyMItMvmwXNDVUeaZQ/uH7W/YeXmoG/
-# doOB58+59UPDhbRun5i+XpypqtGMHVm1W9W9spsXXaN/rrVoOa728uJ0z560SwAA
-# 8GpCTuiGfojXKLEpVevMUROWGMEMQ1CAOptXCs9bxOOR4ngLprg/STIQYM5iBj2P
-# PlqCsoL8MEt5DcQNhnNUnu8CmibYinF+oyirNqA9SVCRY8ARrqctOkcWioGhTvN5
-# A2CODc6fs2DRObrvbWsSwMNLtjXvhLxJwDIJO9PrdsIHoTQlR0xZmNn2iEx8guw5
-# ZsprUUN6cnSZqfEVYhFHv6ato6QoZqPod+EnAJOvQgVNRWY1somyfs1VFPnfLMki
-# utVazAERDzlpems=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgT8/vK0tMSnYWbW/14uaGtpwRNGospjws
+# M+G83kaD7mwwDQYJKoZIhvcNAQEBBQAEggIAo3fXyQCq8TuRBHTqy6ewA6STzUSn
+# JRKl8HCob6aTFsyQbEDUwZuASOoDz9rR5Csh4HuIteZ5IgeqwxQDJXYVoP/Iz1JH
+# lXjeoThG5rPTgO+zTl7MEp83b+bl4xaiTI+K8eLXP9GOxeLMwJ+5pkwTDaroGcdh
+# h6s+LA8ZC02ootZbtxaJ88Lxblph/xnKaL6IaSJK3XZQpd0le5KgLEXNdeyLC3Xt
+# oSvBuhn9hUJ7FK4iMoOeDMWTdtIWOtKNdED5wUPPKrsOSsYq7fIe11HTSeU+5tfH
+# ASuNXN7LyjFMZhqA1WpKKl9xPB4x3j7vzdC59H1KkMEmy3jby0CPxhEy8Aje1vvN
+# heSQGW0hochEl4haQlHKXNFKjFd3JKUzscIeM22r3tJ+59hf+VMds1B4T0dJrJJB
+# KgThys9AVV4LNKztn13pww3EPD+1Rrf1+2Nb79Vf+I4nB5O9eV8E0jGi8Cx3shzV
+# V4QKD38vLTg8cLIAwHT6B8bMRIJcBuSeGF5NXTlGRDlFWRoeRgcW/roYG/dJN6to
+# TlOPNa4zcTX3BgiighZ95GyspWdJRKlXnhAmUaO1buRhILEbBrKb/Ta65KKLA3Sv
+# SR9Iup0abda6KOqIpryU6nF6UAhYQde3Gr4EUzE+53Ob719clJhAL1YfsR8s0HiR
+# lvMG2ZdYzCTGHRo=
 # SIG # End signature block

@@ -100,6 +100,11 @@ function Connect-WUGServer {
     begin {
         Write-Debug "Starting Connect-WUGServer function"
 
+        # Warn if plaintext username/password parameters are used
+        if ($PSCmdlet.ParameterSetName -eq 'UserPassSet') {
+            Write-Warning "Plaintext -Username/-Password detected. These values may appear in PSReadLine history and script logs. Prefer -Credential (PSCredential) or vault-based connection (no parameters) instead."
+        }
+
         # ── Vault helpers (DPAPI, interoperable with DiscoveryHelpers vault) ──
         $vaultDir  = Join-Path $env:LOCALAPPDATA 'DiscoveryHelpers\Vault'
         $vaultFile = Join-Path $vaultDir 'WUG.Server.cred'
@@ -116,14 +121,37 @@ function Connect-WUGServer {
                     Write-Warning "Vault credential is AES-encrypted. Use the DiscoveryHelpers to unlock, or reset."
                     return $null
                 }
-                # Verify integrity hash
+                # Verify integrity (HMAC-SHA256 if key exists, fall back to SHA-256 for legacy)
                 if ($obj.Integrity) {
                     $intInput = "$($obj.Encrypted)|$($env:COMPUTERNAME)|$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
-                    $sha = [System.Security.Cryptography.SHA256]::Create()
-                    $hBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($intInput))
-                    $sha.Dispose()
-                    $expected = [BitConverter]::ToString($hBytes) -replace '-', ''
-                    if ($obj.Integrity -ne $expected) {
+                    $hmacKeyFile = Join-Path (Split-Path $Path -Parent) '.vault-hmac.key'
+                    $verifyHash = $null
+                    if (Test-Path $hmacKeyFile) {
+                        try {
+                            $hmacEnc = [System.IO.File]::ReadAllText($hmacKeyFile).Trim()
+                            $hmacSS = ConvertTo-SecureString -String $hmacEnc
+                            $hmacBstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($hmacSS)
+                            try { $hmacB64 = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($hmacBstr) }
+                            finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($hmacBstr) }
+                            $hmacKeyBytes = [Convert]::FromBase64String($hmacB64)
+                            $hmacB64 = $null
+                            $hmac = New-Object System.Security.Cryptography.HMACSHA256
+                            $hmac.Key = $hmacKeyBytes
+                            $hBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($intInput))
+                            $hmac.Dispose()
+                            for ($j = 0; $j -lt $hmacKeyBytes.Length; $j++) { $hmacKeyBytes[$j] = 0 }
+                            $verifyHash = [BitConverter]::ToString($hBytes) -replace '-', ''
+                        }
+                        catch { $verifyHash = $null }
+                    }
+                    if (-not $verifyHash) {
+                        # Legacy fallback: plain SHA-256 (for creds saved before HMAC migration)
+                        $sha = [System.Security.Cryptography.SHA256]::Create()
+                        $hBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($intInput))
+                        $sha.Dispose()
+                        $verifyHash = [BitConverter]::ToString($hBytes) -replace '-', ''
+                    }
+                    if ($obj.Integrity -ne $verifyHash) {
                         Write-Warning "Vault integrity check failed for WUG.Server. The file may have been tampered with."
                         return $null
                     }
@@ -169,15 +197,44 @@ function Connect-WUGServer {
                     $acl.AddAccessRule($sysRule)
                     Set-Acl -Path $VaultDir -AclObject $acl
                 }
-                catch { Write-Verbose "Could not restrict vault directory ACL: $_" }
+                catch { Write-Warning "Could not restrict vault directory ACL: $_. Credentials may be accessible to other users on this system." }
             }
             $combined = "$Server|$ConnPort|$Proto|$User|$Pass"
             $ss = ConvertTo-SecureString $combined -AsPlainText -Force
             $encrypted = ConvertFrom-SecureString -SecureString $ss
+            # HMAC-SHA256 integrity using a DPAPI-protected random key
+            $hmacKeyFile = Join-Path $VaultDir '.vault-hmac.key'
+            $hmacKeyBytes = $null
+            if (Test-Path $hmacKeyFile) {
+                try {
+                    $hmacEnc = [System.IO.File]::ReadAllText($hmacKeyFile).Trim()
+                    $hmacSS = ConvertTo-SecureString -String $hmacEnc
+                    $hmacBstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($hmacSS)
+                    try { $hmacB64 = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($hmacBstr) }
+                    finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($hmacBstr) }
+                    $hmacKeyBytes = [Convert]::FromBase64String($hmacB64)
+                    $hmacB64 = $null
+                }
+                catch { $hmacKeyBytes = $null }
+            }
+            if (-not $hmacKeyBytes) {
+                # Generate and DPAPI-protect a new HMAC key
+                $hmacKeyBytes = New-Object byte[] 32
+                $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::Create()
+                $rng.GetBytes($hmacKeyBytes)
+                $rng.Dispose()
+                $hmacB64 = [Convert]::ToBase64String($hmacKeyBytes)
+                $hmacSS = ConvertTo-SecureString $hmacB64 -AsPlainText -Force
+                $hmacEnc = ConvertFrom-SecureString -SecureString $hmacSS
+                [System.IO.File]::WriteAllText($hmacKeyFile, $hmacEnc, [System.Text.UTF8Encoding]::new($true))
+                $hmacB64 = $null
+            }
             $intInput = "$encrypted|$($env:COMPUTERNAME)|$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
-            $sha = [System.Security.Cryptography.SHA256]::Create()
-            $hBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($intInput))
-            $sha.Dispose()
+            $hmac = New-Object System.Security.Cryptography.HMACSHA256
+            $hmac.Key = $hmacKeyBytes
+            $hBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($intInput))
+            $hmac.Dispose()
+            for ($i = 0; $i -lt $hmacKeyBytes.Length; $i++) { $hmacKeyBytes[$i] = 0 }
             $hash = [BitConverter]::ToString($hBytes) -replace '-', ''
             $credObj = [ordered]@{
                 Name        = 'WUG.Server'
@@ -294,14 +351,29 @@ function Connect-WUGServer {
         }
     
         # SSL Certificate Validation Handling
+        # WARNING: On PowerShell 5.1, SSL bypass is process-wide and cannot be scoped per-request.
+        # This affects all .NET HTTP connections in this process until Disconnect-WUGServer is called.
+        # On PowerShell 7+, SkipCertificateCheck is scoped via PSDefaultParameterValues.
         if ($IgnoreSSLErrors -and $Protocol -eq "https") {
             if ($PSVersionTable.PSEdition -eq 'Core') { 
                 $Script:PSDefaultParameterValues["invoke-restmethod:SkipCertificateCheck"] = $true
                 $Script:PSDefaultParameterValues["invoke-webrequest:SkipCertificateCheck"] = $true
-            } else { 
-                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+            } else {
+                # Scope SSL bypass to the WUG server hostname only (PS 5.1 limitation: callback is process-wide,
+                # but we check the hostname inside), so other HTTPS connections are still validated.
+                $global:_WUGAllowedSSLHosts = @($serverUri.ToLower())
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {
+                    param($sender, $certificate, $chain, $sslPolicyErrors)
+                    if ($sslPolicyErrors -eq [System.Net.Security.SslPolicyErrors]::None) { return $true }
+                    # Only bypass for the WUG server hostname
+                    if ($sender -is [System.Net.HttpWebRequest]) {
+                        $reqHost = ([System.Uri]$sender.RequestUri).Host.ToLower()
+                        if ($global:_WUGAllowedSSLHosts -contains $reqHost) { return $true }
+                    }
+                    return $false
+                }
             }
-            Write-Warning "Ignoring SSL certificate validation errors. Use this option with caution."
+            Write-Warning "Ignoring SSL certificate validation errors for $serverUri. Use Disconnect-WUGServer to restore validation."
         }    
     
         # Set variables
@@ -309,7 +381,9 @@ function Connect-WUGServer {
         $global:WhatsUpServerBaseURI = "${Protocol}://${serverUri}:${Port}"
         $global:tokenUri = "${global:WhatsUpServerBaseURI}${TokenEndpoint}"
         $global:WUGBearerHeaders = @{"Content-Type" = "application/json" }
-        $tokenBody = "grant_type=password&username=${Username}&password=${Password}"
+        $encUser = [System.Uri]::EscapeDataString($Username)
+        $encPass = [System.Uri]::EscapeDataString($Password)
+        $tokenBody = "grant_type=password&username=${encUser}&password=${encPass}"
     }
     
     process {
@@ -342,10 +416,11 @@ function Connect-WUGServer {
     }
 
     end {
-        # Output connection status and return the token details
-        Write-Output "Connected to ${serverUri} to obtain authorization token for user `"${Username}`" which expires at ${global:expiry} UTC."
+        # Output connection status
+        Write-Host "Connected to ${serverUri} as `"${Username}`". Token expires at ${global:expiry} UTC." -ForegroundColor Green
 
         # Save connection to vault after successful authentication
+        # IMPORTANT: Must save BEFORE clearing $Password from memory
         if (-not $_fromVault) {
             try {
                 _SaveWUGConnection -VaultDir $vaultDir -Path $vaultFile `
@@ -357,13 +432,17 @@ function Connect-WUGServer {
                 Write-Verbose "Could not save connection to vault: $_"
             }
         }
+
+        # Clear plaintext credential variables from memory
+        $tokenBody = $null
+        $Password = $null
     }
 }
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAkG2rd5knco7nY
-# RJQjE6ArH/MuDSc5x9oWXrWy2K6mjKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCeS4Q4ykonRbwz
+# eOngfXsodrEa6bCDMQr+oEEKsA4HtqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -463,17 +542,17 @@ function Connect-WUGServer {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgPQFnL6xGqZnTzRX4L1Sfiv8JwY9Iq21T
-# 5NmyqEc8+xIwDQYJKoZIhvcNAQEBBQAEggIALiaDHbxIDEBKSG++44O+7YknXbiq
-# 4aJUY4aSFEQebuv5Uuj19FtMqMbGQ0qt/l4ZVW0SVCppIy+Ce0LqiUxW1+Iuckvy
-# 9a2WcFybf1omarTOEptZ44hocIp4WGz/EGiWnxWwEVJ30ZzAele1/nDHtyaBFmFe
-# 89cR+CGPcVlrgr4r4ADbOhumnIkqtXTVxVGCqqPgDVW2qA23Mki22L3dxleEBZgE
-# 6jV61Z4hb4cT8u8hrxm0LFKAj0I6+ZDs3ZSUpqT7Aa7Yo0nHi8b2d0/xYEqn4Ouq
-# Cnl6LZxeBlaOD6pOb8HLduh5mneYmbYlCMTXh02j6BXn2MPZXMGimECrz1UtI85N
-# jNBuh4/rk4E9p+jAYwt6yW6h4HdnPA/i7SZdpC6fQ/PS+eihGNZkt+y/QVL8Hsn4
-# BmoOgowbjpKXHdLa/kWfSkMjhNzoY0bAbh4o6TiwXoCehoMPgo1iepwG5rK8ZS85
-# 4EcktkpG+G12Tr17AKVPhGjcGwsYdmkY9wE2jNp5pv1TxNua/GeirdeR1d3S2HEG
-# MHmtyKcvPzVT8NgVoldgUU4MDBwRDmPnGBKXcpIrkg6sw596gF+p1Wa1WvyMHMPk
-# TKfSMOKpI/3t1ynNBUorbPL8VB5WRPKePqdRd3boPwuTajZKOUEv9kwKwy6xOIlY
-# 1GkVY1rMfGwGHAw=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgK5h66pomTRyvD/5z60cN3iePOJeJBM35
+# VUYaLo6sWfgwDQYJKoZIhvcNAQEBBQAEggIAe5mquLlljEtz5dFVUG4guUkym7Ii
+# fvxFote2O87iYhEyviM4FR92Z6XXqwCnYtUF+JA0tjvYGrBaha2G39WrtR6SMtpu
+# 0sNQf2KVIRY058iEL1PbedC3Lf7+ZTaN92VytloXpcWhR5TWyrOpoBDeLBeWW5k5
+# rJJy9+HngjBsif16zpnm4iICImL3K7Pga2AILmADJvdJ+MUB6y/APipZKpcaDtbW
+# qPaQp1u6cCjwDLJReYyKL6NezpS7rrXBZXitju5m3Cl39PGSJbG1KoNAqLcFsJpi
+# sO4RBvNeJsqEJZu9J11jvRPLHaT3z1KfdPPJ1FfRG7bz/5Xv4bb+T7mThWl/fg18
+# QMZLBQKbgZZnjL2xf8OGyrjJJIj274Y4aorcDeajZD1e1Llxvkp273S2CT6gbwMm
+# D5m4RcYExgpwyzxBbPHx45begqa0yVTmux9hZmwmGfA5LRYIz5pSkNOINDq+Klqe
+# MF7IlVgxnxN8fyVqdPlMEiIVXl3yoYikvweGweuZ86AY085so4+OpOYTA0Y9xxpi
+# At4TGiz7wuLFFxMK9w124QBHsFA4SG4G8x8dsT9lnGgVeUtAiNj85pXUhqv+TW99
+# CdlbgmGMPsMOcp3gDvei1eXE6BdIn5jeYg7W8zv8OJdUGw+4zZxHEf931FWG3G0+
+# 7ZlOCvPl5R+ZWGw=
 # SIG # End signature block

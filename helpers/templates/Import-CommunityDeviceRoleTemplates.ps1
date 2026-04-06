@@ -54,9 +54,14 @@ $repoApiUrl = "https://api.github.com/repos/progress/WhatsUp-Gold-Device-Templat
 # -- Pre-flight ----------------------------------------------------------------
 if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 if ($WUGServer) {
     if (-not $global:WhatsUpServerBaseURI) {
-        $cred = Get-Credential -Message "Enter WhatsUp Gold credentials for $WUGServer"
+        $cred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+        if (-not $cred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
         Connect-WUGServer -Server $WUGServer -Credential $cred
     }
 }
@@ -157,8 +162,8 @@ $results | Format-Table -AutoSize
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFw8r2lLqpIRps
-# DRJkrIr24k3PAJscSoB4550b58h346CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdMAKCns6kQBbA
+# EkXLBk1/p5Uz21eZHTZGew9GEQ40A6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -258,17 +263,17 @@ $results | Format-Table -AutoSize
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgadjF/VepQgHVWNIE7rkV8ve1xG0sysEY
-# sxNO2+LBEu4wDQYJKoZIhvcNAQEBBQAEggIAkwquGePhHau7F3jxFZMeAu7oexrg
-# RRTllmSda3antMEGCTBfCKJM63wHV5ym1Q3Eub2Ux2zHIjWfYS3WMbqR/DrqAxOQ
-# hskv1IALTQIE8KwEdS05kDY8+xqom0xwVEcJNqNRDiCYqXlI7wdoEweXdmDKsAdO
-# oBldfvJu1eeQdIGDdyAEHECGpQyuSQEONCJGNJtGZfpz8aoC3ppThnd53wvwes3E
-# tsilFMkcR34rK/iw7NRzJK8GB3MF3oDP4Cy107aYkTEtCBK+szvLG2t4YMUrmbg/
-# kI+uzWJt+UGO2As++qqczMNj8lIFqIxROM1CF8TgwC4pmz97B7UrwaHuT3+uZrgJ
-# naqrrCD4T785l5UhcIsU8F/WHAhzmwA/cndZnpdaMC5Rnuc49x/cTjDm8825rVjB
-# 9np/xu3duwlTA54qlEKjbFoPFW+iEzmkOBgP1r7ms8Y7MRX5hRbOh9XXGS5hZ2Y3
-# 5F9VZ6fBU6JPjRsJOUSrH0SU/+QyX/EEjKQqskiAJycFApph1QxNmZtqHWm6aNut
-# MAN8wu3nN21bpfMQyOu2CE9K6pu1qysNNbeInapjYacWaAotuFUt05GBWZOuu4n1
-# Kh8OOtrYlrFp3PD+53EtCRylB9bZUnf+Lsd/FXEH+TLtBYF/o6IXfzy7jTGQ11UW
-# 3oE+gJWncfuLFwI=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgh0C1xq/uvQU/uilHWEvN96DaF/fqQCE/
+# CFUy7MDjX2wwDQYJKoZIhvcNAQEBBQAEggIApNW5mvXrqkyEk26lT2yncrtmxx9L
+# QI4GZEif2pidWk0BrFA0g2o8Ny2kqCdM8ziKKyUgXM60vC1tdwSjvRYA0kr+N6Iv
+# iiWUx2cO4e76xby3r1zDxKW6pBofXKYielL2FATJ5cacLLzt4dGq1U2GqSeEpT5r
+# X8jX8bskVyip4/BjUJNnA9ahq7Gkefs/147QzdzkitwlriBJzzrVOWh42bZLaj6p
+# GNfnGTRTaNiKfenrBmWfq7s8+dsTkDrPVNhRgsqzIPTlohQoP3pWKFLxO7ddKSIj
+# x1hAD3GROtP9jItvk6OB4skr9X/acULYLGsK4ONdyzf5jmB624j06JnKOIXFbHjg
+# 58rhd+WyZYO7OCL9b8gkG9eFTuEi8BclDm0Q7gIbamDt2VevKo8JES9PcW2l6IcG
+# UVX560F7deAkJnTGeu0hvWuDV8sN4z2+jiENFkOQJWaa5KkOyZrmd+bHwbSRbzwi
+# iis14y75X7eATb+b0jVzRNm9HjueFXqCcirZaWOTt0pEppG0eLZMWQnVR1VPOK+i
+# H2vkzrTRdrSOPoHybf9N9jHBwGObLc33CAprHmlbdXdnpUCdwNnKhEJklXhiTWjN
+# e9d361bjmtVqc8HelqsSlPrpwFQKkrFg/YmSoD5FpFDDGJu1jEuKymbTO1wGT1W9
+# lG3bSEgSZzzPR30=
 # SIG # End signature block

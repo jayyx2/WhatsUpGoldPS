@@ -46,6 +46,10 @@ else {
     throw "BigleafHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 # Import WhatsUpGoldPS module if available (for WUG integration)
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
@@ -56,20 +60,23 @@ if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
 # --- Authenticate to Bigleaf -------------------------------------------------
 if (-not $global:BigleafHeaders) {
     if (-not $Credential) {
-        $Credential = Get-Credential -Message "Enter Bigleaf API credentials (username + password or API token)"
+        $Credential = Resolve-DiscoveryCredential -Name 'Bigleaf.Credential' -CredType PSCredential -ProviderLabel 'Bigleaf API' -AutoUse
+    }
+    if (-not $Credential) {
+        throw "Bigleaf API credentials are required."
     }
     Connect-BigleafAPI -Credential $Credential -BaseUri $BaseUri
 }
 
 # --- Optional: Connect to WhatsUp Gold for enrichment -----------------------
 if ($UseWUGDevices -and -not $global:WUGBearerHeaders) {
-    if (-not $WUGServerUri) {
-        $WUGServerUri = Read-Host -Prompt "Enter WhatsUp Gold server URI (e.g. 192.168.1.100)"
+    $wugInfo = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -AutoUse
+    if ($wugInfo) {
+        Connect-WUGServer -serverUri $wugInfo.Server -Credential $wugInfo.Credential -IgnoreSSLErrors -Protocol $wugInfo.Protocol -Port $wugInfo.Port
+    } else {
+        Write-Warning "No WUG credentials available. Skipping WUG enrichment."
+        $UseWUGDevices = $false
     }
-    if (-not $WUGCredential) {
-        $WUGCredential = Get-Credential -Message "Enter WhatsUp Gold credentials"
-    }
-    Connect-WUGServer -serverUri $WUGServerUri -Credential $WUGCredential -IgnoreSSLErrors -Protocol https
 }
 
 # Output paths
@@ -124,8 +131,8 @@ Write-Host "`nDone." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpp+ZSXQr6mu79
-# jTiXEaNTceeCOjFURWQL042Gay70p6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQqnAAE3wVKVwF
+# HTqEw10/d6WdEMhz5mD90fiq8texSKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -225,17 +232,17 @@ Write-Host "`nDone." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgpg4EJDuUyslmtVCIsMNjSJ4Lv8ipyz8O
-# qAdyxj4MdW0wDQYJKoZIhvcNAQEBBQAEggIAFSAfZcbM+r/ozp+OAc26Km2+puOD
-# iqKLpcgAalWvD1VxGS2iBJ1Juu50kDyUGuRPMbdz1gS6QjSmjUbgFDPw33T3j/cY
-# vjwgYCfDaWEnB7PK2tt/q77vY8+tHQyRvSM+MAENJyl+1wwtNm0aHCjSuw/eYIu/
-# qi6BSPJqNv9C/AOX+uKrNNgZxGjPk40IN2fi5Xhy3Z6FUF5E9wtYqlLzXNpnbL/O
-# ts3CklO7YoHLMMtFBh4KvDeoJGSm3OHlXESPkBmTUqzMjqJDB4f4fZAN3/iELLxd
-# sq+1zxNqIA9C+xQx135kMEcDn5FoRn7853BsHN4Wz8ExeKk47bMCfysl6gb0ARo/
-# C3baNem1udJIFvZC7+UlmdnVr6+P0Lja3Fj0Q9htxGl8u1r+DvhsGQXsv6c76tep
-# nls0UlANzw11SSehWDAyrfc2lOUOH+UxCeH0xZz8ztkr3QPxziifap5XVoxet5qW
-# Ux7RzZT02J2I81fWbUZsjqoRHhtMYpuu5b/aov6kdnOCSLxUCbGuaSnEVAduJqFp
-# cUXz/CCdsRUD8rVEbWSl+5sHOY9fuHffB8GmQJNiide2vv1q5c/d8cQMmpDZq+Uy
-# LilbQj+7QUkOQT2N6pRBz6hi034y2po+8swg8CniNOyCBsx/WRUG1t/Pp6zUFamk
-# c7zBHLloKRr5GqY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgdAMjDWyJjlbWoV+hAxMCyhasE8OXkQUj
+# Gdj5PzJK3RUwDQYJKoZIhvcNAQEBBQAEggIAEv1WHpLDkzSBztX7GuWJj4bcQljQ
+# d2niBfMuBE7dTmRrydYqF0KHMOvbYEnrBHSgCmfkBHfUQ/m5mEtOeaSz6vB0Urk8
+# DNl8WEYUwXTEZ7zvJVpgC1aezGGAb0zL0bRYD/tme1Bads6029V2at3oMfX/W5k2
+# npkJzDdi6sieMUsimOdldgRVh8gHdr3OijVnU/jDJ+Y+l+4nUhX4zl90dGzDEoLM
+# 8urm/GzLci2v9b5hsiVyUNY1ovXmlE8rxMyern5DRfbc+nWuGB0kEq8GTm/8Qimn
+# sP0sJlrIGY7rkuEbu+H9th1T6KoHpZJHNDADDNNP4OnQYKgQkqPLFEoPDHOMtLX7
+# q8xmNlh5MEf8BY4r9RS2SJ6gNFmF7ays3R91TwQN/R2GoyINwN9xlABFfqFJyQVW
+# 8FLWRRzwU5cJ0RaiHIWK1KTCKBfyuK8RhvCGtXo90GVhhF2R+jpyjqr0s59PJrzH
+# ghAKrx4gtxjn0OuQdqkuQQm2C1vqJ44m3yPAB8gb4/EEvwTRUMsxYZ1Q4+6s/fw3
+# iFHVdqIbJU5OaJxWy1u4l2XmIH4Y2LNnlb2Zgd/HE9gdGCy2DMgaQB2i0g1seXkA
+# Vdd4/e79PpXTfAgRcWmu/GIA1IkaAceG7vPWkMP72zMWBpYUTFtOn0cyLPw8VH5c
+# jPSoqEuwxN6wfQE=
 # SIG # End signature block

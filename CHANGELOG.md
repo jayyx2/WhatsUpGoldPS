@@ -1,5 +1,13 @@
 ﻿﻿# WhatsUpGoldPS Release History
-## 0.1.21 - 2026-03-26 [Unreleased]
+## 0.1.21 - 2026-04-05 [Unreleased]
+* Added -- New Functions (92 total exports; psm1 and psd1 in sync)
+  * `Get-WUGPassiveMonitor` -- Retrieve passive monitor templates from the library (`GET /monitors/-?type=passive`), a single template by ID (`GET /monitors/{id}?type=passive`), or device assignments (`GET /devices/{id}/monitors/-?type=passive`); supports `-Search`, `-View`, `-DeviceId`, `-AssignmentView`, `-MonitorId`, pagination
+  * `Set-WUGPassiveMonitor` -- Update passive monitor template definitions via `PUT /monitors/{id}?type=passive`; supports `-Name`, `-Description`, `-PropertyBags`, `-UseInDiscovery`
+  * `Remove-WUGPassiveMonitor` -- Delete passive monitors from the library by search string (`DELETE /monitors/-?type=passive&search=...`) or by ID (`DELETE /monitors/{id}?type=passive`); supports `-FailIfInUse`
+  * `Add-WUGMonitorTemplate` -- Bulk create multiple active, passive, and/or performance monitors in the WUG library in a single `PATCH /api/v1/monitors/-/config/template` request; accepts arrays of monitor templates with property bags
+  * `Get-WUGPerformanceMonitor` -- Query performance monitors from the library (default) or from a specific device's assignments; supports `-Search`, `-MonitorTypeId`, `-DeviceId`, `-EnabledOnly`, `-View`
+  * `Set-WUGPerformanceMonitor` -- Update an existing performance monitor template via `PUT /api/v1/monitors/{id}`; type-specific parameter sets (RestApi, PowerShell, WmiRaw, WmiFormatted, WindowsPerformanceCounter, Ssh, Snmp, AzureMetrics, CloudWatch) plus custom `-PropertyBag` for non-standard monitors
+
 * Added -- Helpers
   * helpers/reports/ -- Dynamic Dashboard Generator (`Export-DynamicDashboardHtml`)
     * `Export-DynamicDashboardHtml.ps1` -- Universal HTML dashboard generator from any PowerShell object array
@@ -67,22 +75,34 @@
       * Adds devices via `Add-WUGDeviceTemplate` with Ping monitor and 14 custom Lansweeper attributes
       * Attributes: Lansweeper_Source, AssetKey, AssetType, Site, SiteId, Domain, MAC, Manufacturer, Model, Serial, FirstSeen, LastSeen, Url, LastSync
   * helpers/geolocation/ -- Geolocation map helper suite (replaces legacy ASP-based wug-geolocation with pure PowerShell + Leaflet)
-    * `GeolocationHelpers.ps1` -- 7 functions for querying WUG devices/groups with lat/lng data and generating interactive Leaflet maps
+    * `GeolocationHelpers.ps1` -- 8 functions for querying WUG devices/groups with lat/lng data and generating interactive Leaflet maps
       * `Initialize-GeoSSLBypass` -- SSL bypass for self-signed certs (compiled C# callback for PS 5.1)
       * `Invoke-GeoAPI` -- REST wrapper with automatic token refresh (5-minute expiry window) and PS 5.1 connection-pool retry
       * `Connect-GeoWUGServer` -- OAuth 2.0 password grant authentication; returns config hashtable with tokens/expiry
-      * `Get-GeoDevicesWithLocation` -- Queries devices for `LatLong` attribute ("lat,lng") or separate `Latitude`/`Longitude` attributes (`-UseBuiltinCoords`); supports group filtering
+      * `Get-GeoDevicesWithLocation` -- Queries devices for `LatLong` attribute ("lat,lng") or separate `Latitude`/`Longitude` attributes (`-UseBuiltinCoords`); supports group filtering; uses `?view=overview` for inline monitor status (eliminates per-device API calls)
       * `Get-GeoGroupsWithLocation` -- Parses device group descriptions for "lat,lng" coordinate pairs with range validation
       * `Get-GeolocationData` -- Combined device + group dataset with `IncludeDevices`/`IncludeGroups` toggles
-      * `Export-GeolocationMapHtml` -- Generates self-contained HTML with inline JSON data, configurable center/zoom, clickable WUG console links
-    * `Setup-GeolocationConfig.ps1` -- Interactive one-time setup: prompts for WUG server/credentials, validates API connection, encrypts refresh token with DPAPI, saves config JSON
-    * `Update-GeolocationMap.ps1` -- Scheduled-task script: reads saved config, decrypts refresh token, authenticates via refresh grant, queries devices/groups, generates HTML map, rotates refresh token for next run
-    * `Geolocation-Map-Template.html` -- Leaflet 1.9.4 + leaflet-providers 2.0.0 map template
-      * 11 free tile layers (OpenStreetMap, CartoDB Positron/Dark/Voyager, USGS Imagery/Topo, Stadia, CyclOSM, OpenTopoMap)
+      * `Export-GeolocationMapHtml` -- Generates self-contained HTML with inline JSON data, configurable center/zoom, clickable WUG console links; new `-TileApiKeys` hashtable parameter injects provider API keys into `%%API_KEYS%%` placeholder
+      * `Set-GeoDeviceLocations` -- CSV-based bulk import of lat/lng coordinates onto WUG devices; matches by DeviceName or IP (pre-fetches all devices for O(1) lookup); two attribute modes: combined `LatLong` (default) or separate `Latitude`/`Longitude`; `-WhatIf` support, coordinate validation, progress bar, per-row status reporting
+    * `Setup-GeolocationConfig.ps1` -- Interactive one-time setup: prompts for WUG server/credentials, validates API connection, saves all config + API keys to DPAPI vault (`Geolocation.Config` bundle + `Geolocation.RefreshToken`); prompts for 8 tile provider API keys (Thunderforest, Stadia, MapTiler, HERE, Mapbox, Jawg, TomTom, OpenWeatherMap) with free-tier limit display; **migrated from repo-local JSON file to DPAPI vault** -- no sensitive data touches the repo directory
+    * `Update-GeolocationMap.ps1` -- Scheduled-task script: reads config from DPAPI vault via `Import-GeolocationConfig`, authenticates via refresh grant, queries devices/groups, generates HTML map, rotates refresh token back to vault; tile API keys come pre-decrypted from vault
+    * `Sync-GeolocationAttributes.ps1` -- CSV-to-WUG attribute sync script: reads config from DPAPI vault, authenticates via refresh grant, syncs lat/lng, rotates refresh token back to vault
+    * `GeolocationHelpers.ps1` -- Added `Import-GeolocationConfig` function: reads `Geolocation.Config` bundle + `Geolocation.RefreshToken` from vault, converts typed fields (int/double/bool), extracts `TileApiKey.*` fields into hashtable; returns unified config hashtable for all geolocation scripts
+    * `Geolocation-Map-Template.html` -- Leaflet 1.9.4 self-contained map template (removed leaflet-providers.js dependency; all tile URLs hardcoded inline)
+      * Custom chip-based control panels replacing `L.control.layers`:
+        * **Map Tiles** box (collapsible): grouped by provider with labelled rows, radio-button behavior (one active at a time), session persistence via `sessionStorage`
+        * **Weather Overlays** box (collapsible, only visible when OpenWeatherMap key present): toggle behavior (multiple active simultaneously)
+        * **Layers** box: Device/Group toggle chips with green active state
+      * Tile registry system: `addTile(group, name, layer)` function with group/variant structure; `buildControls()` generates chip DOM from registry
+      * 12 free tile providers (no API key needed): CartoDB (Voyager/Positron/Dark), Esri (Street/Imagery/Topo/Dark Gray/NatGeo/Ocean), USGS (Imagery/Topo), OpenTopoMap
+      * 7 keyed tile provider families (33 variants, rendered only when API key present): Thunderforest (6), Stadia (6), MapTiler (4), HERE (5), Mapbox (5), Jawg (5), TomTom (2)
+      * 6 weather overlays (OpenWeatherMap key): Clouds, Rain, Wind, Temperature, Pressure, Snow
+      * Chip CSS: pill-shaped, color-coded active states (blue=tile, orange=overlay, green=marker layer), hover/active animations, responsive flexbox layout
+      * Popup enhancements: monitor counts (total up / total down), collapsible `<details>` for down monitor list (up to 10), styled WUG deep-links with arrow icon
       * Device (circle) and Group (square) overlay layers with independent toggle
       * SVG status icons: green (Up), red (Down), orange (Maintenance), grey (Unknown)
-      * Popup with device/group name, coordinates, state, and clickable link to WUG web console dashboard
-      * Auto-fit bounds to all markers, legend, session-persisted pan/zoom, info bar with generation timestamp
+      * Auto-fit bounds to all markers, legend, session-persisted pan/zoom/tile selection, info bar with generation timestamp
+      * Favicon (wug.ninja), title: ninja emoji + "WhatsUpGoldPS Geolocation"
     * No ASP, no jQuery -- pure vanilla JavaScript with only Leaflet as external dependency
   * helpers/docker/ -- Docker Engine REST API helper suite (v1.45+, ports 2375/2376)
     * `DockerHelpers.ps1` -- 11 functions for Docker Engine API
@@ -123,6 +143,7 @@
     * `DiscoveryHelpers.ps1` -- 24-function core framework operating in standalone (inventory/audit/CI) or WUG integration mode
       * Provider Registry: `Register-DiscoveryProvider`, `Get-DiscoveryProvider`, `Find-WUGDiscoveryDevices`, `New-DiscoveredItem`, `Invoke-Discovery`, `Export-DiscoveryPlan` (JSON/CSV/objects with automatic secret scrubbing)
       * DPAPI Credential Vault: `Set-DiscoveryVaultPath`, `Set-DiscoveryVaultPassword`, `Clear-DiscoveryVaultPassword`, `Initialize-DiscoveryVault` (ACL-locked directory), `Write-VaultAuditLog`, `Protect-VaultData` (DPAPI + optional AES-256 double encryption), `Unprotect-VaultData`
+      * Vault Security Hardening: `Get-VaultHmacKey` / `Get-VaultHmac` -- HMAC-SHA256 integrity verification for vault files using a DPAPI-protected random 32-byte key (`.vault-hmac.key`); AES-256 PBKDF2 iteration count increased to 600,000 (OWASP 2023+ guidance); salt now uses deterministic (machine+user) + random component (`.vault-salt.bin`)
       * Credential Management: `Save-DiscoveryCredential` (AWSKeys/AzureSP/BearerToken/PSCredential bundles), `Get-DiscoveryCredential` (expiry/integrity checks), `Request-DiscoveryCredential` (interactive prompt), `Resolve-DiscoveryCredential` (vault -> prompt -> WUG attribute fallback), `ConvertFrom-VaultStored`, `Save-ResolvedCredential`, `Remove-DiscoveryCredential`
       * WUG Integration: `Invoke-WUGDiscovery`, `Invoke-WUGDiscoverySync` (REST API monitor creation), `New-WUGDiscoveryCredential` (WUG credential store), `Start-WUGDiscovery` (top-level orchestrator)
     * `DiscoveryProvider-AWS.ps1` -- AWS discovery provider (EC2 instances, CloudWatch metrics)
@@ -135,7 +156,9 @@
     * `DiscoveryProvider-F5.ps1` -- F5 BIG-IP discovery provider (virtual servers, pools, nodes)
     * `DiscoveryProvider-Fortinet.ps1` -- Fortinet FortiGate discovery provider (system, firewall, VPN)
     * `DiscoveryProvider-HyperV.ps1` -- Hyper-V discovery provider (hosts, VMs, health)
-    * `DiscoveryProvider-Proxmox.ps1` -- Proxmox VE discovery provider (cluster nodes, QEMU VMs, CPU/memory/disk monitors; API Token auth)
+    * `DiscoveryProvider-Proxmox.ps1` -- Proxmox VE discovery provider (cluster nodes, QEMU VMs, LXC containers, CPU/memory/disk monitors; API Token auth)
+      * LXC container support: queries `/nodes/{node}/lxc` for container list, `/lxc/{vmid}/status/current` + `/lxc/{vmid}/config` for IP resolution via `net\d+` config parsing; adds CT type with same metadata as VMs (Name, IP, Node, Status, Cpus, MaxMem, MaxDisk)
+      * Phase 2 metric validation probes each node/VM/CT status endpoint
     * `DiscoveryProvider-VMware.ps1` -- VMware vSphere discovery provider (ESXi hosts, VMs, datastores)
     * `Setup-AWS-Discovery.ps1` -- Interactive AWS discovery script with vault-backed credential storage, menu-driven export/WUG push
     * `Setup-Azure-Discovery.ps1` -- Azure cloud resource discovery with full WUG integration
@@ -150,7 +173,7 @@
     * `Setup-F5-Discovery.ps1` -- Interactive F5 BIG-IP discovery script with token vault storage
     * `Setup-Fortinet-Discovery.ps1` -- Interactive Fortinet FortiGate discovery script with API key vault storage
     * `Setup-HyperV-Discovery.ps1` -- Interactive Hyper-V discovery script with PSCredential vault storage
-    * `Setup-Proxmox-Discovery.ps1` -- Interactive Proxmox VE discovery script with API token vault storage
+    * `Setup-Proxmox-Discovery.ps1` -- Interactive Proxmox VE discovery script with API token vault storage; LXC container (`CT`) device type handling; unified "guest" terminology (VMs + CTs); guest-with-IP / guest-without-IP summary; new `DashboardAndPush` action; sequential Dashboard then PushToWUG execution; full PushToWUG pipeline (credential creation, bulk active/perf monitor creation, device template creation, credential assignment); WUG module auto-import; vault-based credential resolution
     * `Setup-VMware-Discovery.ps1` -- Interactive VMware vSphere discovery script with PSCredential vault storage
   * helpers/bigleaf/ -- Bigleaf Cloud Connect SD-WAN dashboard suite (API v2)
     * `BigleafHelpers.ps1` -- 13 functions for Bigleaf API integration (HTTP Basic auth, 10 calls/min rate limit)
@@ -166,22 +189,61 @@
     * `Invoke-WUGDiscoveryVault.ps1` -- Interactive DPAPI vault manager (List/View/Add/Update/Delete credentials); supports AWSKeys, AzureSP, BearerToken, PSCredential types; `-Action`/`-Name`/`-CredType` parameters for non-interactive use
     * `Invoke-WUGDiscoveryHelperTest.ps1` -- Automated test harness for Discovery Framework and DPAPI Credential Vault (12 test areas: provider registration, single/multi-field vault ops, credential expiry, tamper detection, AES-256 double encryption, secret scrubbing, aliases, standalone discovery with mock provider, audit log, ACL permissions, cleanup); uses temp vault, no network access required
     * `Test-Dashboard-Template.html` -- Bootstrap Table HTML template for test result reports
+    * `Register-DiscoveryScheduledTask.ps1` -- Register Windows Scheduled Tasks for recurring discovery runs; three modes: Provider (single provider), Runner (all providers via Invoke-WUGDiscoveryRunner), WUGAction (Setup script action); uses DPAPI vault for fully non-interactive execution; supports 12 providers (AWS, Azure, Bigleaf, Docker, F5, Fortinet, GCP, HyperV, Nutanix, OCI, Proxmox, VMware); `DashboardAndPush` action; new `Set-RestrictedDirectoryAcl` function locks output/log directories to current user + SYSTEM + Administrators via explicit ACL
+  * helpers/test/Invoke-WUGGeomapTest.ps1 -- Dedicated geolocation E2E integration test harness (21 tests)
+    * `Connect-WUGServer` + `Connect-GeoWUGServer` authentication
+    * `Add-WUGDeviceTemplate` (create geo test device), `Set-WUGDeviceAttribute` for LatLong (combined) and separate Latitude/Longitude, `Get-WUGDeviceAttribute` verification
+    * `Add-WUGDeviceGroup` (create geo test group), `Get-GeoDevicesWithLocation` (LatLong + BuiltinCoords modes), `Get-GeoGroupsWithLocation`, `Get-GeolocationData` (all/devices-only/groups-only)
+    * `Export-GeolocationMapHtml` (basic + verify markers + all tile providers with fake keys)
+    * All-providers test: generates map with keys for all 8 providers, verifies provider blocks rendered, chip UI (`geo-controls`), Weather Overlays box present
+    * Cleanup: `Remove-WUGDevice`, `Remove-WUGDeviceGroup`, `Disconnect-WUGServer`
+
+* Test Coverage (this release)
+  * `Invoke-WUGModuleTest.ps1`: 168 -> 207 tests (+39 new: Set-WUGRole, Add-WUGMonitorTemplate bulk, Set-WUGMonitorTemplate, Add/Set/Remove-WUGDeviceInterface, Set-WUGDevicePollingConfig, Set-WUGDeviceRole, Set-WUGDeviceMaintenanceSchedule, Get-WUGPassiveMonitor library/search/details/byId/device, Set-WUGPassiveMonitor update/rename/validation, Remove-WUGPassiveMonitor byId, passive monitor cleanup catch-all)
+  * `Invoke-WUGHelperTest.ps1`: 222 -> 245 tests (+23 new: full Bigleaf helper suite, Lansweeper helper suite)
+  * `Invoke-WUGGeomapTest.ps1`: 21 tests (new file)
+  * **Total across all test files: 473** (was 390, +83)
 
 * Changed
-  * `DiscoveryProvider-Azure.ps1` -- Replaced generic PowerShell monitor stubs with concrete REST API monitors
-    * Phase 2 metric enumeration discovers all available Azure Monitor metric definitions per resource
-    * Each metric becomes a dedicated REST API Performance Monitor with JSONPath extraction
-    * Resource health check now uses ARM REST API GET with `provisioningState` JSONPath (was generic PowerShell stub)
+  * `DiscoveryProvider-Azure.ps1` -- Major rewrite of metric validation and monitor creation pipeline (end-to-end WUG integration now fully operational)
+    * Phase 1: Live health-endpoint probing per resource type -- inspects actual ARM API response to determine correct JSONPath property in priority order: `availabilityState` -> `enabled` -> `state` -> `provisioningState` -> `dailyMaxActiveDevices`; stored in `$healthJsonProp` hashtable per resource type
+    * Phase 2 metric enumeration discovers all available Azure Monitor metric definitions per resource; each metric becomes a dedicated REST API Performance Monitor with JSONPath extraction
+    * Phase 2.5: P1D metric pre-filter eliminates dead metrics early (24-hour window check)
+    * Phase 2.6: Strict single-aggregation validation at PT10M matching WUG's 10-minute poll cycle; groups metrics by aggregation type, probes with EXACT single aggregation (not all 5), uses `PSObject.Properties.Name -contains` for explicit field existence check -- prevents false positives where Azure returns fields when all 5 aggregations are requested but omits them when only one is requested
+    * Phase 3: Plan item generation uses hardcoded `timespan=PT10M&interval=PT5M` matching WUG's actual performance monitor poll interval
+    * Phase 4: Azure Billing monitors via Azure Consumption Budgets API (`GET /subscriptions/{id}/providers/Microsoft.Consumption/budgets?api-version=2024-08-01`); discovers budgets per subscription; creates 3 monitors per budget (Current Spend, Budget Limit, Forecast Spend) via JSONPath extraction; auto-creates "WUG-Discovery-Monitor" budget ($1000/month) when no budgets exist in a subscription
+    * Configurable `-MetricsTimespan` (PT1H/PT6H/PT12H/P1D/P7D) for Azure Monitor metric polling window; P7D recommended for idle labs to prevent empty timeseries errors
+    * Resource health check now uses ARM REST API GET with probed JSONPath property (was generic PowerShell stub with hardcoded `provisioningState`)
     * Progress bar during metric enumeration with resource count and name display
-  * `Setup-Azure-Discovery.ps1` -- Major WUG integration overhaul
+  * `Setup-Azure-Discovery.ps1` -- Major WUG push overhaul
+    * Added `-MetricsTimespan` parameter with `ValidateSet` (PT1H, PT6H, PT12H, P1D, P7D; default P1D); interactive menu prompt for timespan selection; passed through credential context to DiscoveryProvider
     * PushToWUG now adds ALL resources (previously skipped resources without IP)
     * Cloud resources (no IP) added as 0.0.0.0 devices with Azure Cloud Resource attributes
     * Creates two WUG credentials per tenant: Azure SP for device identity + REST API OAuth2 for monitor auth
     * Credential assignment to every cloud resource device (Azure + REST API)
+    * Step 2a/2b: Bulk monitor creation batched in groups of 50 with 2-second pauses between batches to prevent WUG API overload
+    * Step 2a/2b: Post-creation reconciliation re-queries WUG monitor library (`Get-WUGActiveMonitor -Search`, `Get-WUGPerformanceMonitor -Search`) to backfill monitor IDs missed during bulk creation tracking
+    * Step 2d: Device creation switched from bulk `Add-WUGDeviceTemplates` to one-by-one `Add-WUGDeviceTemplate` (bulk was returning 500 errors)
     * TestCredential option [7] for round-trip credential verification before committing
     * Non-interactive mode defaults to Dashboard (previously required explicit -Action)
     * Plan summary shows metric counts, cloud resource counts, and total plan items
     * ValidateSet for -Action now includes `TestCredential`
+  * `Add-WUGDeviceTemplate.ps1` -- Added `-NoDefaultActiveMonitor` switch to suppress default Ping monitor for perf-only cloud resource devices; added `-GroupName` parameter; added Azure and Meraki credential type support in credential objects
+  * `Connect-WUGServer.ps1` -- Integrated DPAPI credential vault; when called with no parameters, checks vault for saved WUG credentials and prompts to reuse/reset/new; successful connections auto-save to vault at `%LOCALAPPDATA%\DiscoveryHelpers\Vault`; warns when plaintext `-Username`/`-Password` parameters used (PSReadLine history exposure); vault integrity now uses HMAC-SHA256 with DPAPI-protected key (was plain SHA-256); legacy SHA-256 fallback for pre-HMAC vault files; ACL restriction warning when directory permissions can't be set
+  * `Disconnect-WUGServer.ps1` -- Restores SSL certificate validation on disconnect (PS Core: removes `SkipCertificateCheck` defaults; PS 5.1: nulls `ServerCertificateValidationCallback`); clears all credential-related globals (`WUGBearerHeaders`, `expiry`, `WhatsUpServerBaseURI`, `tokenUri`, `WUGRefreshToken`, `IgnoreSSLErrors`, `_WUGAllowedSSLHosts`)
+  * `Get-WUGPerformanceMonitor.ps1` -- Major rewrite: auto-pagination in library mode (loops on `nextPageId` automatically); view validation with library vs device mode enforcing correct `ValidateSet` values with clear error messages; structured output objects with extracted `ClassId`, `BaseType`, `MonitorTypeName` from `monitorTypeInfo`
+  * `Get-WUGActiveMonitor.ps1` -- Device mode now auto-paginates (loops on `nextPageId`); merges template metadata into output objects
+  * `Set-WUGDeviceRole.ps1` -- `brand`/`os`/`primary` role kinds now use query parameters (not JSON body) per API spec; `sub-role` still uses JSON body; backward compat: extracts value from Body JSON if `-RoleValue` not specified
+  * `Add-WUGDeviceInterface.ps1` -- New explicit parameters: `-Address`, `-HostName`, `-DefaultInterface`, `-PollUsingName`; retains `-Body` parameter set for raw JSON
+  * `Add-WUGCredential.ps1` -- REST API credential now conditionally includes OAuth2 property bags only when `AuthType = '1'`; fixes 400 errors from sending empty OAuth2 bags with Basic auth
+  * `Set-WUGDevicePollingConfig.ps1` -- New explicit `-PollingIntervalSeconds` parameter (was body-only)
+  * `Get-WUGAPIResponse.ps1` -- Enhanced diagnostics: body length, UTC token expiry timestamps in debug logging; improved error messages include URI, Method, statusCode, responseBody context
+  * `GeolocationHelpers.ps1` -- Eliminated per-device status API calls: uses `?view=overview` on device group endpoint to get `bestState`, `worstState`, `totalActiveMonitors`, `totalActiveMonitorsDown`, `downActiveMonitors` inline (was making N+1 API calls); fixed API response parsing (`$result.data.groups`/`$result.data.devices` instead of `$result.data`); device data now includes `TotalMonitors`, `DownMonitors`, `DownMonitorDetails` fields; `Write-Output` -> `Write-Verbose` for pipeline-clean output; template reading switched to `[System.IO.File]::ReadAllText()` (avoids BOM issues); TLS 1.0/1.1 removed from SSL bypass (TLS 1.2 only)
+  * `Add-WUGPerformanceMonitor.ps1` -- Added type-specific parameter sets and auto-generated monitor names when omitted
+  * `Add-WUGActiveMonitor.ps1` -- Minor refinements to property bag handling
+  * `AzureHelpers.ps1` -- `Invoke-AzureREST` now supports `-Body` parameter for PUT/POST operations; hashtables auto-converted to JSON; Content-Type set to `application/json` when Body is provided
+  * All 7 Setup scripts (AWS, Azure, F5, Fortinet, HyperV, Proxmox, VMware) -- Enhanced PushToWUG actions with vault credential integration and improved error handling
+  * All 7 Discovery Providers -- Refined monitor template generation and plan item structures
   * Removed unused `tableexport.jquery.plugin` dependency from all 14 dashboard HTML templates -- custom `wireExport()` functions handle all exports via FileSaver + xlsx.js directly; plugin was loaded but never called
   * Standardized HTML dashboard toolbar across all 14 templates (AWS, Azure, Bigleaf, Certificate, Docker, F5, GCP, Hyper-V, Lansweeper, Nutanix, OCI, Proxmox, Test, VMware)
     * Unified `wireExport()`, `updateRowCounter()`, toolbar injection pattern (row counter span + pagination toggle + export dropdown into `.fixed-table-toolbar .columns`)
@@ -211,6 +273,24 @@
   * Fixed `Export-GeolocationMapHtml` using `-replace` (regex) for JSON data injection -- regex special chars (`$`, `(`, `)`) in JSON could corrupt output; switched to `.Replace()` (literal string matching)
   * Fixed Geolocation-Map-Template.html bare `%%DEFAULT_LAT%%` / `%%DEFAULT_LNG%%` / `%%DEFAULT_ZOOM%%` placeholders causing JS parse errors -- wrapped in `parseFloat()`/`parseInt()` so `%%` tokens sit inside valid string literals
   * UTF-8 BOM added to 22 files created in this release that were missing it (all .ps1 and .html files now consistent)
+
+* Security
+  * PBKDF2 iteration count increased to 600,000 in DiscoveryHelpers vault encryption (OWASP 2023+ compliance)
+  * HMAC-SHA256 vault integrity verification with DPAPI-protected random key (prevents tampering by other local users)
+  * ACL restriction on vault/output directories (SYSTEM + Administrators + current user only via `Set-RestrictedDirectoryAcl`)
+  * Plaintext credential parameter warning in `Connect-WUGServer` (PSReadLine history exposure risk)
+  * SSL/TLS state cleanup on `Disconnect-WUGServer` prevents leaking trust-all-certs to subsequent sessions
+  * TLS 1.0/1.1 removed from geolocation SSL bypass (TLS 1.2 only)
+  * Geolocation config migrated from repo-local JSON file to DPAPI vault -- refresh tokens, tile API keys, and server connection info now stored in `%LOCALAPPDATA%\DiscoveryHelpers\Vault` with HMAC-SHA256 integrity; no sensitive data in the repo directory
+  * All 10 dashboard scripts (AWS, Azure, Bigleaf, Certificate, F5, Hyper-V, Lansweeper, Nutanix, Proxmox, VMware) now use `Resolve-DiscoveryCredential` for vault-first credential resolution; if credentials exist in the vault (from a prior Setup run), they are reused automatically; if not, the user is prompted interactively and the credential is saved to the vault for next time
+  * Lansweeper PAT prompt now uses `Resolve-DiscoveryCredential` with `-CredType BearerToken` (was plaintext `Read-Host` without `-AsSecureString`)
+  * Proxmox dashboard vault fallback added before falling through to plaintext Username/Password prompts
+  * AWS/Azure dashboards try vault before accepting plaintext parameter strings
+  * All changed files re-signed (Authenticode code-signing certificate)
+
+* Fixed
+  * `Invoke-WUGModuleTest.ps1` -- Passive monitor tests were not cleaning up after themselves; `$script:PassiveMonitorNames` was never initialized causing cleanup loop to silently skip all monitor deletions; now initialized as `List[string]` alongside `$script:PassiveMonitorIds` and populated on each `Add-WUGPassiveMonitor` call; cleanup uses new `Remove-WUGPassiveMonitor` with a catch-all `WhatsUpGoldPS-Test-` search to also remove orphans from prior runs
+  * `Invoke-WUGModuleTest.ps1` -- `Get-WUGActiveMonitor (templates)` test returned null because function without `-IncludeAssignments` falls through to global assignments endpoint which can be empty; added `-IncludeAssignments` to the test call
 
 ## 0.1.19/20 - 2026-03-15 [Released to PowerShell Gallery]
 * Added  -- New Functions (85 total exports; psm1 and psd1 in sync)

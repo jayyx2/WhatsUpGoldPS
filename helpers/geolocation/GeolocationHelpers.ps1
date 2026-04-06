@@ -35,8 +35,7 @@ public static class GeoSSLValidator {
             new RemoteCertificateValidationCallback(OnValidateCertificate);
         ServicePointManager.Expect100Continue = false;
         ServicePointManager.DefaultConnectionLimit = 64;
-        ServicePointManager.SecurityProtocol =
-            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
     }
 }
 "@
@@ -178,7 +177,7 @@ function Connect-GeoWUGServer {
         _Expiry        = (Get-Date).AddSeconds($token.expires_in)
     }
 
-    Write-Output "Connected to ${ServerUri}. Token expires at $($config._Expiry)."
+    Write-Verbose "Connected to ${ServerUri}. Token expires at $($config._Expiry)."
     return $config
 }
 
@@ -213,8 +212,8 @@ function Get-GeoDevicesWithLocation {
         # Find the group
         $groupResult = Invoke-GeoAPI -Config $Config -Endpoint "/api/v1/device-groups/-?search=$([uri]::EscapeDataString($GroupName))&limit=250"
         $groupId = $null
-        if ($groupResult.data) {
-            foreach ($g in $groupResult.data) {
+        if ($groupResult.data.groups) {
+            foreach ($g in $groupResult.data.groups) {
                 if ($g.name -eq $GroupName) { $groupId = $g.id; break }
             }
         }
@@ -222,21 +221,21 @@ function Get-GeoDevicesWithLocation {
             Write-Warning "Device group '$GroupName' not found. Falling back to all devices."
         }
         else {
-            $deviceResult = Invoke-GeoAPI -Config $Config -Endpoint "/api/v1/device-groups/$groupId/devices/-?limit=250"
-            if ($deviceResult.data) {
-                $devices = $deviceResult.data
+            $deviceResult = Invoke-GeoAPI -Config $Config -Endpoint "/api/v1/device-groups/$groupId/devices/-?view=overview&limit=250"
+            if ($deviceResult.data.devices) {
+                $devices = $deviceResult.data.devices
             }
         }
     }
 
     if ($devices.Count -eq 0 -and (-not $GroupName -or $GroupName -eq 'All' -or -not $groupId)) {
-        # Get all devices
+        # Get all devices from root group (id=0) with overview view for inline status
         $pageId = $null
         do {
-            $endpoint = "/api/v1/devices/-?limit=250"
+            $endpoint = "/api/v1/device-groups/0/devices/-?view=overview&limit=250"
             if ($pageId) { $endpoint += "&pageId=$pageId" }
             $result = Invoke-GeoAPI -Config $Config -Endpoint $endpoint
-            if ($result.data) { $devices += $result.data }
+            if ($result.data.devices) { $devices += $result.data.devices }
             $pageId = $result.paging.nextPageId
         } while ($pageId)
     }
@@ -290,23 +289,21 @@ function Get-GeoDevicesWithLocation {
             }
 
             if ($null -ne $lat -and $null -ne $lng) {
-                # Get device status for state info
-                $statusResult = $null
-                try {
-                    $statusResult = Invoke-GeoAPI -Config $Config -Endpoint "/api/v1/devices/$deviceId/status"
-                } catch { }
-
-                $bestState  = if ($statusResult.data) { $statusResult.data.bestState }  else { 'Unknown' }
-                $worstState = if ($statusResult.data) { $statusResult.data.worstState } else { 'Unknown' }
+                # Status is already available from the overview view (no extra API call)
+                $bestState  = if ($device.bestState)  { $device.bestState }  else { 'Unknown' }
+                $worstState = if ($device.worstState) { $device.worstState } else { 'Unknown' }
 
                 $geoDevices += [PSCustomObject]@{
-                    Type       = 'Device'
-                    Name       = if ($device.name) { $device.name } elseif ($device.displayName) { $device.displayName } else { "Device $deviceId" }
-                    DeviceId   = $deviceId
-                    Latitude   = $lat
-                    Longitude  = $lng
-                    BestState  = $bestState
-                    WorstState = $worstState
+                    Type                  = 'Device'
+                    Name                  = if ($device.name) { $device.name } elseif ($device.displayName) { $device.displayName } else { "Device $deviceId" }
+                    DeviceId              = $deviceId
+                    Latitude              = $lat
+                    Longitude             = $lng
+                    BestState             = $bestState
+                    WorstState            = $worstState
+                    TotalMonitors         = if ($device.totalActiveMonitors) { $device.totalActiveMonitors } else { 0 }
+                    DownMonitors          = if ($device.totalActiveMonitorsDown) { $device.totalActiveMonitorsDown } else { 0 }
+                    DownMonitorDetails    = if ($device.downActiveMonitors) { $device.downActiveMonitors } else { @() }
                 }
             }
         }
@@ -343,7 +340,7 @@ function Get-GeoGroupsWithLocation {
         $endpoint = "/api/v1/device-groups/-?limit=250&view=detail"
         if ($pageId) { $endpoint += "&pageId=$pageId" }
         $result = Invoke-GeoAPI -Config $Config -Endpoint $endpoint
-        if ($result.data) { $groups += $result.data }
+        if ($result.data.groups) { $groups += $result.data.groups }
         $pageId = $result.paging.nextPageId
     } while ($pageId)
 
@@ -468,8 +465,18 @@ function Export-GeolocationMapHtml {
         Default map center longitude (default: -98.5795 - center of US).
     .PARAMETER DefaultZoom
         Default map zoom level (default: 5).
+    .PARAMETER TileApiKeys
+        Optional hashtable of tile provider API keys to embed in the HTML file.
+        Supported keys: thunderforest, stadia, maptiler, here, mapbox, jawg, tomtom, openweathermap.
+        NOTE: Keys passed here are written in plaintext to the output HTML (opt-in).
+        For better security, omit this parameter and enter keys via the map's
+        Settings > API Keys panel instead. Keys entered in-browser are stored in
+        localStorage (never written to disk in the HTML file).
     .EXAMPLE
         Export-GeolocationMapHtml -Data $geoData -OutputPath "C:\Maps\WUG-Map.html"
+    .EXAMPLE
+        $keys = @{ thunderforest = 'abc123'; stadia = 'xyz789' }
+        Export-GeolocationMapHtml -Data $geoData -OutputPath "C:\Maps\WUG-Map.html" -TileApiKeys $keys
     #>
     param(
         [Parameter(Mandatory)][array]$Data,
@@ -478,7 +485,8 @@ function Export-GeolocationMapHtml {
         [string]$WugBaseUrl = '',
         [double]$DefaultLat  = 39.8283,
         [double]$DefaultLng  = -98.5795,
-        [int]$DefaultZoom    = 5
+        [int]$DefaultZoom    = 5,
+        [hashtable]$TileApiKeys
     )
 
     if (-not $TemplatePath) {
@@ -488,7 +496,7 @@ function Export-GeolocationMapHtml {
         throw "Template not found: $TemplatePath"
     }
 
-    $template = Get-Content -Path $TemplatePath -Raw
+    $template = [System.IO.File]::ReadAllText($TemplatePath)
 
     # Build JSON data
     $jsonData = ConvertTo-Json -InputObject @($Data) -Depth 5 -Compress
@@ -504,6 +512,19 @@ function Export-GeolocationMapHtml {
     $html = $html.Replace('%%WUG_BASE_URL%%', $WugBaseUrl)
     $html = $html.Replace('%%GENERATED_AT%%', (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
 
+    # Inject tile provider API keys
+    if ($TileApiKeys -and $TileApiKeys.Count -gt 0) {
+        $keysObj = @{}
+        foreach ($k in $TileApiKeys.Keys) {
+            $keysObj[$k.ToLower()] = $TileApiKeys[$k]
+        }
+        $keysJson = (ConvertTo-Json -InputObject $keysObj -Compress) -replace "'", "\\'"
+        $html = $html.Replace('%%API_KEYS%%', $keysJson)
+    }
+    else {
+        $html = $html.Replace('%%API_KEYS%%', '')
+    }
+
     # Write output
     $outputDir = Split-Path $OutputPath -Parent
     if ($outputDir -and -not (Test-Path $outputDir)) {
@@ -511,15 +532,270 @@ function Export-GeolocationMapHtml {
     }
     Set-Content -Path $OutputPath -Value $html -Encoding UTF8
 
-    Write-Output "Geolocation map exported to: $OutputPath"
+    Write-Verbose "Geolocation map exported to: $OutputPath"
     return $OutputPath
+}
+
+# --- Import device locations from CSV and set attributes ---
+function Set-GeoDeviceLocations {
+    <#
+    .SYNOPSIS
+        Reads a CSV file and sets geolocation attributes on matching WhatsUp Gold devices.
+    .DESCRIPTION
+        Imports a CSV with columns DeviceName (or IP), Latitude, Longitude and writes
+        those coordinates to each matched device as custom attributes in WhatsUp Gold.
+
+        Supports two attribute modes:
+        - LatLong (default): writes a single "LatLong" attribute with value "lat,lng"
+        - Separate: writes individual "Latitude" and "Longitude" attributes
+
+        Device matching is done by searching the WUG device list by name or IP.
+        A detailed summary report is returned showing what was set and any misses.
+    .PARAMETER Config
+        The configuration hashtable from Connect-GeoWUGServer.
+    .PARAMETER CsvPath
+        Full path to the CSV file. Required columns: DeviceName, Latitude, Longitude.
+        Optional column: IP (used as fallback search if DeviceName match fails).
+    .PARAMETER UseSeparateAttributes
+        If set, writes "Latitude" and "Longitude" as separate attributes instead of
+        a single "LatLong" attribute.
+    .PARAMETER WhatIf
+        Show what would be changed without making any API calls.
+    .OUTPUTS
+        Array of PSCustomObject summarising each row: DeviceName, DeviceId, Status, Detail.
+    .EXAMPLE
+        $results = Set-GeoDeviceLocations -Config $geo -CsvPath "C:\Data\device-locations.csv"
+    .EXAMPLE
+        Set-GeoDeviceLocations -Config $geo -CsvPath ".\locations.csv" -UseSeparateAttributes -WhatIf
+    #>
+    param(
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$CsvPath,
+        [switch]$UseSeparateAttributes,
+        [switch]$WhatIf
+    )
+
+    if (-not (Test-Path $CsvPath)) {
+        throw "CSV file not found: $CsvPath"
+    }
+
+    $csv = Import-Csv -Path $CsvPath
+    if ($csv.Count -eq 0) {
+        Write-Warning "CSV file is empty."
+        return @()
+    }
+
+    # Validate required columns
+    $headers = $csv[0].PSObject.Properties.Name
+    $hasName = $headers -contains 'DeviceName'
+    $hasIP   = $headers -contains 'IP'
+    $hasLat  = $headers -contains 'Latitude'
+    $hasLng  = $headers -contains 'Longitude'
+
+    if (-not $hasLat -or -not $hasLng) {
+        throw "CSV must have 'Latitude' and 'Longitude' columns."
+    }
+    if (-not $hasName -and -not $hasIP) {
+        throw "CSV must have at least a 'DeviceName' or 'IP' column."
+    }
+
+    # Pre-fetch all devices for matching (avoids N search calls)
+    Write-Verbose "Fetching full device list for matching..."
+    $allDevices = @()
+    $pageId = $null
+    do {
+        $endpoint = "/api/v1/device-groups/0/devices/-?view=overview&limit=250"
+        if ($pageId) { $endpoint += "&pageId=$pageId" }
+        $result = Invoke-GeoAPI -Config $Config -Endpoint $endpoint
+        if ($result.data.devices) { $allDevices += $result.data.devices }
+        $pageId = $result.paging.nextPageId
+    } while ($pageId)
+
+    Write-Verbose "Loaded $($allDevices.Count) devices for matching."
+
+    # Build lookup tables (name -> device, IP -> device)
+    $byName = @{}
+    $byIP   = @{}
+    foreach ($d in $allDevices) {
+        $devId = if ($d.id) { $d.id } else { $d.deviceId }
+        $devName = if ($d.name) { $d.name } elseif ($d.displayName) { $d.displayName } else { '' }
+        $devIP = if ($d.networkAddress) { $d.networkAddress } elseif ($d.hostName) { $d.hostName } else { '' }
+        if ($devName) { $byName[$devName.ToLower()] = @{ Id = $devId; Name = $devName; IP = $devIP } }
+        if ($devIP)   { $byIP[$devIP.ToLower()]     = @{ Id = $devId; Name = $devName; IP = $devIP } }
+    }
+
+    $results = @()
+    $totalRows = $csv.Count
+    $currentRow = 0
+
+    foreach ($row in $csv) {
+        $currentRow++
+        $pct = [Math]::Round(($currentRow / $totalRows) * 100, 0)
+        Write-Progress -Activity "Syncing device locations" -Status "$currentRow of $totalRows" -PercentComplete $pct
+
+        $csvName = if ($hasName -and $row.DeviceName) { $row.DeviceName.Trim() } else { '' }
+        $csvIP   = if ($hasIP -and $row.IP) { $row.IP.Trim() } else { '' }
+        $lat     = $row.Latitude.Trim()
+        $lng     = $row.Longitude.Trim()
+
+        # Validate coordinates
+        $latNum = 0.0; $lngNum = 0.0
+        if (-not [double]::TryParse($lat, [ref]$latNum) -or -not [double]::TryParse($lng, [ref]$lngNum)) {
+            $results += [PSCustomObject]@{
+                DeviceName = if ($csvName) { $csvName } else { $csvIP }
+                DeviceId   = $null
+                Status     = 'Skipped'
+                Detail     = "Invalid coordinates: $lat, $lng"
+            }
+            continue
+        }
+        if ($latNum -lt -90 -or $latNum -gt 90 -or $lngNum -lt -180 -or $lngNum -gt 180) {
+            $results += [PSCustomObject]@{
+                DeviceName = if ($csvName) { $csvName } else { $csvIP }
+                DeviceId   = $null
+                Status     = 'Skipped'
+                Detail     = "Coordinates out of range: $lat, $lng"
+            }
+            continue
+        }
+
+        # Match device
+        $matched = $null
+        if ($csvName) { $matched = $byName[$csvName.ToLower()] }
+        if (-not $matched -and $csvIP) { $matched = $byIP[$csvIP.ToLower()] }
+
+        if (-not $matched) {
+            $results += [PSCustomObject]@{
+                DeviceName = if ($csvName) { $csvName } else { $csvIP }
+                DeviceId   = $null
+                Status     = 'NotFound'
+                Detail     = "No matching device in WUG"
+            }
+            continue
+        }
+
+        $deviceId = $matched.Id
+        $displayLabel = if ($csvName) { $csvName } else { "$csvIP ($($matched.Name))" }
+
+        if ($WhatIf) {
+            $attrDesc = if ($UseSeparateAttributes) { "Latitude=$lat, Longitude=$lng" } else { "LatLong=$lat,$lng" }
+            $results += [PSCustomObject]@{
+                DeviceName = $displayLabel
+                DeviceId   = $deviceId
+                Status     = 'WhatIf'
+                Detail     = "Would set $attrDesc"
+            }
+            continue
+        }
+
+        # Set attributes via PATCH (upsert)
+        try {
+            if ($UseSeparateAttributes) {
+                $body = ConvertTo-Json -InputObject @{
+                    attributesToAdd = @(
+                        @{ name = 'Latitude';  value = $lat }
+                        @{ name = 'Longitude'; value = $lng }
+                    )
+                } -Depth 5 -Compress
+            }
+            else {
+                $body = ConvertTo-Json -InputObject @{
+                    attributesToAdd = @(
+                        @{ name = 'LatLong'; value = "$lat,$lng" }
+                    )
+                } -Depth 5 -Compress
+            }
+
+            $null = Invoke-GeoAPI -Config $Config `
+                -Endpoint "/api/v1/devices/$deviceId/attributes/-" `
+                -Method 'PATCH' -Body $body
+
+            $results += [PSCustomObject]@{
+                DeviceName = $displayLabel
+                DeviceId   = $deviceId
+                Status     = 'Updated'
+                Detail     = if ($UseSeparateAttributes) { "Lat=$lat, Lng=$lng" } else { "LatLong=$lat,$lng" }
+            }
+        }
+        catch {
+            $results += [PSCustomObject]@{
+                DeviceName = $displayLabel
+                DeviceId   = $deviceId
+                Status     = 'Error'
+                Detail     = $_.Exception.Message
+            }
+        }
+    }
+
+    Write-Progress -Activity "Syncing device locations" -Completed
+
+    # Summary
+    $updated  = @($results | Where-Object { $_.Status -eq 'Updated' }).Count
+    $notFound = @($results | Where-Object { $_.Status -eq 'NotFound' }).Count
+    $skipped  = @($results | Where-Object { $_.Status -eq 'Skipped' }).Count
+    $errors   = @($results | Where-Object { $_.Status -eq 'Error' }).Count
+    Write-Verbose "Sync complete: $updated updated, $notFound not found, $skipped skipped, $errors errors."
+
+    return $results
+}
+
+# --- Read geolocation config from the DPAPI vault ---
+function Import-GeolocationConfig {
+    <#
+    .SYNOPSIS
+        Reads the geolocation configuration and refresh token from the DPAPI vault.
+    .DESCRIPTION
+        Retrieves the Geolocation.Config bundle and Geolocation.RefreshToken
+        from the discovery vault, converts string fields to their proper types,
+        and returns a typed configuration hashtable.
+
+        Requires DiscoveryHelpers.ps1 to be loaded first (for vault functions).
+    #>
+    [CmdletBinding()]
+    param()
+
+    $raw = Get-DiscoveryCredential -Name 'Geolocation.Config'
+    if (-not $raw) {
+        throw "Geolocation config not found in vault. Run Setup-GeolocationConfig.ps1 first."
+    }
+
+    $refreshToken = Get-DiscoveryCredential -Name 'Geolocation.RefreshToken'
+    if (-not $refreshToken) {
+        throw "Geolocation refresh token not found in vault. Run Setup-GeolocationConfig.ps1 first."
+    }
+
+    # Extract tile API keys from TileApiKey.* fields
+    $tileApiKeys = @{}
+    foreach ($key in @($raw.Keys)) {
+        if ($key -like 'TileApiKey.*') {
+            $provider = $key.Substring('TileApiKey.'.Length)
+            $tileApiKeys[$provider] = $raw[$key]
+        }
+    }
+
+    @{
+        ServerUri        = $raw.ServerUri
+        Protocol         = $raw.Protocol
+        Port             = [int]$raw.Port
+        IgnoreSSL        = [System.Convert]::ToBoolean($raw.IgnoreSSL)
+        WugConsoleUrl    = $raw.WugConsoleUrl
+        RefreshToken     = $refreshToken
+        DefaultLat       = [double]$raw.DefaultLat
+        DefaultLng       = [double]$raw.DefaultLng
+        DefaultZoom      = [int]$raw.DefaultZoom
+        GroupName        = $raw.GroupName
+        UseBuiltinCoords = [System.Convert]::ToBoolean($raw.UseBuiltinCoords)
+        IncludeDevices   = [System.Convert]::ToBoolean($raw.IncludeDevices)
+        IncludeGroups    = [System.Convert]::ToBoolean($raw.IncludeGroups)
+        TileApiKeys      = $tileApiKeys
+    }
 }
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFjGFr4i1reMvb
-# tZ+WYG9nlgxy064Qh0pZ27XwrvLIXaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJPlA66qc4Tn2i
+# 12ColaHsiYYgtQKjezUpDiYPXAFshKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -619,17 +895,17 @@ function Export-GeolocationMapHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgJalNAP33zd4ybA1VDowy0LcpKfZ+Br+6
-# gSobMYr6Ka0wDQYJKoZIhvcNAQEBBQAEggIAWT01Lz3tiargUgqS9thEau0IHcgz
-# TBnMZRycdvMPa03z9L7YH+UsPv4cM7QZ35/X1M7FZFOjFy/En8WvgMNXU3ypGQyw
-# hk5gvVHQpgAjeFPHmHzbLJ1qsNwX9BFIh9C2WflG9h1nxkJMTeT/InwJdrhPrdGQ
-# EAZWICPWhjpnvBAP5bqiqbDKoHwMXQZqpr8e21L6SJX6AFhmE79Jlas86La6oePs
-# UEmkBcFV8uLvSeilqP5X8kVTizsPocSU+rb4Oa7mzYnydqfqjwBYQ5BKVFR6M5K7
-# 8iEThwd+JcWGY65yxc7cJiSVVifJbVo5EkklkSt5qctsQbEomo1jDsk/V9w6ARZ0
-# soy0HfUPaD2cSwE1XRk7VAko/TyHEIUp0wFgIRSbu6Pe5qCF5FSGrFdBEU8YNh8D
-# /lbPThxDZjjovRZhfVdJaKKgo9FrnW2jM9C36aJ7W4TXIHxc9fLhmLKrSrFSkjsw
-# EVef5D9MtAniLNxROUs8DsEu7gaosoPZ7wUIU9wLAerUWuudPTHA2ylPb9HNg7jA
-# /p2bLMwZyBNHGqhQZARqIZVnK/J9Uc3Bn6Z7pgJcOUuPAHV/FQ5SlZ619Gw20Ld2
-# vmDOpfWnb7R/YQW/G4NRBVxkHipKs5mKzIbdG1SHKltdkkqsB9TKvMgBjOuoQI7q
-# GlhQpcuNBnMIbaE=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgoioW9J6Tj1RcmpUI25E3Tov3DZ0XtI3C
+# cg4X5QBO69kwDQYJKoZIhvcNAQEBBQAEggIAVSAB7lq1Fe6VOhzDZ7sIGFWw9YeO
+# 6/8pPrjVrxOiwEWKRuXBhrHDefz2t3eq/mulmsLxSNkB6K5c0g/2ZS/S/bk9NahE
+# XBQhGPLABz+UCthWvRKLtwHMtQivUxFEw6D1Ag3mWHuh6y9thD8X5wFsdRIjp6md
+# tp22OtPOFu6caTRhkBua4oejrESibzsPS78VcyrmkhTxq/1rkewC623eGgwKxTbc
+# 65jue9fNDbXBw69CcNx0xFGqqIMSYriAw94pRwYEBrS1xvdBloYcWD4MJoPq7ndU
+# kpLmwJ1zF2PmVSF4EeGaw/lYJ1eoL+hlLEu+HnHvnmpPx6zJ/ZEpkXSCKW7EMw6W
+# EpO+Z7UQgcEJF5ZLhtEHc87tcO56aPTkEzHoWnEBIgbd07SNmJiG46TeqfYyxM6L
+# 0MtiLHdZdpBEe2zU9PB7sW29uIpg3qrCVPqTxlCQ5wD9kmmXFbi97NX+UNSobS+P
+# WqTY1Y7844D0+zNHRtPQZqgicQFY+hi++WO5lNozzKny5mLXnR+MGz9NtXfDCUkQ
+# LGYyPlbYTAWlUvqMpoMBOjq4QBa4Z+0GLCX1D05vj5QjTWOFX4uWXTYcoTeJCkqm
+# 4LW4pUUKMs5XjyxJVd/sX58I2ywpD9h/50jjCHzL1SLkSiz5CJoqCICAyoN2pfxB
+# rUZFBp+3xrQLi0Y=
 # SIG # End signature block

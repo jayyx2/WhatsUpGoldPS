@@ -149,7 +149,7 @@
     (restapi) Auth type. 0=Basic, 1=OAuth2. Default: 0.
 
 .PARAMETER RestApiGrantType
-    (restapi) OAuth2 grant type. 1=Password, 2=AuthorizationCode. Default: empty.
+    (restapi) OAuth2 grant type. 0=ClientCredentials, 1=Password, 2=AuthorizationCode. Default: empty.
 
 .PARAMETER RestApiAuthorizeUrl
     (restapi) OAuth2 authorization URL. Default: empty.
@@ -502,22 +502,33 @@ function Add-WUGCredential {
             }
 
             'restapi' {
+                # Build property bags conditionally based on auth type.
+                # AuthType '0' = Basic/None (Username + Password only).
+                # AuthType '1' = OAuth2 (needs token URL, client creds, etc.).
+                # Sending empty OAuth2 bags with Basic auth causes 400 errors.
                 $bags = @(
-                    @{ name = 'CredRestAPI:Username';                              value = "$RestApiUsername" }
-                    @{ name = 'CredRestAPI:Password';                              value = "$RestApiPassword" }
-                    @{ name = 'CredRestAPI:Authtype';                              value = "$RestApiAuthType" }
-                    @{ name = 'CredRestAPI:GrantType';                             value = "$RestApiGrantType" }
-                    @{ name = 'CredRestAPI:AuthorizeUrl';                          value = "$RestApiAuthorizeUrl" }
-                    @{ name = 'CredRestAPI:TokenUrl';                              value = "$RestApiTokenUrl" }
-                    @{ name = 'CredRestAPI:ClientId';                              value = "$RestApiClientId" }
-                    @{ name = 'CredRestAPI:ClientSecret';                          value = "$RestApiClientSecret" }
-                    @{ name = 'CredRestAPI:Scope';                                 value = "$RestApiScope" }
-                    @{ name = 'CredRestAPI:OptionalParams';                        value = "$RestApiOptionalParams" }
-                    @{ name = 'CredRestAPI:PwdGrantUserName';                      value = "$RestApiPwdGrantUserName" }
-                    @{ name = 'CredRestAPI:PwdGrantPassword';                      value = "$RestApiPwdGrantPassword" }
-                    @{ name = 'CredRestAPI:IgnoreCertificateErrorsForOAuth2Token'; value = "$RestApiIgnoreCertErrors" }
-                    @{ name = 'CredRestAPI:RefreshToken';                          value = "$RestApiRefreshToken" }
+                    @{ name = 'CredRestAPI:Username'; value = "$RestApiUsername" }
+                    @{ name = 'CredRestAPI:Password'; value = "$RestApiPassword" }
+                    @{ name = 'CredRestAPI:Authtype'; value = "$RestApiAuthType" }
                 )
+                if ($RestApiAuthType -eq '1') {
+                    # OAuth2 fields
+                    $bags += @(
+                        @{ name = 'CredRestAPI:GrantType';     value = "$RestApiGrantType" }
+                        @{ name = 'CredRestAPI:AuthorizeUrl';  value = "$RestApiAuthorizeUrl" }
+                        @{ name = 'CredRestAPI:TokenUrl';      value = "$RestApiTokenUrl" }
+                        @{ name = 'CredRestAPI:ClientId';      value = "$RestApiClientId" }
+                        @{ name = 'CredRestAPI:ClientSecret';  value = "$RestApiClientSecret" }
+                        @{ name = 'CredRestAPI:Scope';         value = "$RestApiScope" }
+                        @{ name = 'CredRestAPI:OptionalParams';        value = "$RestApiOptionalParams" }
+                        @{ name = 'CredRestAPI:PwdGrantUserName';      value = "$RestApiPwdGrantUserName" }
+                        @{ name = 'CredRestAPI:PwdGrantPassword';      value = "$RestApiPwdGrantPassword" }
+                        @{ name = 'CredRestAPI:RefreshToken';          value = "$RestApiRefreshToken" }
+                    )
+                }
+                # Always include cert-error flag with a valid default
+                $certVal = if ($RestApiIgnoreCertErrors) { "$RestApiIgnoreCertErrors" } else { 'False' }
+                $bags += @{ name = 'CredRestAPI:IgnoreCertificateErrorsForOAuth2Token'; value = $certVal }
             }
 
             'ByProperties' {
@@ -538,6 +549,7 @@ function Add-WUGCredential {
                     'snmpV1'       { 'snmpv1'  }
                     'snmpV2'       { 'snmpv2'  }
                     'snmpV3'       { 'snmpv3'  }
+                    'restapi'      { 'rest api' }
                     'ByProperties' { $Type     }
                     default        { $PSCmdlet.ParameterSetName }
                 }
@@ -547,7 +559,7 @@ function Add-WUGCredential {
         }
 
         Write-Debug "POST URI: $uri"
-        Write-Debug "Body: $Body"
+        Write-Debug "Body: [REDACTED - credential payload]"
 
         if (-not $PSCmdlet.ShouldProcess($Name, 'Add credential')) { return }
 
@@ -574,8 +586,8 @@ function Add-WUGCredential {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtY0Z9VwendGN5
-# XO1WVFtNUlTeAibKdd17f1Z0HtnWDaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPy6DwkYcQjv6H
+# AM8HSidf3CtBDYs8j6s6wEC16UqvBKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -675,17 +687,17 @@ function Add-WUGCredential {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgIf6p6v388Bw/jRi9tAB2Y0Eflb0R/EWi
-# UgWipoZs0MIwDQYJKoZIhvcNAQEBBQAEggIA3HH8HnxRqxQhr4wTERp4JAbsUiiG
-# nSheHhc6TtdcQVb+6CM167BC31utbS3IVlC0TNeIMAzjtht3zLh1qLBcUIc+PU3s
-# zojN1cXqeLaYrHpIJrher8TBJHghX6EHptpKVKOAECfbfmG5s8Iy3IB9VlWUlAeI
-# nk6s9+d8DiQYSJSquO7Dxm5wrFBr3s7OOeJQ4Msutsi5APkhO3Fb+WnZnRKasAkX
-# CEisoeemLPyNruvp5QedDsuYFR9Zf2Ik8qZOBFwbLeIOvv4y+A2K4HBf9tFDRg+x
-# Vwey+uEfAIJanwJ67rQpeHbv4TjEWGiuKH9bnwTsPyOa/0p1Jpyu9JkVdSE53kcM
-# LcL8ehko/btOzjuIpLIqeLeBwu92VVd1F/j+OIo411efQnvnrBW9xOMAS6k2WlYY
-# n20dM9b2GKXGTFNO7VU2NBLgOA9m2G0/+QMPGxV9HUNFBWAygFkALGSYTVLU++LD
-# VDZO8GUxKHFLnl48awMoniZMCnoy6Qw2ocsaGhnYQEDHOLUPAl9PQO3K46H/L4oh
-# Z7rkQRwxlzG3xQmkWVLeC+27iWLpxCYrWJlUxciYyjgg2npOA/KC/h+4sKBuKZmi
-# cCOx/g2yvcjZephrVijdIw6qREZlLi0UwAHV96056C2HEveoPBwyFs2pPAfAuTgj
-# C9oBlooAOj3pBF8=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgwzOStc8d+9LY2JIOuuBbzS5jPdHAcEPe
+# LLL+g3uf7xYwDQYJKoZIhvcNAQEBBQAEggIABCXK0cXRiE96r4+wofDWt+3mNplL
+# vSONG9OXzqgdIp1816Ie5Bbi5qMPtMTBQQEmuUOLEHqXguGlTcX11ZwFgj7kBFtf
+# GuDnc6maX/3qS6fidcbArYJ+PDG/AWa7kODY0A9px6Eoanmb4wA8v3rF3CAciS8o
+# UY3VxuiPGXZ6kp/X50yNkE6zfFcQQYgl7wtlhcnS0q1fvCxgGYOK+Weh0mRVJlW9
+# ByLVCW7wi9NS3HLj+KXHklUdtzI/C0PMVlsrTpg3bUkNqxlmOzndgQ1b+VKdjORs
+# F9UBB7On2Bf7W8DZ6WkDrhCwKtGHKZa1ae3XLtTtZ7kX9XuLdayv1p32QPVVVCyN
+# FgEgb1UVEQ86aWTasdHQz3k0c2e/yNXEWCGF1l7xQzZxuenwkUdry2ryGpsaPySX
+# Ub30ahoaEYbiIVoaai2kxiPBR0/Wq9NeQw1VUIbZ45jHwHYWI+JXMaCs8W3KhZPn
+# z4hLB7fAWOx6RPUNUzBr3wciV0C2/P2mLOmOuj3uG02bdUjiTGOCzFwJZZ6s7X+d
+# zAx9c+Ue90eSwkASqFnu4p9tRK62MliuXvX2VdzTRlHAf0OYwSf/NZqMMh6lqo7y
+# RKlnbxxVDnwKWykBsl1fRhsaKS5YcwItqWDWFffipC4IwHYxxP0HhHffePF73TQ+
+# HdHDnVz1b8toMwg=
 # SIG # End signature block

@@ -54,7 +54,7 @@ function Get-WUGAPIResponse {
         Write-Debug "Starting Get-WUGAPIResponse function"
         Write-Debug "URI: $Uri"
         Write-Debug "Method: $Method"
-        Write-Debug "Body: $Body"
+        Write-Debug "Body length: $(if ($Body) { $Body.Length } else { 0 }) chars"
 
         # Global variables error checking
         if (-not $global:WUGBearerHeaders) {
@@ -66,14 +66,25 @@ function Get-WUGAPIResponse {
             Connect-WUGServer
         }
 
-        # Ignore SSL errors if flag is present
+        # Ignore SSL errors if flag is present (reuse the hostname-scoped callback set by Connect-WUGServer)
         if ($global:ignoreSSLErrors) {
             if ($PSVersionTable.PSEdition -eq 'Core') {
                 $Script:PSDefaultParameterValues["Invoke-RestMethod:SkipCertificateCheck"] = $true
                 $Script:PSDefaultParameterValues["Invoke-WebRequest:SkipCertificateCheck"] = $true
             }
-            else {
-                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+            elseif (-not [System.Net.ServicePointManager]::ServerCertificateValidationCallback) {
+                # Re-apply the hostname-scoped callback if it was cleared (e.g. by another module)
+                if ($global:_WUGAllowedSSLHosts) {
+                    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {
+                        param($sender, $certificate, $chain, $sslPolicyErrors)
+                        if ($sslPolicyErrors -eq [System.Net.Security.SslPolicyErrors]::None) { return $true }
+                        if ($sender -is [System.Net.HttpWebRequest]) {
+                            $reqHost = ([System.Uri]$sender.RequestUri).Host.ToLower()
+                            if ($global:_WUGAllowedSSLHosts -contains $reqHost) { return $true }
+                        }
+                        return $false
+                    }
+                }
             }
             Write-Verbose "Ignoring SSL certificate validation errors."
         }
@@ -96,10 +107,10 @@ function Get-WUGAPIResponse {
                 $global:WUGRefreshToken = $newToken.refresh_token
                 $global:expiry = (Get-Date).AddSeconds($newToken.expires_in)
 
-                Write-Output "Refreshed authorization token which now expires at $($global:expiry.ToUniversalTime()) UTC."
+                Write-Verbose "Refreshed authorization token. Expires at $($global:expiry.ToUniversalTime()) UTC."
             }
             catch {
-                $errorMessage = "Error refreshing token: $($_.Exception.Message)`nURI: $refreshTokenUri"
+                $errorMessage = "Error refreshing token: $($_.Exception.Message)"
                 Write-Error -Message $errorMessage
                 throw $errorMessage
             }
@@ -140,7 +151,7 @@ function Get-WUGAPIResponse {
                     $reader.Close()
                     $stream.Close()
 
-                    $errorMessage = "HTTP Error $statusCode ($statusDescription): $responseBody`nURI: $Uri`nMethod: $Method`nBody: $Body"
+                    $errorMessage = "HTTP Error $statusCode ($statusDescription): $responseBody`nURI: $Uri`nMethod: $Method"
                     Write-Error $errorMessage
 
                     if ($statusCode -eq 401 -and $retryCount -lt $maxRetries) {
@@ -162,13 +173,13 @@ function Get-WUGAPIResponse {
                             $global:WUGRefreshToken = $newToken.refresh_token
                             $global:expiry = (Get-Date).AddSeconds($newToken.expires_in)
 
-                            Write-Output "Refreshed authorization token which now expires at $($global:expiry.ToUniversalTime()) UTC."
+                            Write-Verbose "Refreshed authorization token. Expires at $($global:expiry.ToUniversalTime()) UTC."
                             # Update retry count and continue
                             $retryCount++
                             continue  # Retry the request
                         }
                         catch {
-                            $refreshError = "Error refreshing token after 401 Unauthorized: $($_.Exception.Message)`nURI: $refreshTokenUri"
+                            $refreshError = "Error refreshing token after 401 Unauthorized: $($_.Exception.Message)"
                             Write-Error -Message $refreshError
                             throw $refreshError
                         }
@@ -180,14 +191,14 @@ function Get-WUGAPIResponse {
                 }
                 else {
                     # No response from server
-                    $errorMessage = "Network error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method`nBody: $Body"
+                    $errorMessage = "Network error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method"
                     Write-Error $errorMessage
                     throw $errorMessage
                 }
             }
             catch {
                 # Other exceptions
-                $errorMessage = "Error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method`nBody: $Body"
+                $errorMessage = "Error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method"
                 Write-Error $errorMessage
                 throw $errorMessage
             }
@@ -202,8 +213,8 @@ function Get-WUGAPIResponse {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCrqodqcJ4mRlF
-# 7x0XYqc/SNLp6wQCDovXlRe5idObvKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfBQEtcVaOoxVA
+# zGr8/Rawduojv32zXr7Wkdv/G91iIaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -303,17 +314,17 @@ function Get-WUGAPIResponse {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgO69MyhO1IU6ka9fpUGmVA/ViENQxjBq7
-# Suwys6cZ/d0wDQYJKoZIhvcNAQEBBQAEggIAl9HSqTyvKzgvut3Asc3Ow81A24cr
-# wfhtqHlFTbs8/f8jr5jfLSjzqFdz6OezRcfBHO8TqD3swzIeGlPtjs2VZxh95Ho5
-# 9AM3lfFZNEeqh2eich8J0TFUo6YQhu+xjvZ1pt0cGvvIBE7v1x6yjwjZUg8wYGWu
-# XYr/ESAW2ZKKcWKg+N0Q+LlHD+urInzx4d+3D/d/wufQwNbA8KT8NZbtwqvYjLpt
-# IpqdGV+4IAzxBHCPvAKXF221s07nH19KSfFiP//M7Z7dNhvXqm7545Rd0EZ1KUjv
-# AGmkoCaRu9/nqsqSSnhBouDB3py0C55He5/nB0tYdE1f71H7iYYitNkQzhC/DwKZ
-# qyx1RIpVZ3GFtQB8prbAKGBqyUCpaW4kXZD7W8oDcFlMrq/OrguHX4PAPPNEworP
-# 5XCCXMs3iRvQkx6bSRxzxbMVJOYH/FMgvfqZPhDCISTeTWBWSQd2f5DdHCPaC8k0
-# cbb9cJpdCFNrPLpN0RbHsxz9CO3y3dgrJ4CjllyU0mdQeEErnBZehA9wQqwAn41Y
-# oq4khpDWDLulGLsd7IREs4W47+tfFPAOYJpILWYDMhM1YyPv77tAz9t5YphpRjpQ
-# OP/H9NbW+kMy8om1Iq6gRQU3mE4iL9s2tR73gRL50OMOlYQGU0IhcdlmL6/ve6eX
-# 2It+YOv9A8/JYPI=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgoDVb2I+GtpjHS2xNlXuNlQfS+S4CGvEG
+# 9iZwWdOiuoMwDQYJKoZIhvcNAQEBBQAEggIA6/3d6zqOxhlkz8o3rwxd1haCMM4e
+# KKWyIRECFzD8ooabX/7vguUj6XMbsNZcwQwTCMS1xsLQcXqnF9X4LqH8Ba5xuyUl
+# L2SGY1oxQO19HA9XV8STbcMQqEksOMQelaGm8R4BSjEd1//jg5fDtzb0SrLhOdrG
+# Xn0Loi12CbuqFSbwOScs03GXpbwQHFQEsF1WlUazz4J/ab9SqiR6vt49yQanXhwT
+# iFr4olsMnXzeqCyX6g3w+nIrJ77hI/PBVYFwHP2nPww+IgI5PexgBcp3jq7XiPD4
+# 1vtXfpjsbRbyPf7Vx6elF7NJ6E58cDNLcHeqthfumkKuwi+oguk2WimvCPIcZpU8
+# IZyKMky+UG8/u5Y5rFRCfF+bcr5X7iYURL3XX4NH9cm4B6tJBKjuqcJTK7uQtZcl
+# BF/a40MD9adTjQqNsUOeZSr5Je3RgB6dle8doX5GvhwBSqppxl2noYsXGxdaMOBw
+# x7DPO1kWzfrqCDsjbfLEmc4vsX11CuFLEBMe4vnIvdW81q00Dnn+EHOKP/ExuJUR
+# 1P6SL04KaQA0TVdfnO288g95AJsdMQYSlmMPJ1JGDgSvSevWdTuVG+AzfgpA5o2u
+# BV6uFI6QjiMjmvPduCfVNzX03BByJWs2aNVLKwR2TtR4IdeenWhiSAEcxDhrwaq1
+# dB8OtdFJFSRJ2jQ=
 # SIG # End signature block

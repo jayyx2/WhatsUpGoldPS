@@ -1,12 +1,5 @@
 ﻿# Specify the hostname or IP to your vCenter server(s)
 $vCenterServer = "192.168.23.60"
-#Specify the WhatsUp Gold IP Address or Hostname
-$WUGServer = "192.168.1.250"
-
-#Set your VMware Cred
-if(!$VMwareCred){$VMwareCred = (Get-Credential -UserName "administrator@vsphere.local")}
-#Set your WhatsUp Gold Cred
-if(!$WUGCred){$WUGCred = (Get-Credential -UserName "admin")}
 
 # Check if the WhatsUpGoldPS module is loaded, and if not, import it
 if (-not (Get-Module -Name WhatsUpGoldPS)) {Import-Module WhatsUpGoldPS}
@@ -16,6 +9,17 @@ if (-not (Get-Module -Name VMware.VimAutomation.Cis.Core)) {Import-Module VMware
 if (-not (Get-Module -Name VMware.VimAutomation.Common)) {Import-Module VMware.VimAutomation.Common}
 if (-not (Get-Module -Name VMware.VimAutomation.Core)) {Import-Module VMware.VimAutomation.Core}
 if (-not (Get-Module -Name VMware.VimAutomation.Sdk)) {Import-Module VMware.VimAutomation.Sdk}
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# Resolve credentials from vault
+if(!$VMwareCred){ $VMwareCred = Resolve-DiscoveryCredential -Name "VMware.$vCenterServer.Credential" -CredType PSCredential -ProviderLabel 'VMware vCenter' -AutoUse }
+if(!$VMwareCred){ throw "VMware credentials are required. Store them in the vault first." }
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
 
 Connect-VIServer $vCenterServer -Credential $VMwareCred
 Connect-WUGServer -serverUri $WUGServer -Credential $WUGCred -Protocol https -IgnoreSSLErrors
@@ -126,8 +130,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLtIZjSkDko06g
-# SC1kEggOXPTHF5uSlWpODGz0PoN7u6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMt65NM/o1BpH/
+# S+NV6p0cB6NDAIGBBW0e6i4g7jjSd6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -227,17 +231,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgJmkFipgHm+fw8dmyPX+3hfKCcg69Xc+y
-# kNL5wfBdZdowDQYJKoZIhvcNAQEBBQAEggIAh3O1trb4n7/V2eqkt/0rAuKqEd9L
-# 8iRfAT1gq+X3gpcz+BUh7R+c535huuIPly6dWkWdWa/ggNVIMKOLt7x5u110FHEY
-# y05NFFW1pm0voBqcNSaRdqMotyO/DpQCoEf44r6+yxfZpTWWlfCMh9l6ys9mVXiJ
-# NH+4tyaRZngFZ+xn+RPP4swZtwALRY/gTR6oiZLkHiYLVhq6AHXQHVulSot+WIXs
-# u1uHRUAzhkLFA9NESDeWxHcCoEUcIy4sK3LuLnl68kYpMO6yhFhBHzDo7QEjRJG2
-# KUOjsIIdeOplqqwBoIGG8DjMeW6U+zvhaia/Z/nNzLMB4Iar8Reu50G2Yetu9yee
-# 668DGQa4mNkDw+u4RvdpFepH1yTHgG5nJ8o59YfGvGh3YrIVdPr2SpaQ0YBHt/MP
-# 0fDCyO4nGG+1EfsWzAPUZaIML6ojmvyZ0zRzgVI/rFFv2E5QARm33uWm/H9QEPaf
-# wJjGBlgg0Z1JjQlKQDY4ylOaLTzhDWqZaC8SCmwa2cKVneWt4rz3t2y1SwQTcwBl
-# B4jfflCAaF6mYv4mQAmNdXIzLY8wsKsl7pH2XZ+39pmhFBEifFZlPsUX9miMAwXd
-# xRCLyxMXv/hGHKW5ZKVVtGuVhsGsGwnGeVjdlJAQUb9EM9Edm/UWK8ahS7zRAeQu
-# 6yMSlY+9BK+pdTY=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgqoP7hLTsiJQZpdm27kOBXV846RDc/PX4
+# UwIm4OdQvwYwDQYJKoZIhvcNAQEBBQAEggIA43h0PZpG93NDOBq4lX2V5RD2h/k9
+# qnAYYDMxdoqusSlT91t2npSSQ9F1QF8W19fyXX/70FFOFx96C13zl0mMFw09HdPi
+# n8yE5Ezlkye15BwfdiA7FpKslw9istX96P0z73FLc4N8tiHGrd3WKmao0zAoSQd2
+# h1ifMoLUxKwSwox8ZsbuRT3jEg4HlpEfm5SN/GUr82/t5bbE2fm46v1aNN+O+bQU
+# ERbHlBuId+3TCvfFc5piCVANjtkn6evFkHz0U7ftjS0ZoAVorY3zWvXBOkmVuQwC
+# r0NWLQPKvryoiSn74yq4sgOSaDKMZKq/fICTi2DUCEufdaVf71NraH/QBnJol0Qi
+# 2BMyTfgNealt+QPJxYM2qGOljwQ6i33bbQimFn5uDCuBzKuf8Bma3pt5BAxP9Q+J
+# CfzitAxjaHBSQ7SP6B760i1DSqR38FeIxVcnQe7/1ZNY9OBJ/VcYZiGQ73+UPbm2
+# kttA3sQRysjGtg44v4Y+30ob/SldpKNHwRKlmVGp5P7drhMSU4hqrjHN8jJchP6C
+# FZRFNTMYZbaoqedp46OkYcVwaL3VpH9KxrJ20rfvzOmXe5by3CB0vl5qXOzQfr+z
+# r8iP0XQxRwqaRRutMQu3bdWUD85AkHOEWY9uOY2nuXznHiB9NU9+TaY1pLwbxwGO
+# HhfY0WIrLJtsAI4=
 # SIG # End signature block

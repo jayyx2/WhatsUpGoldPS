@@ -58,7 +58,7 @@
     This function iterates each DeviceId x MonitorId combination, one POST per pair.
 #>
 function Add-WUGPerformanceMonitorToDevice {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Position = 0, Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [Alias('id')]
@@ -106,6 +106,8 @@ function Add-WUGPerformanceMonitorToDevice {
                 Write-Debug "URI: $uri"
                 Write-Debug "Body: $body"
 
+                if (-not $PSCmdlet.ShouldProcess("Device $dId", "Assign performance monitor $mId")) { continue }
+
                 try {
                     $result = Get-WUGAPIResponse -Uri $uri -Method "POST" -Body $body
 
@@ -134,8 +136,8 @@ function Add-WUGPerformanceMonitorToDevice {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAb909rMeGJ5ugm
-# 29Mm0Trf9KRk3xG5bF86UmayFWBWZqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvE+eH3nCkGtJK
+# 8lFMdCt21IYoP5Z0obixEayd/9l04KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -235,17 +237,17 @@ function Add-WUGPerformanceMonitorToDevice {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgWHO/vlbRkNWf8FloyQoDIVtGdALogYjj
-# P2EtPmkBe1EwDQYJKoZIhvcNAQEBBQAEggIA8Yp4YQ1FE4tWjCKtd1jVIsegWPOI
-# 9U7bz6Fq95wyaT3phaDQbQHiDxMx0S1jT5pxEp51zWQOLUnIKM79bgyW+qIIK6la
-# Wwm/Xm4Q4E2JOwjtGuybxFO/kL+lg1BDuI742kwW9Mmu/sc6d6nL+Eqe7siWMP4K
-# VTnPri94Ge7g8e0DG2WOAGrOk5BqXhicMFj12jzu2pwHSRAjfgpjqdMQDLL1rP6c
-# Wt/ybJQLwpUP9AS52lDf6u6xOO1rIJ9dv9bEgrjDxjOGCx5Cian7HJe81zNpbtgO
-# iM48cyAZZLHEWOGf99DlXEmYnDR8qqI3Pci17MHYZAbNzzWWYynC5C7RUCeAjQzu
-# NTYMEhlo6ohtu5FMxIllIw7tJSD0RfUXHuSqOB+/0p/p3+zutatSCauj8BS1mlCC
-# Lrpu3qwA2ealMpLibVy/9WTeOB56MhBc3VVH97yh3EYL2qyiTyaf1pf9R2mO0GW0
-# hbztxRepw9wdYELkYnMCJ0Mt53YZbDTjxa/KP+t8mRSNu2Vbh0GGyAtNbjnsgG5k
-# BpkHx2i4w+jOOw0Tzw5VTeBnW+lA+WztytWI6I+4C8mcZfCNaMMjk5ysFzkXlSz0
-# tixvxudUjCf/YiSwhUAuJZOL6BEBNzPJsd2A3wODor+3snTc5X92tAVMFAIFIEng
-# EsSAw9873CfDkdw=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgyZ6l6gL1aSBjv048nHMinwaOFjUfPrGn
+# Aewjn6FklikwDQYJKoZIhvcNAQEBBQAEggIAS1fCUpmMze/uZI4ZR0QK/UKuz1lZ
+# da2aO4+/hwOUtzecOOI4dN2/NwAHTRlQBVL7103yqgVYT7XDDpZbkRqpstBsq5Nv
+# Ur9Im/HLKMiFWzE7SUN1um1iU9LQz7DIS7wcbS8NGK+dYt03uAGON19jaJu4Adgi
+# umk6tTRkhJsvxB3YHYM9pVlSv/r9dTVNBWw97KBd9spJb4rLs8+7U5twOR6CbraJ
+# GGUySuCHSj7Qzs3woNTIVOEQcZTvny5kiosN7U16eVk6N+3dTihuKTWVR4nQ1RRf
+# 2nM2YUDvj8wFK5gFivxUK7FmW1g5ujyH+cJ8A/AfcptPo6AXnm1Dyf548BwL9KI7
+# AqWvk6BCjHiZIsb2PArR12bO4s+T0rZQFD/OnvfY+U3B6YHeGlyTMWxmxg0iV9EW
+# 456ZxG5MC6jD/CSFqdiNnZCLbZsSC797KE9oIHxMY5qehBtKb1p9AbCi8F3RKr2X
+# 6Bie/JCZlvfn6a+y5CIn0ws/aicKy0qTqJohqw30V7yAiIFdbe0pxw8QvEFjyvSn
+# HE40n+U6Uj7c/0UBHc81QPSC9neT4N1pdHqQrNXl7if+Y7CueMdBQcfbtZNB1Vur
+# 14P76Y5tRPTLDLhO6z9nv57RTh2Uv5TVzZYgEyKxVPfbsVXrd2cvywuGoD1zbOwd
+# hzBJeXL5tJfuYn0=
 # SIG # End signature block

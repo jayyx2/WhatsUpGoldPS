@@ -87,6 +87,10 @@ else {
     throw "OCIHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
         Import-Module -Name WhatsUpGoldPS
@@ -95,6 +99,15 @@ if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
 
 # --- Validate config ---------------------------------------------------------
 $connectSplat = @{}
+
+# Try vault for OCI config path + profile
+if (-not $ConfigFile -and -not $ProfileName) {
+    $ociCred = Resolve-DiscoveryCredential -Name 'OCI.Credential' -CredType PSCredential -ProviderLabel 'OCI' -AutoUse
+    if ($ociCred) {
+        $cfgPath = $ociCred.UserName
+        if ($cfgPath -and $cfgPath -ne '~/.oci/config') { $connectSplat["ConfigFile"] = $cfgPath }
+    }
+}
 if ($ConfigFile)   { $connectSplat["ConfigFile"] = $ConfigFile }
 if ($ProfileName)  { $connectSplat["Profile"] = $ProfileName }
 
@@ -168,8 +181,8 @@ Write-Host "Done." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFG0vwRx098Kjh
-# bZ+Rri+J9Hh0X1DND16phxCo2QaZ96CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBObqGoeNBMYUwP
+# 6c5hv1dbl7vPL0r+2YhmDzm7TeVPoqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -269,17 +282,17 @@ Write-Host "Done." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQglDHvnqyFwVzJHw0hd5W2JcSNK8hjDMY1
-# lWHZFrSeuFEwDQYJKoZIhvcNAQEBBQAEggIAK6S0NxQyNKvo62qCvL8wJ+VSj4Ft
-# LnumhaDI9URDjUdTlJypgQLPLM9+CIaW4MDgfZHL4+hmgZnoRt8u2uhSBb8zP63d
-# rRzeNPsb7dzdFN1TmgSz7sFYskPoV5H4XU+wxj+fI+LYAgqA7EqNJGRgceTgrCFV
-# E4LY0z6otMnGQzE0KU0sRXsaU8l3I2nn3/NqhXeoSVj0hEq9p7ZVwTKQRk1k0Utc
-# KUeq701k9kgUfJdY1xyCcdi1vJXkIEZKmUTBnKfmd8J5rBkAXsQVbOg0NQqyyUlY
-# fJTkUzDWJPJD07Fat0wrR8qURFS/IurlddSHeGPGyWjAjMkS5DBJS8OY/SYzJGMt
-# uUIUy/XEZj9re6U0qUbW+kAPuOP961ZM/sOUlKQaO+NkITAvIhiJ1FD/Kt9sjC49
-# V9YjVkZjn5o29LLex6uNbk4wELr9y+MamS7lso7/ckF26979u52uXZJB6S9LrTVN
-# YS3ayzOipmtTPLVhRqj8baDCmMYN45dbLg13r7RpVgqNUp1JbeslnY0nzgNH6A2v
-# yCkEvHo2dlKwdSbBUytoQ1bWbFjnqT4jMravIZdH/BwPx5k4lAyMrXa+Qax4jeFs
-# 71Pj1KY3cHoC7rxScHElLSZluUTDRXdwYaWHoY8FFFLFSEIM4mlTqtyXwgDRxQBb
-# C6ZzlBCxWiGHkWM=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgsqqdxG3P+2VAqYRWE8Pm+T1/CNtodD4e
+# NmLQ7SLfA90wDQYJKoZIhvcNAQEBBQAEggIAle3lBe/CGwRuGT5TtQkIx3ty8I9L
+# kAWxb435fbi6WdN8HLL12IJy2QWqKZ4uIq6WuDXoMAjHPRUx3H99Mvi5wGFf5H5T
+# oPGMp3aMH8z956gKx0MHcqGJDGuNDE/Ea2rCQotCHNyNSZeaH/26lMSa2eLBb5ZP
+# z3ivy0fMSPGafwSThcxm8LoSBR+Fg8UPQNKFRjZkdfNKtEal9BGpNTfDyycpMYKA
+# mDdlkVY1LSqhKp29uNGbGYP+ai8wir2BgcUl9GmOHu3HzBTWs4Oyt5askrXivfRe
+# YnBqpoflCZcRnX7I+j0rqVi/hZRqJnfgWHUAitM/B46nXKnc4S8C+rLl158AoELQ
+# 1PR2HlT744HIjtYiuKAE4xeKZE5TCCFxUeLpkBnfOfla6aRsapIPYGfcQdqDdZEc
+# rswXo7XAlZ0r+lmIOxBkpfXrH2HomUzeJSiZRVOnZfqAekj6CPceHiReYJ8Kgz+/
+# /JvbkE5kSi30YN3kVeSnW/aJYQpJhSjpVGA7SExs4XjLfyaw37qrTOyzog1rJgBQ
+# 75qvX9eG11Mrb82OW1HVoTP5i6zLEPFrunNHub4S7e1Z6aLXGCqE0/MiX38VRL8J
+# HtLNes4yjP50ms8Gpys/PlGfujuFEmBpqLL52t7FRZfGzwNt+YOeIdQS2Emagivy
+# tw3q3EeStqlYiLM=
 # SIG # End signature block

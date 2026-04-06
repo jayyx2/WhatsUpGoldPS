@@ -98,6 +98,9 @@ Export-ModuleMember -Function Add-WUGPerformanceMonitor
 Export-ModuleMember -Function Add-WUGPerformanceMonitorToDevice
 Export-ModuleMember -Function Add-WUGPassiveMonitor
 Export-ModuleMember -Function Add-WUGPassiveMonitorToDevice
+Export-ModuleMember -Function Get-WUGPassiveMonitor
+Export-ModuleMember -Function Set-WUGPassiveMonitor
+Export-ModuleMember -Function Remove-WUGPassiveMonitor
 Export-ModuleMember -Function Set-WUGMonitorTemplate
 Export-ModuleMember -Function Set-WUGDeviceGroupMembership
 Export-ModuleMember -Function Get-WUGPerformanceMonitor
@@ -107,8 +110,8 @@ Export-ModuleMember -Function Set-WUGPerformanceMonitor
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+MdElxgUjUlTU
-# OKtV/r9813LUGKZTk+fuU/g/BcI4s6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFgiXnWOHeeMGs
+# 66UW0VOoQNdXWP7nP00rjDYExmNV8KCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -208,17 +211,17 @@ Export-ModuleMember -Function Set-WUGPerformanceMonitor
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgNaL0pJFgauc3ZIYsQGz9R+N2lWLwN0Ac
-# XQ5y5dNfO3AwDQYJKoZIhvcNAQEBBQAEggIA6onsFf8yJ06m9TAYWNkzdpv1SrCq
-# SWpUzqAlDVlPnbQSJn/3AtYRmYq3lDJKSBW4UT/AEB3YZTv6p4CMEXplspYvOlbl
-# C/SjNMqhB3iV7rG07WfCYniyFTKx8Tv7ATOWD9t3Wci+owzoHMg2eN+AB97cQTMX
-# MYMQOH/sLgmDcVkuV1r//iSsUBRBZNyPELANLnH5u1vzcW71MCmlVmKsZl+hMSrZ
-# K9PCGwwu7UhAEo5CPLb4KVktx+htidA+9+49OLLnrJtBd97IokOC9HSe90WxyFCm
-# WCmz9OBht2vF6qO2s/HhubwkdAKv0RSfqvpnb5R2+7183Vnmtxp5CF8HRscl34Uo
-# rej+iwEvLwp3ZZeyvSuLvoOe6n2NciR1PuzRJ64GusicVDybqcF/ZxAyD9UU++IF
-# Z4x17rziCZWowSN79dvti/e0bvFQsgVJG9+0ngN5t4trgERkLmo1jB8kAdyfE9YF
-# YhcGOzQNOsBOCCo++z/hzVFvT0Y2d52dCRxmidu1CMfY46ZKaIScAKEp1o6JNIhK
-# DTSislJdI9qhkzdqbeB9cnLFO+E55VSyuEUMbiv2JBWA9tEA4/ekiQsNascYb2Q2
-# jUUSJp/vSWutwEDwJ25wf9nOCXGv4A0iT+iaR3myIkKv8mLBLut6QSOflG5vbZhq
-# yDBQGwa1M6iEz9c=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgTjIDAPM9atYOkYz59Q3avEV0MFzaKX75
+# D+Sx8Xb1nTcwDQYJKoZIhvcNAQEBBQAEggIApiR+fLw4aIUTQX1GEhUQCFhrLF/p
+# z0qoa/cnIlEGYZ9cCgXPYg/1VqwBx7eSsrAXkNS/Z07FFb44F+X9g1woO0Sxks5T
+# QnYx8buHu5HWdDFFTfIOAR0PKQ9Rw2naVqe1veVx8trKFAPj4WHPMlC3bYtVaMvG
+# xBx7npIpbfRjGS0JrOJRaPjNZ+PKQBC2/hKx48DZKW2sQ8pBtMNx5ZNYqpUv/gCF
+# wVdIl3Zdu96splpAuTr7d0B5QirJtrQhlOqrqYZ29MWmVjRLcQcIU3IE3ggBDDfw
+# a0zzXvniYZAqDj3QODhIH/uZnJPIsiO8b9gjcKC+3/u2WFV1s23LZkTCeLUAR1Q4
+# GwL8ECO4C3BIEa/CTohhJ8Rgxot6ZRCiHYkzyzCJkxZ1aNSXjyV2iiR5zJmxifCy
+# DU7eV6H33GZXOeMkQCU817u+GoQjEbIgEMTjAQrgUw2pp6odL+IlWnqQs1yfStk5
+# OK3CINsQt/gZFB6Qt4fLId4qb/u0qZr+mpL0Gf+c1BVQKh+XRyxcK1T3xptEam1O
+# FKQfpb2CYmKj4OUCg5CniRh+tYkTWhBI9o5GXIewjG3d//4qb5gd9ZPTNehyiDZe
+# QigAFMyDfnMjulnTCcB4p1jc4lYp7DtKg3Q8l9cI5vd0zMKo6S+ZL/1L2Pu7ajk/
+# k9N2OC7zqhKPEcI=
 # SIG # End signature block

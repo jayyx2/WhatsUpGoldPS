@@ -367,6 +367,27 @@ function Resolve-AzureResourceIP {
                 Write-Verbose "Could not resolve App Service FQDN for $($Resource.ResourceName): $($_.Exception.Message)"
             }
         }
+        'Microsoft.Network/loadBalancers' {
+            try {
+                $lb = Get-AzLoadBalancer -Name $Resource.ResourceName -ResourceGroupName $Resource.ResourceGroupName -ErrorAction Stop
+                foreach ($fec in $lb.FrontendIpConfigurations) {
+                    if ($fec.PublicIpAddress) {
+                        $pubIp = Get-AzPublicIpAddress -Name ($fec.PublicIpAddress.Id -split '/')[-1] -ResourceGroupName $Resource.ResourceGroupName -ErrorAction Stop
+                        if ($pubIp.IpAddress -and $pubIp.IpAddress -ne 'Not Assigned') {
+                            $ip = $pubIp.IpAddress
+                            break
+                        }
+                    }
+                    if ($fec.PrivateIpAddress) {
+                        $ip = $fec.PrivateIpAddress
+                        break
+                    }
+                }
+            }
+            catch {
+                Write-Verbose "Could not resolve Load Balancer IP for $($Resource.ResourceName): $($_.Exception.Message)"
+            }
+        }
         default {
             # Generic DNS attempt using resource name
             try {
@@ -646,6 +667,9 @@ function Invoke-AzureREST {
         Full URI to call.
     .PARAMETER Method
         HTTP method. Defaults to GET.
+    .PARAMETER Body
+        Request body (string or hashtable). Hashtables are auto-converted to JSON.
+        Content-Type is set to application/json when Body is provided.
     .PARAMETER ApiVersion
         Appended as ?api-version= query parameter if the Uri does not already contain one.
     #>
@@ -653,6 +677,7 @@ function Invoke-AzureREST {
     param(
         [Parameter(Mandatory)][string]$Uri,
         [string]$Method = 'GET',
+        $Body,
         [string]$ApiVersion
     )
 
@@ -667,11 +692,25 @@ function Invoke-AzureREST {
 
     $headers = @{ Authorization = "Bearer $($script:_AzureRESTToken)" }
 
+    # Build Invoke-RestMethod splat
+    $irmSplat = @{
+        Uri     = $null
+        Method  = $Method
+        Headers = $headers
+        ErrorAction = 'Stop'
+    }
+    if ($Body) {
+        $jsonBody = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 20 }
+        $irmSplat['Body'] = $jsonBody
+        $irmSplat['ContentType'] = 'application/json'
+    }
+
     # Handle pagination (nextLink)
     $allValues = @()
     $currentUri = $Uri
     do {
-        $resp = Invoke-RestMethod -Uri $currentUri -Method $Method -Headers $headers -ErrorAction Stop
+        $irmSplat['Uri'] = $currentUri
+        $resp = Invoke-RestMethod @irmSplat
         if ($resp.value) {
             $allValues += $resp.value
         }
@@ -865,6 +904,36 @@ function Resolve-AzureResourceIPREST {
                 Write-Verbose "Could not resolve App Service FQDN for $($Resource.ResourceName): $($_.Exception.Message)"
             }
         }
+        "Microsoft.Network/loadBalancers" {
+            try {
+                $lbUri = "https://management.azure.com$($Resource.ResourceId)"
+                $lb = Invoke-AzureREST -Uri $lbUri -ApiVersion '2024-01-01'
+                if ($lb.properties.frontendIPConfigurations) {
+                    foreach ($feConfig in $lb.properties.frontendIPConfigurations) {
+                        # Prefer public IP
+                        if ($feConfig.properties.publicIPAddress) {
+                            try {
+                                $pubUri = "https://management.azure.com$($feConfig.properties.publicIPAddress.id)"
+                                $pubIp = Invoke-AzureREST -Uri $pubUri -ApiVersion '2024-01-01'
+                                if ($pubIp.properties.ipAddress -and $pubIp.properties.ipAddress -ne 'Not Assigned') {
+                                    $ip = $pubIp.properties.ipAddress
+                                    break
+                                }
+                            }
+                            catch { }
+                        }
+                        # Fall back to private IP
+                        if (-not $ip -and $feConfig.properties.privateIPAddress) {
+                            $ip = $feConfig.properties.privateIPAddress
+                        }
+                        if ($ip) { break }
+                    }
+                }
+            }
+            catch {
+                Write-Verbose "Could not resolve Load Balancer IP via REST for $($Resource.ResourceName): $($_.Exception.Message)"
+            }
+        }
         default {
             try {
                 $resolved = [System.Net.Dns]::GetHostAddresses($Resource.ResourceName) | Select-Object -First 1
@@ -1024,8 +1093,8 @@ function Get-AzureResourceHealthREST {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1KvUDosierU+6
-# 35T6zL4G4ENKODQqz+f4glWB/gKQpaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArr2PRUbCJy4p1
+# bkt8hJuWGsFmMdSEnGXSUrlNRZ+Xw6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1125,17 +1194,17 @@ function Get-AzureResourceHealthREST {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg7l1RB1yLsZGng/8wdLQCNIZm7onfR70x
-# U7PM+zv82RgwDQYJKoZIhvcNAQEBBQAEggIAyi29nCkAKe/e82Ll9ehQl1bmfo6E
-# ILdQKihEvDO2owmNd/AW2R5b+xF3LG5Muy/NAX+YzmZvN0GypJKg8c3yGx00uKeE
-# TM6NdWanLApyRvjDbyfpTx7le9DZFMWVmrlCuO3MwYIWbP7LN9IR1vf/ojduUeLG
-# qm/wO7RdWZdqMtpZEbRbhsffEPB4zqk5Vj3a9TWEM+EgUerwZkTLEaYWPCYpgNm5
-# YwecRbBubWPzuvyeiZOoHc55FMalsiZ6IMXjFAQHaGf5rRDwb9YWkr7tDyt/HA2h
-# ybl3jE3+lK8Lr4hzF80+0FglbwJXBvCLFOTjovQuWIUPdzuMf2MfNXp8Gi2uskaw
-# 4sj6YQPvDz7ndef/JLItRL4Rq2FjJ3aGHnAA2qVs0DueANk0Nk4qz88otv6o+mRH
-# RDy4YOJAxv/Y5BKpXan8tdIYNaisLUwXFU3xs7BS+yz6aI3XgNjwdxuFuasdgbVA
-# Anz7hXLBIC2pRG0nqe5Dm+URxsMO6oMcItLO+ajY//0TvjIG7yIqa6Xs4Q44MDkq
-# mjNZrDyYzIsd8yO2a2eOaLLL50lsrLABFVvETBnnv4+SJLxlQm8vXkaLa9ngclKv
-# KjZQiQ+N0FS/dsxc3Lq36dKtDg1pyA2O5/OHgOIg9QwAHC9Wh19jpkFhKT1kz1jn
-# MVD8M8OddyJJuRw=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg/LdJZDf1yodfnfR88dc6FUycNcO0esT7
+# PYdNQQhljYQwDQYJKoZIhvcNAQEBBQAEggIA8u7IUl0hzSccbbh/usVCvlnyiZqm
+# NqsEgoLQ92PKvuplT0cuW6C46fPkXT85WIbfz87h/jIafEl7fh9IAiV/Ap2n1pl2
+# 83O++WYVEzbDxPGrmsQj/Le4WLXGjwE1j7xRQMk5PcDFsp0giebDZsvj1rGJO0yz
+# u38rPxdn3qagG0q/D+6EKSi/oK7DlIQvVweaj1/9/uKa1Qy1YH+jBWxb2nGbvD7w
+# bT1nSa0hwPxJDItEn1JZvLRwCDgLbX874EAJZm91BUCqN/gVrPpaHnoan1kXwyeR
+# VU3MgMgtoW83PLreuHLaLUnkW2FbA78mqqrY2RNgde6eF3W46jn94cJPsleo0xK1
+# EhL4lwLuKQSWweQ6dsd4rVY4WcbhdxnYIKxYNxM4aN1TqLKT24AVoHtvbGJc6Lzb
+# DxBtKSsgPMS/FjxM2FQMc88JQ3CQj8jp3W9lTLQFKMUnfNLGSLg67py6xNWk2Aff
+# jwoLpqLXPZ/BggVcprfqF0oIfLsbI5stwBv7H5JzaBozmZOxn3gHZhCqlsreMfpe
+# fa0NY0BO93FU8Qkro5+RljS2wbOX3pRB/lXzaHIEDoMC+AM3pU2Eo+3Kr6Dj2nTo
+# 0vKpiNyygGHsl9Hc6d7mam3leWfF7tFk4xyt188vE3sZL5nlqMWB8qkYZTcL0bbK
+# LsUKb3AFSBMmZWg=
 # SIG # End signature block

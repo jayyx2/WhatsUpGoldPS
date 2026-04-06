@@ -2,16 +2,22 @@
 $ProxmoxHost = "192.168.1.39"
 $ProxmoxPort = "8006"
 $ProxmoxUri = "https://${ProxmoxHost}:${ProxmoxPort}"
-#WhatsUp Gold server IP or hostname
-$WUGServer = "192.168.74.74"
-
-if(!$ProxmoxCred){$ProxmoxCred = Get-Credential -Message "Enter credentials for Proxmox server"}
-$ProxmoxUsername = $ProxmoxCred.UserName
-$ProxmoxPassword = $ProxmoxCred.GetNetworkCredential().Password
-if(!$WUGCred) {$WUGCred = Get-Credential -Message "Enter credentials for WUG server"}
 
 # Load helper functions
 . "$PSScriptRoot\ProxmoxHelpers.ps1"
+
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
+# Resolve credentials from vault
+$ProxmoxCred = Resolve-DiscoveryCredential -Name "Proxmox.$ProxmoxHost.Credential" -CredType PSCredential -ProviderLabel 'Proxmox' -AutoUse
+if (-not $ProxmoxCred) { throw "Proxmox credentials are required. Store them in the vault first." }
+$ProxmoxUsername = $ProxmoxCred.UserName
+$ProxmoxPassword = $ProxmoxCred.GetNetworkCredential().Password
+$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
+if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
+$WUGServer = $WUGCred.UserName
 
 # Ignore SSL cert validation (self-signed)
 Initialize-SSLBypass
@@ -78,8 +84,8 @@ if ($Global:WUGConnection) {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKMHyQuPm+Maj4
-# sA2IBTvMPHaPm7SYB/jCgJ4xDu5HBqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDkpDYx/04Gm+vM
+# Yb/Pi+Ugw5rSbeiMyA1THZkjTYlvJKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -179,17 +185,17 @@ if ($Global:WUGConnection) {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgNzjmYHYTbfxbFaBuUH6PsWX2iYpWfe/a
-# Z0a7flEp5BwwDQYJKoZIhvcNAQEBBQAEggIADKMO4F/P8lRtbfJUzZ6MCD+IlenH
-# 81jfH/VXCV9lcLJ8ny7Pr+pPEkHqij7C5migwZ3I+ZPjcUlGkYwQqr/NHEwtj/IO
-# qoobUfyj8FFNgOHkbpCq00FYQgQWNYx3LVJ5KjXF35R3Sg6YQa44uszMEAVh7ooO
-# Nq3RRkrTm9PGji7I+3QCBkeL1HblFmO5tP8O8wufaIU+0Fe2cfQjuDWTIDOqWTOt
-# F9azpU48iZoT+E5FtZ5DLxcZTzX1BBK1sNx3gC0dZjykiEL0WJaoDjMBrXw4KgYz
-# 3e0JkmZXxgFwQtp9lWa2jpTvaWmpFP+UlHjNN7UM0njYr5uHsacSsoAPlEowmQKm
-# sX91JpKnr/Ffm4OpbqXhMQE0V7THld5Pm/msOIkvaJHBuIj9nUzkvBH/lvASweEK
-# Zxe6nRCyQmBCYZeENi3qxuhH0Yc3Zayl2jb9IHbcSxTF1aenSFW6Vu7EFBzfwppp
-# HsPcZbBg4T9rVq1Y1WcWjHTjU4cy8URdJHl29vkVw31deJTiAp6HZgd99r17lDmw
-# lP6NbP+XUDh1N6HnOc3tQ2lkiq4/YCm7uW3yPsLU4CWsJxrGc2uCPVF0onUR22NQ
-# LavMBqqQAlhRGUaPh78TZIsxcTBS7JCOeEVxzIC4P3jdduYJVUlzJwxFg/c8eHzT
-# EvPZiatyohhBlS8=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgaGdx19cxtth8hD4mYBL8OgUUBJluXVtc
+# Xf0v1CTRC6QwDQYJKoZIhvcNAQEBBQAEggIApW+01ha6+OM+fdSAEzAeKviO7PjB
+# DDCREtZ9xdGBb4weHRoJ1rSiD8Nl2l0bdqf4u6EdkQ4tcISr4jZi+sIYKpmsncnV
+# TyvXhM9j6aJOiErcecx/0woNoXRR4X7kBlPR3Gxml4e9Xr1c+S3mRpJSo0+Xqb/t
+# YUAUVqZb65+twioWO1cvuYBQDOuGbFDy0UpVGuK617xcWDO2TuybbLDS5r/tNmiW
+# uIZKNic9LrvTwfiD7adW5V977ahP6GKpUc5aZzR+ln95Q+ih9stYwdBdJ6LFAuEg
+# I7A/g5enLUJTcwy2br7ODD7ZwDT679HSZE/kyeS0bvP8x2ZQn5g7lM9T4JoBoDhD
+# dBpMa7S66+BR4sEqz8xq2pOvQWXlrAHWygvbqZGUluMwwstRkdBojDm4RVrc/YPH
+# KZR+GieS/kWUUmBbSdCmxw3MQNFrE6AiFXGB88wfrVwSPTKqvKmtmb96AqrSbNFw
+# q8FKPOJBZcq3OnHDCYX9Zv8rnLjonlXq/Ob4dT/ZAFmbstY3BAn74vWJRGakKvaH
+# nPEqkUd0LXzGgbuqLpQXEjtBlclkyTuLfn5jAoKb5rLCEOUqO4pV0jd89a/xCb2U
+# lIiUn/iR7gjbseOb8OutxuMvG7ySD+x0u9U9Ri9DZi79Oa779Shn6bYqbhR970vI
+# /DV/vNC5iE0xhW0=
 # SIG # End signature block

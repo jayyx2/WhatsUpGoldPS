@@ -9,23 +9,28 @@ using POST /api/v1/devices/{deviceId}/interfaces/-.
 .PARAMETER DeviceId
 The ID of the device to add the interface to.
 
-.PARAMETER NetworkAddress
-The network address for the new interface.
+.PARAMETER Address
+The IP address for the new interface (required).
+Must be a valid IP address.
 
-.PARAMETER NetworkName
-The network/host name for the new interface.
+.PARAMETER HostName
+The IP or Host/DNS name for the new interface (required).
+Must be a valid IP, host name, or DNS name.
 
-.PARAMETER IsDefault
-Whether this interface should be the default interface.
+.PARAMETER DefaultInterface
+Whether this interface should be the default interface. Default: false.
+
+.PARAMETER PollUsingName
+When using this interface to poll, use the HostName field instead of Address. Default: false.
 
 .PARAMETER Body
 A raw JSON body string for full control over the request.
 
 .EXAMPLE
-Add-WUGDeviceInterface -DeviceId 123 -NetworkAddress "192.168.1.100" -NetworkName "server01"
+Add-WUGDeviceInterface -DeviceId 123 -Address "192.168.1.100" -HostName "server01"
 
 .EXAMPLE
-$body = @{ networkAddress = "10.0.0.5"; networkName = "switch01"; isDefault = $true } | ConvertTo-Json
+$body = @{ address = "10.0.0.5"; hostName = "switch01"; defaultInterface = $true } | ConvertTo-Json
 Add-WUGDeviceInterface -DeviceId 123 -Body $body
 
 .NOTES
@@ -43,13 +48,16 @@ function Add-WUGDeviceInterface {
         [string]$Body,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'ByProperties')]
-        [string]$NetworkAddress,
+        [string]$Address,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ByProperties')]
+        [string]$HostName,
 
         [Parameter(ParameterSetName = 'ByProperties')]
-        [string]$NetworkName,
+        [bool]$DefaultInterface,
 
         [Parameter(ParameterSetName = 'ByProperties')]
-        [bool]$IsDefault
+        [bool]$PollUsingName
     )
 
     begin {
@@ -64,9 +72,12 @@ function Add-WUGDeviceInterface {
             $requestBody = $Body
         }
         else {
-            $bodyHash = @{ networkAddress = $NetworkAddress }
-            if ($PSBoundParameters.ContainsKey('NetworkName')) { $bodyHash.networkName = $NetworkName }
-            if ($PSBoundParameters.ContainsKey('IsDefault')) { $bodyHash.isDefault = $IsDefault }
+            $bodyHash = @{
+                address  = $Address
+                hostName = $HostName
+            }
+            if ($PSBoundParameters.ContainsKey('DefaultInterface')) { $bodyHash.defaultInterface = $DefaultInterface }
+            if ($PSBoundParameters.ContainsKey('PollUsingName')) { $bodyHash.pollUsingName = $PollUsingName }
             $requestBody = $bodyHash | ConvertTo-Json -Depth 5
         }
 
@@ -96,8 +107,8 @@ function Add-WUGDeviceInterface {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA6z3hCWhnKfykz
-# CZQ34em8t5x0WMU1QJ4QDy7E2Kv0IKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDjBlFb55oHzGl
+# K+eM0uoKOIExl8oN0mrVnG6cg7JCTqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -197,17 +208,17 @@ function Add-WUGDeviceInterface {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgDLWZRuCnxaoS2y1PgRKtqmEfgAccaddh
-# E9V+u8CqMdYwDQYJKoZIhvcNAQEBBQAEggIASML4czq8vmC07TMeoSuA4sVUU0LT
-# nZM/ds1MgSOUq03JHMoyHICJESccVOF/SkuuRmTXbyMuou5Y7mZA2olC7E8AocE3
-# Op/UYB49tggas+FK/9G+Pm4vRvdur4UQnCJwJYHhVknjfWOrrdsNqfG0+sm8ixh5
-# oNz4lvpvSa+f9roLvU2ryG6pnpAky4/4XLFOdM14rpWQqY0KQux/hUTH+7ezANoi
-# p2lbnAQV/g0SDp+xJiICuhOruUEoRjE11hU/Zahi/NvGxvUY1e4YQ4hJB9y83IDf
-# GcHU3ZnjxlNgE47tq618im5/mtE2KMY2jVZg6TNXOREIV5IEa+D+B3d/LVHCrOg+
-# SP8y5RRec6ADnSDkBF/IM6vazVbuA5sVGjHcJd2BW5z9p1BNjmzOwLh07pos/A9N
-# dY3o/getHGteVEQWoDZhjuqDflvw+ifVums6lyvfEqVtbV7zf1H1MiIVJ7yaEua3
-# a/4zUIUYxB5t5UZ1tqWXNRc8W2PmXLU7a2BH8CDKdkPrz58PmnHXdS2OXM95lgoF
-# QxCMMj1L4RapQI7netaRfBTymMNQ4hVmEoQBzFyoDMI4qZCodNHEDQ+ooET6hIH5
-# Ium38RCYziM/M6bVmWM/C3xBwjbSd+EluIW5lfxSHigRHLvyCWn3hD9nuq6gHq8c
-# CVb5/1xmrM32X9c=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg+dlraW+Kv3mpF1AUeDpQN572PMK430B/
+# qsyFsSq2JwkwDQYJKoZIhvcNAQEBBQAEggIAWhvbVBtoCU+anuFaIuJ3RsVapVYx
+# Hx5wq/CZeyVDfEmbCl9GV+N0M7DgyVXZtUbi8PEvKe3VW2KpVdTX7BLs4RRAhKWB
+# 5Hj7vdQNE/TBPhKtdpwLIcZfX6TpZpTEIFgrVrIGCsA+BOQtGJ3h2eek1ngU8ivO
+# neXr2H9jezzXvKYpnEnzxWlCpI8G09CMgq5vk2RDxSocZDcBBR0/2kwgCawr+4di
+# s//h8euDmHeyhN+OAvUd9WZtESRCSjj8Dr/lCFJJv84KgtRHo6eEWZ1yTGIWJndj
+# E82FnJTTS0Vc9rcSI+Mi1WIiey2OuT2UHcSksrdQ/ye/mpZBka8CfpCyvbyKiOj0
+# jKcRhF2tIFu2v6QilzD5vFKfU3wup90Fte2lhud7mP8MP0QUdI0VtSiZLQ9WoHSD
+# WpCtW3PoKEWibBCFd3dsJTSUmy+hPrGwpkNrvp1q+tkbLaGKIo62QlgWLc+EXVoO
+# Ds3TBKJFVpXJ9cc/9dC2kbWvPg+S9cKKKLbnWitg2TTe4+t++99VeKOGLy3iB6m/
+# hbK/hoC6VL6cpLhpEjaeYCjzLX7K5T5PbC4VZzbaU0NshzIeXD9NFDwZVRi0yf0w
+# 2llBo6bjPnVC0robPRYXQaUHvyjdhc8bFQofb87xyIcqP/g8PMHmvQQc+eq5lJW5
+# 1fIHXcFX8rOmv54=
 # SIG # End signature block

@@ -225,7 +225,6 @@ function Get-WUGActiveMonitor {
             if ($Search)         { $qs += "search=$Search&" }
             if ($MonitorTypeId)  { $qs += "monitorTypeId=$MonitorTypeId&" }
             if ($EnabledOnly)    { $qs += "enabledOnly=$EnabledOnly&" }
-            if ($PageId)         { $qs += "pageId=$PageId&" }
             if ($Limit)          { $qs += "limit=$Limit&" }
             $qs = $qs.TrimEnd('&')
 
@@ -248,6 +247,7 @@ function Get-WUGActiveMonitor {
                         }
                         [PSCustomObject]@{
                             DeviceMonitorAssignmentId = $response.data.id
+                            Name                     = $response.data.description
                             Description              = $response.data.description
                             Type                     = $response.data.type
                             MonitorTypeId            = $response.data.monitorTypeId
@@ -271,47 +271,64 @@ function Get-WUGActiveMonitor {
                 }
                 return
             } else {
-                $uri = "${global:WhatsUpServerBaseURI}/api/v1/devices/$DeviceId/monitors/-"
-                if ($qs) { $uri += "?$qs" }
-                try {
-                    $response = Get-WUGAPIResponse -Uri $uri -Method GET
-                    if ($response.data) {
-                        return $response.data | ForEach-Object {
-                            $comment = $null; $argument = $null
-                            if ($_.active) {
-                                $arr = Get-ActiveCommentArgument $_.active
-                                $comment = $arr[0]; $argument = $arr[1]
-                            }
-                            # Merge with template (if available)
-                            $tid = $_.monitorTypeId
-                            $template = $null
-                            if ($tid -and $activeMonitors) {
-                                $template = $activeMonitors | Where-Object { $_.monitorId -eq $tid -or $_.id -eq $tid } | Select-Object -First 1
-                            }
-                            [PSCustomObject]@{
-                                DeviceMonitorAssignmentId = $_.id
-                                Description              = $_.description
-                                Type                     = $_.type
-                                MonitorTypeId            = $_.monitorTypeId
-                                MonitorTypeClassId       = $_.monitorTypeClassId
-                                MonitorTypeName          = $_.monitorTypeName
-                                IsGlobal                 = $_.isGlobal
-                                Status                   = $_.status
-                                Enabled                  = $_.enabled
-                                comment                  = $comment
-                                argument                 = $argument
-                                TemplateName             = $template.name
-                                TemplateDescription      = $template.description
-                                TemplateMonitorId        = $template.monitorId
-                                TemplateId               = $template.id
-                                TemplateClassId          = $template.monitorTypeClassId
-                                TemplateInfo             = $template.monitorTypeInfo
+                $baseDevUri = "${global:WhatsUpServerBaseURI}/api/v1/devices/$DeviceId/monitors/-"
+                if ($qs) { $baseDevUri += "?$qs" }
+
+                # Auto-paginate unless caller specified a specific page
+                $currentPageId = $PageId
+                $userRequestedPage = [bool]$PageId
+                do {
+                    if ($currentPageId) {
+                        $sep = if ($baseDevUri -match '\?') { '&' } else { '?' }
+                        $uri = "${baseDevUri}${sep}pageId=$currentPageId"
+                    } else {
+                        $uri = $baseDevUri
+                    }
+                    Write-Debug "GET $uri"
+
+                    try {
+                        $response = Get-WUGAPIResponse -Uri $uri -Method GET
+                        if ($response.data) {
+                            foreach ($item in $response.data) {
+                                $comment = $null; $argument = $null
+                                if ($item.active) {
+                                    $arr = Get-ActiveCommentArgument $item.active
+                                    $comment = $arr[0]; $argument = $arr[1]
+                                }
+                                # Merge with template (if available)
+                                $tid = $item.monitorTypeId
+                                $template = $null
+                                if ($tid -and $activeMonitors) {
+                                    $template = $activeMonitors | Where-Object { $_.monitorId -eq $tid -or $_.id -eq $tid } | Select-Object -First 1
+                                }
+                                [PSCustomObject]@{
+                                    DeviceMonitorAssignmentId = $item.id
+                                    Name                     = $item.description
+                                    Description              = $item.description
+                                    Type                     = $item.type
+                                    MonitorTypeId            = $item.monitorTypeId
+                                    MonitorTypeClassId       = $item.monitorTypeClassId
+                                    MonitorTypeName          = $item.monitorTypeName
+                                    IsGlobal                 = $item.isGlobal
+                                    Status                   = $item.status
+                                    Enabled                  = $item.enabled
+                                    comment                  = $comment
+                                    argument                 = $argument
+                                    TemplateName             = $template.name
+                                    TemplateDescription      = $template.description
+                                    TemplateMonitorId        = $template.monitorId
+                                    TemplateId               = $template.id
+                                    TemplateClassId          = $template.monitorTypeClassId
+                                    TemplateInfo             = $template.monitorTypeInfo
+                                }
                             }
                         }
+                        $currentPageId = if ($response.paging) { $response.paging.nextPageId } else { $null }
+                    } catch {
+                        Write-Error "Failed to retrieve monitor assignments for device ${DeviceId}: $_"
+                        break
                     }
-                } catch {
-                    Write-Error "Failed to retrieve monitor assignments for device ${DeviceId}: $_"
-                }
+                } while ($currentPageId -and -not $userRequestedPage)
                 return
             }
         }
@@ -390,8 +407,8 @@ function Get-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCT/a0pSVz6gMM9
-# 8REVYWpq1XFAmTS34lu7cEmQ8SXAnaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDyTtDt4TPCMw5m
+# byzd6V73eu7KN1R1krWJDBYVpV4smaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -491,17 +508,17 @@ function Get-WUGActiveMonitor {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQghH/zTe4vbYTM+nG9kyHJQVbRy1F6vsaK
-# 7COibDAmoh0wDQYJKoZIhvcNAQEBBQAEggIAxf/fA6dPAdiQ20qw/5xy8GQmO7e4
-# ugPA6TrnMv7M03L4Il7xf9mrUVLbNdhBVQfBbXHFiHbo++aDzFnLpRKVhfD2lLHB
-# j2tj0jKJRhRv5luzvF4XTVj29i3ilr/SBudqDAQm0KMU9ttfmAfkH87k3oSmGTrP
-# y/PKbxZ90gWsYlaVTBeXXUd4EIDD4iBUVaYAs4fE0M3g419oQ346n2wjepIIGdo4
-# jXUCjVG6kR9wLELFWwTmZ57k4WgIJ9JBEceEwLSNNxAGYjMz4vfXZyNf0HATVUP0
-# lMVFdb5cfb2I2e1vfLdcJTA1Dy0JA+0ocKjzAlQI1tYELzNfUiA0P7moe9xqQEzq
-# v3QITdE6sTsG02DsiZ/Ooat6QoKfbvkqGeYpMqI9M3WPp+GIcBNuleGfT/mQ3qx/
-# v61E05pZJ0a7O6wDZuYeXa2WGQmAbnoDTaMucRTqCQ0t96bWnELkb7Xb779xwQS/
-# hDgD/UjcWXk8ibUFHdBjg1R+yX3WkjSA2l1IQ/Ih/eWMv2K5zNWKhSN03t8qhNhz
-# qErXCm4Al1tVJkkUB4D31XLgKv5A3q/uJlHDTCikCX3OwJYav3XYK8KeG7mTyYKF
-# ak2Ff1C9Dwj1nn63716FofccJdFK2Qjaos6AReU5Zvb5jC+cqtbxJyU3DtaSMQ8U
-# B0vk6GHJUq8Jb3g=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgOJIHswG/neu/rEiWJIKoiTjzS8zXM64x
+# a7kkTZv3bZwwDQYJKoZIhvcNAQEBBQAEggIABrkWwaXPapfCRnOtrvEoPB5IVQZ2
+# 4TC6nEAFPMqKVunSXElszr30NlZlEhYPB48fdWFFtC6Q0sUtonNjnr0POsQz0l40
+# F8GD3KwErlOCw4Q2tvT2Nk0A/+G0VMHpGLGRrRoUO59QKtWU3JVp+K7EfJxHrHhP
+# 7kZu4x3XNveNP8qwO0NXUkyNPLC+6lS7O3KnySBtuvQHD2v+Rdn3W64erGwsbdnP
+# fgvjE8/P+ictxvV9Q/S93M84Vxi5mqUPNIdERIJ0fV/82AhfEcLiG6TlR2g99LUt
+# 0Cx/2YJK4wjPw+iCCXQAObAxyKE3NNaSAIAQ9lD7pAFvUlOMei4b9oh0Nh5haAcZ
+# Csgk0ayph9scWStAeUz1p7PGIivN8dgJoKCwlGofo9i5BSRzc458LSD729Q6ASk7
+# sPqVeYWYQybMdhxTSZf4ekiYizSYjdq0VN2Yy/hIV1ZiIeji+5q6oECMrzkE4exn
+# 2+43fS4cOOYEAiJDAawQaNMknc9h+F0PVXmgnNHpkqpa9iUNZsVNvvT/4040pC8P
+# TslX4EqIFtK1e3jQSzPyB6ECuhYGtcBZz+hstEmbvmgElPuGyUdY8k18JkpgPnIw
+# Do1ckDpaijeC8VVK7TRwoUUecBJHl20s4YB5LGSdvH9ZDwjHaSO1go+FML7lfZJu
+# AZytukfRucnIjW4=
 # SIG # End signature block

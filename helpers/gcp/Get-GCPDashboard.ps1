@@ -68,6 +68,10 @@ else {
     throw "GCPHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
         Import-Module -Name WhatsUpGoldPS
@@ -78,10 +82,22 @@ if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
 if ($KeyFilePath -and $Project) {
     Connect-GCPAccount -KeyFilePath $KeyFilePath -Project $Project
 }
-elseif (-not $Project) {
-    $Project = Read-Host -Prompt "Enter GCP project ID"
+else {
+    # Try vault for GCP key file path
+    if (-not $KeyFilePath) {
+        $gcpCred = Resolve-DiscoveryCredential -Name 'GCP.Credential' -CredType PSCredential -ProviderLabel 'GCP' -AutoUse
+        if ($gcpCred) {
+            $KeyFilePath = $gcpCred.UserName
+        }
+    }
     if (-not $Project) {
-        throw "A GCP project ID is required."
+        $Project = Read-Host -Prompt "Enter GCP project ID"
+        if (-not $Project) {
+            throw "A GCP project ID is required."
+        }
+    }
+    if ($KeyFilePath) {
+        Connect-GCPAccount -KeyFilePath $KeyFilePath -Project $Project
     }
 }
 
@@ -134,8 +150,8 @@ Write-Host "Done." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDEU/HT3FZzOFMi
-# CXy1nlYrKt7JR28T5iK254jWPY78PqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBq2mziqWc4lXJI
+# JMv3tczlwQ1SfrIzKz2KYSt1Hxa3bqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -235,17 +251,17 @@ Write-Host "Done." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg+bmRpQhfAiJPRaA1QCmDZPIUAl3l8w3J
-# xaItoks/s74wDQYJKoZIhvcNAQEBBQAEggIA0/NhrgVSxs+HFDqN/f/ARGLFAY/i
-# 35PD9HDO5uwVtEyD+14iLU/zrPScI5EEkvWv5Eo3P2dMqClazMMYvZl5S/Q209Rc
-# kzs+BNLQpgOBFFvcsXh0Efg433CZF2g1Dt1Ir31/AzB2l9WigBmmsL5LYycya8/9
-# JEYADf1kmdQsX2B68AjkchG/s9yzK0zhnZthi10mDxBvemvYJh5y0olR2zQn4sM2
-# XMEnal/L0+HtP2F0yHVVNKhKX/0oZ/6YtUwctfqLe4oibGAuJOTo27ZdpnjrR91W
-# M+eXutkSdq42NYDV5CxBN41DD1XFODj/CUnBydBT5tiuAil4MnAPtleX+XvrWrOB
-# OZL7byVQZyHC65Dbh1WIsNiLIEp5g2Jt91gSerCbkvM+WaGzPzv7TbiuqhsgRpv8
-# 8FpEqxZk9Iis5OC686XL2cBxQUh8UApYy3EkqsnYmyKywnj7teFmbyb/vpy8lOSL
-# ZM5DP/EcS4bdivC7Nf3QFzLqspU4f/8P+iOtqaGW8DsFGq8IKmtPq9bLUsQyAjWN
-# yGIMjzVX2RuRoQodABoAQ3SCP7YRlpHotcXNNe/c7MvXfPPVIkHlwsb6iQv1bMWW
-# Oo2deW1bH3FIHfubr2TQd0s+8oVL9mhWDY+YlLCFW2ZmWKg4FQovRQIdrGFTRwSS
-# Mm1Pv666u1FaMsQ=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg6B6d/uSzmMY5a2vnSa4FqO72utZSG5tN
+# ZMl13O8maGswDQYJKoZIhvcNAQEBBQAEggIAVg7Vitw0jW46pm1LPO8wge5foNGt
+# GTMGBvMn9joT+Dl1RBaL5jSpNO/lmS0xFBzF/s//E+3T87pEZzzazTAdy0D41Tap
+# n+AY89LxxSHSMnf7TPFbUoZiROKHh/VHcNMoy3J33ZjrN1YA4PgVw6YzZui237zT
+# fmn4DjD8CcYLATaoPT6TRRadFZPwoq28/y8SOIz6e02hWzg8fli/aqjKmUqpL3se
+# d49neqwhZP4j6WIYTGeA0CYKT2YJ4BwJj+k9Ph65zuTyhUL9yYet5e1sXujpnuY9
+# 5lvuzLX7CuCp3ho+bvfmd8cA6QuARLmXLsiEKC+lJp61Bak2S59vkqltJpMF+/e4
+# Iros68Fjcbcle7cBi2uQVaieJYh4FqRPnoLjXGePmdMppceN454DO42+ak+xlniJ
+# UkN/TdHyvKgmXZtzTvji6NLgYeu7qo7TVmUY98Pi3Jnx+QSb/XuPUZRLdChorvhg
+# ii8D60RfWerXtWnIJKpagDDvm5oikQGYTttlUWGTP8n+2hbDbOq0LnUnWvcXjzxn
+# 0e7BPQYLjm54Yv2ZTBCppZsBiRkhcbn9+wdTrDuOw8Vm1X0qvjqRa38beQlw9Ugy
+# zNCSPBJcjjm6kx3bpNj06pdvioMLiA6ZE7EW2Nz8C8lj36lDeUqz5YzAbwWLxfya
+# tAo7Z6dzDvDpAmI=
 # SIG # End signature block

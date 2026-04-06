@@ -94,7 +94,7 @@ param(
     [ValidateSet('Token', 'Password')]
     [string]$AuthMethod = 'Token',
 
-    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'None')]
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
     [string]$Action,
 
     [string]$WUGServer = '192.168.74.74',
@@ -258,6 +258,13 @@ foreach ($item in $plan) {
             $ip   = $item.Attributes['Proxmox.VMIP']
             $parentNode = $item.Attributes['Proxmox.ParentNode']
         }
+        'CT' {
+            $ctid = $item.Attributes['Proxmox.VMID']
+            $key  = "ct:${ctid}"
+            $name = $item.Attributes['Proxmox.VMName']
+            $ip   = $item.Attributes['Proxmox.VMIP']
+            $parentNode = $item.Attributes['Proxmox.ParentNode']
+        }
         default { continue }
     }
     if (-not $devicePlan.Contains($key)) {
@@ -275,8 +282,10 @@ foreach ($item in $plan) {
 
 $nodeDevices = @($devicePlan.Values | Where-Object { $_.Type -eq 'Node' })
 $vmDevices   = @($devicePlan.Values | Where-Object { $_.Type -eq 'VM' })
-$vmWithIP    = @($vmDevices | Where-Object { $_.IP })
-$vmNoIP      = @($vmDevices | Where-Object { -not $_.IP })
+$ctDevices   = @($devicePlan.Values | Where-Object { $_.Type -eq 'CT' })
+$guestDevices = @($vmDevices) + @($ctDevices)
+$guestWithIP  = @($guestDevices | Where-Object { $_.IP })
+$guestNoIP    = @($guestDevices | Where-Object { -not $_.IP })
 
 # Count unique monitor TEMPLATES (not total items)
 $activeTemplates = @($plan | Where-Object { $_.ItemType -eq 'ActiveMonitor' } |
@@ -286,10 +295,12 @@ $perfTemplates   = @($plan | Where-Object { $_.ItemType -eq 'PerformanceMonitor'
 
 Write-Host ""
 Write-Host "Discovery complete!" -ForegroundColor Green
-Write-Host "  Nodes:                 $($nodeDevices.Count)" -ForegroundColor White
-Write-Host "  VMs (with IP):         $($vmWithIP.Count)" -ForegroundColor White
-Write-Host "  VMs (no IP/no agent):  $($vmNoIP.Count)" -ForegroundColor White
-Write-Host "  Total WUG devices:     $($nodeDevices.Count + $vmWithIP.Count + 1) (nodes + VMs w/ IP + cluster)" -ForegroundColor White
+Write-Host "  Nodes:                  $($nodeDevices.Count)" -ForegroundColor White
+Write-Host "  VMs:                    $($vmDevices.Count)" -ForegroundColor White
+Write-Host "  Containers (LXC):       $($ctDevices.Count)" -ForegroundColor White
+Write-Host "  Guests with IP:         $($guestWithIP.Count)" -ForegroundColor White
+Write-Host "  Guests without IP:      $($guestNoIP.Count)" -ForegroundColor White
+Write-Host "  Total WUG devices:      $($nodeDevices.Count + $guestWithIP.Count + 1) (nodes + guests w/ IP + cluster)" -ForegroundColor White
 Write-Host ""
 Write-Host "  Active monitor templates:  $($activeTemplates.Count)  ($(@($plan | Where-Object { $_.ItemType -eq 'ActiveMonitor' }).Count) assignments)" -ForegroundColor White
 Write-Host "  Perf monitor templates:    $($perfTemplates.Count)  ($(@($plan | Where-Object { $_.ItemType -eq 'PerformanceMonitor' }).Count) assignments)" -ForegroundColor White
@@ -301,10 +312,10 @@ foreach ($t in $activeTemplates) { Write-Host "  [Active] $t" -ForegroundColor W
 foreach ($t in $perfTemplates)   { Write-Host "  [Perf]   $t" -ForegroundColor White }
 Write-Host ""
 
-if ($vmNoIP.Count -gt 0) {
-    Write-Host "VMs without IP (guest agent needed — monitors attach to parent node):" -ForegroundColor Yellow
-    foreach ($vm in $vmNoIP) {
-        Write-Host "    $($vm.Name) (on $($vm.ParentNode))" -ForegroundColor DarkYellow
+if ($guestNoIP.Count -gt 0) {
+    Write-Host "Guests without IP (monitors attach to parent node):" -ForegroundColor Yellow
+    foreach ($g in $guestNoIP) {
+        Write-Host "    $($g.Name) [$($g.Type)] (on $($g.ParentNode))" -ForegroundColor DarkYellow
     }
     Write-Host ""
 }
@@ -334,6 +345,7 @@ if ($Action) {
         'ShowTable' { $choice = '4' }
         'Dashboard' { $choice = '5' }
         'None' { $choice = '6' }
+        'DashboardAndPush' { $choice = '7' }
     }
 }
 
@@ -350,18 +362,27 @@ if (-not $choice) {
     Write-Host "  [4] Show full plan table"
     Write-Host "  [5] Generate Proxmox HTML dashboard (live metrics)"
     Write-Host "  [6] Exit (do nothing)"
+    Write-Host "  [7] Dashboard + Push to WUG"
     Write-Host ""
-    $choice = Read-Host -Prompt "Choice [1-6]"
+    $choice = Read-Host -Prompt "Choice [1-7]"
 }
 
-switch ($choice) {
+# Handle DashboardAndPush: run Dashboard then PushToWUG sequentially
+if ($choice -eq '7') {
+    $actionsToRun = @('5', '1')
+} else {
+    $actionsToRun = @($choice)
+}
+
+foreach ($currentChoice in $actionsToRun) {
+switch ($currentChoice) {
     '1' {
         if (-not $ProxmoxToken) {
             Write-Warning "WUG push requires API token auth. Re-run and choose option [1] for authentication."
             return
         }
         # --- Multi-device push to WUG -----------------------------------------
-        if (-not $NonInteractive) {
+        if (-not $NonInteractive -and -not $PSBoundParameters.ContainsKey('WUGServer')) {
             Write-Host ""
             $wugInput = Read-Host -Prompt "WhatsUp Gold server [default: $WUGServer]"
             if ($wugInput -and -not [string]::IsNullOrWhiteSpace($wugInput)) {
@@ -371,42 +392,82 @@ switch ($choice) {
 
         Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
         try {
-            Import-Module WhatsUpGoldPS -ErrorAction Stop
+            # Import from repo (not installed module) to get latest functions
+            $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+            $repoPsd1 = Join-Path $repoRoot 'WhatsUpGoldPS.psd1'
+            if (Test-Path $repoPsd1) {
+                Import-Module $repoPsd1 -Force -ErrorAction Stop
+            } else {
+                Import-Module WhatsUpGoldPS -ErrorAction Stop
+            }
         }
         catch {
             Write-Error "Could not load WhatsUpGoldPS module. Is it installed? $_"
             return
         }
+        # Dot-source internal helper so scripts can call Get-WUGAPIResponse directly
+        $apiResponsePath = Join-Path $PSScriptRoot '..\..\functions\Get-WUGAPIResponse.ps1'
+        if (Test-Path $apiResponsePath) { . $apiResponsePath }
 
+        # Resolve WUG credentials from vault or prompt
+        $wugVaultName = "WUG.$WUGServer"
         if ($WUGCredential) {
             $wugCred = $WUGCredential
         }
-        elseif ($NonInteractive) {
-            $wugResolved = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -NonInteractive
+        else {
+            $wugSplat = @{
+                Name     = $wugVaultName
+                CredType = 'WUGServer'
+            }
+            if ($NonInteractive) { $wugSplat.NonInteractive = $true }
+            else { $wugSplat.AutoUse = $true }
+
+            $wugResolved = Resolve-DiscoveryCredential @wugSplat
             if (-not $wugResolved) {
-                Write-Error 'No WUG credentials in vault. Run interactively first to cache them, or pass -WUGCredential.'
+                if ($NonInteractive) {
+                    Write-Error "No WUG credentials in vault for '$wugVaultName'. Run interactively first, or pass -WUGCredential."
+                    return
+                }
+                Write-Error 'WUG credential resolution cancelled.'
                 return
             }
             $wugCred = $wugResolved.Credential
             if ($wugResolved.Server) { $WUGServer = $wugResolved.Server }
         }
-        else {
-            $wugCred = Get-Credential -Message "WhatsUp Gold admin credentials for $WUGServer"
-        }
         Connect-WUGServer -serverUri $WUGServer -Credential $wugCred -IgnoreSSLErrors
 
-        # ----------------------------------------------------------------
-        # 5a. Create or find one shared REST API credential for Proxmox
-        # ----------------------------------------------------------------
+        # ================================================================
+        # PushToWUG — Azure-style flow:
+        #   1. Create/find credential
+        #   2a. Create active monitors in library (bulk)
+        #   2b. Create perf monitors in library (bulk)
+        #   2c. Check existing vs new devices
+        #   2d. Create new devices via Add-WUGDeviceTemplate
+        #   2e. Update existing devices (assign creds + monitors)
+        # ================================================================
+        $stats = @{
+            HealthCreated = 0; HealthSkipped = 0; HealthFailed = 0
+            PerfCreated   = 0; PerfSkipped   = 0; PerfFailed   = 0
+            DevicesCreated = 0; DevicesFound = 0; CloudDevices = 0
+            CredsAssigned = 0
+        }
+        $wugDeviceMap = @{}   # deviceKey -> WUG device ID
+        $deviceKeys = @($devicePlan.Keys | Sort-Object)
+        $devTotal   = $deviceKeys.Count
+
+        # ---- 1. Create/find REST API credential ----------------------------
         Write-Host ""
         Write-Host "Setting up Proxmox REST API credential in WUG..." -ForegroundColor Cyan
 
-        $credName = "Proxmox API Token"
+        $credName   = "Proxmox API Token"
         $proxCredId = $null
 
-        # Check if credential already exists
+        # Search by type + name first, then by name only as fallback
         try {
-            $existingCreds = @(Get-WUGCredential -Type restapi -SearchValue $credName)
+            $existingCreds = @(Get-WUGCredential -Type restapi -SearchValue $credName -View basic)
+            if ($existingCreds.Count -eq 0) {
+                $existingCreds = @(Get-WUGCredential -SearchValue $credName -View basic)
+            }
             if ($existingCreds.Count -gt 0) {
                 $matchCred = $existingCreds | Where-Object { $_.name -eq $credName } | Select-Object -First 1
                 if ($matchCred) {
@@ -415,185 +476,596 @@ switch ($choice) {
                 }
             }
         }
-        catch {
-            Write-Verbose "Credential search error: $_"
-        }
+        catch { Write-Verbose "Credential search error: $_" }
 
         if (-not $proxCredId) {
             Write-Host "  Creating credential '$credName'..." -ForegroundColor Yellow
             try {
-                $credResult = Add-WUGCredential -Name $credName -Type restapi `
+                $credResult = Add-WUGCredential -Name $credName `
+                    -Description "Proxmox PVE API Token (auto-created by discovery)" `
+                    -Type restapi `
                     -RestApiUsername 'api-token' `
                     -RestApiPassword $ProxmoxToken `
-                    -RestApiAuthType '0'
+                    -RestApiAuthType '0' `
+                    -RestApiIgnoreCertErrors 'True'
                 if ($credResult) {
-                    $proxCredId = if ($credResult.PSObject.Properties['resourceId']) { $credResult.resourceId } else { $credResult.id }
-                    Write-Host "  Created credential (ID: $proxCredId)" -ForegroundColor Green
+                    if ($credResult.PSObject.Properties['data']) {
+                        $proxCredId = $credResult.data.idMap.resultId
+                    } elseif ($credResult.PSObject.Properties['resourceId']) {
+                        $proxCredId = $credResult.resourceId
+                    } elseif ($credResult.PSObject.Properties['id']) {
+                        $proxCredId = $credResult.id
+                    }
+                    if ($proxCredId) {
+                        Write-Host "  Created credential (ID: $proxCredId)" -ForegroundColor Green
+                    }
                 }
             }
             catch {
-                Write-Warning "Failed to create credential: $_"
+                Write-Verbose "Standard credential creation failed: $_"
+            }
+
+            # Fallback: try PATCH config/template endpoint (like monitor templates)
+            if (-not $proxCredId) {
+                try {
+                    $credTpl = @{
+                        templateId   = 'proxmox_restapi_1'
+                        name         = $credName
+                        description  = 'Proxmox PVE API Token (auto-created by discovery)'
+                        type         = 'restapi'
+                        propertyBags = @(
+                            @{ name = 'CredRestAPI:Username'; value = 'api-token' }
+                            @{ name = 'CredRestAPI:Password'; value = $ProxmoxToken }
+                            @{ name = 'CredRestAPI:Authtype'; value = '0' }
+                            @{ name = 'CredRestAPI:IgnoreCertificateErrorsForOAuth2Token'; value = 'True' }
+                        )
+                    }
+                    $credBody = @{ credentials = @($credTpl) } | ConvertTo-Json -Depth 5
+                    $credUri  = "${global:WhatsUpServerBaseURI}/api/v1/credentials/-/config/template"
+                    $tplResult = Get-WUGAPIResponse -Uri $credUri -Method 'PATCH' -Body $credBody
+                    if ($tplResult.data -and $tplResult.data.idMap) {
+                        $proxCredId = ($tplResult.data.idMap | Select-Object -First 1).resultId
+                        Write-Host "  Created credential via template (ID: $proxCredId)" -ForegroundColor Green
+                    }
+                }
+                catch {
+                    Write-Verbose "Template credential creation also failed: $_"
+                }
+            }
+
+            # Re-search in case creation succeeded but ID extraction failed
+            if (-not $proxCredId) {
+                try {
+                    $recheck = @(Get-WUGCredential -SearchValue $credName -View basic)
+                    $match = $recheck | Where-Object { $_.name -eq $credName } | Select-Object -First 1
+                    if ($match) {
+                        $proxCredId = $match.id
+                        Write-Host "  Found credential '$credName' after creation (ID: $proxCredId)" -ForegroundColor Green
+                    }
+                }
+                catch { }
+            }
+
+            if (-not $proxCredId) {
+                Write-Warning "Could not create REST API credential via API."
+                Write-Warning "Create it manually in WUG: Credentials Library -> Add -> REST API"
+                Write-Warning "  Name: $credName | Auth: None/Basic | Username: api-token | Password: <PVE token>"
+                Write-Warning "Monitors will still work (auth is in CustomHeader), but devices won't have the credential assigned."
             }
         }
 
-        # ----------------------------------------------------------------
-        # 5b. Create/find devices in WUG
-        # ----------------------------------------------------------------
+        # ---- 2a. Create active monitors in library (bulk) ------------------
         Write-Host ""
-        Write-Host "Creating devices in WUG..." -ForegroundColor Cyan
+        Write-Host "  Creating active monitors in library..." -ForegroundColor Cyan
 
-        $wugDeviceMap = @{}  # deviceKey -> WUG device ID
-        $devicesCreated = 0
-        $devicesFound   = 0
-
-        foreach ($key in $devicePlan.Keys) {
+        # Deduplicate by monitor name across all devices
+        $uniqueActiveMonitors = @{}
+        foreach ($key in $deviceKeys) {
             $dev = $devicePlan[$key]
+            foreach ($actItem in @($dev.Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' })) {
+                $actName = $actItem.Name
+                if (-not $actName -or $uniqueActiveMonitors.ContainsKey($actName)) { continue }
+                if (-not $actItem.MonitorParams -or $actItem.MonitorParams.Count -eq 0) { continue }
+                $uniqueActiveMonitors[$actName] = $actItem
+            }
+        }
 
-            # Determine IP/hostname to add to WUG
-            $addIP = $null
-            if ($dev.Type -eq 'Cluster') {
-                $addIP = $dev.IP
-            }
-            elseif ($dev.Type -eq 'Node') {
-                $addIP = $dev.IP
-            }
-            elseif ($dev.Type -eq 'VM' -and $dev.IP) {
-                $addIP = $dev.IP
-            }
-            else {
-                # VM without IP — map to parent node later
-                continue
-            }
-
-            if (-not $addIP) { continue }
-
-            # Search WUG for existing device
-            $existingDevice = $null
+        # Check which already exist in library (per-name search like Azure)
+        $existingActiveNames = @{}  # name -> library ID
+        foreach ($actName in @($uniqueActiveMonitors.Keys)) {
             try {
-                $searchResults = @(Get-WUGDevice -SearchValue $addIP)
+                $found = @(Get-WUGActiveMonitor -Search $actName)
+                $exact = $found | Where-Object { $_.name -eq $actName } | Select-Object -First 1
+                if ($exact) {
+                    $existingActiveNames[$actName] = [int]$exact.id
+                }
+            }
+            catch { }
+        }
+
+        $toCreateActive = @($uniqueActiveMonitors.Keys | Where-Object { -not $existingActiveNames.ContainsKey($_) })
+        $stats.HealthSkipped = $uniqueActiveMonitors.Count - $toCreateActive.Count
+
+        if ($toCreateActive.Count -gt 0) {
+            Write-Host "    Creating $($toCreateActive.Count) new active monitors (bulk)..." -ForegroundColor DarkGray
+
+            $activeTemplateArr = @()
+            $actTplIdMap = @{}
+            $actTplIdx = 0
+            foreach ($actName in $toCreateActive) {
+                $actItem = $uniqueActiveMonitors[$actName]
+                $mp = $actItem.MonitorParams
+                $tplId = "act_$actTplIdx"
+                $actTplIdMap[$tplId] = $actName
+                $actTplIdx++
+
+                $bags = @(
+                    @{ name = 'MonRestApi:RestUrl';                value = "$($mp.RestApiUrl)" }
+                    @{ name = 'MonRestApi:HttpMethod';             value = if ($mp.RestApiMethod) { "$($mp.RestApiMethod)" } else { 'GET' } }
+                    @{ name = 'MonRestApi:HttpTimeoutMs';          value = if ($mp.RestApiTimeoutMs) { "$($mp.RestApiTimeoutMs)" } else { '10000' } }
+                    @{ name = 'MonRestApi:IgnoreCertErrors';       value = if ($mp.RestApiIgnoreCertErrors) { "$($mp.RestApiIgnoreCertErrors)" } else { '1' } }
+                    @{ name = 'MonRestApi:UseAnonymousAccess';     value = if ($mp.RestApiUseAnonymous) { "$($mp.RestApiUseAnonymous)" } else { '1' } }
+                    @{ name = 'MonRestApi:CustomHeader';           value = if ($mp.RestApiCustomHeader) { "$($mp.RestApiCustomHeader)" } else { '' } }
+                    @{ name = 'MonRestApi:DownIfResponseCodeIsIn'; value = if ($mp.RestApiDownIfResponseCodeIsIn) { "$($mp.RestApiDownIfResponseCodeIsIn)" } else { '[]' } }
+                    @{ name = 'MonRestApi:ComparisonList';         value = if ($mp.RestApiComparisonList) { "$($mp.RestApiComparisonList)" } else { '[]' } }
+                    @{ name = 'Cred:Type';                        value = '8192' }
+                )
+
+                $activeTemplateArr += @{
+                    templateId      = $tplId
+                    name            = $actName
+                    description     = 'Proxmox RestApi active monitor'
+                    useInDiscovery  = $false
+                    monitorTypeInfo = @{
+                        baseType = 'active'
+                        classId  = 'f0610672-d515-4268-bd21-ac5ebb1476ff'
+                    }
+                    propertyBags    = $bags
+                }
+            }
+
+            try {
+                $batchSize = 50
+                for ($bi = 0; $bi -lt $activeTemplateArr.Count; $bi += $batchSize) {
+                    $batchEnd = [Math]::Min($bi + $batchSize - 1, $activeTemplateArr.Count - 1)
+                    $actBatch = @($activeTemplateArr[$bi..$batchEnd])
+                    if ($activeTemplateArr.Count -gt $batchSize) {
+                        $batchNum = [Math]::Floor($bi / $batchSize) + 1
+                        $totalBatches = [Math]::Ceiling($activeTemplateArr.Count / $batchSize)
+                        Write-Host "      Batch $batchNum/$totalBatches ($($actBatch.Count) monitors)..." -ForegroundColor DarkGray
+                    }
+
+                    $bulkActResult = Add-WUGMonitorTemplate -ActiveMonitors $actBatch
+                    if ($bulkActResult.idMap) {
+                        foreach ($mapping in $bulkActResult.idMap) {
+                            $tplId = $mapping.templateId
+                            $resultId = $mapping.resultId
+                            if ($actTplIdMap.ContainsKey($tplId) -and $resultId) {
+                                $actName = $actTplIdMap[$tplId]
+                                $existingActiveNames[$actName] = [int]$resultId
+                                $stats.HealthCreated++
+                            }
+                        }
+                    }
+                    if ($bulkActResult.errors) {
+                        foreach ($err in $bulkActResult.errors) {
+                            $errName = if ($actTplIdMap.ContainsKey($err.templateId)) { $actTplIdMap[$err.templateId] } else { $err.templateId }
+                            Write-Warning "Active monitor create error for '$errName': $($err.messages -join '; ')"
+                            $stats.HealthFailed++
+                        }
+                    }
+                    if ($batchEnd -lt $activeTemplateArr.Count - 1) { Start-Sleep -Seconds 2 }
+                }
+            }
+            catch {
+                Write-Warning "Bulk active monitor creation failed, falling back to one-at-a-time: $_"
+                $actIdx = 0
+                foreach ($actName in $toCreateActive) {
+                    if ($existingActiveNames.ContainsKey($actName)) { continue }
+                    $actIdx++
+                    $actItem = $uniqueActiveMonitors[$actName]
+                    Write-Progress -Activity 'Creating Active Monitors' `
+                        -Status "$actIdx / $($toCreateActive.Count) - $actName" `
+                        -PercentComplete ([Math]::Round(($actIdx / $toCreateActive.Count) * 100))
+                    try {
+                        $actParams = @{ Type = $actItem.MonitorType; Name = $actName; ErrorAction = 'Stop' }
+                        foreach ($ak in $actItem.MonitorParams.Keys) {
+                            if ($ak -ne 'Name' -and $ak -ne 'Description') { $actParams[$ak] = $actItem.MonitorParams[$ak] }
+                        }
+                        $monLibId = Add-WUGActiveMonitor @actParams
+                        if ($monLibId) { $existingActiveNames[$actName] = [int]$monLibId; $stats.HealthCreated++ }
+                    }
+                    catch { Write-Warning "Failed to create active monitor '$actName': $_"; $stats.HealthFailed++ }
+                }
+                Write-Progress -Activity 'Creating Active Monitors' -Completed
+            }
+        }
+        Write-Host "    Active monitors: $($stats.HealthCreated) created, $($stats.HealthSkipped) existing, $($stats.HealthFailed) failed" -ForegroundColor DarkGray
+
+        # Reconcile: re-query library for any names still missing
+        $reconciledAct = 0
+        foreach ($actName in @($uniqueActiveMonitors.Keys)) {
+            if ($existingActiveNames.ContainsKey($actName)) { continue }
+            try {
+                $found = @(Get-WUGActiveMonitor -Search $actName)
+                $exact = $found | Where-Object { $_.name -eq $actName } | Select-Object -First 1
+                if ($exact) {
+                    $existingActiveNames[$actName] = [int]$exact.id
+                    $reconciledAct++
+                }
+            }
+            catch { }
+        }
+        if ($reconciledAct -gt 0) { Write-Host "    Reconciled $reconciledAct active monitors from library" -ForegroundColor DarkGray }
+
+        # ---- 2b. Create perf monitors in library (bulk) --------------------
+        Write-Host "  Creating performance monitors in library..." -ForegroundColor Cyan
+
+        $uniquePerfMonitors = @{}
+        foreach ($key in $deviceKeys) {
+            $dev = $devicePlan[$key]
+            foreach ($perfItem in @($dev.Items | Where-Object { $_.ItemType -eq 'PerformanceMonitor' })) {
+                $monName = $perfItem.Name
+                if (-not $monName -or $uniquePerfMonitors.ContainsKey($monName)) { continue }
+                $uniquePerfMonitors[$monName] = $perfItem
+            }
+        }
+
+        $existingPerfNames = @{}  # name -> monitor library id
+        foreach ($monName in @($uniquePerfMonitors.Keys)) {
+            try {
+                $found = @(Get-WUGPerformanceMonitor -Search $monName)
+                $exact = $found | Where-Object { $_.name -eq $monName } | Select-Object -First 1
+                if ($exact) {
+                    $existingPerfNames[$monName] = "$($exact.id)"
+                }
+            }
+            catch { }
+        }
+
+        $toCreatePerf = @($uniquePerfMonitors.Keys | Where-Object { -not $existingPerfNames.ContainsKey($_) })
+        $stats.PerfSkipped = $uniquePerfMonitors.Count - $toCreatePerf.Count
+
+        if ($toCreatePerf.Count -gt 0) {
+            Write-Host "    Creating $($toCreatePerf.Count) new perf monitors (bulk)..." -ForegroundColor DarkGray
+
+            $perfTemplateArr = @()
+            $perfTplIdMap = @{}
+            $perfTplIdx = 0
+            foreach ($monName in $toCreatePerf) {
+                $perfItem = $uniquePerfMonitors[$monName]
+                $mp = $perfItem.MonitorParams
+                $tplId = "perf_$perfTplIdx"
+                $perfTplIdMap[$tplId] = $monName
+                $perfTplIdx++
+
+                $bags = @(
+                    @{ name = 'RdcRestApi:RestUrl';            value = "$($mp.RestApiUrl)" }
+                    @{ name = 'RdcRestApi:JsonPath';           value = "$($mp.RestApiJsonPath)" }
+                    @{ name = 'RdcRestApi:HttpMethod';         value = if ($mp.RestApiHttpMethod) { "$($mp.RestApiHttpMethod)" } else { 'GET' } }
+                    @{ name = 'RdcRestApi:HttpTimeoutMs';      value = if ($mp.RestApiHttpTimeoutMs) { "$($mp.RestApiHttpTimeoutMs)" } else { '10000' } }
+                    @{ name = 'RdcRestApi:IgnoreCertErrors';   value = if ($mp.RestApiIgnoreCertErrors) { "$($mp.RestApiIgnoreCertErrors)" } else { '1' } }
+                    @{ name = 'RdcRestApi:UseAnonymousAccess'; value = if ($mp.RestApiUseAnonymousAccess) { "$($mp.RestApiUseAnonymousAccess)" } else { '1' } }
+                    @{ name = 'RdcRestApi:CustomHeader';       value = if ($mp.RestApiCustomHeader) { "$($mp.RestApiCustomHeader)" } else { '' } }
+                )
+
+                $perfTemplateArr += @{
+                    templateId      = $tplId
+                    name            = $monName
+                    description     = 'Proxmox RestApi performance monitor'
+                    monitorTypeInfo = @{
+                        baseType = 'performance'
+                        classId  = '987bb6a4-70f4-4f46-97c6-1c9dd1766437'
+                    }
+                    propertyBags    = $bags
+                }
+            }
+
+            try {
+                $batchSize = 50
+                for ($bi = 0; $bi -lt $perfTemplateArr.Count; $bi += $batchSize) {
+                    $batchEnd = [Math]::Min($bi + $batchSize - 1, $perfTemplateArr.Count - 1)
+                    $perfBatch = @($perfTemplateArr[$bi..$batchEnd])
+                    $batchNum = [Math]::Floor($bi / $batchSize) + 1
+                    $totalBatches = [Math]::Ceiling($perfTemplateArr.Count / $batchSize)
+                    Write-Host "      Batch $batchNum/$totalBatches ($($perfBatch.Count) monitors)..." -ForegroundColor DarkGray
+
+                    $bulkPerfResult = Add-WUGMonitorTemplate -PerformanceMonitors $perfBatch
+                    if ($bulkPerfResult.idMap) {
+                        foreach ($mapping in $bulkPerfResult.idMap) {
+                            $tplId = $mapping.templateId
+                            $resultId = $mapping.resultId
+                            if ($perfTplIdMap.ContainsKey($tplId) -and $resultId) {
+                                $monName = $perfTplIdMap[$tplId]
+                                $existingPerfNames[$monName] = "$resultId"
+                                $stats.PerfCreated++
+                            }
+                        }
+                    }
+                    if ($bulkPerfResult.errors) {
+                        foreach ($err in $bulkPerfResult.errors) {
+                            $errName = if ($perfTplIdMap.ContainsKey($err.templateId)) { $perfTplIdMap[$err.templateId] } else { $err.templateId }
+                            Write-Warning "Perf monitor create error for '$errName': $($err.messages -join '; ')"
+                            $stats.PerfFailed++
+                        }
+                    }
+                    if ($batchEnd -lt $perfTemplateArr.Count - 1) { Start-Sleep -Seconds 2 }
+                }
+            }
+            catch {
+                Write-Warning "Bulk perf monitor creation failed, falling back to one-at-a-time: $_"
+                $perfIdx = 0
+                foreach ($monName in $toCreatePerf) {
+                    if ($existingPerfNames.ContainsKey($monName)) { continue }
+                    $perfIdx++
+                    $perfItem = $uniquePerfMonitors[$monName]
+                    Write-Progress -Activity 'Creating Perf Monitors' `
+                        -Status "$perfIdx / $($toCreatePerf.Count)" `
+                        -PercentComplete ([Math]::Round(($perfIdx / $toCreatePerf.Count) * 100))
+                    try {
+                        $perfParams = @{ Type = $perfItem.MonitorType; Name = $monName; ErrorAction = 'Stop' }
+                        foreach ($pk in $perfItem.MonitorParams.Keys) {
+                            if ($pk -notin @('Name','Description','LastValue','LastTimestamp','MetricUnit') -and $pk -notlike '_*') {
+                                $perfParams[$pk] = $perfItem.MonitorParams[$pk]
+                            }
+                        }
+                        $result = Add-WUGPerformanceMonitor @perfParams
+                        if ($result -and $result.MonitorId) {
+                            $existingPerfNames[$monName] = "$($result.MonitorId)"
+                            $stats.PerfCreated++
+                        }
+                    }
+                    catch {
+                        if ($_.Exception.Message -match 'already exists|duplicate') { $stats.PerfSkipped++ }
+                        else { Write-Verbose "Failed to create perf monitor '$monName': $_"; $stats.PerfFailed++ }
+                    }
+                }
+                Write-Progress -Activity 'Creating Perf Monitors' -Completed
+            }
+        }
+        Write-Host "    Perf monitors: $($stats.PerfCreated) created, $($stats.PerfSkipped) existing, $($stats.PerfFailed) failed" -ForegroundColor DarkGray
+
+        # Reconcile perf monitors
+        $reconciledPerf = 0
+        foreach ($monName in @($uniquePerfMonitors.Keys)) {
+            if ($existingPerfNames.ContainsKey($monName)) { continue }
+            try {
+                $found = @(Get-WUGPerformanceMonitor -Search $monName)
+                $exact = $found | Where-Object { $_.name -eq $monName } | Select-Object -First 1
+                if ($exact) {
+                    $existingPerfNames[$monName] = "$($exact.id)"
+                    $reconciledPerf++
+                }
+            }
+            catch { }
+        }
+        if ($reconciledPerf -gt 0) { Write-Host "    Reconciled $reconciledPerf perf monitors from library" -ForegroundColor DarkGray }
+
+        # ---- 2c. Identify existing vs new devices --------------------------
+        Write-Host "  Checking for existing devices..." -ForegroundColor Cyan
+        $existingDevices = @{}   # key -> deviceId
+        $newDeviceKeys   = [System.Collections.Generic.List[string]]::new()
+
+        $devIdx = 0
+        foreach ($key in $deviceKeys) {
+            $devIdx++
+            $dev = $devicePlan[$key]
+            # Every device gets created — no-IP guests use 0.0.0.0
+            $rawIP = $dev.IP
+            $addIP = if ($rawIP -and $rawIP -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { $rawIP } else { '0.0.0.0' }
+            $displayName = "$($dev.Name) ($($dev.Type))"
+
+            Write-Progress -Activity 'Checking existing devices' `
+                -Status "$devIdx / $devTotal - $($dev.Name)" `
+                -PercentComplete ([Math]::Round(($devIdx / $devTotal) * 100))
+
+            $deviceId = $null
+            try {
+                $searchResults = @(Get-WUGDevice -SearchValue $dev.Name)
                 if ($searchResults.Count -gt 0) {
                     $existingDevice = $searchResults | Where-Object {
-                        $_.networkAddress -eq $addIP -or
-                        $_.hostName -eq $addIP -or
-                        $_.displayName -eq $addIP -or
-                        $_.displayName -eq $dev.Name
+                        $_.displayName -eq $dev.Name -or
+                        $_.displayName -eq $displayName -or
+                        $_.hostName -eq $dev.Name
                     } | Select-Object -First 1
-                    if (-not $existingDevice -and $searchResults.Count -eq 1) {
-                        $existingDevice = $searchResults[0]
+                    if ($existingDevice) { $deviceId = $existingDevice.id }
+                }
+                if (-not $deviceId -and $dev.IP) {
+                    $searchResults = @(Get-WUGDevice -SearchValue $addIP)
+                    if ($searchResults.Count -gt 0) {
+                        $match = $searchResults | Where-Object {
+                            $_.networkAddress -eq $addIP -or $_.hostName -eq $addIP
+                        } | Select-Object -First 1
+                        if ($match) { $deviceId = $match.id }
                     }
                 }
             }
-            catch {
-                Write-Verbose "Search for '$addIP' returned error: $_"
-            }
+            catch { Write-Verbose "Search for '$($dev.Name)' returned error: $_" }
 
-            if ($existingDevice) {
-                $wugDeviceMap[$key] = $existingDevice.id
-                $devicesFound++
-                Write-Host "  Found: $($existingDevice.displayName) (ID: $($existingDevice.id)) [$($dev.Type)]" -ForegroundColor Green
+            if ($deviceId) {
+                $existingDevices[$key] = $deviceId
+                $wugDeviceMap[$key] = $deviceId
+                $stats.DevicesFound++
             }
             else {
-                Write-Host "  Adding $addIP ($($dev.Name)) [$($dev.Type)]..." -ForegroundColor Yellow
-                try {
-                    Add-WUGDevice -IpOrName $addIP -GroupId 0 | Out-Null
-                    Start-Sleep -Seconds 2
-                    $newDevice = @(Get-WUGDevice -SearchValue $addIP) | Select-Object -First 1
-                    if ($newDevice) {
-                        $wugDeviceMap[$key] = $newDevice.id
-                        $devicesCreated++
-                        Write-Host "  Added: $($newDevice.displayName) (ID: $($newDevice.id))" -ForegroundColor Green
+                $newDeviceKeys.Add($key)
+            }
+        }
+        Write-Progress -Activity 'Checking existing devices' -Completed
+        Write-Host "    Found $($stats.DevicesFound) existing, $($newDeviceKeys.Count) new to create" -ForegroundColor DarkGray
+
+        # ---- 2d. Create devices via Add-WUGDeviceTemplate ------------------
+        if ($newDeviceKeys.Count -gt 0) {
+            Write-Host "  Creating $($newDeviceKeys.Count) devices..." -ForegroundColor Yellow
+            $devIdx = 0
+
+            foreach ($key in $newDeviceKeys) {
+                $devIdx++
+                $dev = $devicePlan[$key]
+                $rawIP = $dev.IP
+                $addIP = if ($rawIP -and $rawIP -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { $rawIP } else { '0.0.0.0' }
+                $displayName = "$($dev.Name) ($($dev.Type))"
+
+                Write-Progress -Activity 'Creating devices' `
+                    -Status "$devIdx / $($newDeviceKeys.Count) - $displayName" `
+                    -PercentComplete ([Math]::Round(($devIdx / $newDeviceKeys.Count) * 100))
+
+                # Build attributes array
+                $devAttrs = @()
+                foreach ($attrName in $dev.Attrs.Keys) {
+                    $attrVal = $dev.Attrs[$attrName]
+                    if ($attrVal) { $devAttrs += @{ name = $attrName; value = "$attrVal" } }
+                }
+
+                # Collect unique active monitor names that exist in library
+                $actNames = @()
+                $seenActNames = @{}
+                foreach ($actItem in @($dev.Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' })) {
+                    if ($actItem.Name -and $existingActiveNames.ContainsKey($actItem.Name) -and -not $seenActNames.ContainsKey($actItem.Name)) {
+                        $actNames += $actItem.Name
+                        $seenActNames[$actItem.Name] = $true
                     }
-                    else {
-                        Write-Warning "Added '$addIP' but could not find it in WUG."
+                }
+
+                # Collect unique perf monitor names that exist in library
+                $perfNames = @()
+                $seenPerfNames = @{}
+                foreach ($perfItem in @($dev.Items | Where-Object { $_.ItemType -eq 'PerformanceMonitor' })) {
+                    if ($perfItem.Name -and $existingPerfNames.ContainsKey($perfItem.Name) -and -not $seenPerfNames.ContainsKey($perfItem.Name)) {
+                        $perfNames += $perfItem.Name
+                        $seenPerfNames[$perfItem.Name] = $true
+                    }
+                }
+
+                # Skip devices with no monitors to assign
+                if ($actNames.Count -eq 0 -and $perfNames.Count -eq 0) {
+                    Write-Verbose "Skipping '$displayName' — no monitors to assign."
+                    continue
+                }
+
+                $devNote = "Proxmox $($dev.Type) (auto-created by discovery)"
+
+                $splat = @{
+                    displayName   = $displayName
+                    DeviceAddress = $addIP
+                    Hostname      = $dev.Name
+                    Brand         = 'Proxmox'
+                    Note          = $devNote
+                }
+
+                if ($devAttrs.Count -gt 0) { $splat['Attributes'] = $devAttrs }
+                if ($credName -and $proxCredId) { $splat['CredentialRestApi'] = $credName }
+
+                if ($actNames.Count -gt 0) {
+                    $splat['ActiveMonitors'] = $actNames
+                }
+                # Always suppress default Ping monitor — our REST API active monitors handle up/down
+                $splat['NoDefaultActiveMonitor'] = $true
+
+                if ($perfNames.Count -gt 0) {
+                    $splat['PerformanceMonitors'] = $perfNames
+                }
+
+                try {
+                    $devResult = Add-WUGDeviceTemplate @splat
+
+                    if ($devResult -and -not $devResult.error) {
+                        $newDeviceId = $null
+                        if ($devResult.idMap) {
+                            $newDeviceId = ($devResult.idMap | Select-Object -First 1).resultId
+                        } elseif ($devResult.PSObject.Properties['resultId']) {
+                            $newDeviceId = $devResult.resultId
+                        }
+                        if ($newDeviceId) { $wugDeviceMap[$key] = $newDeviceId }
+                        $stats.DevicesCreated++
+                        if (-not $dev.IP) { $stats.CloudDevices++ }
+                        Write-Verbose "Created device '$displayName' (ID: $newDeviceId)"
+                    } else {
+                        $errMsg = if ($devResult.error) { $devResult.error } else { 'Unknown error' }
+                        Write-Warning "Failed to create device '$displayName': $errMsg"
                     }
                 }
                 catch {
-                    Write-Warning "Failed to add device '$addIP': $_"
+                    Write-Warning "Error creating device '$displayName': $_"
                 }
             }
+
+            Write-Progress -Activity 'Creating devices' -Completed
+            Write-Host "    Devices: $($stats.DevicesCreated) created ($($stats.CloudDevices) no-IP)" -ForegroundColor Green
         }
 
-        # Map no-IP VMs to parent node devices
-        foreach ($key in $devicePlan.Keys) {
-            $dev = $devicePlan[$key]
-            if ($dev.Type -eq 'VM' -and -not $dev.IP -and -not $wugDeviceMap.ContainsKey($key)) {
-                $parentKey = "node:$($dev.ParentNode)"
-                if ($wugDeviceMap.ContainsKey($parentKey)) {
-                    $wugDeviceMap[$key] = $wugDeviceMap[$parentKey]
-                    Write-Host "  $($dev.Name) (VM, no IP) -> node $($dev.ParentNode)" -ForegroundColor DarkGray
+        # ---- 2e. Handle existing devices (creds + monitor assignment) ------
+        if ($existingDevices.Count -gt 0) {
+            Write-Host "  Updating $($existingDevices.Count) existing devices (credentials + monitors)..." -ForegroundColor Cyan
+            $existIdx = 0
+            foreach ($key in $existingDevices.Keys) {
+                $existIdx++
+                $deviceId = [int]$existingDevices[$key]
+                $dev = $devicePlan[$key]
+
+                Write-Progress -Activity 'Updating existing devices' `
+                    -Status "$existIdx / $($existingDevices.Count) - $($dev.Name)" `
+                    -PercentComplete ([Math]::Round(($existIdx / $existingDevices.Count) * 100))
+
+                # Assign credential
+                if ($proxCredId) {
+                    try {
+                        $null = Set-WUGDeviceCredential -DeviceId $deviceId -CredentialId $proxCredId -Assign
+                        $stats.CredsAssigned++
+                    }
+                    catch {
+                        if ($_.Exception.Message -notmatch 'already|assigned|exists|duplicate') {
+                            Write-Verbose "Credential assign error for device $deviceId`: $_"
+                        }
+                    }
                 }
-                else {
-                    Write-Warning "No WUG device for VM '$($dev.Name)' — parent node '$($dev.ParentNode)' not found."
+
+                # Assign active monitors by library ID
+                $actMonitorIds = @()
+                foreach ($actItem in @($dev.Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' })) {
+                    if ($actItem.Name -and $existingActiveNames.ContainsKey($actItem.Name)) {
+                        $actMonitorIds += $existingActiveNames[$actItem.Name]
+                    }
                 }
-            }
-        }
-
-        Write-Host ""
-        Write-Host "Devices: $devicesCreated created, $devicesFound existing" -ForegroundColor Cyan
-
-        # ----------------------------------------------------------------
-        # 5c. Assign credential + set device attributes
-        # ----------------------------------------------------------------
-        Write-Host "Assigning credential and setting attributes..." -ForegroundColor Cyan
-
-        foreach ($key in @($wugDeviceMap.Keys)) {
-            $devId = $wugDeviceMap[$key]
-            $dev   = $devicePlan[$key]
-
-            # Assign the shared credential
-            if ($proxCredId) {
-                try {
-                    Set-WUGDeviceCredential -DeviceId $devId -CredentialId $proxCredId -Assign | Out-Null
-                    Write-Verbose "Credential assigned to device $devId"
+                if ($actMonitorIds.Count -gt 0) {
+                    try {
+                        Add-WUGActiveMonitorToDevice -DeviceId $deviceId -MonitorId $actMonitorIds -ErrorAction Stop
+                    }
+                    catch {
+                        if ($_.Exception.Message -notmatch 'already|assigned|exists|duplicate') {
+                            Write-Verbose "Active monitor assign error for device $deviceId`: $_"
+                        }
+                    }
                 }
-                catch {
-                    if ($_.Exception.Message -notmatch 'already|duplicate') {
-                        Write-Warning "Credential assign error for device $devId`: $_"
+
+                # Assign perf monitors by library ID
+                $perfMonitorIds = @()
+                foreach ($perfItem in @($dev.Items | Where-Object { $_.ItemType -eq 'PerformanceMonitor' })) {
+                    if ($perfItem.Name -and $existingPerfNames.ContainsKey($perfItem.Name)) {
+                        $perfMonitorIds += [int]$existingPerfNames[$perfItem.Name]
+                    }
+                }
+                if ($perfMonitorIds.Count -gt 0) {
+                    try {
+                        Add-WUGPerformanceMonitorToDevice -DeviceId $deviceId -MonitorId $perfMonitorIds -PollingIntervalMinutes 5 -ErrorAction Stop
+                    }
+                    catch {
+                        if ($_.Exception.Message -notmatch 'already|assigned|exists|duplicate') {
+                            Write-Verbose "Perf monitor assign error for device $deviceId`: $_"
+                        }
                     }
                 }
             }
-
-            # Set device attributes from the plan
-            foreach ($attrName in $dev.Attrs.Keys) {
-                try {
-                    Set-WUGDeviceAttribute -DeviceId $devId -Name $attrName -Value $dev.Attrs[$attrName] | Out-Null
-                }
-                catch {
-                    Write-Verbose "Attribute set error for $attrName on device $devId`: $_"
-                }
-            }
+            Write-Progress -Activity 'Updating existing devices' -Completed
         }
 
-        # ----------------------------------------------------------------
-        # 5d. Update plan items with actual WUG device IDs and sync
-        # ----------------------------------------------------------------
-        foreach ($key in $devicePlan.Keys) {
-            if (-not $wugDeviceMap.ContainsKey($key)) { continue }
-            $wugId = $wugDeviceMap[$key]
-            foreach ($item in $devicePlan[$key].Items) {
-                $item.DeviceId = $wugId
-            }
-        }
-
+        # ---- Summary -------------------------------------------------------
         Write-Host ""
-        Write-Host "Syncing monitors: $($activeTemplates.Count) active templates + $($perfTemplates.Count) perf templates across $($wugDeviceMap.Count) devices..." -ForegroundColor Cyan
-
-        $result = Invoke-WUGDiscoverySync -Plan $plan `
-            -PollingIntervalSeconds 300 `
-            -PerfPollingIntervalMinutes 5
-
-        Write-Host ""
-        Write-Host "Sync complete!" -ForegroundColor Green
-        Write-Host "  Devices in WUG:              $($wugDeviceMap.Count)" -ForegroundColor White
-        Write-Host "  Active monitors created:      $($result.ActiveCreated)  (templates — shared across devices)" -ForegroundColor White
-        Write-Host "  Performance monitors created: $($result.PerfCreated)" -ForegroundColor White
-        Write-Host "  Assigned to devices:          $($result.Assigned)" -ForegroundColor White
-        Write-Host "  Skipped (already exist):      $($result.Skipped)" -ForegroundColor White
-        Write-Host "  Attributes set:               $($result.AttrsUpdated)" -ForegroundColor White
-        if ($result.Failed -gt 0) {
-            Write-Host "  Failed:                       $($result.Failed)" -ForegroundColor Red
-        }
-
+        Write-Host "Push complete!" -ForegroundColor Green
+        Write-Host "  Active monitors:  $($stats.HealthCreated) created, $($stats.HealthSkipped) existing, $($stats.HealthFailed) failed" -ForegroundColor White
+        Write-Host "  Perf monitors:    $($stats.PerfCreated) created, $($stats.PerfSkipped) existing, $($stats.PerfFailed) failed" -ForegroundColor White
+        Write-Host "  Devices:          $($stats.DevicesCreated) created ($($stats.CloudDevices) no-IP), $($stats.DevicesFound) existing" -ForegroundColor White
+        Write-Host "  Creds assigned:   $($stats.CredsAssigned)" -ForegroundColor White
         Write-Host ""
         Write-Host "Done! Monitors pushed to WhatsUp Gold." -ForegroundColor Green
     }
@@ -704,8 +1176,7 @@ public static class SSLValidator {
             new RemoteCertificateValidationCallback(OnValidateCertificate);
         ServicePointManager.Expect100Continue = false;
         ServicePointManager.DefaultConnectionLimit = 64;
-        ServicePointManager.SecurityProtocol =
-            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
     }
 }
 "@
@@ -786,6 +1257,7 @@ public static class SSLValidator {
             if ($dev.Type -ne 'VM') { continue }
             $vmid   = $dev.Attrs['Proxmox.VMID']
             $vmNode = $dev.ParentNode
+            $apiType = 'qemu'
             try {
                 $resp = & $dashInvokeApi "${dashBaseUri}/api2/json/nodes/${vmNode}/qemu/${vmid}/status/current" $dashHdrName $dashHdrVal '1'
                 $d = $resp.data
@@ -835,6 +1307,56 @@ public static class SSLValidator {
             }
         }
 
+        # --- Fetch live LXC container stats ---
+        foreach ($key in $devicePlan.Keys) {
+            $dev = $devicePlan[$key]
+            if ($dev.Type -ne 'CT') { continue }
+            $ctid   = $dev.Attrs['Proxmox.VMID']
+            $ctNode = $dev.ParentNode
+            try {
+                $resp = & $dashInvokeApi "${dashBaseUri}/api2/json/nodes/${ctNode}/lxc/${ctid}/status/current" $dashHdrName $dashHdrVal '1'
+                $d = $resp.data
+
+                $cpuPct   = '{0:N1}%' -f ($d.cpu * 100)
+                $cores    = if ($d.cpus) { $d.cpus } else { '1' }
+                $ramUsed  = [math]::Round($d.mem / 1MB)
+                $ramTotal = [math]::Round($d.maxmem / 1MB)
+                $ramPct   = if ($ramTotal -gt 0) { '{0:N1}%' -f ($ramUsed / $ramTotal * 100) } else { '0.0%' }
+                $diskTot  = '{0} MB' -f [math]::Round($d.maxdisk / 1MB)
+                $netInKB  = '{0} KB' -f [math]::Round($d.netin / 1KB)
+                $netOutKB = '{0} KB' -f [math]::Round($d.netout / 1KB)
+                $tags     = if ($d.tags) { "$($d.tags)" } else { 'N/A' }
+                $haState  = if ($d.ha -and $d.ha.managed) { "$($d.ha.managed)" } else { 'N/A' }
+
+                $dashboardRows += [PSCustomObject]@{
+                    Type       = "CT ($ctid)"
+                    Name       = $dev.Name
+                    Status     = $d.status
+                    IPAddress  = if ($dev.IP) { $dev.IP } else { 'N/A' }
+                    Node       = $ctNode
+                    CPU        = "$cpuPct (${cores}c)"
+                    RAM        = "$ramPct ($ramUsed MB / $ramTotal MB)"
+                    Disk       = $diskTot
+                    NetworkIn  = $netInKB
+                    NetworkOut = $netOutKB
+                    Uptime     = "$($d.uptime)"
+                    Tags       = $tags
+                    HAState    = $haState
+                }
+                Write-Host "  CT: $($dev.Name)" -ForegroundColor DarkGray
+            }
+            catch {
+                $dashboardRows += [PSCustomObject]@{
+                    Type = "CT ($ctid)"; Name = $dev.Name
+                    Status = if ($dev.Attrs['Proxmox.VMStatus']) { $dev.Attrs['Proxmox.VMStatus'] } else { 'unknown' }
+                    IPAddress = if ($dev.IP) { $dev.IP } else { 'N/A' }
+                    Node = $ctNode; CPU = 'N/A'; RAM = 'N/A'; Disk = 'N/A'
+                    NetworkIn = 'N/A'; NetworkOut = 'N/A'; Uptime = '0'
+                    Tags = 'N/A'; HAState = 'N/A'
+                }
+            }
+        }
+
         if ($dashboardRows.Count -eq 0) {
             Write-Warning "No data to generate dashboard."
         }
@@ -851,9 +1373,10 @@ public static class SSLValidator {
             Write-Host "Dashboard generated: $dashTempPath" -ForegroundColor Green
             $dHosts   = @($dashboardRows | Where-Object { $_.Type -eq 'Host' }).Count
             $dVMs     = @($dashboardRows | Where-Object { $_.Type -like 'VM*' }).Count
+            $dCTs     = @($dashboardRows | Where-Object { $_.Type -like 'CT*' }).Count
             $dRunning = @($dashboardRows | Where-Object { $_.Status -eq 'running' }).Count
             $dStopped = @($dashboardRows | Where-Object { $_.Status -eq 'stopped' }).Count
-            Write-Host "  Hosts: $dHosts  |  VMs: $dVMs  |  Running: $dRunning  |  Stopped: $dStopped" -ForegroundColor White
+            Write-Host "  Hosts: $dHosts  |  VMs: $dVMs  |  CTs: $dCTs  |  Running: $dRunning  |  Stopped: $dStopped" -ForegroundColor White
 
             # Attempt to copy to WUG NmConsole directory
             $nmConsolePaths = @(
@@ -886,6 +1409,7 @@ public static class SSLValidator {
         Write-Host "No action taken." -ForegroundColor Gray
     }
 }
+} # end foreach actionsToRun
 
 Write-Host ""
 Write-Host "Re-run anytime to discover new Proxmox nodes/VMs." -ForegroundColor Cyan
@@ -893,8 +1417,8 @@ Write-Host "Re-run anytime to discover new Proxmox nodes/VMs." -ForegroundColor 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBc9gg06bsUak7L
-# 1X1QvVAWG9ImHcQOR1Fa/VdmCPwN6aCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQ2+Gcbx5zPQNS
+# DbzRGGt3jqIAILe6V4oU5dM8v5CcLaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -994,17 +1518,17 @@ Write-Host "Re-run anytime to discover new Proxmox nodes/VMs." -ForegroundColor 
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgNg/qRPZhNwKjFJPeULOqnGy1p9h1YUnT
-# zdrQmi0Wdq8wDQYJKoZIhvcNAQEBBQAEggIAb29cFw/IZ1vcw11v0VvyZ2SNOeXa
-# xh+40HvE2CRO4kw3jWgpbuI1kNtzzuEGtfXK61mfuyg9Xih9DtLJNnkS/HP2C5ON
-# F9Kvs3DajU/FqaULSHglYbxlTPCzdJMzfNYXKurQM24WXdsbi705b9MevrvkDFEq
-# 3eDTFRb0WVjnG6OYT8VTg3oJJw/6Sz5LtUL8qF8ZlGXgpb3JlLfzjydCLkPWVtK5
-# byxOMb/RK2lXtmEhAI08R9uWThC0z69wATAOHDELHi1pYU5x1xz3IFbdo3KOIWvd
-# Jn7mMEgqxN+JF+iXYB6YLs8oO+vPteEzavCl8Enx2MxXtiqHlq3BdMtApfsEue+w
-# ivGihAlOz2kw2u+k3fy2c3w5kEbLSu/9Y7X6mUXBBfLdIev6MB3rcxK1QeHbuaxu
-# RJ3iVRr3Rt4CET9PZ3LagHcq+ETRokcFMXixWnjP0gGb1dD+SlU7udBlxi4qT/Z8
-# cYHaFSToMmAoDFriGxNjoZC0A5hra1DzTYqdXGWf5fU6ZlaeKNei0KJMvSuGPLCM
-# guDAsHk5caYLfM35UWbMuhiaLQizfnIwPMtqLwv/k9L8NYVDBzh6metZg1g1WEmz
-# rbUZinxeJBSJtew1XB3aeYImot0DiWUxwEUTydWFqecvJhDSgU+Mf0msPibEshiu
-# qKLW4fRbQu49X0g=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgO1A+mIbuJ9OcIGRBDm/RTgKtqLiFCqja
+# +VSIi46xKigwDQYJKoZIhvcNAQEBBQAEggIAXobboCnjz6y6v8xZF5hg5JD+k+pR
+# p0uUgTnPVWmLrfDDlDbpM6QqvkVdZsaEpruXF/eRX+G8JHnTtS4+zwpYy6dQiHeA
+# BczE3o3q7hIUjYeWNypR+mlKt8JtMY4RTe4FOtd5yQD6JGoz5h3ELAexUoqRoPML
+# LTik3Yk53chXInYvd1a6B7XWDi/K95ZqyJ8r0CTDXD7TdIxGeZj1pV0YNOtv9XGx
+# iCya/41IRcOV1Jmsl1LThkJ9HNAk/u1Nk4ZN7ZOZZsLSPDrcT7X7OZiPzNV9sL9m
+# fYDjvu7TsVUzq8pphHYECq5GSZNogN6xd9bv+KIAlrRsXCmrYxOMmcV0NJ1bwiE4
+# f7Ta578+kuP5lSDfBBvewycxVi+oCd2FKgcnBWWAoJnwdxM8TTI+BaSra+wwaU3X
+# gLJydGy7JUb8Tv2rQ8Rt6r0Q01tLQATiy+LnnK9C4JVhtWR32vyD/GMfIr6DRtMN
+# a94U753NHWgr+3T+xnZJtOL8NeNc4Gl756gprgGsQKRWlnIe7R+2Gr+NhDbTwsFc
+# bmj4X4uK8lr/ka4cNfkqHoQgCrGYbJWuTs9N20XP/xb613clL4wMXQNmY5clC4VM
+# HqqQp1Le/JAMjlpHMVyDAaVsX3OgVlvffW+GnPSO3Vzbd4+9ys4DIjjQ4Dx6nA03
+# dH0pjnpxNKgVYRU=
 # SIG # End signature block

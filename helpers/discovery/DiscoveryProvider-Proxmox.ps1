@@ -113,8 +113,7 @@ public static class SSLValidator {
             new RemoteCertificateValidationCallback(OnValidateCertificate);
         ServicePointManager.Expect100Continue = false;
         ServicePointManager.DefaultConnectionLimit = 64;
-        ServicePointManager.SecurityProtocol =
-            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
     }
 }
 "@
@@ -185,23 +184,8 @@ public static class SSLValidator {
         $apiHost = $deviceIP
         $apiPort = [string]$ctx.Port
 
-        # ================================================================
-        # WUG Context Variable Syntax
-        # ================================================================
-        # These are used in monitor URL/header templates so WUG resolves
-        # them per-device at poll time. Adjust if your WUG version uses
-        # different substitution syntax.
-        # The credential password holds the full PVE API token string.
-        $credPwdVar    = '%Credential.Password%'
-
-        # Template URLs using device attributes (resolved by WUG at poll time)
-        $tplClusterUrl = "https://%Proxmox.ApiHost%:%Proxmox.ApiPort%/api2/json/cluster/status"
-        $tplNodeListUrl= "https://%Proxmox.ApiHost%:%Proxmox.ApiPort%/api2/json/nodes"
-        $tplNodeUrl    = "https://%Proxmox.ApiHost%:%Proxmox.ApiPort%/api2/json/nodes/%Proxmox.NodeName%/status"
-        $tplVmUrl      = "https://%Proxmox.ApiHost%:%Proxmox.ApiPort%/api2/json/nodes/%Proxmox.ParentNode%/qemu/%Proxmox.VMID%/status/current"
-
-        # Auth header template (references WUG credential — no plaintext token)
-        $tplAuthHeader = "Authorization:PVEAPIToken=${credPwdVar}"
+        # Base URL prefix used by the live API helper below (discovery time)
+        $apiBase = "https://${apiHost}:${apiPort}/api2/json"
 
         # ================================================================
         # Live API helper (for discovery calls, NOT stored in monitors)
@@ -252,7 +236,8 @@ public static class SSLValidator {
         # Phase 1: Live API enumeration
         # ================================================================
         $nodeMap = @{}   # nodeName -> IP
-        $vmMap   = @{}   # vmid -> @{ Name; IP; Node; Status; Cpus; MaxMem; MaxDisk }
+        $vmMap   = @{}   # vmid -> @{ Name; IP; Node; Status; Cpus; MaxMem; MaxDisk; Type }
+        $ctMap   = @{}   # vmid -> @{ Name; IP; Node; Status; Cpus; MaxMem; MaxDisk; Type }
 
         if ($hdrName) {
             # Node IPs from /cluster/status
@@ -316,22 +301,249 @@ public static class SSLValidator {
                                 Cpus    = $vm.cpus
                                 MaxMem  = $vm.maxmem
                                 MaxDisk = $vm.maxdisk
+                                Type    = 'qemu'
                             }
                         }
                     }
                 }
                 catch { Write-Warning "Could not query VMs on node ${node}: $_" }
+
+                # LXC containers per node
+                try {
+                    $resp = & $invokeApi "${baseUri}/api2/json/nodes/${node}/lxc" $hdrName $hdrVal $ignoreCert
+                    if ($resp.data) {
+                        foreach ($ct in $resp.data) {
+                            if (-not $ct.vmid) { continue }
+                            $ctIP = $null
+                            # LXC containers often expose IP in status/current or via config
+                            if ($ct.status -eq 'running') {
+                                try {
+                                    $ctStatusUrl = "${baseUri}/api2/json/nodes/${node}/lxc/$($ct.vmid)/status/current"
+                                    $ctStatusResp = & $invokeApi $ctStatusUrl $hdrName $hdrVal $ignoreCert
+                                    if ($ctStatusResp.data) {
+                                        # Try common network config pattern: net0 "ip=x.x.x.x/24,..."
+                                        $cfgUrl = "${baseUri}/api2/json/nodes/${node}/lxc/$($ct.vmid)/config"
+                                        try {
+                                            $cfgResp = & $invokeApi $cfgUrl $hdrName $hdrVal $ignoreCert
+                                            if ($cfgResp.data) {
+                                                foreach ($prop in $cfgResp.data.PSObject.Properties) {
+                                                    if ($prop.Name -match '^net\d+$' -and $prop.Value -match 'ip=([^/,]+)') {
+                                                        $candidateIP = $Matches[1]
+                                                        if ($candidateIP -ne '127.0.0.1' -and $candidateIP -ne '0.0.0.0') {
+                                                            $ctIP = $candidateIP
+                                                            break
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        catch { <# Config query not available #> }
+                                    }
+                                }
+                                catch { <# Status query failed #> }
+                            }
+                            $ctMap[[string]$ct.vmid] = @{
+                                Name    = $ct.name
+                                IP      = $ctIP
+                                Node    = $node
+                                Status  = $ct.status
+                                Cpus    = $ct.cpus
+                                MaxMem  = $ct.maxmem
+                                MaxDisk = $ct.maxdisk
+                                Type    = 'lxc'
+                            }
+                        }
+                    }
+                }
+                catch { Write-Warning "Could not query LXC containers on node ${node}: $_" }
             }
         }
 
-        Write-Verbose "Topology: $($nodeMap.Count) nodes, $($vmMap.Count) VMs"
+        Write-Host "  Topology: $($nodeMap.Count) nodes, $($vmMap.Count) VMs, $($ctMap.Count) containers" -ForegroundColor DarkGray
 
         # ================================================================
-        # Phase 2: Build template-based monitor plan
+        # Phase 2: Validate metrics return numeric data
         # ================================================================
-        # Each item carries device attributes. The setup script uses these
-        # to create/find WUG devices and set attributes before syncing.
-        # Monitor URLs use context variables — WUG resolves them per device.
+        # Probe each node/VM/CT status endpoint and verify that the JSON
+        # paths used by performance monitors extract numeric values.
+        # Dropped metrics are not added to the plan. Active monitors are
+        # always kept (they only check HTTP status, not numeric values).
+
+        # Define the metric sets once (reused in Phase 3 plan building)
+        $nodePerfDefs = @(
+            @{ Name = 'Proxmox - Node CPU';            JsonPath = '$.data.cpu';            Key = 'cpu';         Field = 'cpu' }
+            @{ Name = 'Proxmox - Node CPU IO Wait';    JsonPath = '$.data.wait';           Key = 'iowait';     Field = 'wait' }
+            @{ Name = 'Proxmox - Node Memory Used';    JsonPath = '$.data.memory.used';    Key = 'memused';    Field = 'memory.used' }
+            @{ Name = 'Proxmox - Node Memory Free';    JsonPath = '$.data.memory.free';    Key = 'memfree';    Field = 'memory.free' }
+            @{ Name = 'Proxmox - Node Swap Used';      JsonPath = '$.data.swap.used';      Key = 'swapused';   Field = 'swap.used' }
+            @{ Name = 'Proxmox - Node Swap Free';      JsonPath = '$.data.swap.free';      Key = 'swapfree';   Field = 'swap.free' }
+            @{ Name = 'Proxmox - Node Disk Used';      JsonPath = '$.data.rootfs.used';    Key = 'diskused';   Field = 'rootfs.used' }
+            @{ Name = 'Proxmox - Node Disk Free';      JsonPath = '$.data.rootfs.free';    Key = 'diskfree';   Field = 'rootfs.free' }
+            @{ Name = 'Proxmox - Node Load Avg 1m';    JsonPath = '$.data.loadavg[0]';     Key = 'loadavg1';   Field = 'loadavg[0]' }
+            @{ Name = 'Proxmox - Node Load Avg 5m';    JsonPath = '$.data.loadavg[1]';     Key = 'loadavg5';   Field = 'loadavg[1]' }
+            @{ Name = 'Proxmox - Node Load Avg 15m';   JsonPath = '$.data.loadavg[2]';     Key = 'loadavg15';  Field = 'loadavg[2]' }
+            @{ Name = 'Proxmox - Node Uptime';         JsonPath = '$.data.uptime';         Key = 'uptime';     Field = 'uptime' }
+        )
+        $guestPerfDefs = @(
+            @{ Name = 'CPU';        JsonPath = '$.data.cpu';       Key = 'cpu';       Field = 'cpu' }
+            @{ Name = 'Memory';     JsonPath = '$.data.mem';       Key = 'mem';       Field = 'mem' }
+            @{ Name = 'Net In';     JsonPath = '$.data.netin';     Key = 'netin';     Field = 'netin' }
+            @{ Name = 'Net Out';    JsonPath = '$.data.netout';    Key = 'netout';    Field = 'netout' }
+            @{ Name = 'Disk Read';  JsonPath = '$.data.diskread';  Key = 'diskread';  Field = 'diskread' }
+            @{ Name = 'Disk Write'; JsonPath = '$.data.diskwrite'; Key = 'diskwrite'; Field = 'diskwrite' }
+            @{ Name = 'Uptime';     JsonPath = '$.data.uptime';    Key = 'uptime';    Field = 'uptime' }
+        )
+
+        # Dynamic property navigator — resolves 'memory.free' or 'loadavg[0]' on an object
+        $resolveField = {
+            param($obj, [string]$fieldPath)
+            $cur = $obj
+            foreach ($seg in $fieldPath -split '\.') {
+                if ($null -eq $cur) { return $null }
+                if ($seg -match '^(.+)\[(\d+)\]$') {
+                    $cur = $cur.($Matches[1])
+                    if ($cur -and $cur.Count -gt [int]$Matches[2]) {
+                        $cur = $cur[[int]$Matches[2]]
+                    } else { return $null }
+                } else {
+                    $cur = $cur.$seg
+                }
+            }
+            return $cur
+        }
+
+        # Validated metric keys per entity: nodeValidated[nodeName] = @('cpu','memused',...)
+        $nodeValidated = @{}
+        $guestValidated = @{}  # validated[vmid] = @('cpu','mem',...)
+        $nodeCapacity = @{}    # nodeCapacity[nodeName] = @{ MemTotal; SwapTotal; DiskTotal }
+
+        if ($hdrName) {
+            Write-Host "  Validating node metrics..." -ForegroundColor DarkGray
+            foreach ($nodeName in @($nodeMap.Keys | Sort-Object)) {
+                try {
+                    $resp = & $invokeApi "${baseUri}/api2/json/nodes/${nodeName}/status" $hdrName $hdrVal $ignoreCert
+                    $d = $resp.data
+                    $validKeys = [System.Collections.Generic.List[string]]::new()
+                    foreach ($pm in $nodePerfDefs) {
+                        $val = & $resolveField $d $pm.Field
+                        if ($null -ne $val -and ($val -is [double] -or $val -is [int] -or $val -is [long] -or $val -is [decimal] -or $val -is [float] -or $val -is [single] -or "$val" -match '^\d')) {
+                            $validKeys.Add($pm.Key)
+                        }
+                    }
+                    $nodeValidated[$nodeName] = @($validKeys)
+                    # Capture static totals for device attributes (not worth polling)
+                    $nodeCapacity[$nodeName] = @{
+                        MemTotal  = & $resolveField $d 'memory.total'
+                        SwapTotal = & $resolveField $d 'swap.total'
+                        DiskTotal = & $resolveField $d 'rootfs.total'
+                    }
+                    $dropped = $nodePerfDefs.Count - $validKeys.Count
+                    if ($dropped -gt 0) {
+                        Write-Host "    $nodeName`: $($validKeys.Count)/$($nodePerfDefs.Count) metrics validated ($dropped dropped)" -ForegroundColor DarkYellow
+                    } else {
+                        Write-Host "    $nodeName`: $($validKeys.Count)/$($nodePerfDefs.Count) metrics validated" -ForegroundColor DarkGray
+                    }
+                }
+                catch {
+                    Write-Warning "    Could not probe node $nodeName — keeping all metrics (benefit of the doubt): $_"
+                    $nodeValidated[$nodeName] = @($nodePerfDefs | ForEach-Object { $_.Key })
+                }
+            }
+
+            # Validate QEMU VMs
+            Write-Host "  Validating VM metrics..." -ForegroundColor DarkGray
+            foreach ($vmid in @($vmMap.Keys | Sort-Object { [int]$_ })) {
+                $vmInfo = $vmMap[$vmid]
+                if ($vmInfo.Status -ne 'running') {
+                    # Stopped VMs — include all perf keys (benefit of the doubt)
+                    $guestValidated[$vmid] = @($guestPerfDefs | ForEach-Object { $_.Key })
+                    Write-Host "    $($vmInfo.Name) (VM $vmid): stopped — perf monitors included (unvalidated)" -ForegroundColor DarkYellow
+                    continue
+                }
+                try {
+                    $resp = & $invokeApi "${baseUri}/api2/json/nodes/$($vmInfo.Node)/qemu/${vmid}/status/current" $hdrName $hdrVal $ignoreCert
+                    $d = $resp.data
+                    $validKeys = [System.Collections.Generic.List[string]]::new()
+                    foreach ($pm in $guestPerfDefs) {
+                        $val = & $resolveField $d $pm.Field
+                        if ($null -ne $val -and ($val -is [double] -or $val -is [int] -or $val -is [long] -or $val -is [decimal] -or $val -is [float] -or $val -is [single] -or "$val" -match '^\d')) {
+                            $validKeys.Add($pm.Key)
+                        }
+                    }
+                    $guestValidated[$vmid] = @($validKeys)
+                    $dropped = $guestPerfDefs.Count - $validKeys.Count
+                    if ($dropped -gt 0) {
+                        Write-Host "    $($vmInfo.Name) (VM $vmid): $($validKeys.Count)/$($guestPerfDefs.Count) validated ($dropped dropped)" -ForegroundColor DarkYellow
+                    } else {
+                        Write-Host "    $($vmInfo.Name) (VM $vmid): $($validKeys.Count)/$($guestPerfDefs.Count) validated" -ForegroundColor DarkGray
+                    }
+                }
+                catch {
+                    Write-Warning "    Could not probe VM $($vmInfo.Name) ($vmid) — keeping all: $_"
+                    $guestValidated[$vmid] = @($guestPerfDefs | ForEach-Object { $_.Key })
+                }
+            }
+
+            # Validate LXC containers
+            if ($ctMap.Count -gt 0) {
+                Write-Host "  Validating container metrics..." -ForegroundColor DarkGray
+                foreach ($ctid in @($ctMap.Keys | Sort-Object { [int]$_ })) {
+                    $ctInfo = $ctMap[$ctid]
+                    if ($ctInfo.Status -ne 'running') {
+                        $guestValidated[$ctid] = @($guestPerfDefs | ForEach-Object { $_.Key })
+                        Write-Host "    $($ctInfo.Name) (CT $ctid): stopped — perf monitors included (unvalidated)" -ForegroundColor DarkYellow
+                        continue
+                    }
+                    try {
+                        $resp = & $invokeApi "${baseUri}/api2/json/nodes/$($ctInfo.Node)/lxc/${ctid}/status/current" $hdrName $hdrVal $ignoreCert
+                        $d = $resp.data
+                        $validKeys = [System.Collections.Generic.List[string]]::new()
+                        foreach ($pm in $guestPerfDefs) {
+                            $val = & $resolveField $d $pm.Field
+                            if ($null -ne $val -and ($val -is [double] -or $val -is [int] -or $val -is [long] -or $val -is [decimal] -or $val -is [float] -or $val -is [single] -or "$val" -match '^\d')) {
+                                $validKeys.Add($pm.Key)
+                            }
+                        }
+                        $guestValidated[$ctid] = @($validKeys)
+                        $dropped = $guestPerfDefs.Count - $validKeys.Count
+                        if ($dropped -gt 0) {
+                            Write-Host "    $($ctInfo.Name) (CT $ctid): $($validKeys.Count)/$($guestPerfDefs.Count) validated ($dropped dropped)" -ForegroundColor DarkYellow
+                        } else {
+                            Write-Host "    $($ctInfo.Name) (CT $ctid): $($validKeys.Count)/$($guestPerfDefs.Count) validated" -ForegroundColor DarkGray
+                        }
+                    }
+                    catch {
+                        Write-Warning "    Could not probe container $($ctInfo.Name) ($ctid) — keeping all: $_"
+                        $guestValidated[$ctid] = @($guestPerfDefs | ForEach-Object { $_.Key })
+                    }
+                }
+            }
+
+            # Summary
+            $totalNodeMetrics = ($nodeValidated.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
+            $totalGuestMetrics = ($guestValidated.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
+            Write-Host "  Validation: $totalNodeMetrics node metrics + $totalGuestMetrics guest metrics confirmed" -ForegroundColor DarkGray
+        }
+        else {
+            # No auth — cannot validate, accept all
+            foreach ($n in $nodeMap.Keys) { $nodeValidated[$n] = @($nodePerfDefs | ForEach-Object { $_.Key }) }
+            foreach ($v in $vmMap.Keys)   { $guestValidated[$v] = @($guestPerfDefs | ForEach-Object { $_.Key }) }
+            foreach ($c in $ctMap.Keys)   { $guestValidated[$c] = @($guestPerfDefs | ForEach-Object { $_.Key }) }
+        }
+
+        # ================================================================
+        # Phase 3: Build fully-resolved monitor plan
+        # ================================================================
+        # Each monitor gets a unique, hardcoded URL with the actual
+        # node name / VMID baked in. WUG REST API monitors only support
+        # %Device.Address%, %Device.Hostname%, and credential variables —
+        # custom device attributes CANNOT be used in URLs.
+        # Auth is handled entirely by the device's REST API credential
+        # (Basic auth with API token split into user:secret).
+        # Monitors set RestApiUseAnonymousAccess='0' so WUG attaches
+        # the credential on every poll.
+
+        $apiBase = "https://${apiHost}:${apiPort}/api2/json"
 
         $baseAttrs = @{
             'Proxmox.ApiHost' = $apiHost
@@ -340,42 +552,66 @@ public static class SSLValidator {
             'DiscoveryHelper.Proxmox.LastRun' = (Get-Date).ToUniversalTime().ToString('o')
         }
 
+        # Auth via RestApiCustomHeader with the actual token baked in.
+        # WUG does NOT resolve %Credential.Password% in CustomHeader fields,
+        # so we hardcode the full PVEAPIToken header at plan-generation time.
+        # The credential is still created in WUG for device assignment, but
+        # the actual auth goes through this header on each monitor.
+        # UseAnonymous='1' disables Basic auth so WUG does not send its own
+        # Authorization header.
+        if ($tokenValue) {
+            $tplAuthHeader = "Authorization:PVEAPIToken=$tokenValue"
+        } else {
+            # Ticket-based auth — no persistent token available for monitors
+            $tplAuthHeader = ''
+            Write-Warning "No API token available. Monitors will not have auth headers. Use -AuthMethod Token for WUG push."
+        }
+
+        # Common active monitor params
+        $activeBase = @{
+            RestApiMethod                 = 'GET'
+            RestApiTimeoutMs              = 10000
+            RestApiIgnoreCertErrors       = $ignoreCert
+            RestApiUseAnonymous           = '1'
+            RestApiCustomHeader           = $tplAuthHeader
+            RestApiDownIfResponseCodeIsIn = '[400,401,403,404,500,502,503]'
+        }
+        # Common perf monitor params
+        $perfBase = @{
+            RestApiHttpMethod         = 'GET'
+            RestApiHttpTimeoutMs      = 10000
+            RestApiIgnoreCertErrors   = $ignoreCert
+            RestApiUseAnonymousAccess = '1'
+            RestApiCustomHeader       = $tplAuthHeader
+        }
+
         # --- Cluster device (the API entry point) ---
         $clusterAttrs = $baseAttrs.Clone()
         $clusterAttrs['Proxmox.DeviceType'] = 'Cluster'
 
+        $clusterUrl = "${apiBase}/cluster/status"
+        $nodeListUrl = "${apiBase}/nodes"
+
+        $aParams = $activeBase.Clone()
+        $aParams['RestApiUrl'] = $clusterUrl
+        $aParams['RestApiComparisonList'] = "[{`"JsonPathQuery`":`"['data'][0]['type']`",`"AttributeType`":3,`"ComparisonType`":14}]"
         $items += New-DiscoveredItem `
-            -Name 'Proxmox - Cluster Status' `
+            -Name "Proxmox - Cluster Status" `
             -ItemType 'ActiveMonitor' `
             -MonitorType 'RestApi' `
-            -MonitorParams @{
-                RestApiUrl                    = $tplClusterUrl
-                RestApiMethod                 = 'GET'
-                RestApiTimeoutMs              = 10000
-                RestApiIgnoreCertErrors       = $ignoreCert
-                RestApiUseAnonymous           = '1'
-                RestApiCustomHeader           = $tplAuthHeader
-                RestApiDownIfResponseCodeIsIn = '[400,401,403,404,500,502,503]'
-                RestApiComparisonList         = '[]'
-            } `
+            -MonitorParams $aParams `
             -UniqueKey "Proxmox:cluster:active:status" `
             -Attributes $clusterAttrs `
             -Tags @('proxmox', 'cluster')
 
+        $aParams = $activeBase.Clone()
+        $aParams['RestApiUrl'] = $nodeListUrl
+        $aParams['RestApiComparisonList'] = "[{`"JsonPathQuery`":`"['data'][0]['node']`",`"AttributeType`":3,`"ComparisonType`":14}]"
         $items += New-DiscoveredItem `
-            -Name 'Proxmox - Node List' `
+            -Name "Proxmox - Node List" `
             -ItemType 'ActiveMonitor' `
             -MonitorType 'RestApi' `
-            -MonitorParams @{
-                RestApiUrl                    = $tplNodeListUrl
-                RestApiMethod                 = 'GET'
-                RestApiTimeoutMs              = 10000
-                RestApiIgnoreCertErrors       = $ignoreCert
-                RestApiUseAnonymous           = '1'
-                RestApiCustomHeader           = $tplAuthHeader
-                RestApiDownIfResponseCodeIsIn = '[400,401,403,404,500,502,503]'
-                RestApiComparisonList         = '[]'
-            } `
+            -MonitorParams $aParams `
             -UniqueKey "Proxmox:cluster:active:nodelist" `
             -Attributes $clusterAttrs `
             -Tags @('proxmox', 'cluster')
@@ -383,53 +619,46 @@ public static class SSLValidator {
         # --- Per-Node items ---
         foreach ($nodeName in @($nodeMap.Keys | Sort-Object)) {
             $nodeIP = $nodeMap[$nodeName]
+            $nodeStatusUrl = "${apiBase}/nodes/${nodeName}/status"
+
             $nodeAttrs = $baseAttrs.Clone()
             $nodeAttrs['Proxmox.DeviceType'] = 'Node'
             $nodeAttrs['Proxmox.NodeName']   = $nodeName
             if ($nodeIP) { $nodeAttrs['Proxmox.NodeIP'] = $nodeIP }
 
-            # Active monitor: shared "Proxmox - Node Status" assigned to each node
+            # Store static capacity totals as attributes (not worth polling)
+            if ($nodeCapacity.ContainsKey($nodeName)) {
+                $cap = $nodeCapacity[$nodeName]
+                if ($cap.MemTotal)  { $nodeAttrs['Proxmox.NodeMemTotal']  = [string]$cap.MemTotal }
+                if ($cap.SwapTotal) { $nodeAttrs['Proxmox.NodeSwapTotal'] = [string]$cap.SwapTotal }
+                if ($cap.DiskTotal) { $nodeAttrs['Proxmox.NodeDiskTotal'] = [string]$cap.DiskTotal }
+            }
+
+            # Active monitor — DOWN if $.data.uptime is null
+            $aParams = $activeBase.Clone()
+            $aParams['RestApiUrl'] = $nodeStatusUrl
+            $aParams['RestApiComparisonList'] = "[{`"JsonPathQuery`":`"['data']['uptime']`",`"AttributeType`":3,`"ComparisonType`":14}]"
             $items += New-DiscoveredItem `
-                -Name 'Proxmox - Node Status' `
+                -Name "Proxmox - Node ${nodeName} Status" `
                 -ItemType 'ActiveMonitor' `
                 -MonitorType 'RestApi' `
-                -MonitorParams @{
-                    RestApiUrl                    = $tplNodeUrl
-                    RestApiMethod                 = 'GET'
-                    RestApiTimeoutMs              = 10000
-                    RestApiIgnoreCertErrors       = $ignoreCert
-                    RestApiUseAnonymous           = '1'
-                    RestApiCustomHeader           = $tplAuthHeader
-                    RestApiDownIfResponseCodeIsIn = '[400,401,403,404,500,502,503]'
-                    RestApiComparisonList         = '[]'
-                } `
+                -MonitorParams $aParams `
                 -UniqueKey "Proxmox:node:${nodeName}:active:status" `
                 -Attributes $nodeAttrs `
                 -Tags @('proxmox', 'node', $nodeName, $(if ($nodeIP) { $nodeIP } else { 'no-ip' }))
 
-            # Performance monitors: same template name per metric, created per device
-            $nodePerfMonitors = @(
-                @{ Name = 'Proxmox - Node CPU';          JsonPath = '$.data.cpu';          Key = 'cpu' }
-                @{ Name = 'Proxmox - Node Memory Used';  JsonPath = '$.data.memory.used';  Key = 'memused' }
-                @{ Name = 'Proxmox - Node Memory Total'; JsonPath = '$.data.memory.total'; Key = 'memtotal' }
-                @{ Name = 'Proxmox - Node Disk Used';    JsonPath = '$.data.rootfs.used';  Key = 'diskused' }
-                @{ Name = 'Proxmox - Node Disk Total';   JsonPath = '$.data.rootfs.total'; Key = 'disktotal' }
-                @{ Name = 'Proxmox - Node Load Avg';     JsonPath = '$.data.loadavg[0]';   Key = 'loadavg' }
-            )
-            foreach ($pm in $nodePerfMonitors) {
+            # Performance monitors — only validated metrics
+            $validNodeKeys = if ($nodeValidated.ContainsKey($nodeName)) { $nodeValidated[$nodeName] } else { @($nodePerfDefs | ForEach-Object { $_.Key }) }
+            foreach ($pm in $nodePerfDefs) {
+                if ($validNodeKeys -notcontains $pm.Key) { continue }
+                $pParams = $perfBase.Clone()
+                $pParams['RestApiUrl']      = $nodeStatusUrl
+                $pParams['RestApiJsonPath'] = $pm.JsonPath
                 $items += New-DiscoveredItem `
-                    -Name $pm.Name `
+                    -Name "Proxmox - Node ${nodeName} $($pm.Name -replace '^Proxmox - Node ','')" `
                     -ItemType 'PerformanceMonitor' `
                     -MonitorType 'RestApi' `
-                    -MonitorParams @{
-                        RestApiUrl                = $tplNodeUrl
-                        RestApiJsonPath           = $pm.JsonPath
-                        RestApiHttpMethod         = 'GET'
-                        RestApiHttpTimeoutMs      = 10000
-                        RestApiIgnoreCertErrors   = $ignoreCert
-                        RestApiUseAnonymousAccess = '1'
-                        RestApiCustomHeader       = $tplAuthHeader
-                    } `
+                    -MonitorParams $pParams `
                     -UniqueKey "Proxmox:node:${nodeName}:perf:$($pm.Key)" `
                     -Attributes $nodeAttrs `
                     -Tags @('proxmox', 'node', $nodeName, $(if ($nodeIP) { $nodeIP } else { 'no-ip' }))
@@ -442,6 +671,7 @@ public static class SSLValidator {
             $vmName = if ($vmInfo.Name) { $vmInfo.Name } else { "vm-$vmid" }
             $vmIP   = $vmInfo.IP
             $vmNode = $vmInfo.Node
+            $vmStatusUrl = "${apiBase}/nodes/${vmNode}/qemu/${vmid}/status/current"
 
             $vmAttrs = $baseAttrs.Clone()
             $vmAttrs['Proxmox.DeviceType'] = 'VM'
@@ -454,53 +684,90 @@ public static class SSLValidator {
             if ($vmInfo.MaxMem) { $vmAttrs['Proxmox.VMMaxMem']  = [string]$vmInfo.MaxMem }
             if ($vmInfo.MaxDisk){ $vmAttrs['Proxmox.VMMaxDisk'] = [string]$vmInfo.MaxDisk }
 
-            # Active monitor: shared "Proxmox - VM Status" assigned to each VM device
+            # Active monitor — DOWN if $.data.status does not contain 'running'
+            # ComparisonList: AttributeType 1=String, ComparisonType 3=DoesNotContain
+            $aParams = $activeBase.Clone()
+            $aParams['RestApiUrl'] = $vmStatusUrl
+            $aParams['RestApiComparisonList'] = "[{`"JsonPathQuery`":`"['data']['status']`",`"AttributeType`":1,`"ComparisonType`":3,`"CompareValue`":`"running`"}]"
             $items += New-DiscoveredItem `
-                -Name 'Proxmox - VM Status' `
+                -Name "Proxmox - VM ${vmName} Status" `
                 -ItemType 'ActiveMonitor' `
                 -MonitorType 'RestApi' `
-                -MonitorParams @{
-                    RestApiUrl                    = $tplVmUrl
-                    RestApiMethod                 = 'GET'
-                    RestApiTimeoutMs              = 10000
-                    RestApiIgnoreCertErrors       = $ignoreCert
-                    RestApiUseAnonymous           = '1'
-                    RestApiCustomHeader           = $tplAuthHeader
-                    RestApiDownIfResponseCodeIsIn = '[400,401,403,404,500,502,503]'
-                    RestApiComparisonList         = '[]'
-                } `
+                -MonitorParams $aParams `
                 -UniqueKey "Proxmox:vm:${vmid}:active:status" `
                 -Attributes $vmAttrs `
                 -Tags @('proxmox', 'vm', $vmName, $(if ($vmIP) { $vmIP } else { 'no-ip' }), $vmNode)
 
-            $vmPerfMonitors = @(
-                @{ Name = 'Proxmox - VM CPU';        JsonPath = '$.data.cpu';       Key = 'cpu' }
-                @{ Name = 'Proxmox - VM Memory';     JsonPath = '$.data.mem';       Key = 'mem' }
-                @{ Name = 'Proxmox - VM Net In';     JsonPath = '$.data.netin';     Key = 'netin' }
-                @{ Name = 'Proxmox - VM Net Out';    JsonPath = '$.data.netout';    Key = 'netout' }
-                @{ Name = 'Proxmox - VM Disk Read';  JsonPath = '$.data.diskread';  Key = 'diskread' }
-                @{ Name = 'Proxmox - VM Disk Write'; JsonPath = '$.data.diskwrite'; Key = 'diskwrite' }
-            )
-            foreach ($pm in $vmPerfMonitors) {
+            # Performance monitors — only validated metrics
+            $validGuestKeys = if ($guestValidated.ContainsKey($vmid)) { $guestValidated[$vmid] } else { @($guestPerfDefs | ForEach-Object { $_.Key }) }
+            foreach ($pm in $guestPerfDefs) {
+                if ($validGuestKeys -notcontains $pm.Key) { continue }
+                $pParams = $perfBase.Clone()
+                $pParams['RestApiUrl']      = $vmStatusUrl
+                $pParams['RestApiJsonPath'] = $pm.JsonPath
                 $items += New-DiscoveredItem `
-                    -Name $pm.Name `
+                    -Name "Proxmox - VM ${vmName} $($pm.Name)" `
                     -ItemType 'PerformanceMonitor' `
                     -MonitorType 'RestApi' `
-                    -MonitorParams @{
-                        RestApiUrl                = $tplVmUrl
-                        RestApiJsonPath           = $pm.JsonPath
-                        RestApiHttpMethod         = 'GET'
-                        RestApiHttpTimeoutMs      = 10000
-                        RestApiIgnoreCertErrors   = $ignoreCert
-                        RestApiUseAnonymousAccess = '1'
-                        RestApiCustomHeader       = $tplAuthHeader
-                    } `
+                    -MonitorParams $pParams `
                     -UniqueKey "Proxmox:vm:${vmid}:perf:$($pm.Key)" `
                     -Attributes $vmAttrs `
                     -Tags @('proxmox', 'vm', $vmName, $(if ($vmIP) { $vmIP } else { 'no-ip' }), $vmNode)
             }
         }
 
+        # --- Per-Container (LXC) items ---
+        foreach ($ctid in @($ctMap.Keys | Sort-Object { [int]$_ })) {
+            $ctInfo = $ctMap[$ctid]
+            $ctName = if ($ctInfo.Name) { $ctInfo.Name } else { "ct-$ctid" }
+            $ctIP   = $ctInfo.IP
+            $ctNode = $ctInfo.Node
+            $ctStatusUrl = "${apiBase}/nodes/${ctNode}/lxc/${ctid}/status/current"
+
+            $ctAttrs = $baseAttrs.Clone()
+            $ctAttrs['Proxmox.DeviceType'] = 'CT'
+            $ctAttrs['Proxmox.VMID']       = [string]$ctid
+            $ctAttrs['Proxmox.VMName']     = $ctName
+            $ctAttrs['Proxmox.ParentNode'] = $ctNode
+            $ctAttrs['Proxmox.VMStatus']   = $ctInfo.Status
+            if ($ctIP)          { $ctAttrs['Proxmox.VMIP']      = $ctIP }
+            if ($ctInfo.Cpus)   { $ctAttrs['Proxmox.VMCpus']    = [string]$ctInfo.Cpus }
+            if ($ctInfo.MaxMem) { $ctAttrs['Proxmox.VMMaxMem']  = [string]$ctInfo.MaxMem }
+            if ($ctInfo.MaxDisk){ $ctAttrs['Proxmox.VMMaxDisk'] = [string]$ctInfo.MaxDisk }
+
+            # Active monitor — DOWN if $.data.status does not contain 'running'
+            # ComparisonList: AttributeType 1=String, ComparisonType 3=DoesNotContain
+            $aParams = $activeBase.Clone()
+            $aParams['RestApiUrl'] = $ctStatusUrl
+            $aParams['RestApiComparisonList'] = "[{`"JsonPathQuery`":`"['data']['status']`",`"AttributeType`":1,`"ComparisonType`":3,`"CompareValue`":`"running`"}]"
+            $items += New-DiscoveredItem `
+                -Name "Proxmox - CT ${ctName} Status" `
+                -ItemType 'ActiveMonitor' `
+                -MonitorType 'RestApi' `
+                -MonitorParams $aParams `
+                -UniqueKey "Proxmox:ct:${ctid}:active:status" `
+                -Attributes $ctAttrs `
+                -Tags @('proxmox', 'ct', $ctName, $(if ($ctIP) { $ctIP } else { 'no-ip' }), $ctNode)
+
+            # Performance monitors — only validated metrics
+            $validCtKeys = if ($guestValidated.ContainsKey($ctid)) { $guestValidated[$ctid] } else { @($guestPerfDefs | ForEach-Object { $_.Key }) }
+            foreach ($pm in $guestPerfDefs) {
+                if ($validCtKeys -notcontains $pm.Key) { continue }
+                $pParams = $perfBase.Clone()
+                $pParams['RestApiUrl']      = $ctStatusUrl
+                $pParams['RestApiJsonPath'] = $pm.JsonPath
+                $items += New-DiscoveredItem `
+                    -Name "Proxmox - CT ${ctName} $($pm.Name)" `
+                    -ItemType 'PerformanceMonitor' `
+                    -MonitorType 'RestApi' `
+                    -MonitorParams $pParams `
+                    -UniqueKey "Proxmox:ct:${ctid}:perf:$($pm.Key)" `
+                    -Attributes $ctAttrs `
+                    -Tags @('proxmox', 'ct', $ctName, $(if ($ctIP) { $ctIP } else { 'no-ip' }), $ctNode)
+            }
+        }
+
+        $tokenValue = $null; $ticketCookie = $null; $csrfToken = $null
         return $items
     }
 
@@ -597,8 +864,8 @@ function Export-ProxmoxDashboardHtml {
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCt3tAf6jVIMs/K
-# p14p35OLopeltPrUcvXPFjNW9kJsgKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBn6vwqLR/b6AA1
+# ogZ9uh7Jd2Xekd32A0cOuUgWGga1caCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -698,17 +965,17 @@ function Export-ProxmoxDashboardHtml {
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgoedj92x8HAWZclKkbvBf8aG37WqppS1F
-# L7GKr/FR2l0wDQYJKoZIhvcNAQEBBQAEggIA6pw5D3VdqDJUEOefGmi5YZZVCv4p
-# 7fsHENIft7xwxNmH6Hcjk91/WinLevg4AARaVYD3lAApJ7O4+6p3r3PFvlIRtYB+
-# BRweVf53rIoMOJIR4vLelmKyoj3qdlfCvtlEtLPX9kqr2fiiHzTKSdqFXidFB5x2
-# iE5gRv7hM65W40/bcGFM1V6J8bkxBhxe8JR11o30PkAmJT2pmmDfbQ8IrDo74/Es
-# +s26AoDgxxjMbFFYUGw4ZfrWkLHoLBACtxznS4guddSOLPjUiScrAFvQ4M1JnYn9
-# a85XMEKwPX/HchxU0+Q/5qyVb1u4A1RSsuVrohvmAVshG4b4vPmtpjuFhlFk/hQv
-# nvVNqE7yzriqlFt/3XmLUQSZjZhgSEXt9a8cvAn5in8TbQfy0J8TmVKhwrUSL5Oq
-# sQlNyPxgjcLxaO/RzazZtf3v5nNhuXakF0xMMRxWGXODLdAmtuEgqIgnjnhmU61O
-# 1PHBet1cjMq1c2c66kAnXKZAJjbAFJFzBLLLcvg1R1pnUmwx1NpU7G0F7wc3ox45
-# OeyMVJlrpXFj557ehLc2Jno0qM/Gs/YDxX2RdbhY1s96fDBrEWys+cpiwqYgXpBo
-# Qlo/M91+ckXPPpHgAEaVVRx4llrqf4BciII6zgyyAeVivLPAu2kZnLYlny5zu7WC
-# i5f5kEsPCaAPrtA=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg7/CDaSACgJe55wH1rXMjB+xNdZUM4E70
+# 9pZM4IbbVgowDQYJKoZIhvcNAQEBBQAEggIAUTb0gXWMqF5PTFrpuNopqYNJszJf
+# /dpV8JOeQthtWAjs2qmNHm2cJWt5Ywp85tFyUElV4uF2H4Rk+C87mhXHgO7JDFlC
+# f2v1Hw+CQJPZaKUEdOoxcK71GM3snFxlD0DT+x9DYFqGeFIVrHVUKEgajIEWVt9c
+# OZxzxdz61ywMJh7O+d7upHibEvqFOri4ZLgDxDN7ZJ9i7afiS7+yQiE3dhTYdM60
+# 1V3YbwFg0qcNy+M2eCGV+IzhCwLspHa2UXFYuaiFGbTpNXCWnuvFvs8VIy8JwJDn
+# lz1F47/FhZf/H5jEIZAL1+F2rZdiBEo2FdYft+oADJZN3Yx9JLsXw42vxRazKRMp
+# uKkcHvL0edxNwG7DF4GYhSoXyoM4lARovEkW4+a4zxXGExnB1RfdnRuMT2fiys1N
+# heEdQ6RjzvjdkMMnI1gujpCpx1Ee9ryizs6KQPpGS6fnq1nQmpmsyCzulIPAmmWG
+# dmEZofK8B/SuB2QnXbCuG/CjuIQfMXcUIAzc+01Ck5zgFsb+beYl8VxIkqcToVpP
+# Ce+GqL4TR6w5D3xnFdri19kJWKd+SNhG+ODkvuPnXcbEKWvobFcuAkWvoWTB7nJG
+# 307AcPkPYF/7xzRWwRiohwgFbT7aEXG2VWFVV+m2yxL6+WXjahDjLA+nUui+dYmy
+# wHHe1Uih9359/a4=
 # SIG # End signature block

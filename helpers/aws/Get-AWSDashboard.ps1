@@ -78,6 +78,10 @@ else {
     throw "AWSHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
         Import-Module -Name WhatsUpGoldPS
@@ -93,7 +97,18 @@ elseif ($AccessKey -and $SecretKey) {
     Connect-AWSProfile -AccessKey $AccessKey -SecretKey $SecretKey -Region $defaultRegion
 }
 else {
-    Write-Host "No credentials specified. Attempting to use existing AWS session/profile..." -ForegroundColor Yellow
+    # Try vault
+    $awsCred = Resolve-DiscoveryCredential -Name 'AWS.Credential' -CredType AWSKeys -ProviderLabel 'AWS' -AutoUse
+    if ($awsCred) {
+        $AccessKey = $awsCred.UserName
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($awsCred.Password)
+        try { $SecretKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+        finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        $defaultRegion = if ($Regions) { $Regions[0] } else { "us-east-1" }
+        Connect-AWSProfile -AccessKey $AccessKey -SecretKey $SecretKey -Region $defaultRegion
+    } else {
+        Write-Host "No credentials specified. Attempting to use existing AWS session/profile..." -ForegroundColor Yellow
+    }
 }
 
 # --- Input prompts -----------------------------------------------------------
@@ -156,8 +171,8 @@ Write-Host "Done." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqwkSybWl1LU/p
-# wqhZ0Kndr4BVXrgm6ke4L4EY3oqb+qCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWE//kn8UCgctm
+# yy0SiyRcH0sijvgTUy3/pnqCDs59F6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -257,17 +272,17 @@ Write-Host "Done." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgVFaSIo/iRbl3rG+ZASE8eQDG7/iOeQoX
-# lk+o3lWVrKQwDQYJKoZIhvcNAQEBBQAEggIA8TZ+0g2+ibU+ZgH3be1kK0XLKHEn
-# 729H1C++LMun835GvzNJxhoq9U3OVyR7OqCDKysQPjKUzrvqs3YCKHF2o6qZQbwo
-# bWWi47I3JkxicNKjui/C5qRlU1cDFnMcnGFEIKYvm7VJvQAFF59CtVYEHecP2Nks
-# jACUm0dS30kLZOu/PBg/uOM1pim+02kmgr6rakTxfmNpde8NXk2d/Wly23T4v6Ry
-# o3xvnQas7r4ZMZVuigV/HDiGrwwXhHXlKHS81HX8tlRiRnovqE5JhE/J8t5MafFL
-# 5Kt+oD9JYw23vXsLUDDvazBrG5DyIcLZuX9gmq0ab5ji6/8+FkuiG4uKHTGztKMW
-# eg/KFfLQtF6HxA95XFkd/9TtfC9xHBlejfPHbGrFlLeqt2xH0a/lIOQP3I3QsiG7
-# 3AKgz3pXVhw6jRklKM3RH5bB8WDCTqcqZ0GAkM7D0CCnRnFj7eEGa30+jcqbGxN3
-# F1lU3pG0ZjpvJ4VAU94CRlJWA3YJBqO4nX38ZwbZB8om5XICNXcZewL7EcgDnKpw
-# eI7GviV/FR6qr/vAEMHs+epPv0BovFDs4MAy7u1/2jQhVd1HK0HPQy8iVx4K5roz
-# Wlp7syuLl0LDjaryb4uJK/YVlJ36HRAPrzXItXdNa5HcMNz4CJ9GyqpNYQPY3reh
-# h5bUr09klUZ+a2w=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg8G23HA0NG9l6NMXJG9RC/CvLEWczJqnN
+# AC8+wAoVtw8wDQYJKoZIhvcNAQEBBQAEggIAeMrUWW1E3dBv4fp/UE3RtoXkEiF/
+# Dwr4vhwL9ULeM6rvOOPsGbxT0JUjyoY6XI/TxgAE6Md7EjW3udXHjP8XnS0qnAXs
+# /+4GujZe2e7CryANb/Bf5BTMfgdrzVYN7S+hYMdsJBzHpZrd4KP6LT9c/6cHpPn4
+# H+p5JSic9IK/c+uQGBaXV0ZqBGT8wwi5/6X89Qj58BW1EDPdi6VTCtceBfVnf9LZ
+# fNUqq4QxlFxqGA7kOZeQ+4mMq0oigQ0uv3RR0gzJjc7kwXK7TGD+DfsL5UZWBsOJ
+# D6MlTcIR/5GSZH0L/MB2+56h0YBZBY6/QA9CSw8mMP5rZ/FpF1zRk0zTF0LncYhT
+# 3L5TalWC2yvlkuVfsocHbUq56UOUQ0Y6uFQL037P2m+uqI+MWTQSysqPjRcTwpkG
+# GCQA4GwXFpa3d0dpc5YlmqJKOue036nuT6UvH3M0aumz0S+H8G5maaJyAOtHRYcg
+# sK2CG9Xl/bt8WHTeRr5pAGCu8X9qPYmOTbd06jZVoKguiw8KzP/clHF+G/Ui3UtU
+# GHyuELlD0G8XO5qgO6wwrg2Z8DjAODpA2iecDQ8NY/OqB3ngWyT03O+nlCH0APBp
+# XKglNzOODYk9U3VmWrm8X4JImPzMMMtzhHS2gA1J5C5TemlQ5inSzYTwD024z0Ya
+# d+1utZkEGIQF010=
 # SIG # End signature block

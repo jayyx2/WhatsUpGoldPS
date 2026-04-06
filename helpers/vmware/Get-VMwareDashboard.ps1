@@ -60,6 +60,10 @@ else {
     throw "VMwareHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
 }
 
+# Load vault functions for credential resolution
+$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
+
 if (Get-Module -ListAvailable -Name WhatsUpGoldPS) {
     if (-not (Get-Module -Name WhatsUpGoldPS)) {
         Import-Module -Name WhatsUpGoldPS
@@ -76,7 +80,11 @@ if (-not $VMwareServer -or $VMwareServer.Trim() -eq '') {
 }
 
 if (-not $VMwareCredential) {
-    $VMwareCredential = Get-Credential -Message "Enter VMware vSphere credentials"
+    $vaultName = "VMware.$VMwareServer.Credential"
+    $VMwareCredential = Resolve-DiscoveryCredential -Name $vaultName -CredType PSCredential -ProviderLabel 'VMware vSphere' -AutoUse
+}
+if (-not $VMwareCredential) {
+    throw "VMware vSphere credentials are required."
 }
 
 # Output paths
@@ -142,8 +150,8 @@ Write-Host "`nDone." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbWUydwTtTVMn8
-# 2f2CLUUpYB5VgOtlFVOKGEU2UlaUwqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDv3PtQ1y71XZ3F
+# s4VjsHzunz+uVyeZTmA+DCf2lNvKJqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -243,17 +251,17 @@ Write-Host "`nDone." -ForegroundColor Green
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgxHRqIyOr8B3tGTxfydp5rtnGWPeUgJ/d
-# 8kPQVaRHz/EwDQYJKoZIhvcNAQEBBQAEggIAofDvZa09+iswjNbAKel6FXLLFov4
-# iVi7SVVRVJZZi4emtPu9RhnItnUQARd0R2HfObOOIOMMyJaIvwdMoNxfl3z+uaPn
-# cyOUrM5+zu47A+JuwEJNB8OoxDhYt7euW3kuxVsks+FHGmIbf+QDyeyY6gZnpFsp
-# SmlyPrqaSACt/8gbgydGdXpdD1RmRPznF/VqX46nz/3facIyfA7dyy4v5NLAM1qe
-# h1ywVbCEuVNm+KK0+mJqoQNquRU27LCnp1U3RB3gpNzNeFVM4xDdif5VNol71z+y
-# PlBb7Qs69I/c5+e5nbaGYDDzO2lCzQGcTyhBOV2fNZ+wPeq97uqo/+fqxdCXdyfi
-# Y/Sgk10xk9NLrPI9eBXYhSreDg10nobRCz5bppNoM6GSQOMoTtUjoPKY7upQl4Uy
-# B1EIKq23TdFz7uFcSinDBuagq7YYYLZp2Y3nWVA3hQBslxYWXESirQTY1ALQBOcT
-# W0JAe14gEhRjIxjFy+skUBAF373VP8s+AnOnAvD8AKNusXC9QGX5g7gnvN+OayKc
-# Rw1Zyqn8JzTvAQa+n4/g4XVp0qfjADRyP9Yk/VJ8dCcy9WMJ74mywV+mmTX6fnQ7
-# BF2kUn75b5fSagc4dt7akjcAUe/lSs27q3YnwjpG/xeHTHAgYwWIfQbTB9LqDWIi
-# zP3pd+Sh+DLlUZ0=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgFYO1Mwb7mo6t4XzSrvT49H3z+Tewk7/X
+# Dzb/tg6OBs0wDQYJKoZIhvcNAQEBBQAEggIAfsnXgpWUvBTfHUdGPHzEaCoeAtLy
+# aazP6p1fiaCWK17fQo7WZ3DDnJoPTN1kzjZI3wwgrEysvbt7w683QgJDKqPHk/ET
+# dYTQlB6zp+TyBLAm1Rv5fDwLlOiC/r8veLyEaVyy+rDQyVmWLcoAJk+PGxUfF9JI
+# 1CVBlyv1FEwcaOp9pEfGOGFs7A3SQXaE4nRkDdnU10OvCb7O6ucZQo7l1kdAPAFa
+# m6mgArj1A0Kma+S/fFfxYXmUlc/gEpZjX0ojotmuZl7dwqRwJTrOTYE6R7WasceP
+# hjNuCnIRVI/+sqdMNAmLGzcRmG6pkg/GqqLNk7VtmQDiJmGkJdodNnQpnZ2PcaC7
+# qKunqHny1Ohb5zbhoUkLKyLoaOb878nnLfZysByMW3nlea9sPlkTHiiXMC/81biQ
+# nQh6Fm9hmlo80bSVWlTq6n4aUx4Oqtcrn+Mp+luzEAHXi0Z4+kR37b+jTW9fBcZh
+# f0RqLdhCVs0FbJTYLPzHYs/dlsqSjTxxr1FcsVjSMQJ9Ng9lLqqJUz1WnBIyvuLE
+# LmC4rzIxYbKoUjHOsIOzjkp/zj2PaPWY5TWBxQv4LCj+PUizGErmZ/9olJDq40Dz
+# cVpNP++8Pb2YDQeg3mXoA9ejePgPDil5UMPCVVBi184MAtbfyBZLY3Ps35exF2VT
+# 28wskBJfponJjJU=
 # SIG # End signature block

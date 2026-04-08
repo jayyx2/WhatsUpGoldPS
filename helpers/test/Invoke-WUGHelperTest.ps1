@@ -226,14 +226,11 @@ $script:AWSCmdletList = @(
     'Export-AWSDashboardHtml','AWS Session Cleanup'
 )
 $script:AzureCmdletList = @(
-    'Azure Authentication','Get-AzureSubscriptions','Get-AzureResourceGroups','Get-AzureResources',
-    'Get-AzureResourceMetrics (default)','Get-AzureResourceMetrics (MaxMetrics=3)',
-    'Get-AzureResourceDetail (metrics)','Get-AzureResourceDetail (no metrics)',
-    'Resolve-AzureResourceIP',
-    'Get-AzureDashboard (no metrics)','Get-AzureDashboard (with metrics)','Get-AzureDashboard (SubId)',
-    'Export-AzureDashboardHtml','Azure Session Disconnect',
     'Azure REST Authentication','Get-AzureSubscriptionsREST','Get-AzureResourceGroupsREST',
-    'Get-AzureResourcesREST','Resolve-AzureResourceIPREST','Get-AzureResourceMetricsREST'
+    'Get-AzureResourcesREST','Get-AzureSubscriptionResourcesREST','Get-AzureNetworkDataREST',
+    'Resolve-AzureResourceIPREST','Get-AzureResourceMetricsREST',
+    'Get-AzureResourceDetail','Get-AzureDashboard',
+    'Export-AzureDashboardHtml'
 )
 $script:GCPCmdletList = @(
     'Connect-GCPAccount','Get-GCPProjects',
@@ -405,6 +402,14 @@ $providerToggle = @{
     Lansweeper = [ref]$TestLansweeper
 }
 
+# Always load DiscoveryHelpers (vault, credential, WUG integration functions)
+$discoveryHelpersPath = Join-Path $helpersRoot 'discovery\DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) {
+    . $discoveryHelpersPath
+} else {
+    Write-Warning "DiscoveryHelpers.ps1 not found at $discoveryHelpersPath - vault credential functions will be unavailable."
+}
+
 foreach ($provider in $helperFiles.Keys) {
     $toggle = $providerToggle[$provider]
     if ($toggle.Value) {
@@ -428,12 +433,7 @@ if ($TestAWS) {
         Write-Warning "AWS tests will be skipped."; $TestAWS = $false
     }
 }
-if ($TestAzure) {
-    if (-not (Install-RequiredModule -ModuleName 'Az.Accounts' -Provider 'Azure' `
-        -InstallHint 'Install-Module -Name Az.Accounts, Az.Resources, Az.Compute, Az.Network, Az.Monitor -Scope CurrentUser -Force')) {
-        Write-Warning "Azure tests will be skipped."; $TestAzure = $false
-    }
-}
+# Azure: no external module dependency required (REST-only)
 if ($TestGCP) {
     if (-not (Install-RequiredModule -ModuleName 'GoogleCloud' -Provider 'GCP' `
         -InstallHint 'Install-Module -Name GoogleCloud -Scope CurrentUser -Force')) {
@@ -590,30 +590,64 @@ if ($TestAWS) {
     }
 
     if ($TestAWS) {
+        # -- Enumerate all enabled regions for multi-region scanning --
+        $script:AWSAllRegions = @()
         Invoke-Test -Cmdlet 'Get-AWSRegionList' -Endpoint 'AWS / EC2 / Get-AWSRegionList' -Test {
             $r = Get-AWSRegionList -ErrorAction Stop; Assert-NotNull $r; Assert-HasProperty $r[0] @('RegionName')
+            $script:AWSAllRegions = @($r | Select-Object -ExpandProperty RegionName | Sort-Object)
+            Write-Host "    Enabled regions: $($script:AWSAllRegions.Count) ($($script:AWSAllRegions -join ', '))" -ForegroundColor DarkGray
         }
-        Invoke-Test -Cmdlet 'Get-AWSEC2Instances' -Endpoint 'AWS / EC2 / Get-AWSEC2Instances' -Test {
-            $r = Get-AWSEC2Instances -ErrorAction Stop
-            if ($r -and @($r).Count -gt 0) { Assert-HasProperty $r[0] @('InstanceId','Name','State','PrivateIP'); $script:FirstEC2Instance = $r[0] }
+
+        # -- Scan EC2 across all regions --
+        Invoke-Test -Cmdlet 'Get-AWSEC2Instances' -Endpoint 'AWS / EC2 / Get-AWSEC2Instances (all regions)' -Test {
+            foreach ($rgn in $script:AWSAllRegions) {
+                $r = Get-AWSEC2Instances -Region $rgn -ErrorAction Stop
+                if ($r -and @($r).Count -gt 0) {
+                    if (-not $script:FirstEC2Instance) {
+                        Assert-HasProperty $r[0] @('InstanceId','Name','State','PrivateIP')
+                        $script:FirstEC2Instance = $r[0]
+                    }
+                    Write-Host "    $rgn : $(@($r).Count) EC2 instances" -ForegroundColor DarkGray
+                }
+            }
         }
-        Invoke-Test -Cmdlet 'Get-AWSEC2Instances (filtered)' -Endpoint 'AWS / EC2 / Get-AWSEC2Instances -Region' -Test {
+        Invoke-Test -Cmdlet 'Get-AWSEC2Instances (filtered)' -Endpoint "AWS / EC2 / Get-AWSEC2Instances -Region $AWSRegion" -Test {
             $r = Get-AWSEC2Instances -Region $AWSRegion -ErrorAction Stop
             if ($r -and @($r).Count -gt 0 -and -not $script:FirstEC2Instance) { $script:FirstEC2Instance = $r[0] }
         }
-        Invoke-Test -Cmdlet 'Get-AWSRDSInstances' -Endpoint 'AWS / RDS / Get-AWSRDSInstances' -Test {
-            $r = Get-AWSRDSInstances -ErrorAction Stop
-            if ($r -and @($r).Count -gt 0) { Assert-HasProperty $r[0] @('DBInstanceId','Engine','Status','Endpoint'); $script:FirstRDSInstance = $r[0] }
+
+        # -- Scan RDS across all regions --
+        Invoke-Test -Cmdlet 'Get-AWSRDSInstances' -Endpoint 'AWS / RDS / Get-AWSRDSInstances (all regions)' -Test {
+            foreach ($rgn in $script:AWSAllRegions) {
+                $r = Get-AWSRDSInstances -Region $rgn -ErrorAction Stop
+                if ($r -and @($r).Count -gt 0) {
+                    if (-not $script:FirstRDSInstance) {
+                        Assert-HasProperty $r[0] @('DBInstanceId','Engine','Status','Endpoint')
+                        $script:FirstRDSInstance = $r[0]
+                    }
+                    Write-Host "    $rgn : $(@($r).Count) RDS instances" -ForegroundColor DarkGray
+                }
+            }
         }
-        Invoke-Test -Cmdlet 'Get-AWSRDSInstances (filtered)' -Endpoint 'AWS / RDS / Get-AWSRDSInstances -Region' -Test {
+        Invoke-Test -Cmdlet 'Get-AWSRDSInstances (filtered)' -Endpoint "AWS / RDS / Get-AWSRDSInstances -Region $AWSRegion" -Test {
             $r = Get-AWSRDSInstances -Region $AWSRegion -ErrorAction Stop
             if ($r -and @($r).Count -gt 0 -and -not $script:FirstRDSInstance) { $script:FirstRDSInstance = $r[0] }
         }
-        Invoke-Test -Cmdlet 'Get-AWSLoadBalancers' -Endpoint 'AWS / ELB / Get-AWSLoadBalancers' -Test {
-            $r = Get-AWSLoadBalancers -ErrorAction Stop
-            if ($r -and @($r).Count -gt 0) { Assert-HasProperty $r[0] @('LoadBalancerName','Type','State','DNSName'); $script:FirstELB = $r[0] }
+
+        # -- Scan ELB across all regions --
+        Invoke-Test -Cmdlet 'Get-AWSLoadBalancers' -Endpoint 'AWS / ELB / Get-AWSLoadBalancers (all regions)' -Test {
+            foreach ($rgn in $script:AWSAllRegions) {
+                $r = Get-AWSLoadBalancers -Region $rgn -ErrorAction Stop
+                if ($r -and @($r).Count -gt 0) {
+                    if (-not $script:FirstELB) {
+                        Assert-HasProperty $r[0] @('LoadBalancerName','Type','State','DNSName')
+                        $script:FirstELB = $r[0]
+                    }
+                    Write-Host "    $rgn : $(@($r).Count) load balancers" -ForegroundColor DarkGray
+                }
+            }
         }
-        Invoke-Test -Cmdlet 'Get-AWSLoadBalancers (filtered)' -Endpoint 'AWS / ELB / Get-AWSLoadBalancers -Region' -Test {
+        Invoke-Test -Cmdlet 'Get-AWSLoadBalancers (filtered)' -Endpoint "AWS / ELB / Get-AWSLoadBalancers -Region $AWSRegion" -Test {
             $r = Get-AWSLoadBalancers -Region $AWSRegion -ErrorAction Stop
             if ($r -and @($r).Count -gt 0 -and -not $script:FirstELB) { $script:FirstELB = $r[0] }
         }
@@ -648,7 +682,13 @@ if ($TestAWS) {
         }
         Invoke-Test -Cmdlet 'Get-AWSDashboard (no RDS)' -Endpoint 'AWS / Dashboard / -IncludeRDS $false' -Test { Get-AWSDashboard -IncludeRDS $false -ErrorAction Stop | Out-Null }
         Invoke-Test -Cmdlet 'Get-AWSDashboard (no ELB)' -Endpoint 'AWS / Dashboard / -IncludeELB $false' -Test { Get-AWSDashboard -IncludeELB $false -ErrorAction Stop | Out-Null }
-        Invoke-Test -Cmdlet 'Get-AWSDashboard (multi-region)' -Endpoint 'AWS / Dashboard / -Regions' -Test { Get-AWSDashboard -Regions @($AWSRegion) -ErrorAction Stop | Out-Null }
+        Invoke-Test -Cmdlet 'Get-AWSDashboard (multi-region)' -Endpoint "AWS / Dashboard / -Regions ($($script:AWSAllRegions.Count) regions)" -Test {
+            $allRegionData = Get-AWSDashboard -Regions $script:AWSAllRegions -ErrorAction Stop
+            if ($allRegionData -and @($allRegionData).Count -gt 0) {
+                Write-Host "    All-region dashboard: $(@($allRegionData).Count) resources across $($script:AWSAllRegions.Count) regions" -ForegroundColor DarkGray
+                $script:AWSDashboardData = $allRegionData
+            }
+        }
         $awsTpl = Join-Path $helpersRoot 'aws\AWS-Dashboard-Template.html'
         if ($script:AWSDashboardData -and @($script:AWSDashboardData).Count -gt 0 -and (Test-Path $awsTpl)) {
             Invoke-Test -Cmdlet 'Export-AWSDashboardHtml' -Endpoint 'AWS / Export / Export-AWSDashboardHtml' -Test {
@@ -664,28 +704,22 @@ if ($TestAWS) {
 ###############################################################################
 #region -- Azure --------------------------------------------------------------
 ###############################################################################
-$script:AzureAuthMethod = $null; $script:AzureHtmlOutPath = $null; $script:AzureDashboardData = $null
+$script:AzureHtmlOutPath = $null; $script:AzureDashboardData = $null
 
 if ($TestAzure) {
-    Write-Host "`nAzure Authentication - choose a method:" -ForegroundColor Cyan
-    Write-Host "  [1] Service Principal (DPAPI vault)  [2] Interactive browser  [3] Current Az context  [S] Skip"
+    Write-Host "`nAzure Authentication (REST API):" -ForegroundColor Cyan
+    Write-Host "  [1] Service Principal  [S] Skip"
     $azChoice = Read-Host "Selection"
-    switch ($azChoice.Trim().ToUpper()) {
-        '1' {
-            $script:AzureAuthMethod = 'ServicePrincipal'
-            if (-not $AzureTenantId) { $AzureTenantId = Read-Host "Azure Tenant ID" }
-            $script:AzureSPCred = Resolve-DiscoveryCredential -Name "Azure.$AzureTenantId.ServicePrincipal" -CredType AzureSP -ProviderLabel 'Azure' -DeferSave
-            if ($script:AzureSPCred) {
-                $spParts = $script:AzureSPCred.UserName -split '\|', 2
-                $AzureTenantId         = $spParts[0]
-                $script:AzureAppId     = $spParts[1]
-                $script:AzureClientSecretSS = $script:AzureSPCred.Password
-            } else { $TestAzure = $false }
-        }
-        '2' { $script:AzureAuthMethod = 'Interactive' }
-        '3' { $script:AzureAuthMethod = 'Existing' }
-        default { $TestAzure = $false }
-    }
+    if ($azChoice.Trim().ToUpper() -eq '1') {
+        if (-not $AzureTenantId) { $AzureTenantId = Read-Host "Azure Tenant ID" }
+        $script:AzureSPCred = Resolve-DiscoveryCredential -Name "Azure.$AzureTenantId.ServicePrincipal" -CredType AzureSP -ProviderLabel 'Azure' -DeferSave
+        if ($script:AzureSPCred) {
+            $spParts = $script:AzureSPCred.UserName -split '\|', 2
+            $AzureTenantId         = $spParts[0]
+            $script:AzureAppId     = $spParts[1]
+            $script:AzureClientSecretSS = $script:AzureSPCred.Password
+        } else { $TestAzure = $false }
+    } else { $TestAzure = $false }
     if (-not $TestAzure) { Skip-ProviderTests -Provider 'Azure' -Reason 'User skipped' -Cmdlets $script:AzureCmdletList }
 } else { Skip-ProviderTests -Provider 'Azure' -Reason 'Disabled or modules unavailable' -Cmdlets $script:AzureCmdletList }
 
@@ -693,131 +727,95 @@ if ($TestAzure) {
     $currentSection++
     Write-Host "`n[$currentSection/$sectionCount] Testing Azure ..." -ForegroundColor Cyan
 
-    $script:AzureTestSub = $null; $script:AzureTestRG = $null; $script:FirstAzureResource = $null
+    $script:AzureTestSub = $null; $script:FirstAzureResource = $null
 
-    Invoke-Test -Cmdlet 'Azure Authentication' -Endpoint 'Azure / Auth / Connect-Az*' -Test {
-        switch ($script:AzureAuthMethod) {
-            'ServicePrincipal' {
-                Write-Host "    Connecting SP: Tenant=$AzureTenantId, AppId=$($script:AzureAppId)" -ForegroundColor DarkGray
-                $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($script:AzureClientSecretSS)
-                try {
-                    $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-                    Connect-AzureServicePrincipal -TenantId $AzureTenantId -ApplicationId $script:AzureAppId -ClientSecret $plain -ErrorAction Stop
-                } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-            }
-            'Interactive' {
-                Write-Host "    Connecting via browser..." -ForegroundColor DarkGray
-                Connect-AzAccount -ErrorAction Stop
-            }
-            'Existing' {
-                Write-Host "    Using existing Az context..." -ForegroundColor DarkGray
-                $ctx = Get-AzContext -ErrorAction Stop; if (-not $ctx -or -not $ctx.Account) { throw "No Az context" }
-            }
+    # -- Authenticate via REST --
+    $script:AzureRESTAuthed = $false
+    if ($AzureTenantId -and $script:AzureAppId -and $script:AzureClientSecretSS) {
+        Invoke-Test -Cmdlet 'Azure REST Authentication' -Endpoint 'Azure / REST / Connect-AzureServicePrincipalREST' -Test {
+            $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($script:AzureClientSecretSS)
+            try {
+                $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+                Connect-AzureServicePrincipalREST -TenantId $AzureTenantId -ApplicationId $script:AzureAppId -ClientSecret $plain -ErrorAction Stop
+            } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+            $script:AzureRESTAuthed = $true
         }
-        $ctx = Get-AzContext -ErrorAction Stop; if (-not $ctx.Account) { throw "No account after auth" }
-    }
-    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:AzureAuthMethod -eq 'ServicePrincipal' -and $script:AzureSPCred) {
-        Save-ResolvedCredential -Name "Azure.$AzureTenantId.ServicePrincipal" -CredType AzureSP -Value $script:AzureSPCred
-    }
-    if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
-        if ($script:AzureAuthMethod -eq 'ServicePrincipal' -and $AzureTenantId) {
+        if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:AzureSPCred) {
+            Save-ResolvedCredential -Name "Azure.$AzureTenantId.ServicePrincipal" -CredType AzureSP -Value $script:AzureSPCred
+        }
+        if (-not $script:AzureRESTAuthed -and $AzureTenantId) {
             Remove-DiscoveryCredential -Name "Azure.$AzureTenantId.ServicePrincipal" -Confirm:$false -ErrorAction SilentlyContinue
             Write-Host "  Bad credential removed from vault." -ForegroundColor Yellow
         }
-        $TestAzure = $false
-        Skip-ProviderTests -Provider 'Azure' -Reason 'Auth failed' -Cmdlets ($script:AzureCmdletList | Where-Object { $_ -ne 'Azure Authentication' })
     }
 
-    if ($TestAzure) {
-        Invoke-Test -Cmdlet 'Get-AzureSubscriptions' -Endpoint 'Azure / Account / Get-AzureSubscriptions' -Test {
-            $r = Get-AzureSubscriptions -ErrorAction Stop; Assert-NotNull $r
+    if ($script:AzureRESTAuthed) {
+        Invoke-Test -Cmdlet 'Get-AzureSubscriptionsREST' -Endpoint 'Azure / REST / Get-AzureSubscriptionsREST' -Test {
+            $r = Get-AzureSubscriptionsREST -ErrorAction Stop; Assert-NotNull $r
             Assert-HasProperty $r[0] @('SubscriptionId','SubscriptionName')
-            $script:AzureSubs = @($r | Where-Object { $_.State -eq 'Enabled' })
-            if ($script:AzureSubs.Count -eq 0) { throw "No enabled subscriptions" }
+            $script:AzureRESTSubs = @($r | Where-Object { $_.State -eq 'Enabled' })
+            if ($script:AzureRESTSubs.Count -eq 0) { throw "No enabled subscriptions" }
+            $script:AzureTestSub = $script:AzureRESTSubs[0]
         }
-        if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:AzureSubs) {
-            if ($script:AzureSubs.Count -gt 1) {
-                Write-Host "`nSubscriptions:"
-                for ($i=0;$i -lt $script:AzureSubs.Count;$i++) { Write-Host "  [$i] $($script:AzureSubs[$i].SubscriptionName)" }
-                $idx = [int](Read-Host "Index [0]"); if ($idx -lt 0 -or $idx -ge $script:AzureSubs.Count) { $idx = 0 }
-                $script:AzureTestSub = $script:AzureSubs[$idx]
-            } else { $script:AzureTestSub = $script:AzureSubs[0] }
-            Set-AzContext -SubscriptionId $script:AzureTestSub.SubscriptionId -ErrorAction Stop | Out-Null
-        }
-        if ($script:AzureTestSub) {
-            Invoke-Test -Cmdlet 'Get-AzureResourceGroups' -Endpoint 'Azure / Resources / Get-AzureResourceGroups' -Test {
-                $r = Get-AzureResourceGroups -ErrorAction Stop; Assert-NotNull $r; $script:AzureRGs = @($r)
-            }
-            $script:AzureTestRGList = @()
-            if ($script:AzureRGs -and $script:AzureRGs.Count -gt 0) {
-                Write-Host "`nResource Groups:"
-                Write-Host "  [A] All resource groups (cycle through each)"
-                for ($i=0;$i -lt $script:AzureRGs.Count;$i++) { Write-Host "  [$i] $($script:AzureRGs[$i].ResourceGroupName)" }
-                $rgInput = (Read-Host "Selection [A]").Trim()
-                if ($rgInput -match '^\d+$') {
-                    $rgIdx = [int]$rgInput
-                    if ($rgIdx -ge 0 -and $rgIdx -lt $script:AzureRGs.Count) {
-                        $script:AzureTestRGList = @($script:AzureRGs[$rgIdx].ResourceGroupName)
-                    } else { $script:AzureTestRGList = @($script:AzureRGs[0].ResourceGroupName) }
-                } else {
-                    $script:AzureTestRGList = @($script:AzureRGs | ForEach-Object { $_.ResourceGroupName })
-                }
-            }
-        }
-        # Cycle through selected resource group(s)
-        foreach ($currentRG in $script:AzureTestRGList) {
-            $rgLabel = $currentRG
-            Write-Host "    -- Resource Group: $rgLabel --" -ForegroundColor DarkCyan
+    }
 
-            $rgResource = $null
-            Invoke-Test -Cmdlet "Get-AzureResources ($rgLabel)" -Endpoint "Azure / Resources / $rgLabel" -Test {
-                $r = Get-AzureResources -ResourceGroupName $currentRG -ErrorAction Stop
-                if ($r -and @($r).Count -gt 0) { $script:_tmpRes = @($r)[0] } else { $script:_tmpRes = $null }
-            }
-            $rgResource = $script:_tmpRes
+    if ($script:AzureRESTAuthed -and $script:AzureTestSub) {
+        $restSubId = $script:AzureTestSub.SubscriptionId
 
-            if ($rgResource) {
-                Invoke-Test -Cmdlet "Get-AzureResourceMetrics ($rgLabel)" -Endpoint "Azure / Monitor / $rgLabel" -Test {
-                    Get-AzureResourceMetrics -ResourceId $rgResource.ResourceId -ErrorAction Stop | Out-Null
-                }
-                Invoke-Test -Cmdlet "Get-AzureResourceMetrics MaxMetrics ($rgLabel)" -Endpoint "Azure / Monitor / $rgLabel MaxMetrics 3" -Test {
-                    $r = Get-AzureResourceMetrics -ResourceId $rgResource.ResourceId -MaxMetrics 3 -ErrorAction Stop
-                    if ($r -and @($r).Count -gt 3) { throw "Got $(@($r).Count) metrics, expected <=3" }
-                }
-                Invoke-Test -Cmdlet "Get-AzureResourceDetail metrics ($rgLabel)" -Endpoint "Azure / Detail / $rgLabel IncludeMetrics" -Test {
-                    $r = Get-AzureResourceDetail -Resource $rgResource -SubscriptionName $script:AzureTestSub.SubscriptionName -SubscriptionId $script:AzureTestSub.SubscriptionId -ResourceGroupName $currentRG -IncludeMetrics $true -ErrorAction Stop
-                    Assert-HasProperty $r @('ResourceName','ResourceType','SubscriptionName','MetricsSummary')
-                }
-                Invoke-Test -Cmdlet "Get-AzureResourceDetail no-metrics ($rgLabel)" -Endpoint "Azure / Detail / $rgLabel NoMetrics" -Test {
-                    $r = Get-AzureResourceDetail -Resource $rgResource -SubscriptionName $script:AzureTestSub.SubscriptionName -SubscriptionId $script:AzureTestSub.SubscriptionId -ResourceGroupName $currentRG -IncludeMetrics $false -ErrorAction Stop
-                    Assert-HasProperty $r @('ResourceName','ResourceType','SubscriptionName','MetricsSummary')
-                }
-                Invoke-Test -Cmdlet "Resolve-AzureResourceIP ($rgLabel)" -Endpoint "Azure / IP / $rgLabel" -Test {
-                    Resolve-AzureResourceIP -Resource $rgResource -ErrorAction Stop | Out-Null
-                }
-                # Capture the first resource found across all RGs for dashboard tests
-                if (-not $script:FirstAzureResource) { $script:FirstAzureResource = $rgResource }
-            } else {
-                Record-Test -Cmdlet "Get-AzureResources ($rgLabel)" -Endpoint "Azure / Resources / $rgLabel" -Status 'Skipped' -Detail "No resources in $rgLabel"
-            }
+        Invoke-Test -Cmdlet 'Get-AzureResourceGroupsREST' -Endpoint 'Azure / REST / Get-AzureResourceGroupsREST' -Test {
+            $r = Get-AzureResourceGroupsREST -SubscriptionId $restSubId -ErrorAction Stop; Assert-NotNull $r
+            $script:AzureRESTRGs = @($r)
         }
-        if ($script:AzureTestRGList.Count -eq 0) {
-            foreach ($c in @('Get-AzureResources','Get-AzureResourceMetrics','Get-AzureResourceDetail','Resolve-AzureResourceIP')) {
-                Record-Test -Cmdlet $c -Endpoint 'Azure / (skipped)' -Status 'Skipped' -Detail 'No resource groups available'
+
+        Invoke-Test -Cmdlet 'Get-AzureResourcesREST' -Endpoint 'Azure / REST / Get-AzureResourcesREST' -Test {
+            $rgName = $null
+            if ($script:AzureRESTRGs -and $script:AzureRESTRGs.Count -gt 0) {
+                $rgName = $script:AzureRESTRGs[0].ResourceGroupName
             }
+            if (-not $rgName) { throw "No resource group available for REST test" }
+            $r = Get-AzureResourcesREST -SubscriptionId $restSubId -ResourceGroupName $rgName -ErrorAction Stop
         }
-        if ($script:AzureTestSub) {
-            Invoke-Test -Cmdlet 'Get-AzureDashboard (no metrics)' -Endpoint 'Azure / Dashboard / -IncludeMetrics $false' -Test {
-                $script:AzureDashboardData = Get-AzureDashboard -SubscriptionIds @($script:AzureTestSub.SubscriptionId) -IncludeMetrics $false -ErrorAction Stop
-                Assert-NotNull $script:AzureDashboardData
-            }
-            Invoke-Test -Cmdlet 'Get-AzureDashboard (with metrics)' -Endpoint 'Azure / Dashboard / -IncludeMetrics $true' -Test {
-                Get-AzureDashboard -SubscriptionIds @($script:AzureTestSub.SubscriptionId) -IncludeMetrics $true -ErrorAction Stop | Out-Null
-            }
-            Invoke-Test -Cmdlet 'Get-AzureDashboard (SubId)' -Endpoint 'Azure / Dashboard / -SubscriptionIds' -Test {
-                Get-AzureDashboard -SubscriptionIds $script:AzureTestSub.SubscriptionId -ErrorAction Stop | Out-Null
-            }
+
+        Invoke-Test -Cmdlet 'Get-AzureSubscriptionResourcesREST' -Endpoint 'Azure / REST / Get-AzureSubscriptionResourcesREST' -Test {
+            $r = Get-AzureSubscriptionResourcesREST -SubscriptionId $restSubId -ErrorAction Stop
+            Assert-NotNull $r
+            if (@($r).Count -eq 0) { throw "No resources returned" }
+            Assert-HasProperty $r[0] @('ResourceName','ResourceId','ResourceType','Location')
+            if (-not $script:FirstAzureResource) { $script:FirstAzureResource = $r[0] }
         }
+
+        Invoke-Test -Cmdlet 'Get-AzureNetworkDataREST' -Endpoint 'Azure / REST / Get-AzureNetworkDataREST' -Test {
+            $r = Get-AzureNetworkDataREST -SubscriptionId $restSubId -ErrorAction Stop
+            Assert-NotNull $r
+            if (-not $r.ContainsKey('VMIPs'))  { throw "Missing VMIPs key in network data" }
+            if (-not $r.ContainsKey('PIPs'))   { throw "Missing PIPs key in network data" }
+            if (-not $r.ContainsKey('LBIPs'))  { throw "Missing LBIPs key in network data" }
+        }
+
+        if ($script:FirstAzureResource) {
+            Invoke-Test -Cmdlet 'Resolve-AzureResourceIPREST' -Endpoint 'Azure / REST / Resolve-AzureResourceIPREST' -Test {
+                Resolve-AzureResourceIPREST -Resource $script:FirstAzureResource -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-AzureResourceMetricsREST' -Endpoint 'Azure / REST / Get-AzureResourceMetricsREST' -Test {
+                Get-AzureResourceMetricsREST -ResourceId $script:FirstAzureResource.ResourceId -ErrorAction Stop | Out-Null
+            }
+            Invoke-Test -Cmdlet 'Get-AzureResourceDetail' -Endpoint 'Azure / REST / Get-AzureResourceDetail' -Test {
+                $rgName = ''
+                if ($script:FirstAzureResource.ResourceId -match '/resourceGroups/([^/]+)/') { $rgName = $Matches[1] }
+                $r = Get-AzureResourceDetail -Resource $script:FirstAzureResource -SubscriptionName $script:AzureTestSub.SubscriptionName -SubscriptionId $restSubId -ResourceGroupName $rgName -IncludeMetrics $false -ErrorAction Stop
+                Assert-HasProperty $r @('ResourceName','ResourceType','SubscriptionName','MetricsSummary')
+            }
+        } else {
+            Record-Test -Cmdlet 'Resolve-AzureResourceIPREST' -Endpoint 'Azure / REST' -Status 'Skipped' -Detail 'No resource available'
+            Record-Test -Cmdlet 'Get-AzureResourceMetricsREST' -Endpoint 'Azure / REST' -Status 'Skipped' -Detail 'No resource available'
+            Record-Test -Cmdlet 'Get-AzureResourceDetail' -Endpoint 'Azure / REST' -Status 'Skipped' -Detail 'No resource available'
+        }
+
+        Invoke-Test -Cmdlet 'Get-AzureDashboard' -Endpoint 'Azure / REST / Get-AzureDashboard' -Test {
+            $script:AzureDashboardData = Get-AzureDashboard -SubscriptionIds @($restSubId) -IncludeMetrics $false -ErrorAction Stop
+            Assert-NotNull $script:AzureDashboardData
+        }
+
         $azTpl = Join-Path $helpersRoot 'azure\Azure-Dashboard-Template.html'
         if ($script:AzureDashboardData -and @($script:AzureDashboardData).Count -gt 0 -and (Test-Path $azTpl)) {
             Invoke-Test -Cmdlet 'Export-AzureDashboardHtml' -Endpoint 'Azure / Export / Export-AzureDashboardHtml' -Test {
@@ -826,6 +824,13 @@ if ($TestAzure) {
                 if (-not (Test-Path $script:AzureHtmlOutPath)) { throw "File not created" }
             }
         } else { Record-Test -Cmdlet 'Export-AzureDashboardHtml' -Endpoint 'Azure / Export' -Status 'Skipped' -Detail 'No data or template missing' }
+    } elseif (-not $script:AzureRESTAuthed) {
+        foreach ($c in @('Get-AzureSubscriptionsREST','Get-AzureResourceGroupsREST','Get-AzureResourcesREST',
+                         'Get-AzureSubscriptionResourcesREST','Get-AzureNetworkDataREST',
+                         'Resolve-AzureResourceIPREST','Get-AzureResourceMetricsREST',
+                         'Get-AzureResourceDetail','Get-AzureDashboard','Export-AzureDashboardHtml')) {
+            Record-Test -Cmdlet $c -Endpoint 'Azure / REST' -Status 'Skipped' -Detail 'REST auth not available'
+        }
     }
 }
 #endregion
@@ -1006,23 +1011,34 @@ if ($TestOCI) {
 ###############################################################################
 #region -- Proxmox ------------------------------------------------------------
 ###############################################################################
-$script:ProxmoxHtmlOutPath = $null; $script:ProxmoxDashboardData = $null; $script:ProxmoxCookie = $null
+$script:ProxmoxHtmlOutPath = $null; $script:ProxmoxDashboardData = $null; $script:ProxmoxCookie = $null; $script:ProxmoxApiToken = $null; $script:ProxmoxAuthMethod = $null
 
 if ($TestProxmox) {
     Write-Host "`nProxmox Authentication:" -ForegroundColor Cyan
-    Write-Host "  [1] Username + Password (DPAPI vault)  [S] Skip"
+    Write-Host "  [1] Username + Password (DPAPI vault)"
+    Write-Host "  [2] API Token (DPAPI vault)"
+    Write-Host "  [S] Skip"
     $pmxChoice = Read-Host "Selection"
-    if ($pmxChoice.Trim().ToUpper() -eq '1') {
+    if ($pmxChoice.Trim().ToUpper() -eq '1' -or $pmxChoice.Trim().ToUpper() -eq '2') {
         $pmxHost = Read-Host "Proxmox host or IP [default: localhost]"
         if ([string]::IsNullOrWhiteSpace($pmxHost)) { $pmxHost = 'localhost' }
         $pmxHost = $pmxHost -replace '^https?://','' -replace ':[0-9]+$',''
         $script:ProxmoxServer = "https://${pmxHost}:8006"
         Write-Host "  Using: $($script:ProxmoxServer)" -ForegroundColor DarkGray
-        $script:ProxmoxCred = Resolve-DiscoveryCredential -Name "Proxmox.$pmxHost.Credential" -CredType PSCredential -ProviderLabel 'Proxmox' -DeferSave
-        if ($script:ProxmoxCred) {
-            $script:ProxmoxUser   = $script:ProxmoxCred.UserName
-            $script:ProxmoxPassSS = $script:ProxmoxCred.Password
-        } else { $TestProxmox = $false }
+        if ($pmxChoice.Trim().ToUpper() -eq '2') {
+            $script:ProxmoxAuthMethod = 'Token'
+            $pmxToken = Resolve-DiscoveryCredential -Name "Proxmox.$pmxHost.Token" -CredType BearerToken -ProviderLabel 'Proxmox' -DeferSave
+            if ($pmxToken) {
+                $script:ProxmoxApiToken = $pmxToken
+            } else { $TestProxmox = $false }
+        } else {
+            $script:ProxmoxAuthMethod = 'Password'
+            $script:ProxmoxCred = Resolve-DiscoveryCredential -Name "Proxmox.$pmxHost.Credential" -CredType PSCredential -ProviderLabel 'Proxmox' -DeferSave
+            if ($script:ProxmoxCred) {
+                $script:ProxmoxUser   = $script:ProxmoxCred.UserName
+                $script:ProxmoxPassSS = $script:ProxmoxCred.Password
+            } else { $TestProxmox = $false }
+        }
     } else { $TestProxmox = $false }
     if (-not $TestProxmox) { Skip-ProviderTests -Provider 'Proxmox' -Reason 'User skipped' -Cmdlets $script:ProxmoxCmdletList }
 } else { Skip-ProviderTests -Provider 'Proxmox' -Reason 'Disabled' -Cmdlets $script:ProxmoxCmdletList }
@@ -1034,18 +1050,31 @@ if ($TestProxmox) {
     $script:FirstProxmoxNode = $null; $script:FirstProxmoxVM = $null
 
     Invoke-Test -Cmdlet 'Connect-ProxmoxServer' -Endpoint 'Proxmox / Auth / Connect-ProxmoxServer' -Test {
-        Write-Host "    Connecting to $($script:ProxmoxServer) as $($script:ProxmoxUser)" -ForegroundColor DarkGray
         Initialize-SSLBypass
-        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($script:ProxmoxPassSS)
-        try {
-            $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-            $script:ProxmoxCookie = Connect-ProxmoxServer -Server $script:ProxmoxServer -Username $script:ProxmoxUser -Password $plain -ErrorAction Stop
-        } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-        if (-not $script:ProxmoxCookie) { throw "No cookie returned" }
+        if ($script:ProxmoxAuthMethod -eq 'Token') {
+            Write-Host "    Connecting to $($script:ProxmoxServer) with API token" -ForegroundColor DarkGray
+            $result = Connect-ProxmoxServer -Server $script:ProxmoxServer -ApiToken $script:ProxmoxApiToken -ErrorAction Stop
+            if (-not $result) { throw "Token validation failed" }
+        } else {
+            Write-Host "    Connecting to $($script:ProxmoxServer) as $($script:ProxmoxUser)" -ForegroundColor DarkGray
+            $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($script:ProxmoxPassSS)
+            try {
+                $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+                $script:ProxmoxCookie = Connect-ProxmoxServer -Server $script:ProxmoxServer -Username $script:ProxmoxUser -Password $plain -ErrorAction Stop
+            } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+            if (-not $script:ProxmoxCookie) { throw "No cookie returned" }
+        }
     }
-    $pmxVaultName = "Proxmox.$($pmxHost).Credential"
-    if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:ProxmoxCred) {
-        Save-ResolvedCredential -Name $pmxVaultName -CredType PSCredential -Value $script:ProxmoxCred
+    if ($script:ProxmoxAuthMethod -eq 'Token') {
+        $pmxVaultName = "Proxmox.$($pmxHost).Token"
+        if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:ProxmoxApiToken) {
+            Save-ResolvedCredential -Name $pmxVaultName -CredType BearerToken -Value $script:ProxmoxApiToken
+        }
+    } else {
+        $pmxVaultName = "Proxmox.$($pmxHost).Credential"
+        if (($script:TestResults | Select-Object -Last 1).Status -eq 'Pass' -and $script:ProxmoxCred) {
+            Save-ResolvedCredential -Name $pmxVaultName -CredType PSCredential -Value $script:ProxmoxCred
+        }
     }
     if (($script:TestResults | Select-Object -Last 1).Status -ne 'Pass') {
         Remove-DiscoveryCredential -Name $pmxVaultName -Confirm:$false -ErrorAction SilentlyContinue
@@ -1058,27 +1087,27 @@ if ($TestProxmox) {
         # Run Dashboard first -- it calls Nodes, VMs, NodeDetail, and VMDetail internally.
         # This avoids PS 5.1 connection-pool exhaustion from running them individually first.
         Invoke-Test -Cmdlet 'Get-ProxmoxDashboard' -Endpoint 'Proxmox / Dashboard / Get-ProxmoxDashboard' -Test {
-            $script:ProxmoxDashboardData = Get-ProxmoxDashboard -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ErrorAction Stop
+            $script:ProxmoxDashboardData = Get-ProxmoxDashboard -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ApiToken $script:ProxmoxApiToken -ErrorAction Stop
             Assert-NotNull $script:ProxmoxDashboardData
         }
         $dashboardPassed = ($script:TestResults | Select-Object -Last 1).Status -eq 'Pass'
 
         # Validate sub-functions -- if Dashboard passed, verify via lightweight individual calls
         Invoke-Test -Cmdlet 'Get-ProxmoxNodes' -Endpoint 'Proxmox / Nodes / Get-ProxmoxNodes' -Test {
-            $r = Get-ProxmoxNodes -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ErrorAction Stop
+            $r = Get-ProxmoxNodes -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ApiToken $script:ProxmoxApiToken -ErrorAction Stop
             Assert-NotNull $r; $script:FirstProxmoxNode = @($r)[0].node
         }
         if ($script:FirstProxmoxNode) {
             Invoke-Test -Cmdlet 'Get-ProxmoxVMs' -Endpoint 'Proxmox / VMs / Get-ProxmoxVMs' -Test {
-                $r = Get-ProxmoxVMs -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -Node $script:FirstProxmoxNode -ErrorAction Stop
+                $r = Get-ProxmoxVMs -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ApiToken $script:ProxmoxApiToken -Node $script:FirstProxmoxNode -ErrorAction Stop
                 if ($r -and @($r).Count -gt 0) { $script:FirstProxmoxVM = @($r)[0] }
             }
             Invoke-Test -Cmdlet 'Get-ProxmoxNodeDetail' -Endpoint 'Proxmox / Nodes / Get-ProxmoxNodeDetail' -Test {
-                Get-ProxmoxNodeDetail -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -Node $script:FirstProxmoxNode -ErrorAction Stop | Out-Null
+                Get-ProxmoxNodeDetail -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ApiToken $script:ProxmoxApiToken -Node $script:FirstProxmoxNode -ErrorAction Stop | Out-Null
             }
             if ($script:FirstProxmoxVM) {
                 Invoke-Test -Cmdlet 'Get-ProxmoxVMDetail' -Endpoint 'Proxmox / VMs / Get-ProxmoxVMDetail' -Test {
-                    Get-ProxmoxVMDetail -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -Node $script:FirstProxmoxNode -VMID $script:FirstProxmoxVM.vmid -ErrorAction Stop | Out-Null
+                    Get-ProxmoxVMDetail -Server $script:ProxmoxServer -Cookie $script:ProxmoxCookie -ApiToken $script:ProxmoxApiToken -Node $script:FirstProxmoxNode -VMID $script:FirstProxmoxVM.vmid -ErrorAction Stop | Out-Null
                 }
             } else { Record-Test -Cmdlet 'Get-ProxmoxVMDetail' -Endpoint 'Proxmox / VMs' -Status 'Skipped' -Detail 'No VMs on first node' }
         } else {
@@ -1975,8 +2004,8 @@ if ($TestGeolocation) {
             $script:GeoProtocol   = $script:WUGServerInfo.Protocol
             $script:GeoCred       = $script:WUGServerInfo.Credential
             $script:GeoIgnoreSSL  = $script:WUGServerInfo.IgnoreSSL
-            $geoConsole = Read-Host "WUG web console base URL (e.g. https://wug:443) [press Enter to skip]"
-            $script:GeoConsoleUrl = if ([string]::IsNullOrWhiteSpace($geoConsole)) { '' } else { $geoConsole }
+            $script:GeoConsoleUrl = "$($script:GeoProtocol)://$($script:GeoServer):443"
+            Write-Host "  Console URL: $($script:GeoConsoleUrl)" -ForegroundColor DarkGray
         } else {
             $TestGeolocation = $false
         }
@@ -2154,9 +2183,10 @@ if ($script:AzureAuthMethod) {
     }
 }
 
-if ($script:ProxmoxCookie) {
-    Record-Test -Cmdlet 'Proxmox Session Cleanup' -Endpoint 'Proxmox / Auth / (session)' -Status 'Pass' -Detail 'Cookie cleared from memory'
+if ($script:ProxmoxCookie -or $script:ProxmoxApiToken) {
+    Record-Test -Cmdlet 'Proxmox Session Cleanup' -Endpoint 'Proxmox / Auth / (session)' -Status 'Pass' -Detail 'Auth cleared from memory'
     $script:ProxmoxCookie = $null
+    $script:ProxmoxApiToken = $null
 }
 
 if ($script:HyperVSession) {
@@ -2473,13 +2503,18 @@ Write-Host "`n============================================================" -For
 if (-not $IncludeSkipped -and $skipped -gt 0) {
     Write-Host "  ($skipped skipped tests hidden - use -IncludeSkipped to show)" -ForegroundColor DarkGray
 }
-$displayResults | Format-Table -AutoSize -Property Cmdlet, Endpoint, Status, Detail
+if ($displayResults -and @($displayResults).Count -gt 0) {
+    $displayResults | Format-Table -AutoSize -Property Cmdlet, Endpoint, Status, Detail
+}
 
 $reportTemplatePath = Join-Path $helpersRoot 'reports\Bootstrap-Table-Sample.html'
 $script:TestResultsHtmlPath = Join-Path $outDir "Get-HelperTestResult-$(Get-Date -Format 'yyyy-MM-dd').html"
 
-$htmlGenerated = Export-TestResultsHtml -TestResults $displayResults `
-    -OutputPath $script:TestResultsHtmlPath -TemplatePath $reportTemplatePath
+$htmlGenerated = $false
+if ($displayResults -and @($displayResults).Count -gt 0) {
+    $htmlGenerated = Export-TestResultsHtml -TestResults $displayResults `
+        -OutputPath $script:TestResultsHtmlPath -TemplatePath $reportTemplatePath
+}
 
 $reportFiles = @()
 if ($htmlGenerated -and (Test-Path $script:TestResultsHtmlPath)) { $reportFiles += $script:TestResultsHtmlPath }
@@ -2508,10 +2543,10 @@ if ($reportFiles.Count -gt 0) {
 $displayResults
 #endregion
 # SIG # Begin signature block
-# MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIrwgYJKoZIhvcNAQcCoIIrszCCK68CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUVXyqh/lHdPCv
-# HXs9JcAG6zUhai4Pvv1zuqbfE0AStaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBc223cKV6J9Sss
+# C7V4PCM1oFr+0NPAtGniE6Ufi+HmAaCCJNcwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -2540,88 +2575,206 @@ $displayResults
 # J3LFI+ICOBpMIOLbAffNRk8monxmwFE2tokCVMf8WPtsAO7+mKYulaEMUykfb9gZ
 # pk+e96wJ6l2CxouvgKe9gUhShDHaMuwV5KZMPWw5c9QLhTkg4IUaaOGnSDip0TYl
 # d8GNGRbFiExmfS9jzpjoad+sPKhdnckcW67Y8y90z7h+9teDnRGWYpquRRPaf9xH
-# +9/DUp/mBlXpnYzyOmJRvOwkDynUWICE5EV7WtgwggYaMIIEAqADAgECAhBiHW0M
-# UgGeO5B5FSCJIRwKMA0GCSqGSIb3DQEBDAUAMFYxCzAJBgNVBAYTAkdCMRgwFgYD
-# VQQKEw9TZWN0aWdvIExpbWl0ZWQxLTArBgNVBAMTJFNlY3RpZ28gUHVibGljIENv
-# ZGUgU2lnbmluZyBSb290IFI0NjAeFw0yMTAzMjIwMDAwMDBaFw0zNjAzMjEyMzU5
-# NTlaMFQxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzAp
-# BgNVBAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYwggGiMA0G
-# CSqGSIb3DQEBAQUAA4IBjwAwggGKAoIBgQCbK51T+jU/jmAGQ2rAz/V/9shTUxjI
-# ztNsfvxYB5UXeWUzCxEeAEZGbEN4QMgCsJLZUKhWThj/yPqy0iSZhXkZ6Pg2A2NV
-# DgFigOMYzB2OKhdqfWGVoYW3haT29PSTahYkwmMv0b/83nbeECbiMXhSOtbam+/3
-# 6F09fy1tsB8je/RV0mIk8XL/tfCK6cPuYHE215wzrK0h1SWHTxPbPuYkRdkP05Zw
-# mRmTnAO5/arnY83jeNzhP06ShdnRqtZlV59+8yv+KIhE5ILMqgOZYAENHNX9SJDm
-# +qxp4VqpB3MV/h53yl41aHU5pledi9lCBbH9JeIkNFICiVHNkRmq4TpxtwfvjsUe
-# dyz8rNyfQJy/aOs5b4s+ac7IH60B+Ja7TVM+EKv1WuTGwcLmoU3FpOFMbmPj8pz4
-# 4MPZ1f9+YEQIQty/NQd/2yGgW+ufflcZ/ZE9o1M7a5Jnqf2i2/uMSWymR8r2oQBM
-# dlyh2n5HirY4jKnFH/9gRvd+QOfdRrJZb1sCAwEAAaOCAWQwggFgMB8GA1UdIwQY
-# MBaAFDLrkpr/NZZILyhAQnAgNpFcF4XmMB0GA1UdDgQWBBQPKssghyi47G9IritU
-# pimqF6TNDDAOBgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNV
-# HSUEDDAKBggrBgEFBQcDAzAbBgNVHSAEFDASMAYGBFUdIAAwCAYGZ4EMAQQBMEsG
-# A1UdHwREMEIwQKA+oDyGOmh0dHA6Ly9jcmwuc2VjdGlnby5jb20vU2VjdGlnb1B1
-# YmxpY0NvZGVTaWduaW5nUm9vdFI0Ni5jcmwwewYIKwYBBQUHAQEEbzBtMEYGCCsG
-# AQUFBzAChjpodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNDb2Rl
-# U2lnbmluZ1Jvb3RSNDYucDdjMCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0
-# aWdvLmNvbTANBgkqhkiG9w0BAQwFAAOCAgEABv+C4XdjNm57oRUgmxP/BP6YdURh
-# w1aVcdGRP4Wh60BAscjW4HL9hcpkOTz5jUug2oeunbYAowbFC2AKK+cMcXIBD0Zd
-# OaWTsyNyBBsMLHqafvIhrCymlaS98+QpoBCyKppP0OcxYEdU0hpsaqBBIZOtBajj
-# cw5+w/KeFvPYfLF/ldYpmlG+vd0xqlqd099iChnyIMvY5HexjO2AmtsbpVn0OhNc
-# WbWDRF/3sBp6fWXhz7DcML4iTAWS+MVXeNLj1lJziVKEoroGs9Mlizg0bUMbOalO
-# hOfCipnx8CaLZeVme5yELg09Jlo8BMe80jO37PU8ejfkP9/uPak7VLwELKxAMcJs
-# zkyeiaerlphwoKx1uHRzNyE6bxuSKcutisqmKL5OTunAvtONEoteSiabkPVSZ2z7
-# 6mKnzAfZxCl/3dq3dUNw4rg3sTCggkHSRqTqlLMS7gjrhTqBmzu1L90Y1KWN/Y5J
-# KdGvspbOrTfOXyXvmPL6E52z1NZJ6ctuMFBQZH3pwWvqURR8AgQdULUvrxjUYbHH
-# j95Ejza63zdrEcxWLDX6xWls/GDnVNueKjWUH3fTv1Y8Wdho698YADR7TNx8X8z2
-# Bev6SivBBOHY+uqiirZtg0y9ShQoPzmCcn63Syatatvx157YK9hlcPmVoa1oDE5/
-# L9Uo2bC5a4CH2RwwggY+MIIEpqADAgECAhAHnODk0RR/hc05c892LTfrMA0GCSqG
-# SIb3DQEBDAUAMFQxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
-# ZWQxKzApBgNVBAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYw
-# HhcNMjYwMjA5MDAwMDAwWhcNMjkwNDIxMjM1OTU5WjBVMQswCQYDVQQGEwJVUzEU
-# MBIGA1UECAwLQ29ubmVjdGljdXQxFzAVBgNVBAoMDkphc29uIEFsYmVyaW5vMRcw
-# FQYDVQQDDA5KYXNvbiBBbGJlcmlubzCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCC
-# AgoCggIBAPN6aN4B1yYWkI5b5TBj3I0VV/peETrHb6EY4BHGxt8Ap+eT+WpEpJyE
-# tRYPxEmNJL3A38Bkg7mwzPE3/1NK570ZBCuBjSAn4mSDIgIuXZnvyBO9W1OQs5d6
-# 7MlJLUAEufl18tOr3ST1DeO9gSjQSAE5Nql0QDxPnm93OZBon+Fz3CmE+z3MwAe2
-# h4KdtRAnCqwM+/V7iBdbw+JOxolpx+7RVjGyProTENIG3pe/hKvPb501lf8uBAAD
-# LdjZr5ip8vIWbf857Yw1Bu10nVI7HW3eE8Cl5//d1ribHlzTzQLfttW+k+DaFsKZ
-# BBL56l4YAlIVRsrOiE1kdHYYx6IGrEA809R7+TZA9DzGqyFiv9qmJAbL4fDwetDe
-# yIq+Oztz1LvEdy8Rcd0JBY+J4S0eDEFIA3X0N8VcLeAwabKb9AjulKXwUeqCJLvN
-# 79CJ90UTZb2+I+tamj0dn+IKMEsJ4v4Ggx72sxFr9+6XziodtTg5Luf2xd6+Phha
-# mOxF2px9LObhBLLEMyRsCHZIzVZOFKu9BpHQH7ufGB+Sa80Tli0/6LEyn9+bMYWi
-# 2ttn6lLOPThXMiQaooRUq6q2u3+F4SaPlxVFLI7OJVMhar6nW6joBvELTJPmANSM
-# jDSRFDfHRCdGbZsL/keELJNy+jZctF6VvxQEjFM8/bazu6qYhrA7AgMBAAGjggGJ
-# MIIBhTAfBgNVHSMEGDAWgBQPKssghyi47G9IritUpimqF6TNDDAdBgNVHQ4EFgQU
-# 6YF0o0D5AVhKHbVocr8GaSIBibAwDgYDVR0PAQH/BAQDAgeAMAwGA1UdEwEB/wQC
-# MAAwEwYDVR0lBAwwCgYIKwYBBQUHAwMwSgYDVR0gBEMwQTA1BgwrBgEEAbIxAQIB
-# AwIwJTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwCAYGZ4EM
-# AQQBMEkGA1UdHwRCMEAwPqA8oDqGOGh0dHA6Ly9jcmwuc2VjdGlnby5jb20vU2Vj
-# dGlnb1B1YmxpY0NvZGVTaWduaW5nQ0FSMzYuY3JsMHkGCCsGAQUFBwEBBG0wazBE
-# BggrBgEFBQcwAoY4aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGlj
-# Q29kZVNpZ25pbmdDQVIzNi5jcnQwIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNl
-# Y3RpZ28uY29tMA0GCSqGSIb3DQEBDAUAA4IBgQAEIsm4xnOd/tZMVrKwi3doAXvC
-# wOA/RYQnFJD7R/bSQRu3wXEK4o9SIefye18B/q4fhBkhNAJuEvTQAGfqbbpxow03
-# J5PrDTp1WPCWbXKX8Oz9vGWJFyJxRGftkdzZ57JE00synEMS8XCwLO9P32MyR9Z9
-# URrpiLPJ9rQjfHMb1BUdvaNayomm7aWLAnD+X7jm6o8sNT5An1cwEAob7obWDM6s
-# X93wphwJNBJAstH9Ozs6LwISOX6sKS7CKm9N3Kp8hOUue0ZHAtZdFl6o5u12wy+z
-# zieGEI50fKnN77FfNKFOWKlS6OJwlArcbFegB5K89LcE5iNSmaM3VMB2ADV1FEcj
-# GSHw4lTg1Wx+WMAMdl/7nbvfFxJ9uu5tNiT54B0s+lZO/HztwXYQUczdsFon3pjs
-# Nrsk9ZlalBi5SHkIu+F6g7tWiEv3rtVApmJRnLkUr2Xq2a4nbslUCt4jKs5UX4V1
-# nSX8OM++AXoyVGO+iTj7z+pl6XE9Gw/Td6WKKKsxggMaMIIDFgIBATBoMFQxCzAJ
-# BgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNl
-# Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
-# N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
-# BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgLyTkY3ZoftdAw+au1dhRLgl0b1AsyYOU
-# IiYpmpUJnlswDQYJKoZIhvcNAQEBBQAEggIA4VDh4aAOgQV8mGJjaK9aFbMzAfvz
-# jzyd7u7ja5uxePviSknQRp18HSdMEuL9p2QwQSkF/LuB3Hp7699pLHKX1wQTMpTl
-# Li5wGN0HNBh2uFoMnEWrXdBJwCLZ1T/jeKamoc+PkRCXSO/Td3D/2mI0SKyoyXEy
-# h9ASPbPhrtCU6ICm69hkHdETR3qlJAMKh7AHz1tmpOIlU+2+NOk9OzgLaZXXrBcJ
-# cjIHOWT7OanqQaO6A8+OrSbDJge9w4/QaG6WFJ3n/g8vNU9vDQXKtbHUCSU48Edz
-# gtYjYXxmGPYMwREuKNMdJzYRCRItmeT+qebM2DQdeX88ASb/0Lj+ADbZJLE0EiNB
-# KIFPvFSZA4FYG28I2NWU9+1NRBb2J5cFNFXsfnO2r1o4P5Lc6F0lidBU8a67F1Zf
-# RHq7zqaVTju8KjbppeolvqLdTcFvG2lq0CkF/s5Y1SM5wg1HQurt2SNUP4OJaN04
-# MSenPBqfEeJwRim0sbfWn+CpecLGBqdqmGRvXlrBDoLw83zGVbWA8Jm8UXEUECgQ
-# +98xrDyiIN49N1/5o+d6QZEPWOeXwXa8EIS/iDZI/wsKxrm/3qBMy8mD+wY0/A6t
-# mBVOXxQRoYexw301wp4Dj+QiKTcck5WU3n1IiRQGe/gXfCWSDAgXL7D/C0V7noTy
-# zPsJP/SjvKrGseI=
+# +9/DUp/mBlXpnYzyOmJRvOwkDynUWICE5EV7WtgwggYUMIID/KADAgECAhB6I67a
+# U2mWD5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYD
+# VQQKEw9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRp
+# bWUgU3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1
+# OTU5WjBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
+# KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNjCCAaIw
+# DQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAM2Y2ENBq26CK+z2M34mNOSJjNPv
+# IhKAVD7vJq+MDoGD46IiM+b83+3ecLvBhStSVjeYXIjfa3ajoW3cS3ElcJzkyZlB
+# nwDEJuHlzpbN4kMH2qRBVrjrGJgSlzzUqcGQBaCxpectRGhhnOSwcjPMI3G0hedv
+# 2eNmGiUbD12OeORN0ADzdpsQ4dDi6M4YhoGE9cbY11XxM2AVZn0GiOUC9+XE0wI7
+# CQKfOUfigLDn7i/WeyxZ43XLj5GVo7LDBExSLnh+va8WxTlA+uBvq1KO8RSHUQLg
+# zb1gbL9Ihgzxmkdp2ZWNuLc+XyEmJNbD2OIIq/fWlwBp6KNL19zpHsODLIsgZ+WZ
+# 1AzCs1HEK6VWrxmnKyJJg2Lv23DlEdZlQSGdF+z+Gyn9/CRezKe7WNyxRf4e4bwU
+# trYE2F5Q+05yDD68clwnweckKtxRaF0VzN/w76kOLIaFVhf5sMM/caEZLtOYqYad
+# tn034ykSFaZuIBU9uCSrKRKTPJhWvXk4CllgrwIDAQABo4IBXDCCAVgwHwYDVR0j
+# BBgwFoAU9ndq3T/9ARP/FqFsggIv0Ao9FCUwHQYDVR0OBBYEFF9Y7UwxeqJhQo1S
+# gLqzYZcZojKbMA4GA1UdDwEB/wQEAwIBhjASBgNVHRMBAf8ECDAGAQH/AgEAMBMG
+# A1UdJQQMMAoGCCsGAQUFBwMIMBEGA1UdIAQKMAgwBgYEVR0gADBMBgNVHR8ERTBD
+# MEGgP6A9hjtodHRwOi8vY3JsLnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LmNybDB8BggrBgEFBQcBAQRwMG4wRwYIKwYBBQUHMAKG
+# O2h0dHA6Ly9jcnQuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY1RpbWVTdGFtcGlu
+# Z1Jvb3RSNDYucDdjMCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNv
+# bTANBgkqhkiG9w0BAQwFAAOCAgEAEtd7IK0ONVgMnoEdJVj9TC1ndK/HYiYh9lVU
+# acahRoZ2W2hfiEOyQExnHk1jkvpIJzAMxmEc6ZvIyHI5UkPCbXKspioYMdbOnBWQ
+# Un733qMooBfIghpR/klUqNxx6/fDXqY0hSU1OSkkSivt51UlmJElUICZYBodzD3M
+# /SFjeCP59anwxs6hwj1mfvzG+b1coYGnqsSz2wSKr+nDO+Db8qNcTbJZRAiSazr7
+# KyUJGo1c+MScGfG5QHV+bps8BX5Oyv9Ct36Y4Il6ajTqV2ifikkVtB3RNBUgwu/m
+# SiSUice/Jp/q8BMk/gN8+0rNIE+QqU63JoVMCMPY2752LmESsRVVoypJVt8/N3qQ
+# 1c6FibbcRabo3azZkcIdWGVSAdoLgAIxEKBeNh9AQO1gQrnh1TA8ldXuJzPSuALO
+# z1Ujb0PCyNVkWk7hkhVHfcvBfI8NtgWQupiaAeNHe0pWSGH2opXZYKYG4Lbukg7H
+# pNi/KqJhue2Keak6qH9A8CeEOB7Eob0Zf+fU+CCQaL0cJqlmnx9HCDxF+3BLbUuf
+# rV64EbTI40zqegPZdA+sXCmbcZy6okx/SjwsusWRItFA3DE8MORZeFb6BmzBtqKJ
+# 7l939bbKBy2jvxcJI98Va95Q5JnlKor3m0E7xpMeYRriWklUPsetMSf2NvUQa/E5
+# vVyefQIwggYaMIIEAqADAgECAhBiHW0MUgGeO5B5FSCJIRwKMA0GCSqGSIb3DQEB
+# DAUAMFYxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxLTAr
+# BgNVBAMTJFNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBSb290IFI0NjAeFw0y
+# MTAzMjIwMDAwMDBaFw0zNjAzMjEyMzU5NTlaMFQxCzAJBgNVBAYTAkdCMRgwFgYD
+# VQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNlY3RpZ28gUHVibGljIENv
+# ZGUgU2lnbmluZyBDQSBSMzYwggGiMA0GCSqGSIb3DQEBAQUAA4IBjwAwggGKAoIB
+# gQCbK51T+jU/jmAGQ2rAz/V/9shTUxjIztNsfvxYB5UXeWUzCxEeAEZGbEN4QMgC
+# sJLZUKhWThj/yPqy0iSZhXkZ6Pg2A2NVDgFigOMYzB2OKhdqfWGVoYW3haT29PST
+# ahYkwmMv0b/83nbeECbiMXhSOtbam+/36F09fy1tsB8je/RV0mIk8XL/tfCK6cPu
+# YHE215wzrK0h1SWHTxPbPuYkRdkP05ZwmRmTnAO5/arnY83jeNzhP06ShdnRqtZl
+# V59+8yv+KIhE5ILMqgOZYAENHNX9SJDm+qxp4VqpB3MV/h53yl41aHU5pledi9lC
+# BbH9JeIkNFICiVHNkRmq4TpxtwfvjsUedyz8rNyfQJy/aOs5b4s+ac7IH60B+Ja7
+# TVM+EKv1WuTGwcLmoU3FpOFMbmPj8pz44MPZ1f9+YEQIQty/NQd/2yGgW+ufflcZ
+# /ZE9o1M7a5Jnqf2i2/uMSWymR8r2oQBMdlyh2n5HirY4jKnFH/9gRvd+QOfdRrJZ
+# b1sCAwEAAaOCAWQwggFgMB8GA1UdIwQYMBaAFDLrkpr/NZZILyhAQnAgNpFcF4Xm
+# MB0GA1UdDgQWBBQPKssghyi47G9IritUpimqF6TNDDAOBgNVHQ8BAf8EBAMCAYYw
+# EgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggrBgEFBQcDAzAbBgNVHSAE
+# FDASMAYGBFUdIAAwCAYGZ4EMAQQBMEsGA1UdHwREMEIwQKA+oDyGOmh0dHA6Ly9j
+# cmwuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY0NvZGVTaWduaW5nUm9vdFI0Ni5j
+# cmwwewYIKwYBBQUHAQEEbzBtMEYGCCsGAQUFBzAChjpodHRwOi8vY3J0LnNlY3Rp
+# Z28uY29tL1NlY3RpZ29QdWJsaWNDb2RlU2lnbmluZ1Jvb3RSNDYucDdjMCMGCCsG
+# AQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTANBgkqhkiG9w0BAQwFAAOC
+# AgEABv+C4XdjNm57oRUgmxP/BP6YdURhw1aVcdGRP4Wh60BAscjW4HL9hcpkOTz5
+# jUug2oeunbYAowbFC2AKK+cMcXIBD0ZdOaWTsyNyBBsMLHqafvIhrCymlaS98+Qp
+# oBCyKppP0OcxYEdU0hpsaqBBIZOtBajjcw5+w/KeFvPYfLF/ldYpmlG+vd0xqlqd
+# 099iChnyIMvY5HexjO2AmtsbpVn0OhNcWbWDRF/3sBp6fWXhz7DcML4iTAWS+MVX
+# eNLj1lJziVKEoroGs9Mlizg0bUMbOalOhOfCipnx8CaLZeVme5yELg09Jlo8BMe8
+# 0jO37PU8ejfkP9/uPak7VLwELKxAMcJszkyeiaerlphwoKx1uHRzNyE6bxuSKcut
+# isqmKL5OTunAvtONEoteSiabkPVSZ2z76mKnzAfZxCl/3dq3dUNw4rg3sTCggkHS
+# RqTqlLMS7gjrhTqBmzu1L90Y1KWN/Y5JKdGvspbOrTfOXyXvmPL6E52z1NZJ6ctu
+# MFBQZH3pwWvqURR8AgQdULUvrxjUYbHHj95Ejza63zdrEcxWLDX6xWls/GDnVNue
+# KjWUH3fTv1Y8Wdho698YADR7TNx8X8z2Bev6SivBBOHY+uqiirZtg0y9ShQoPzmC
+# cn63Syatatvx157YK9hlcPmVoa1oDE5/L9Uo2bC5a4CH2RwwggY+MIIEpqADAgEC
+# AhAHnODk0RR/hc05c892LTfrMA0GCSqGSIb3DQEBDAUAMFQxCzAJBgNVBAYTAkdC
+# MRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNlY3RpZ28gUHVi
+# bGljIENvZGUgU2lnbmluZyBDQSBSMzYwHhcNMjYwMjA5MDAwMDAwWhcNMjkwNDIx
+# MjM1OTU5WjBVMQswCQYDVQQGEwJVUzEUMBIGA1UECAwLQ29ubmVjdGljdXQxFzAV
+# BgNVBAoMDkphc29uIEFsYmVyaW5vMRcwFQYDVQQDDA5KYXNvbiBBbGJlcmlubzCC
+# AiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAPN6aN4B1yYWkI5b5TBj3I0V
+# V/peETrHb6EY4BHGxt8Ap+eT+WpEpJyEtRYPxEmNJL3A38Bkg7mwzPE3/1NK570Z
+# BCuBjSAn4mSDIgIuXZnvyBO9W1OQs5d67MlJLUAEufl18tOr3ST1DeO9gSjQSAE5
+# Nql0QDxPnm93OZBon+Fz3CmE+z3MwAe2h4KdtRAnCqwM+/V7iBdbw+JOxolpx+7R
+# VjGyProTENIG3pe/hKvPb501lf8uBAADLdjZr5ip8vIWbf857Yw1Bu10nVI7HW3e
+# E8Cl5//d1ribHlzTzQLfttW+k+DaFsKZBBL56l4YAlIVRsrOiE1kdHYYx6IGrEA8
+# 09R7+TZA9DzGqyFiv9qmJAbL4fDwetDeyIq+Oztz1LvEdy8Rcd0JBY+J4S0eDEFI
+# A3X0N8VcLeAwabKb9AjulKXwUeqCJLvN79CJ90UTZb2+I+tamj0dn+IKMEsJ4v4G
+# gx72sxFr9+6XziodtTg5Luf2xd6+PhhamOxF2px9LObhBLLEMyRsCHZIzVZOFKu9
+# BpHQH7ufGB+Sa80Tli0/6LEyn9+bMYWi2ttn6lLOPThXMiQaooRUq6q2u3+F4SaP
+# lxVFLI7OJVMhar6nW6joBvELTJPmANSMjDSRFDfHRCdGbZsL/keELJNy+jZctF6V
+# vxQEjFM8/bazu6qYhrA7AgMBAAGjggGJMIIBhTAfBgNVHSMEGDAWgBQPKssghyi4
+# 7G9IritUpimqF6TNDDAdBgNVHQ4EFgQU6YF0o0D5AVhKHbVocr8GaSIBibAwDgYD
+# VR0PAQH/BAQDAgeAMAwGA1UdEwEB/wQCMAAwEwYDVR0lBAwwCgYIKwYBBQUHAwMw
+# SgYDVR0gBEMwQTA1BgwrBgEEAbIxAQIBAwIwJTAjBggrBgEFBQcCARYXaHR0cHM6
+# Ly9zZWN0aWdvLmNvbS9DUFMwCAYGZ4EMAQQBMEkGA1UdHwRCMEAwPqA8oDqGOGh0
+# dHA6Ly9jcmwuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY0NvZGVTaWduaW5nQ0FS
+# MzYuY3JsMHkGCCsGAQUFBwEBBG0wazBEBggrBgEFBQcwAoY4aHR0cDovL2NydC5z
+# ZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljQ29kZVNpZ25pbmdDQVIzNi5jcnQwIwYI
+# KwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNlY3RpZ28uY29tMA0GCSqGSIb3DQEBDAUA
+# A4IBgQAEIsm4xnOd/tZMVrKwi3doAXvCwOA/RYQnFJD7R/bSQRu3wXEK4o9SIefy
+# e18B/q4fhBkhNAJuEvTQAGfqbbpxow03J5PrDTp1WPCWbXKX8Oz9vGWJFyJxRGft
+# kdzZ57JE00synEMS8XCwLO9P32MyR9Z9URrpiLPJ9rQjfHMb1BUdvaNayomm7aWL
+# AnD+X7jm6o8sNT5An1cwEAob7obWDM6sX93wphwJNBJAstH9Ozs6LwISOX6sKS7C
+# Km9N3Kp8hOUue0ZHAtZdFl6o5u12wy+zzieGEI50fKnN77FfNKFOWKlS6OJwlArc
+# bFegB5K89LcE5iNSmaM3VMB2ADV1FEcjGSHw4lTg1Wx+WMAMdl/7nbvfFxJ9uu5t
+# NiT54B0s+lZO/HztwXYQUczdsFon3pjsNrsk9ZlalBi5SHkIu+F6g7tWiEv3rtVA
+# pmJRnLkUr2Xq2a4nbslUCt4jKs5UX4V1nSX8OM++AXoyVGO+iTj7z+pl6XE9Gw/T
+# d6WKKKswggZiMIIEyqADAgECAhEApCk7bh7d16c0CIetek63JDANBgkqhkiG9w0B
+# AQwFADBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
+# KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNjAeFw0y
+# NTAzMjcwMDAwMDBaFw0zNjAzMjEyMzU5NTlaMHIxCzAJBgNVBAYTAkdCMRcwFQYD
+# VQQIEw5XZXN0IFlvcmtzaGlyZTEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMTAw
+# LgYDVQQDEydTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIFNpZ25lciBSMzYw
+# ggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQDThJX0bqRTePI9EEt4Egc8
+# 3JSBU2dhrJ+wY7JgReuff5KQNhMuzVytzD+iXazATVPMHZpH/kkiMo1/vlAGFrYN
+# 2P7g0Q8oPEcR3h0SftFNYxxMh+bj3ZNbbYjwt8f4DsSHPT+xp9zoFuw0HOMdO3sW
+# eA1+F8mhg6uS6BJpPwXQjNSHpVTCgd1gOmKWf12HSfSbnjl3kDm0kP3aIUAhsodB
+# YZsJA1imWqkAVqwcGfvs6pbfs/0GE4BJ2aOnciKNiIV1wDRZAh7rS/O+uTQcb6JV
+# zBVmPP63k5xcZNzGo4DOTV+sM1nVrDycWEYS8bSS0lCSeclkTcPjQah9Xs7xbOBo
+# CdmahSfg8Km8ffq8PhdoAXYKOI+wlaJj+PbEuwm6rHcm24jhqQfQyYbOUFTKWFe9
+# 01VdyMC4gRwRAq04FH2VTjBdCkhKts5Py7H73obMGrxN1uGgVyZho4FkqXA8/uk6
+# nkzPH9QyHIED3c9CGIJ098hU4Ig2xRjhTbengoncXUeo/cfpKXDeUcAKcuKUYRNd
+# GDlf8WnwbyqUblj4zj1kQZSnZud5EtmjIdPLKce8UhKl5+EEJXQp1Fkc9y5Ivk4A
+# ZacGMCVG0e+wwGsjcAADRO7Wga89r/jJ56IDK773LdIsL3yANVvJKdeeS6OOEiH6
+# hpq2yT+jJ/lHa9zEdqFqMwIDAQABo4IBjjCCAYowHwYDVR0jBBgwFoAUX1jtTDF6
+# omFCjVKAurNhlxmiMpswHQYDVR0OBBYEFIhhjKEqN2SBKGChmzHQjP0sAs5PMA4G
+# A1UdDwEB/wQEAwIGwDAMBgNVHRMBAf8EAjAAMBYGA1UdJQEB/wQMMAoGCCsGAQUF
+# BwMIMEoGA1UdIARDMEEwNQYMKwYBBAGyMQECAQMIMCUwIwYIKwYBBQUHAgEWF2h0
+# dHBzOi8vc2VjdGlnby5jb20vQ1BTMAgGBmeBDAEEAjBKBgNVHR8EQzBBMD+gPaA7
+# hjlodHRwOi8vY3JsLnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1lU3RhbXBp
+# bmdDQVIzNi5jcmwwegYIKwYBBQUHAQEEbjBsMEUGCCsGAQUFBzAChjlodHRwOi8v
+# Y3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1lU3RhbXBpbmdDQVIzNi5j
+# cnQwIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNlY3RpZ28uY29tMA0GCSqGSIb3
+# DQEBDAUAA4IBgQACgT6khnJRIfllqS49Uorh5ZvMSxNEk4SNsi7qvu+bNdcuknHg
+# XIaZyqcVmhrV3PHcmtQKt0blv/8t8DE4bL0+H0m2tgKElpUeu6wOH02BjCIYM6HL
+# InbNHLf6R2qHC1SUsJ02MWNqRNIT6GQL0Xm3LW7E6hDZmR8jlYzhZcDdkdw0cHhX
+# jbOLsmTeS0SeRJ1WJXEzqt25dbSOaaK7vVmkEVkOHsp16ez49Bc+Ayq/Oh2BAkST
+# Fog43ldEKgHEDBbCIyba2E8O5lPNan+BQXOLuLMKYS3ikTcp/Qw63dxyDCfgqXYU
+# hxBpXnmeSO/WA4NwdwP35lWNhmjIpNVZvhWoxDL+PxDdpph3+M5DroWGTc1ZuDa1
+# iXmOFAK4iwTnlWDg3QNRsRa9cnG3FBBpVHnHOEQj4GMkrOHdNDTbonEeGvZ+4nSZ
+# XrwCW4Wv2qyGDBLlKk3kUW1pIScDCpm/chL6aUbnSsrtbepdtbCLiGanKVR/KC1g
+# sR0tC6Q0RfWOI4owggaCMIIEaqADAgECAhA2wrC9fBs656Oz3TbLyXVoMA0GCSqG
+# SIb3DQEBDAUAMIGIMQswCQYDVQQGEwJVUzETMBEGA1UECBMKTmV3IEplcnNleTEU
+# MBIGA1UEBxMLSmVyc2V5IENpdHkxHjAcBgNVBAoTFVRoZSBVU0VSVFJVU1QgTmV0
+# d29yazEuMCwGA1UEAxMlVVNFUlRydXN0IFJTQSBDZXJ0aWZpY2F0aW9uIEF1dGhv
+# cml0eTAeFw0yMTAzMjIwMDAwMDBaFw0zODAxMTgyMzU5NTlaMFcxCzAJBgNVBAYT
+# AkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28g
+# UHVibGljIFRpbWUgU3RhbXBpbmcgUm9vdCBSNDYwggIiMA0GCSqGSIb3DQEBAQUA
+# A4ICDwAwggIKAoICAQCIndi5RWedHd3ouSaBmlRUwHxJBZvMWhUP2ZQQRLRBQIF3
+# FJmp1OR2LMgIU14g0JIlL6VXWKmdbmKGRDILRxEtZdQnOh2qmcxGzjqemIk8et8s
+# E6J+N+Gl1cnZocew8eCAawKLu4TRrCoqCAT8uRjDeypoGJrruH/drCio28aqIVEn
+# 45NZiZQI7YYBex48eL78lQ0BrHeSmqy1uXe9xN04aG0pKG9ki+PC6VEfzutu6Q3I
+# cZZfm00r9YAEp/4aeiLhyaKxLuhKKaAdQjRaf/h6U13jQEV1JnUTCm511n5avv4N
+# +jSVwd+Wb8UMOs4netapq5Q/yGyiQOgjsP/JRUj0MAT9YrcmXcLgsrAimfWY3MzK
+# m1HCxcquinTqbs1Q0d2VMMQyi9cAgMYC9jKc+3mW62/yVl4jnDcw6ULJsBkOkrcP
+# LUwqj7poS0T2+2JMzPP+jZ1h90/QpZnBkhdtixMiWDVgh60KmLmzXiqJc6lGwqoU
+# qpq/1HVHm+Pc2B6+wCy/GwCcjw5rmzajLbmqGygEgaj/OLoanEWP6Y52Hflef3XL
+# vYnhEY4kSirMQhtberRvaI+5YsD3XVxHGBjlIli5u+NrLedIxsE88WzKXqZjj9Zi
+# 5ybJL2WjeXuOTbswB7XjkZbErg7ebeAQUQiS/uRGZ58NHs57ZPUfECcgJC+v2wID
+# AQABo4IBFjCCARIwHwYDVR0jBBgwFoAUU3m/WqorSs9UgOHYm8Cd8rIDZsswHQYD
+# VR0OBBYEFPZ3at0//QET/xahbIICL9AKPRQlMA4GA1UdDwEB/wQEAwIBhjAPBgNV
+# HRMBAf8EBTADAQH/MBMGA1UdJQQMMAoGCCsGAQUFBwMIMBEGA1UdIAQKMAgwBgYE
+# VR0gADBQBgNVHR8ESTBHMEWgQ6BBhj9odHRwOi8vY3JsLnVzZXJ0cnVzdC5jb20v
+# VVNFUlRydXN0UlNBQ2VydGlmaWNhdGlvbkF1dGhvcml0eS5jcmwwNQYIKwYBBQUH
+# AQEEKTAnMCUGCCsGAQUFBzABhhlodHRwOi8vb2NzcC51c2VydHJ1c3QuY29tMA0G
+# CSqGSIb3DQEBDAUAA4ICAQAOvmVB7WhEuOWhxdQRh+S3OyWM637ayBeR7djxQ8Si
+# hTnLf2sABFoB0DFR6JfWS0snf6WDG2gtCGflwVvcYXZJJlFfym1Doi+4PfDP8s0c
+# qlDmdfyGOwMtGGzJ4iImyaz3IBae91g50QyrVbrUoT0mUGQHbRcF57olpfHhQESt
+# z5i6hJvVLFV/ueQ21SM99zG4W2tB1ExGL98idX8ChsTwbD/zIExAopoe3l6JrzJt
+# Pxj8V9rocAnLP2C8Q5wXVVZcbw4x4ztXLsGzqZIiRh5i111TW7HV1AtsQa6vXy63
+# 3vCAbAOIaKcLAo/IU7sClyZUk62XD0VUnHD+YvVNvIGezjM6CRpcWed/ODiptK+e
+# vDKPU2K6synimYBaNH49v9Ih24+eYXNtI38byt5kIvh+8aW88WThRpv8lUJKaPn3
+# 7+YHYafob9Rg7LyTrSYpyZoBmwRWSE4W6iPjB7wJjJpH29308ZkpKKdpkiS9WNsf
+# /eeUtvRrtIEiSJHN899L1P4l6zKVsdrUu1FX1T/ubSrsxrYJD+3f3aKg6yxdbugo
+# t06YwGXXiy5UUGZvOu3lXlxA+fC13dQ5OlL2gIb5lmF6Ii8+CQOYDwXM+yd9dbmo
+# cQsHjcRPsccUd5E9FiswEqORvz8g3s+jR3SFCgXhN4wz7NgAnOgpCdUo4uDyllU9
+# PzGCBkEwggY9AgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28g
+# TGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWduaW5nIENB
+# IFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAYBgorBgEE
+# AYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwG
+# CisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAKUqqn
+# A67L8kp8VDhVXGObrwnIWAll3AeUQYIvF0GdEzANBgkqhkiG9w0BAQEFAASCAgAe
+# vosJoqMZMiJeW+Ir7app3rKR60rhLkTAl7JEErZl/dLAjHCO4WzoL4wDfZ6UsKoL
+# GILB5AtnSNVN3EaLWuE0Knl7wySXrtArXjtODa8DBcNJm1JGWXGJ06Ziz9kcMkep
+# uZW7LwSCvIVNamHIPG20Z+RBTIUesQTrLls0lAt1xvrde67UNk9QUMwcmNnHzhMs
+# t3mQXay2HGGasFa0LkHs9SivaSPThHP4oq6li11ZTb+nwOjha/XvTuy4e5kDBq6o
+# MTgtsFGPcYSF/cgUytRj3HtYuC4e0HBwvpzdSN1idEprRcZkWAQgVyt7TM8bJYeR
+# SrH/M2Rmd7wDN9g3ETUWF0Ec4NA1eq+ZPmrhrbGOoRY+VDxYps3E9JekXXh8sw83
+# /bTLU/f5frNUl/rNDRyD68313MWw2/wUqb7gO84yg4ddFw5PPaVeNolxHJaGrs9c
+# LoJjvU7eNpjvC47hOs0lr7yMUz8VyK9Ovbg9G4t1bBQWAokQQSUdm46WMtY+V6MI
+# by1Bip9o0gREse17GjfHWAEAOEIAIp5yJwxo4IpifdlGZqQjpsvnaeFkITW8kheW
+# X+3oC6hFBTemyO2Kx4i1NI+pF7QlgcRzThl1aS8pnuN7G3dKgRWqlfy5pWLHISwM
+# Wn9BpYxVT74Ok7EpX0hTVd5pAo+HaZWjPxV15FdmS6GCAyMwggMfBgkqhkiG9w0B
+# CQYxggMQMIIDDAIBATBqMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdv
+# IExpbWl0ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcg
+# Q0EgUjM2AhEApCk7bh7d16c0CIetek63JDANBglghkgBZQMEAgIFAKB5MBgGCSqG
+# SIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDQwODAxMzEx
+# OFowPwYJKoZIhvcNAQkEMTIEMF866Y7HwdILHvtHVZ58in3TuffH/NEEshyEjSR/
+# 8G1fkk1FbyXas6V8aVBQpmfxpjANBgkqhkiG9w0BAQEFAASCAgBIuKLJZXQAGPHK
+# /wGjg7EFypYBWk2jKWk9GdKEligFHLwqyohpWIlHqBQfCvtSZQbM+DCQQoJ3rwCo
+# 56vTWLsF0qvUpTIMwAHn7W6Qj9nrkwY4erlVRQHtpO+SSK4mtOOl0gPVsyRRx1qX
+# gWBdw2iZZRvia7f2+VO2mgMwLOzyEvGkbh4pF2eQmtEnOhag5dTkh0wDKWNPBFvW
+# MRTiK7uRvfLtaXJ1YWIyHPSSGUQ+rhFZsRUDebaLXgQXVYQOqmCsGCM85n/HsHD4
+# SxALCMi/TQ38D8/M21pywWUW81VTFrY+mqBs+WbxOAsi4yUktcp4dzQOddU18z1O
+# MzMffJnEIY3w52kmP6gcjlyaFHp802pBVLCGQ+9dQ25RDG38zEHb9znxlIJYHwUc
+# yN/he6xWluq5LgPVv1N8b3pSyh5qHqUeevDo4kCHDKDO3VviF4P6lFCOS6/zxfvt
+# bNX8OvYLF/QtuOaRZItpROAD1QVhtcnF6//LqjDe5v3i34Dq1Y8sx974eXC+sVeb
+# iDDBvO29rSwcdN0C0aeM9vnnhNAtUeQCfmF9yug1SnEvfQ0vaQw2bhYboOI5K1fe
+# mQiVgZVgMzgcsDAw5OPSGtghnBjNIVe/ND9d2WA/jXXuY+9s0nY1ojsUhiwRS9dl
+# 0nepargK1yjCCKI9CMfo5tEhcrBqVQ==
 # SIG # End signature block

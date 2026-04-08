@@ -128,11 +128,11 @@
     function escapeHtml(t) { if(t==null)return''; return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
 
     function formatState(value) {
-        if (!value) return '<span class="status-grey"><span class="status-dot dot-grey"></span>Unknown</span>';
+        if (!value || String(value).toLowerCase()==='n/a') return '<span class="status-grey"><span class="status-dot dot-grey"></span>' + escapeHtml(value||'Unknown') + '</span>';
         var v = String(value).toLowerCase();
-        if (v==='succeeded'||v==='running'||v==='available'||v==='ready') return '<span class="status-green"><span class="status-dot dot-green"></span>' + escapeHtml(value) + '</span>';
-        if (v==='failed'||v==='deleted'||v==='deleting') return '<span class="status-red"><span class="status-dot dot-red"></span>' + escapeHtml(value) + '</span>';
-        if (v==='creating'||v==='updating'||v==='moving') return '<span class="status-orange"><span class="status-dot dot-orange"></span>' + escapeHtml(value) + '</span>';
+        if (v==='succeeded'||v==='running'||v==='available'||v==='ready'||v==='enabled'||v==='active'||v==='true'||v==='published') return '<span class="status-green"><span class="status-dot dot-green"></span>' + escapeHtml(value) + '</span>';
+        if (v==='failed'||v==='deleted'||v==='deleting'||v==='disabled'||v==='false') return '<span class="status-red"><span class="status-dot dot-red"></span>' + escapeHtml(value) + '</span>';
+        if (v==='creating'||v==='updating'||v==='moving'||v==='degraded') return '<span class="status-orange"><span class="status-dot dot-orange"></span>' + escapeHtml(value) + '</span>';
         return '<span class="status-grey"><span class="status-dot dot-grey"></span>' + escapeHtml(value) + '</span>';
     }
 
@@ -140,7 +140,7 @@
         var succeeded=0, failed=0, subs={}, rgs={};
         data.forEach(function(r) {
             var s = String(r.ProvisioningState||'').toLowerCase();
-            if (s==='succeeded'||s==='running'||s==='available'||s==='ready') succeeded++; else failed++;
+            if (s==='succeeded'||s==='running'||s==='available'||s==='ready'||s==='enabled'||s==='active'||s==='true'||s==='published') succeeded++; else failed++;
             if (r.Subscription) subs[r.Subscription]=true;
             if (r.ResourceGroup) rgs[r.ResourceGroup]=true;
         });
@@ -158,7 +158,7 @@
         $('#filter' + filterName.charAt(0).toUpperCase() + filterName.slice(1) + ' .summary-card').addClass('active-filter');
         var filtered = allData.filter(function(r) {
             var s = String(r.ProvisioningState||'').toLowerCase();
-            var ok = (s==='succeeded'||s==='running'||s==='available'||s==='ready');
+            var ok = (s==='succeeded'||s==='running'||s==='available'||s==='ready'||s==='enabled'||s==='active'||s==='true'||s==='published');
             switch(filterName) { case 'total': return true; case 'succeeded': return ok; case 'failed': return !ok; default: return true; }
         });
         $table.bootstrapTable('load', filtered);

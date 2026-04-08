@@ -1,232 +1,30 @@
 ﻿# =============================================================================
 # Azure Helpers for WhatsUpGoldPS
 #
-# Two collection methods supported:
-#   [1] Az PowerShell modules (Az.Accounts, Az.Resources, Az.Compute, Az.Network, Az.Monitor)
-#   [2] Direct REST API calls (zero external dependencies -- uses Invoke-RestMethod)
-#
-# Functions prefixed with "REST" use the Azure Resource Manager REST API directly.
-# Functions without the prefix use the Az PowerShell cmdlets.
+# Uses the Azure Resource Manager REST API via Invoke-RestMethod (built into PS 5.1).
+# Zero external module dependencies.
 # =============================================================================
 
-function Connect-AzureServicePrincipal {
-    <#
-    .SYNOPSIS
-        Authenticates to Azure using a service principal (App Registration).
-    .DESCRIPTION
-        Takes a TenantId, ApplicationId, and client secret, creates a PSCredential,
-        and calls Connect-AzAccount with the service principal identity.
-        Returns the context object on success.
-    .PARAMETER TenantId
-        The Azure AD tenant (directory) ID.
-    .PARAMETER ApplicationId
-        The Application (client) ID of the service principal.
-    .PARAMETER ClientSecret
-        The client secret string for the service principal.
-    .EXAMPLE
-        Connect-AzureServicePrincipal -TenantId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -ApplicationId "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy" -ClientSecret "MySecretValue"
-        Authenticates to Azure using a service principal with a client secret.
-    .EXAMPLE
-        $ctx = Connect-AzureServicePrincipal -TenantId $tenantId -ApplicationId $appId -ClientSecret $secret
-        Authenticates and stores the Azure context in a variable for later use.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$TenantId,
-        [Parameter(Mandatory)][string]$ApplicationId,
-        [Parameter(Mandatory)][string]$ClientSecret
-    )
-
-    $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-    $credential = [PSCredential]::new($ApplicationId, $secureSecret)
-
-    # Pre-load latest Az.Accounts to avoid version mismatch when multiple
-    # versions are installed (prevents 'get_SerializationSettings' errors)
-    if (-not (Get-Module -Name Az.Accounts)) {
-        $latest = Get-Module -ListAvailable -Name Az.Accounts |
-            Sort-Object Version -Descending | Select-Object -First 1
-        if ($latest) {
-            Import-Module Az.Accounts -RequiredVersion $latest.Version -ErrorAction SilentlyContinue
-        }
-    }
-
-    try {
-        $context = Connect-AzAccount -ServicePrincipal -TenantId $TenantId -Credential $credential -ErrorAction Stop
-        Write-Verbose "Authenticated to Azure tenant $TenantId as $ApplicationId"
-        return $context
-    }
-    catch {
-        throw "Failed to authenticate to Azure: $($_.Exception.Message)"
-    }
+# Enforce TLS 1.2 for Azure management API calls (PS 5.1 defaults to TLS 1.0/1.1)
+if ([System.Net.ServicePointManager]::SecurityProtocol -notmatch 'Tls12') {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 }
 
-function Get-AzureSubscriptions {
-    <#
-    .SYNOPSIS
-        Returns all accessible Azure subscriptions.
-    .DESCRIPTION
-        Wraps Get-AzSubscription and returns a simplified collection of
-        subscription objects with Id, Name, State, and TenantId.
-    .EXAMPLE
-        Get-AzureSubscriptions
-        Returns all Azure subscriptions accessible to the current identity.
-    .EXAMPLE
-        Get-AzureSubscriptions | Where-Object { $_.State -eq "Enabled" }
-        Returns only enabled subscriptions.
-    #>
-
-    $subs = Get-AzSubscription -ErrorAction Stop
-    foreach ($sub in $subs) {
-        [PSCustomObject]@{
-            SubscriptionId   = "$($sub.Id)"
-            SubscriptionName = "$($sub.Name)"
-            State            = "$($sub.State)"
-            TenantId         = "$($sub.TenantId)"
-        }
-    }
-}
-
-function Get-AzureResourceGroups {
-    <#
-    .SYNOPSIS
-        Returns all resource groups in the current subscription.
-    .DESCRIPTION
-        Wraps Get-AzResourceGroup and returns a simplified collection.
-    .EXAMPLE
-        Get-AzureResourceGroups
-        Returns all resource groups in the current subscription.
-    .EXAMPLE
-        Get-AzureResourceGroups | Where-Object { $_.Location -eq "eastus" }
-        Returns only resource groups located in East US.
-    #>
-
-    $rgs = Get-AzResourceGroup -ErrorAction Stop
-    foreach ($rg in $rgs) {
-        [PSCustomObject]@{
-            ResourceGroupName = "$($rg.ResourceGroupName)"
-            Location          = "$($rg.Location)"
-            ProvisioningState = "$($rg.ProvisioningState)"
-            Tags              = if ($rg.Tags -and $rg.Tags -is [hashtable]) { ($rg.Tags.GetEnumerator() | Where-Object { $_.Key -ne '' -and $null -ne $_.Key } | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; " } else { "" }
-        }
-    }
-}
-
-function Get-AzureResources {
-    <#
-    .SYNOPSIS
-        Returns all resources within a resource group.
-    .DESCRIPTION
-        Wraps Get-AzResource for a given resource group and returns
-        a simplified collection with key properties.
-    .PARAMETER ResourceGroupName
-        The name of the resource group to enumerate.
-    .EXAMPLE
-        Get-AzureResources -ResourceGroupName "Production-RG"
-        Returns all resources within the Production-RG resource group.
-    .EXAMPLE
-        Get-AzureResources -ResourceGroupName "Production-RG" | Where-Object { $_.ResourceType -like "*virtualMachines*" }
-        Returns only virtual machine resources from the specified resource group.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$ResourceGroupName
-    )
-
-    $resources = Get-AzResource -ResourceGroupName $ResourceGroupName -ExpandProperties -ErrorAction Stop
-    foreach ($r in $resources) {
-        $provState = if ($r.Properties -and $r.Properties.provisioningState) {
-            "$($r.Properties.provisioningState)"
-        } elseif ($r.ProvisioningState) {
-            "$($r.ProvisioningState)"
-        } else { "N/A" }
-        [PSCustomObject]@{
-            ResourceName      = "$($r.Name)"
-            ResourceId        = "$($r.ResourceId)"
-            ResourceType      = "$($r.ResourceType)"
-            Location          = "$($r.Location)"
-            Kind              = if ($r.Kind) { "$($r.Kind)" } else { "N/A" }
-            Sku               = if ($r.Sku -and $r.Sku.Name) { "$($r.Sku.Name)" } else { "N/A" }
-            ProvisioningState = $provState
-            Tags              = if ($r.Tags -and $r.Tags -is [hashtable]) { ($r.Tags.GetEnumerator() | Where-Object { $_.Key -ne '' -and $null -ne $_.Key } | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; " } else { "" }
-        }
-    }
-}
-
-function Get-AzureResourceMetrics {
-    <#
-    .SYNOPSIS
-        Returns available metric definitions and recent values for an Azure resource.
-    .DESCRIPTION
-        Queries Azure Monitor for the specified resource's metric definitions,
-        then retrieves the latest data point for each metric over the past hour.
-        Returns a collection of metric objects suitable for storing as attributes.
-    .PARAMETER ResourceId
-        The full Azure resource ID.
-    .PARAMETER MaxMetrics
-        Maximum number of metrics to retrieve values for. Defaults to 20
-        to prevent excessive API calls on resources with many metrics.
-    .EXAMPLE
-        Get-AzureResourceMetrics -ResourceId "/subscriptions/xxxx/resourceGroups/myRG/providers/Microsoft.Compute/virtualMachines/myVM"
-        Returns up to 20 recent metric values for the specified Azure VM.
-    .EXAMPLE
-        Get-AzureResourceMetrics -ResourceId $resource.ResourceId -MaxMetrics 5
-        Returns only the first 5 metric definitions and their latest values.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$ResourceId,
-        [int]$MaxMetrics = 20
-    )
-
-    $metrics = @()
-    try {
-        $definitions = Get-AzMetricDefinition -ResourceId $ResourceId -ErrorAction Stop |
-            Select-Object -First $MaxMetrics
-
-        foreach ($def in $definitions) {
-            $metricName = $def.Name.Value
-            $metricUnit = "$($def.Unit)"
-            $primaryAgg = if ($def.PrimaryAggregationType) { "$($def.PrimaryAggregationType)" } else { "Average" }
-
-            try {
-                $metricData = Get-AzMetric -ResourceId $ResourceId -MetricName $metricName `
-                    -TimeGrain ([TimeSpan]::FromMinutes(5)) -StartTime (Get-Date).AddHours(-1) `
-                    -EndTime (Get-Date) -AggregationType $primaryAgg -ErrorAction Stop
-
-                $lastValue = "N/A"
-                if ($metricData.Data) {
-                    $latest = $metricData.Data | Where-Object { $null -ne $_.$primaryAgg } | Select-Object -Last 1
-                    if ($latest) {
-                        $lastValue = "$([math]::Round($latest.$primaryAgg, 4))"
-                    }
-                }
-
-                $metrics += [PSCustomObject]@{
-                    MetricName  = $metricName
-                    DisplayName = "$($def.Name.LocalizedValue)"
-                    Unit        = $metricUnit
-                    Aggregation = $primaryAgg
-                    LastValue   = $lastValue
-                }
-            }
-            catch {
-                Write-Verbose "Could not retrieve metric $metricName for resource: $($_.Exception.Message)"
-            }
-        }
-    }
-    catch {
-        Write-Verbose "Could not retrieve metric definitions for $ResourceId : $($_.Exception.Message)"
-    }
-
-    return $metrics
-}
+# --- REMOVED: Az PowerShell module functions ---
+# Previously this file contained wrapper functions that required Az.Accounts,
+# Az.Resources, Az.Compute, Az.Network, and Az.Monitor. Those have been
+# removed in favour of the REST API functions below which have zero external
+# dependencies and work identically on any machine with PowerShell 5.1+.
 
 function Get-AzureResourceDetail {
     <#
     .SYNOPSIS
         Builds a detailed summary object for an Azure resource including metrics.
     .DESCRIPTION
-        Combines resource metadata with metric data into a single object
-        suitable for display and attribute creation.
+        Combines resource metadata with metric data from the REST API into a single
+        object suitable for display and attribute creation.
     .PARAMETER Resource
-        A resource object from Get-AzureResources.
+        A resource object from Get-AzureSubscriptionResourcesREST or Get-AzureResourcesREST.
     .PARAMETER SubscriptionName
         The name of the subscription the resource belongs to.
     .PARAMETER SubscriptionId
@@ -238,12 +36,7 @@ function Get-AzureResourceDetail {
     .PARAMETER MaxMetrics
         Maximum number of metrics to retrieve. Defaults to 20.
     .EXAMPLE
-        $resources = Get-AzureResources -ResourceGroupName "Production-RG"
-        Get-AzureResourceDetail -Resource $resources[0] -SubscriptionName "MySub" -SubscriptionId "xxxx" -ResourceGroupName "Production-RG"
-        Returns a detailed summary of the first resource including up to 20 metric values.
-    .EXAMPLE
-        Get-AzureResourceDetail -Resource $resource -SubscriptionName "MySub" -SubscriptionId "xxxx" -ResourceGroupName "myRG" -IncludeMetrics $false
-        Returns resource details without fetching Azure Monitor metrics.
+        Get-AzureResourceDetail -Resource $resource -SubscriptionName "MySub" -SubscriptionId "xxxx" -ResourceGroupName "myRG"
     #>
     param(
         [Parameter(Mandatory)]$Resource,
@@ -256,7 +49,7 @@ function Get-AzureResourceDetail {
 
     $metricsData = @()
     if ($IncludeMetrics) {
-        $metricsData = Get-AzureResourceMetrics -ResourceId $Resource.ResourceId -MaxMetrics $MaxMetrics
+        $metricsData = @(Get-AzureResourceMetricsREST -ResourceId $Resource.ResourceId -MaxMetrics $MaxMetrics)
     }
 
     $metricsSummary = if ($metricsData.Count -gt 0) {
@@ -281,138 +74,14 @@ function Get-AzureResourceDetail {
     }
 }
 
-function Resolve-AzureResourceIP {
-    <#
-    .SYNOPSIS
-        Attempts to resolve an IP address for an Azure resource.
-    .DESCRIPTION
-        Tries to find a public or private IP associated with the resource.
-        For VMs it checks network interfaces; for App Services / SQL / etc.
-        it attempts DNS resolution of the FQDN. Returns $null if no IP found.
-    .PARAMETER Resource
-        A resource object from Get-AzureResources (needs ResourceId, ResourceType, ResourceName).
-    .EXAMPLE
-        $resources = Get-AzureResources -ResourceGroupName "Production-RG"
-        $ip = Resolve-AzureResourceIP -Resource ($resources | Where-Object { $_.ResourceType -like "*virtualMachines*" } | Select-Object -First 1)
-        Resolves the public or private IP of the first VM in the resource group.
-    .EXAMPLE
-        $resources | ForEach-Object { Resolve-AzureResourceIP -Resource $_ }
-        Attempts IP resolution for every resource in the collection.
-    #>
-    param(
-        [Parameter(Mandatory)]$Resource
-    )
-
-    $ip = $null
-
-    switch -Wildcard ($Resource.ResourceType) {
-        "Microsoft.Compute/virtualMachines" {
-            try {
-                $vm = Get-AzVM -ResourceId $Resource.ResourceId -Status -ErrorAction Stop
-                $nicIds = $vm.NetworkProfile.NetworkInterfaces | Select-Object -ExpandProperty Id
-                foreach ($nicId in $nicIds) {
-                    $nic = Get-AzNetworkInterface -ResourceId $nicId -ErrorAction SilentlyContinue
-                    if ($nic) {
-                        # Prefer public IP
-                        foreach ($ipConfig in $nic.IpConfigurations) {
-                            if ($ipConfig.PublicIpAddress) {
-                                $pubIp = Get-AzPublicIpAddress -ResourceId $ipConfig.PublicIpAddress.Id -ErrorAction SilentlyContinue
-                                if ($pubIp.IpAddress -and $pubIp.IpAddress -ne "Not Assigned") {
-                                    $ip = $pubIp.IpAddress
-                                    break
-                                }
-                            }
-                        }
-                        # Fall back to private IP
-                        if (-not $ip) {
-                            $privateIp = ($nic.IpConfigurations | Select-Object -First 1).PrivateIpAddress
-                            if ($privateIp) { $ip = $privateIp }
-                        }
-                    }
-                    if ($ip) { break }
-                }
-            }
-            catch {
-                Write-Verbose "Could not resolve VM IP for $($Resource.ResourceName): $($_.Exception.Message)"
-            }
-        }
-        "Microsoft.Network/publicIPAddresses" {
-            try {
-                $pubIp = Get-AzPublicIpAddress -Name $Resource.ResourceName -ResourceGroupName (($Resource.ResourceId -split '/')[4]) -ErrorAction Stop
-                if ($pubIp.IpAddress -and $pubIp.IpAddress -ne "Not Assigned") {
-                    $ip = $pubIp.IpAddress
-                }
-            }
-            catch {
-                Write-Verbose "Could not resolve public IP for $($Resource.ResourceName): $($_.Exception.Message)"
-            }
-        }
-        "Microsoft.Sql/servers" {
-            try {
-                $fqdn = "$($Resource.ResourceName).database.windows.net"
-                $resolved = [System.Net.Dns]::GetHostAddresses($fqdn) | Select-Object -First 1
-                if ($resolved) { $ip = $resolved.IPAddressToString }
-            }
-            catch {
-                Write-Verbose "Could not resolve SQL server FQDN for $($Resource.ResourceName): $($_.Exception.Message)"
-            }
-        }
-        "Microsoft.Web/sites" {
-            try {
-                $fqdn = "$($Resource.ResourceName).azurewebsites.net"
-                $resolved = [System.Net.Dns]::GetHostAddresses($fqdn) | Select-Object -First 1
-                if ($resolved) { $ip = $resolved.IPAddressToString }
-            }
-            catch {
-                Write-Verbose "Could not resolve App Service FQDN for $($Resource.ResourceName): $($_.Exception.Message)"
-            }
-        }
-        'Microsoft.Network/loadBalancers' {
-            try {
-                $lb = Get-AzLoadBalancer -Name $Resource.ResourceName -ResourceGroupName $Resource.ResourceGroupName -ErrorAction Stop
-                foreach ($fec in $lb.FrontendIpConfigurations) {
-                    if ($fec.PublicIpAddress) {
-                        $pubIp = Get-AzPublicIpAddress -Name ($fec.PublicIpAddress.Id -split '/')[-1] -ResourceGroupName $Resource.ResourceGroupName -ErrorAction Stop
-                        if ($pubIp.IpAddress -and $pubIp.IpAddress -ne 'Not Assigned') {
-                            $ip = $pubIp.IpAddress
-                            break
-                        }
-                    }
-                    if ($fec.PrivateIpAddress) {
-                        $ip = $fec.PrivateIpAddress
-                        break
-                    }
-                }
-            }
-            catch {
-                Write-Verbose "Could not resolve Load Balancer IP for $($Resource.ResourceName): $($_.Exception.Message)"
-            }
-        }
-        default {
-            # Generic DNS attempt using resource name
-            try {
-                $resolved = [System.Net.Dns]::GetHostAddresses($Resource.ResourceName) | Select-Object -First 1
-                if ($resolved) { $ip = $resolved.IPAddressToString }
-            }
-            catch {
-                Write-Verbose "No IP resolution available for $($Resource.ResourceType) : $($Resource.ResourceName)"
-            }
-        }
-    }
-
-    return $ip
-}
-
 function Get-AzureDashboard {
     <#
     .SYNOPSIS
         Builds a unified dashboard view of Azure resources across subscriptions.
     .DESCRIPTION
-        Enumerates accessible subscriptions, iterates through their resource groups,
-        and returns a flat collection of resources with metadata suitable for
-        Bootstrap Table display. Each row contains resource name, type, provisioning
-        state, resolved IP, location, subscription, resource group, SKU, tags, and
-        optional Azure Monitor metrics.
+        Enumerates accessible subscriptions via REST API, pre-fetches resources
+        and network data at the subscription level for speed, and returns a flat
+        collection of resources with metadata suitable for Bootstrap Table display.
     .PARAMETER SubscriptionIds
         Optional array of subscription IDs to limit scope. If omitted, scans all
         enabled subscriptions accessible to the current authenticated session.
@@ -420,29 +89,16 @@ function Get-AzureDashboard {
         Whether to fetch Azure Monitor metrics for each resource. Defaults to $false
         to avoid excessive API calls on large environments.
     .EXAMPLE
-        Get-AzureDashboard
-
-        Returns all resources across all accessible Azure subscriptions.
-    .EXAMPLE
-        Get-AzureDashboard -SubscriptionIds "xxxx-yyyy" -IncludeMetrics $true
-
-        Returns resources from one subscription with metric data.
-    .EXAMPLE
-        Connect-AzureServicePrincipal -TenantId $tid -ApplicationId $aid -ClientSecret $secret
+        Connect-AzureServicePrincipalREST -TenantId $tid -ApplicationId $aid -ClientSecret $secret
         $data = Get-AzureDashboard -SubscriptionIds $subId
         Export-AzureDashboardHtml -DashboardData $data -OutputPath "C:\Reports\azure.html"
-        Start-Process "C:\Reports\azure.html"
-
-        End-to-end: authenticate via service principal, gather data, export HTML, and open in browser.
     .OUTPUTS
         PSCustomObject[]
-        Each object contains: ResourceName, ResourceType, ProvisioningState, IPAddress,
-        Location, Subscription, ResourceGroup, Kind, Sku, Tags, Metrics.
     .NOTES
         Author  : jason@wug.ninja
-        Version : 1.0.0
-        Date    : 2025-07-15
-        Requires: PowerShell 5.1+. Az modules needed only for Az mode; REST mode has no dependencies.
+        Version : 2.0.0
+        Date    : 2026-04-07
+        Requires: PowerShell 5.1+. Zero external module dependencies.
     .LINK
         https://github.com/jayyx2/WhatsUpGoldPS
     #>
@@ -451,60 +107,96 @@ function Get-AzureDashboard {
         [bool]$IncludeMetrics = $false
     )
 
-    $subscriptions = Get-AzureSubscriptions | Where-Object { $_.State -eq 'Enabled' }
+    $subscriptions = Get-AzureSubscriptionsREST | Where-Object { $_.State -eq 'Enabled' }
     if ($SubscriptionIds) {
         $subscriptions = $subscriptions | Where-Object { $_.SubscriptionId -in $SubscriptionIds }
     }
 
     $results = @()
     foreach ($sub in $subscriptions) {
-        Set-AzContext -SubscriptionId $sub.SubscriptionId -ErrorAction SilentlyContinue | Out-Null
+        Write-Verbose "Processing subscription: $($sub.SubscriptionName)"
 
+        # Bulk pre-fetch resources and network data per subscription
         try {
-            $rgs = Get-AzureResourceGroups
+            $subResources = @(Get-AzureSubscriptionResourcesREST -SubscriptionId $sub.SubscriptionId)
         }
         catch {
-            Write-Warning "Failed to list RGs for $($sub.SubscriptionName): $($_.Exception.Message)"
+            Write-Warning "Failed to list resources for $($sub.SubscriptionName): $($_.Exception.Message)"
             continue
         }
 
-        foreach ($rg in $rgs) {
-            try {
-                $resources = Get-AzureResources -ResourceGroupName $rg.ResourceGroupName
-            }
-            catch {
-                Write-Warning "Failed to list resources in $($rg.ResourceGroupName): $($_.Exception.Message)"
-                continue
-            }
+        $netData = $null
+        try {
+            $netData = Get-AzureNetworkDataREST -SubscriptionId $sub.SubscriptionId
+        }
+        catch {
+            Write-Verbose "Network pre-fetch failed for $($sub.SubscriptionName): $($_.Exception.Message)"
+        }
 
-            foreach ($r in $resources) {
-                $ip = "N/A"
-                try { $ip = Resolve-AzureResourceIP -Resource $r; if (-not $ip) { $ip = "N/A" } } catch {}
+        foreach ($r in $subResources) {
+            $rgName = ''
+            if ($r.ResourceId -match '/resourceGroups/([^/]+)/') { $rgName = $Matches[1] }
 
-                $metricsSummary = "N/A"
-                if ($IncludeMetrics) {
-                    try {
-                        $metrics = Get-AzureResourceMetrics -ResourceId $r.ResourceId -MaxMetrics 5
-                        if ($metrics) {
-                            $metricsSummary = ($metrics | ForEach-Object { "$($_.DisplayName): $($_.LastValue)" }) -join "; "
-                        }
+            $ip = "N/A"
+            if ($netData) {
+                switch -Wildcard ($r.ResourceType) {
+                    'Microsoft.Compute/virtualMachines' {
+                        if ($netData.VMIPs.ContainsKey($r.ResourceId)) { $ip = $netData.VMIPs[$r.ResourceId] }
                     }
-                    catch {}
+                    'Microsoft.Network/publicIPAddresses' {
+                        if ($netData.PIPs.ContainsKey($r.ResourceId)) { $ip = $netData.PIPs[$r.ResourceId] }
+                    }
+                    'Microsoft.Network/loadBalancers' {
+                        if ($netData.LBIPs.ContainsKey($r.ResourceId)) { $ip = $netData.LBIPs[$r.ResourceId] }
+                    }
+                    'Microsoft.Sql/servers' {
+                        try {
+                            $fqdn = "$($r.ResourceName).database.windows.net"
+                            $resolved = [System.Net.Dns]::GetHostAddresses($fqdn) | Select-Object -First 1
+                            if ($resolved) { $ip = $resolved.IPAddressToString }
+                        } catch { }
+                    }
+                    'Microsoft.Web/sites' {
+                        try {
+                            $fqdn = "$($r.ResourceName).azurewebsites.net"
+                            $resolved = [System.Net.Dns]::GetHostAddresses($fqdn) | Select-Object -First 1
+                            if ($resolved) { $ip = $resolved.IPAddressToString }
+                        } catch { }
+                    }
+                    default {
+                        try {
+                            $resolved = [System.Net.Dns]::GetHostAddresses($r.ResourceName) | Select-Object -First 1
+                            if ($resolved) { $ip = $resolved.IPAddressToString }
+                        } catch { }
+                    }
                 }
+            } else {
+                try { $ip = Resolve-AzureResourceIPREST -Resource $r -SubscriptionId $sub.SubscriptionId; if (-not $ip) { $ip = "N/A" } } catch {}
+            }
 
-                $results += [PSCustomObject]@{
-                    ResourceName      = $r.ResourceName
-                    ResourceType      = ($r.ResourceType -split '/')[-1]
-                    ProvisioningState = $r.ProvisioningState
-                    IPAddress         = $ip
-                    Location          = $r.Location
-                    Subscription      = $sub.SubscriptionName
-                    ResourceGroup     = $rg.ResourceGroupName
-                    Kind              = $r.Kind
-                    Sku               = $r.Sku
-                    Tags              = $r.Tags
-                    Metrics           = $metricsSummary
+            $metricsSummary = "N/A"
+            if ($IncludeMetrics) {
+                try {
+                    $metrics = @(Get-AzureResourceMetricsREST -ResourceId $r.ResourceId -MaxMetrics 5)
+                    if ($metrics.Count -gt 0) {
+                        $metricsSummary = ($metrics | ForEach-Object { "$($_.DisplayName): $($_.LastValue)" }) -join "; "
+                    }
                 }
+                catch {}
+            }
+
+            $results += [PSCustomObject]@{
+                ResourceName      = $r.ResourceName
+                ResourceType      = ($r.ResourceType -split '/')[-1]
+                ProvisioningState = $r.ProvisioningState
+                IPAddress         = $ip
+                Location          = $r.Location
+                Subscription      = $sub.SubscriptionName
+                ResourceGroup     = $rgName
+                Kind              = $r.Kind
+                Sku               = $r.Sku
+                Tags              = $r.Tags
+                Metrics           = $metricsSummary
             }
         }
     }
@@ -540,7 +232,7 @@ function Export-AzureDashboardHtml {
 
         Exports with a custom report title.
     .EXAMPLE
-        Connect-AzAccount
+        Connect-AzureServicePrincipalREST -TenantId $tid -ApplicationId $aid -ClientSecret $secret
         $data = Get-AzureDashboard -SubscriptionIds $subId -IncludeMetrics $true
         Export-AzureDashboardHtml -DashboardData $data -OutputPath "C:\Reports\azure.html"
         Start-Process "C:\Reports\azure.html"
@@ -606,7 +298,7 @@ function Export-AzureDashboardHtml {
 }
 
 # =============================================================================
-# REST API Collection Method (zero external dependencies)
+# REST API Functions
 # Uses Azure Resource Manager REST API via Invoke-RestMethod (built into PS 5.1)
 # =============================================================================
 
@@ -810,6 +502,137 @@ function Get-AzureResourcesREST {
             ProvisioningState = $provState
             Tags              = $tags
         }
+    }
+}
+
+function Get-AzureSubscriptionResourcesREST {
+    <#
+    .SYNOPSIS
+        Returns all resources across all resource groups in a subscription via
+        a single REST call (faster than per-RG enumeration).
+    .PARAMETER SubscriptionId
+        The subscription ID.
+    .EXAMPLE
+        Get-AzureSubscriptionResourcesREST -SubscriptionId "xxxx"
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SubscriptionId
+    )
+
+    $uri = "https://management.azure.com/subscriptions/$SubscriptionId/resources"
+    $resources = Invoke-AzureREST -Uri $uri -ApiVersion '2024-03-01'
+    foreach ($r in $resources) {
+        $provState = 'N/A'
+        if ($r.properties -and $r.properties.provisioningState) {
+            $provState = "$($r.properties.provisioningState)"
+        }
+        $tags = ''
+        if ($r.tags -and $r.tags -is [PSCustomObject]) {
+            $tags = ($r.tags.PSObject.Properties | Where-Object { $_.Name -ne '' } | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join '; '
+        }
+        [PSCustomObject]@{
+            ResourceName      = "$($r.name)"
+            ResourceId        = "$($r.id)"
+            ResourceType      = "$($r.type)"
+            Location          = "$($r.location)"
+            Kind              = if ($r.kind) { "$($r.kind)" } else { 'N/A' }
+            Sku               = if ($r.sku -and $r.sku.name) { "$($r.sku.name)" } else { 'N/A' }
+            ProvisioningState = $provState
+            Tags              = $tags
+        }
+    }
+}
+
+function Get-AzureNetworkDataREST {
+    <#
+    .SYNOPSIS
+        Pre-fetches all NICs, public IPs, and load balancers in a subscription
+        and returns IP lookup hashtables for fast resolution without per-resource
+        API calls.
+    .PARAMETER SubscriptionId
+        The subscription ID.
+    .OUTPUTS
+        Hashtable with keys: VMIPs, PIPs, LBIPs
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SubscriptionId
+    )
+
+    $baseUri = "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.Network"
+    $apiVer  = '2024-01-01'
+
+    # 1) Public IP addresses
+    $pipLookup = @{}
+    try {
+        $pips = @(Invoke-AzureREST -Uri "$baseUri/publicIPAddresses" -ApiVersion $apiVer)
+        foreach ($pip in $pips) {
+            if ($pip.properties.ipAddress -and $pip.properties.ipAddress -ne 'Not Assigned') {
+                $pipLookup[$pip.id] = "$($pip.properties.ipAddress)"
+            }
+        }
+    }
+    catch { Write-Verbose "Could not pre-fetch public IPs: $_" }
+
+    # 2) Network interfaces -> VM IP mapping
+    $vmIpLookup = @{}
+    try {
+        $nics = @(Invoke-AzureREST -Uri "$baseUri/networkInterfaces" -ApiVersion $apiVer)
+        foreach ($nic in $nics) {
+            $vmId = $null
+            if ($nic.properties.virtualMachine -and $nic.properties.virtualMachine.id) {
+                $vmId = $nic.properties.virtualMachine.id
+            }
+            if (-not $vmId) { continue }
+
+            $privateIp = $null
+            $publicIp  = $null
+            if ($nic.properties.ipConfigurations) {
+                foreach ($ipConfig in $nic.properties.ipConfigurations) {
+                    if (-not $privateIp -and $ipConfig.properties.privateIPAddress) {
+                        $privateIp = "$($ipConfig.properties.privateIPAddress)"
+                    }
+                    if (-not $publicIp -and $ipConfig.properties.publicIPAddress -and $ipConfig.properties.publicIPAddress.id) {
+                        $pipId = $ipConfig.properties.publicIPAddress.id
+                        if ($pipLookup.ContainsKey($pipId)) {
+                            $publicIp = $pipLookup[$pipId]
+                        }
+                    }
+                }
+            }
+            if (-not $vmIpLookup.ContainsKey($vmId)) {
+                $vmIpLookup[$vmId] = if ($publicIp) { $publicIp } else { $privateIp }
+            }
+        }
+    }
+    catch { Write-Verbose "Could not pre-fetch NICs: $_" }
+
+    # 3) Load balancers
+    $lbIpLookup = @{}
+    try {
+        $lbs = @(Invoke-AzureREST -Uri "$baseUri/loadBalancers" -ApiVersion $apiVer)
+        foreach ($lb in $lbs) {
+            if ($lb.properties.frontendIPConfigurations) {
+                foreach ($feConfig in $lb.properties.frontendIPConfigurations) {
+                    if ($feConfig.properties.publicIPAddress -and $feConfig.properties.publicIPAddress.id) {
+                        $pipId = $feConfig.properties.publicIPAddress.id
+                        if ($pipLookup.ContainsKey($pipId)) {
+                            $lbIpLookup[$lb.id] = $pipLookup[$pipId]
+                            break
+                        }
+                    }
+                    if (-not $lbIpLookup.ContainsKey($lb.id) -and $feConfig.properties.privateIPAddress) {
+                        $lbIpLookup[$lb.id] = "$($feConfig.properties.privateIPAddress)"
+                    }
+                }
+            }
+        }
+    }
+    catch { Write-Verbose "Could not pre-fetch load balancers: $_" }
+
+    return @{
+        VMIPs = $vmIpLookup
+        PIPs  = $pipLookup
+        LBIPs = $lbIpLookup
     }
 }
 
@@ -1091,10 +914,10 @@ function Get-AzureResourceHealthREST {
 }
 
 # SIG # Begin signature block
-# MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIrwgYJKoZIhvcNAQcCoIIrszCCK68CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArr2PRUbCJy4p1
-# bkt8hJuWGsFmMdSEnGXSUrlNRZ+Xw6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQ6yqsz2d1Y4yC
+# 4kVfymw4WeS+1+YHSZyqMPjasSGIoaCCJNcwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1123,88 +946,206 @@ function Get-AzureResourceHealthREST {
 # J3LFI+ICOBpMIOLbAffNRk8monxmwFE2tokCVMf8WPtsAO7+mKYulaEMUykfb9gZ
 # pk+e96wJ6l2CxouvgKe9gUhShDHaMuwV5KZMPWw5c9QLhTkg4IUaaOGnSDip0TYl
 # d8GNGRbFiExmfS9jzpjoad+sPKhdnckcW67Y8y90z7h+9teDnRGWYpquRRPaf9xH
-# +9/DUp/mBlXpnYzyOmJRvOwkDynUWICE5EV7WtgwggYaMIIEAqADAgECAhBiHW0M
-# UgGeO5B5FSCJIRwKMA0GCSqGSIb3DQEBDAUAMFYxCzAJBgNVBAYTAkdCMRgwFgYD
-# VQQKEw9TZWN0aWdvIExpbWl0ZWQxLTArBgNVBAMTJFNlY3RpZ28gUHVibGljIENv
-# ZGUgU2lnbmluZyBSb290IFI0NjAeFw0yMTAzMjIwMDAwMDBaFw0zNjAzMjEyMzU5
-# NTlaMFQxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzAp
-# BgNVBAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYwggGiMA0G
-# CSqGSIb3DQEBAQUAA4IBjwAwggGKAoIBgQCbK51T+jU/jmAGQ2rAz/V/9shTUxjI
-# ztNsfvxYB5UXeWUzCxEeAEZGbEN4QMgCsJLZUKhWThj/yPqy0iSZhXkZ6Pg2A2NV
-# DgFigOMYzB2OKhdqfWGVoYW3haT29PSTahYkwmMv0b/83nbeECbiMXhSOtbam+/3
-# 6F09fy1tsB8je/RV0mIk8XL/tfCK6cPuYHE215wzrK0h1SWHTxPbPuYkRdkP05Zw
-# mRmTnAO5/arnY83jeNzhP06ShdnRqtZlV59+8yv+KIhE5ILMqgOZYAENHNX9SJDm
-# +qxp4VqpB3MV/h53yl41aHU5pledi9lCBbH9JeIkNFICiVHNkRmq4TpxtwfvjsUe
-# dyz8rNyfQJy/aOs5b4s+ac7IH60B+Ja7TVM+EKv1WuTGwcLmoU3FpOFMbmPj8pz4
-# 4MPZ1f9+YEQIQty/NQd/2yGgW+ufflcZ/ZE9o1M7a5Jnqf2i2/uMSWymR8r2oQBM
-# dlyh2n5HirY4jKnFH/9gRvd+QOfdRrJZb1sCAwEAAaOCAWQwggFgMB8GA1UdIwQY
-# MBaAFDLrkpr/NZZILyhAQnAgNpFcF4XmMB0GA1UdDgQWBBQPKssghyi47G9IritU
-# pimqF6TNDDAOBgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNV
-# HSUEDDAKBggrBgEFBQcDAzAbBgNVHSAEFDASMAYGBFUdIAAwCAYGZ4EMAQQBMEsG
-# A1UdHwREMEIwQKA+oDyGOmh0dHA6Ly9jcmwuc2VjdGlnby5jb20vU2VjdGlnb1B1
-# YmxpY0NvZGVTaWduaW5nUm9vdFI0Ni5jcmwwewYIKwYBBQUHAQEEbzBtMEYGCCsG
-# AQUFBzAChjpodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNDb2Rl
-# U2lnbmluZ1Jvb3RSNDYucDdjMCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0
-# aWdvLmNvbTANBgkqhkiG9w0BAQwFAAOCAgEABv+C4XdjNm57oRUgmxP/BP6YdURh
-# w1aVcdGRP4Wh60BAscjW4HL9hcpkOTz5jUug2oeunbYAowbFC2AKK+cMcXIBD0Zd
-# OaWTsyNyBBsMLHqafvIhrCymlaS98+QpoBCyKppP0OcxYEdU0hpsaqBBIZOtBajj
-# cw5+w/KeFvPYfLF/ldYpmlG+vd0xqlqd099iChnyIMvY5HexjO2AmtsbpVn0OhNc
-# WbWDRF/3sBp6fWXhz7DcML4iTAWS+MVXeNLj1lJziVKEoroGs9Mlizg0bUMbOalO
-# hOfCipnx8CaLZeVme5yELg09Jlo8BMe80jO37PU8ejfkP9/uPak7VLwELKxAMcJs
-# zkyeiaerlphwoKx1uHRzNyE6bxuSKcutisqmKL5OTunAvtONEoteSiabkPVSZ2z7
-# 6mKnzAfZxCl/3dq3dUNw4rg3sTCggkHSRqTqlLMS7gjrhTqBmzu1L90Y1KWN/Y5J
-# KdGvspbOrTfOXyXvmPL6E52z1NZJ6ctuMFBQZH3pwWvqURR8AgQdULUvrxjUYbHH
-# j95Ejza63zdrEcxWLDX6xWls/GDnVNueKjWUH3fTv1Y8Wdho698YADR7TNx8X8z2
-# Bev6SivBBOHY+uqiirZtg0y9ShQoPzmCcn63Syatatvx157YK9hlcPmVoa1oDE5/
-# L9Uo2bC5a4CH2RwwggY+MIIEpqADAgECAhAHnODk0RR/hc05c892LTfrMA0GCSqG
-# SIb3DQEBDAUAMFQxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
-# ZWQxKzApBgNVBAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYw
-# HhcNMjYwMjA5MDAwMDAwWhcNMjkwNDIxMjM1OTU5WjBVMQswCQYDVQQGEwJVUzEU
-# MBIGA1UECAwLQ29ubmVjdGljdXQxFzAVBgNVBAoMDkphc29uIEFsYmVyaW5vMRcw
-# FQYDVQQDDA5KYXNvbiBBbGJlcmlubzCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCC
-# AgoCggIBAPN6aN4B1yYWkI5b5TBj3I0VV/peETrHb6EY4BHGxt8Ap+eT+WpEpJyE
-# tRYPxEmNJL3A38Bkg7mwzPE3/1NK570ZBCuBjSAn4mSDIgIuXZnvyBO9W1OQs5d6
-# 7MlJLUAEufl18tOr3ST1DeO9gSjQSAE5Nql0QDxPnm93OZBon+Fz3CmE+z3MwAe2
-# h4KdtRAnCqwM+/V7iBdbw+JOxolpx+7RVjGyProTENIG3pe/hKvPb501lf8uBAAD
-# LdjZr5ip8vIWbf857Yw1Bu10nVI7HW3eE8Cl5//d1ribHlzTzQLfttW+k+DaFsKZ
-# BBL56l4YAlIVRsrOiE1kdHYYx6IGrEA809R7+TZA9DzGqyFiv9qmJAbL4fDwetDe
-# yIq+Oztz1LvEdy8Rcd0JBY+J4S0eDEFIA3X0N8VcLeAwabKb9AjulKXwUeqCJLvN
-# 79CJ90UTZb2+I+tamj0dn+IKMEsJ4v4Ggx72sxFr9+6XziodtTg5Luf2xd6+Phha
-# mOxF2px9LObhBLLEMyRsCHZIzVZOFKu9BpHQH7ufGB+Sa80Tli0/6LEyn9+bMYWi
-# 2ttn6lLOPThXMiQaooRUq6q2u3+F4SaPlxVFLI7OJVMhar6nW6joBvELTJPmANSM
-# jDSRFDfHRCdGbZsL/keELJNy+jZctF6VvxQEjFM8/bazu6qYhrA7AgMBAAGjggGJ
-# MIIBhTAfBgNVHSMEGDAWgBQPKssghyi47G9IritUpimqF6TNDDAdBgNVHQ4EFgQU
-# 6YF0o0D5AVhKHbVocr8GaSIBibAwDgYDVR0PAQH/BAQDAgeAMAwGA1UdEwEB/wQC
-# MAAwEwYDVR0lBAwwCgYIKwYBBQUHAwMwSgYDVR0gBEMwQTA1BgwrBgEEAbIxAQIB
-# AwIwJTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwCAYGZ4EM
-# AQQBMEkGA1UdHwRCMEAwPqA8oDqGOGh0dHA6Ly9jcmwuc2VjdGlnby5jb20vU2Vj
-# dGlnb1B1YmxpY0NvZGVTaWduaW5nQ0FSMzYuY3JsMHkGCCsGAQUFBwEBBG0wazBE
-# BggrBgEFBQcwAoY4aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGlj
-# Q29kZVNpZ25pbmdDQVIzNi5jcnQwIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNl
-# Y3RpZ28uY29tMA0GCSqGSIb3DQEBDAUAA4IBgQAEIsm4xnOd/tZMVrKwi3doAXvC
-# wOA/RYQnFJD7R/bSQRu3wXEK4o9SIefye18B/q4fhBkhNAJuEvTQAGfqbbpxow03
-# J5PrDTp1WPCWbXKX8Oz9vGWJFyJxRGftkdzZ57JE00synEMS8XCwLO9P32MyR9Z9
-# URrpiLPJ9rQjfHMb1BUdvaNayomm7aWLAnD+X7jm6o8sNT5An1cwEAob7obWDM6s
-# X93wphwJNBJAstH9Ozs6LwISOX6sKS7CKm9N3Kp8hOUue0ZHAtZdFl6o5u12wy+z
-# zieGEI50fKnN77FfNKFOWKlS6OJwlArcbFegB5K89LcE5iNSmaM3VMB2ADV1FEcj
-# GSHw4lTg1Wx+WMAMdl/7nbvfFxJ9uu5tNiT54B0s+lZO/HztwXYQUczdsFon3pjs
-# Nrsk9ZlalBi5SHkIu+F6g7tWiEv3rtVApmJRnLkUr2Xq2a4nbslUCt4jKs5UX4V1
-# nSX8OM++AXoyVGO+iTj7z+pl6XE9Gw/Td6WKKKsxggMaMIIDFgIBATBoMFQxCzAJ
-# BgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNl
-# Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
-# N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
-# BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg/LdJZDf1yodfnfR88dc6FUycNcO0esT7
-# PYdNQQhljYQwDQYJKoZIhvcNAQEBBQAEggIA8u7IUl0hzSccbbh/usVCvlnyiZqm
-# NqsEgoLQ92PKvuplT0cuW6C46fPkXT85WIbfz87h/jIafEl7fh9IAiV/Ap2n1pl2
-# 83O++WYVEzbDxPGrmsQj/Le4WLXGjwE1j7xRQMk5PcDFsp0giebDZsvj1rGJO0yz
-# u38rPxdn3qagG0q/D+6EKSi/oK7DlIQvVweaj1/9/uKa1Qy1YH+jBWxb2nGbvD7w
-# bT1nSa0hwPxJDItEn1JZvLRwCDgLbX874EAJZm91BUCqN/gVrPpaHnoan1kXwyeR
-# VU3MgMgtoW83PLreuHLaLUnkW2FbA78mqqrY2RNgde6eF3W46jn94cJPsleo0xK1
-# EhL4lwLuKQSWweQ6dsd4rVY4WcbhdxnYIKxYNxM4aN1TqLKT24AVoHtvbGJc6Lzb
-# DxBtKSsgPMS/FjxM2FQMc88JQ3CQj8jp3W9lTLQFKMUnfNLGSLg67py6xNWk2Aff
-# jwoLpqLXPZ/BggVcprfqF0oIfLsbI5stwBv7H5JzaBozmZOxn3gHZhCqlsreMfpe
-# fa0NY0BO93FU8Qkro5+RljS2wbOX3pRB/lXzaHIEDoMC+AM3pU2Eo+3Kr6Dj2nTo
-# 0vKpiNyygGHsl9Hc6d7mam3leWfF7tFk4xyt188vE3sZL5nlqMWB8qkYZTcL0bbK
-# LsUKb3AFSBMmZWg=
+# +9/DUp/mBlXpnYzyOmJRvOwkDynUWICE5EV7WtgwggYUMIID/KADAgECAhB6I67a
+# U2mWD5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYD
+# VQQKEw9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRp
+# bWUgU3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1
+# OTU5WjBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
+# KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNjCCAaIw
+# DQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAM2Y2ENBq26CK+z2M34mNOSJjNPv
+# IhKAVD7vJq+MDoGD46IiM+b83+3ecLvBhStSVjeYXIjfa3ajoW3cS3ElcJzkyZlB
+# nwDEJuHlzpbN4kMH2qRBVrjrGJgSlzzUqcGQBaCxpectRGhhnOSwcjPMI3G0hedv
+# 2eNmGiUbD12OeORN0ADzdpsQ4dDi6M4YhoGE9cbY11XxM2AVZn0GiOUC9+XE0wI7
+# CQKfOUfigLDn7i/WeyxZ43XLj5GVo7LDBExSLnh+va8WxTlA+uBvq1KO8RSHUQLg
+# zb1gbL9Ihgzxmkdp2ZWNuLc+XyEmJNbD2OIIq/fWlwBp6KNL19zpHsODLIsgZ+WZ
+# 1AzCs1HEK6VWrxmnKyJJg2Lv23DlEdZlQSGdF+z+Gyn9/CRezKe7WNyxRf4e4bwU
+# trYE2F5Q+05yDD68clwnweckKtxRaF0VzN/w76kOLIaFVhf5sMM/caEZLtOYqYad
+# tn034ykSFaZuIBU9uCSrKRKTPJhWvXk4CllgrwIDAQABo4IBXDCCAVgwHwYDVR0j
+# BBgwFoAU9ndq3T/9ARP/FqFsggIv0Ao9FCUwHQYDVR0OBBYEFF9Y7UwxeqJhQo1S
+# gLqzYZcZojKbMA4GA1UdDwEB/wQEAwIBhjASBgNVHRMBAf8ECDAGAQH/AgEAMBMG
+# A1UdJQQMMAoGCCsGAQUFBwMIMBEGA1UdIAQKMAgwBgYEVR0gADBMBgNVHR8ERTBD
+# MEGgP6A9hjtodHRwOi8vY3JsLnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LmNybDB8BggrBgEFBQcBAQRwMG4wRwYIKwYBBQUHMAKG
+# O2h0dHA6Ly9jcnQuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY1RpbWVTdGFtcGlu
+# Z1Jvb3RSNDYucDdjMCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNv
+# bTANBgkqhkiG9w0BAQwFAAOCAgEAEtd7IK0ONVgMnoEdJVj9TC1ndK/HYiYh9lVU
+# acahRoZ2W2hfiEOyQExnHk1jkvpIJzAMxmEc6ZvIyHI5UkPCbXKspioYMdbOnBWQ
+# Un733qMooBfIghpR/klUqNxx6/fDXqY0hSU1OSkkSivt51UlmJElUICZYBodzD3M
+# /SFjeCP59anwxs6hwj1mfvzG+b1coYGnqsSz2wSKr+nDO+Db8qNcTbJZRAiSazr7
+# KyUJGo1c+MScGfG5QHV+bps8BX5Oyv9Ct36Y4Il6ajTqV2ifikkVtB3RNBUgwu/m
+# SiSUice/Jp/q8BMk/gN8+0rNIE+QqU63JoVMCMPY2752LmESsRVVoypJVt8/N3qQ
+# 1c6FibbcRabo3azZkcIdWGVSAdoLgAIxEKBeNh9AQO1gQrnh1TA8ldXuJzPSuALO
+# z1Ujb0PCyNVkWk7hkhVHfcvBfI8NtgWQupiaAeNHe0pWSGH2opXZYKYG4Lbukg7H
+# pNi/KqJhue2Keak6qH9A8CeEOB7Eob0Zf+fU+CCQaL0cJqlmnx9HCDxF+3BLbUuf
+# rV64EbTI40zqegPZdA+sXCmbcZy6okx/SjwsusWRItFA3DE8MORZeFb6BmzBtqKJ
+# 7l939bbKBy2jvxcJI98Va95Q5JnlKor3m0E7xpMeYRriWklUPsetMSf2NvUQa/E5
+# vVyefQIwggYaMIIEAqADAgECAhBiHW0MUgGeO5B5FSCJIRwKMA0GCSqGSIb3DQEB
+# DAUAMFYxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxLTAr
+# BgNVBAMTJFNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBSb290IFI0NjAeFw0y
+# MTAzMjIwMDAwMDBaFw0zNjAzMjEyMzU5NTlaMFQxCzAJBgNVBAYTAkdCMRgwFgYD
+# VQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNlY3RpZ28gUHVibGljIENv
+# ZGUgU2lnbmluZyBDQSBSMzYwggGiMA0GCSqGSIb3DQEBAQUAA4IBjwAwggGKAoIB
+# gQCbK51T+jU/jmAGQ2rAz/V/9shTUxjIztNsfvxYB5UXeWUzCxEeAEZGbEN4QMgC
+# sJLZUKhWThj/yPqy0iSZhXkZ6Pg2A2NVDgFigOMYzB2OKhdqfWGVoYW3haT29PST
+# ahYkwmMv0b/83nbeECbiMXhSOtbam+/36F09fy1tsB8je/RV0mIk8XL/tfCK6cPu
+# YHE215wzrK0h1SWHTxPbPuYkRdkP05ZwmRmTnAO5/arnY83jeNzhP06ShdnRqtZl
+# V59+8yv+KIhE5ILMqgOZYAENHNX9SJDm+qxp4VqpB3MV/h53yl41aHU5pledi9lC
+# BbH9JeIkNFICiVHNkRmq4TpxtwfvjsUedyz8rNyfQJy/aOs5b4s+ac7IH60B+Ja7
+# TVM+EKv1WuTGwcLmoU3FpOFMbmPj8pz44MPZ1f9+YEQIQty/NQd/2yGgW+ufflcZ
+# /ZE9o1M7a5Jnqf2i2/uMSWymR8r2oQBMdlyh2n5HirY4jKnFH/9gRvd+QOfdRrJZ
+# b1sCAwEAAaOCAWQwggFgMB8GA1UdIwQYMBaAFDLrkpr/NZZILyhAQnAgNpFcF4Xm
+# MB0GA1UdDgQWBBQPKssghyi47G9IritUpimqF6TNDDAOBgNVHQ8BAf8EBAMCAYYw
+# EgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggrBgEFBQcDAzAbBgNVHSAE
+# FDASMAYGBFUdIAAwCAYGZ4EMAQQBMEsGA1UdHwREMEIwQKA+oDyGOmh0dHA6Ly9j
+# cmwuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY0NvZGVTaWduaW5nUm9vdFI0Ni5j
+# cmwwewYIKwYBBQUHAQEEbzBtMEYGCCsGAQUFBzAChjpodHRwOi8vY3J0LnNlY3Rp
+# Z28uY29tL1NlY3RpZ29QdWJsaWNDb2RlU2lnbmluZ1Jvb3RSNDYucDdjMCMGCCsG
+# AQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTANBgkqhkiG9w0BAQwFAAOC
+# AgEABv+C4XdjNm57oRUgmxP/BP6YdURhw1aVcdGRP4Wh60BAscjW4HL9hcpkOTz5
+# jUug2oeunbYAowbFC2AKK+cMcXIBD0ZdOaWTsyNyBBsMLHqafvIhrCymlaS98+Qp
+# oBCyKppP0OcxYEdU0hpsaqBBIZOtBajjcw5+w/KeFvPYfLF/ldYpmlG+vd0xqlqd
+# 099iChnyIMvY5HexjO2AmtsbpVn0OhNcWbWDRF/3sBp6fWXhz7DcML4iTAWS+MVX
+# eNLj1lJziVKEoroGs9Mlizg0bUMbOalOhOfCipnx8CaLZeVme5yELg09Jlo8BMe8
+# 0jO37PU8ejfkP9/uPak7VLwELKxAMcJszkyeiaerlphwoKx1uHRzNyE6bxuSKcut
+# isqmKL5OTunAvtONEoteSiabkPVSZ2z76mKnzAfZxCl/3dq3dUNw4rg3sTCggkHS
+# RqTqlLMS7gjrhTqBmzu1L90Y1KWN/Y5JKdGvspbOrTfOXyXvmPL6E52z1NZJ6ctu
+# MFBQZH3pwWvqURR8AgQdULUvrxjUYbHHj95Ejza63zdrEcxWLDX6xWls/GDnVNue
+# KjWUH3fTv1Y8Wdho698YADR7TNx8X8z2Bev6SivBBOHY+uqiirZtg0y9ShQoPzmC
+# cn63Syatatvx157YK9hlcPmVoa1oDE5/L9Uo2bC5a4CH2RwwggY+MIIEpqADAgEC
+# AhAHnODk0RR/hc05c892LTfrMA0GCSqGSIb3DQEBDAUAMFQxCzAJBgNVBAYTAkdC
+# MRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNlY3RpZ28gUHVi
+# bGljIENvZGUgU2lnbmluZyBDQSBSMzYwHhcNMjYwMjA5MDAwMDAwWhcNMjkwNDIx
+# MjM1OTU5WjBVMQswCQYDVQQGEwJVUzEUMBIGA1UECAwLQ29ubmVjdGljdXQxFzAV
+# BgNVBAoMDkphc29uIEFsYmVyaW5vMRcwFQYDVQQDDA5KYXNvbiBBbGJlcmlubzCC
+# AiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAPN6aN4B1yYWkI5b5TBj3I0V
+# V/peETrHb6EY4BHGxt8Ap+eT+WpEpJyEtRYPxEmNJL3A38Bkg7mwzPE3/1NK570Z
+# BCuBjSAn4mSDIgIuXZnvyBO9W1OQs5d67MlJLUAEufl18tOr3ST1DeO9gSjQSAE5
+# Nql0QDxPnm93OZBon+Fz3CmE+z3MwAe2h4KdtRAnCqwM+/V7iBdbw+JOxolpx+7R
+# VjGyProTENIG3pe/hKvPb501lf8uBAADLdjZr5ip8vIWbf857Yw1Bu10nVI7HW3e
+# E8Cl5//d1ribHlzTzQLfttW+k+DaFsKZBBL56l4YAlIVRsrOiE1kdHYYx6IGrEA8
+# 09R7+TZA9DzGqyFiv9qmJAbL4fDwetDeyIq+Oztz1LvEdy8Rcd0JBY+J4S0eDEFI
+# A3X0N8VcLeAwabKb9AjulKXwUeqCJLvN79CJ90UTZb2+I+tamj0dn+IKMEsJ4v4G
+# gx72sxFr9+6XziodtTg5Luf2xd6+PhhamOxF2px9LObhBLLEMyRsCHZIzVZOFKu9
+# BpHQH7ufGB+Sa80Tli0/6LEyn9+bMYWi2ttn6lLOPThXMiQaooRUq6q2u3+F4SaP
+# lxVFLI7OJVMhar6nW6joBvELTJPmANSMjDSRFDfHRCdGbZsL/keELJNy+jZctF6V
+# vxQEjFM8/bazu6qYhrA7AgMBAAGjggGJMIIBhTAfBgNVHSMEGDAWgBQPKssghyi4
+# 7G9IritUpimqF6TNDDAdBgNVHQ4EFgQU6YF0o0D5AVhKHbVocr8GaSIBibAwDgYD
+# VR0PAQH/BAQDAgeAMAwGA1UdEwEB/wQCMAAwEwYDVR0lBAwwCgYIKwYBBQUHAwMw
+# SgYDVR0gBEMwQTA1BgwrBgEEAbIxAQIBAwIwJTAjBggrBgEFBQcCARYXaHR0cHM6
+# Ly9zZWN0aWdvLmNvbS9DUFMwCAYGZ4EMAQQBMEkGA1UdHwRCMEAwPqA8oDqGOGh0
+# dHA6Ly9jcmwuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY0NvZGVTaWduaW5nQ0FS
+# MzYuY3JsMHkGCCsGAQUFBwEBBG0wazBEBggrBgEFBQcwAoY4aHR0cDovL2NydC5z
+# ZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljQ29kZVNpZ25pbmdDQVIzNi5jcnQwIwYI
+# KwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNlY3RpZ28uY29tMA0GCSqGSIb3DQEBDAUA
+# A4IBgQAEIsm4xnOd/tZMVrKwi3doAXvCwOA/RYQnFJD7R/bSQRu3wXEK4o9SIefy
+# e18B/q4fhBkhNAJuEvTQAGfqbbpxow03J5PrDTp1WPCWbXKX8Oz9vGWJFyJxRGft
+# kdzZ57JE00synEMS8XCwLO9P32MyR9Z9URrpiLPJ9rQjfHMb1BUdvaNayomm7aWL
+# AnD+X7jm6o8sNT5An1cwEAob7obWDM6sX93wphwJNBJAstH9Ozs6LwISOX6sKS7C
+# Km9N3Kp8hOUue0ZHAtZdFl6o5u12wy+zzieGEI50fKnN77FfNKFOWKlS6OJwlArc
+# bFegB5K89LcE5iNSmaM3VMB2ADV1FEcjGSHw4lTg1Wx+WMAMdl/7nbvfFxJ9uu5t
+# NiT54B0s+lZO/HztwXYQUczdsFon3pjsNrsk9ZlalBi5SHkIu+F6g7tWiEv3rtVA
+# pmJRnLkUr2Xq2a4nbslUCt4jKs5UX4V1nSX8OM++AXoyVGO+iTj7z+pl6XE9Gw/T
+# d6WKKKswggZiMIIEyqADAgECAhEApCk7bh7d16c0CIetek63JDANBgkqhkiG9w0B
+# AQwFADBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
+# KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNjAeFw0y
+# NTAzMjcwMDAwMDBaFw0zNjAzMjEyMzU5NTlaMHIxCzAJBgNVBAYTAkdCMRcwFQYD
+# VQQIEw5XZXN0IFlvcmtzaGlyZTEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMTAw
+# LgYDVQQDEydTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIFNpZ25lciBSMzYw
+# ggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQDThJX0bqRTePI9EEt4Egc8
+# 3JSBU2dhrJ+wY7JgReuff5KQNhMuzVytzD+iXazATVPMHZpH/kkiMo1/vlAGFrYN
+# 2P7g0Q8oPEcR3h0SftFNYxxMh+bj3ZNbbYjwt8f4DsSHPT+xp9zoFuw0HOMdO3sW
+# eA1+F8mhg6uS6BJpPwXQjNSHpVTCgd1gOmKWf12HSfSbnjl3kDm0kP3aIUAhsodB
+# YZsJA1imWqkAVqwcGfvs6pbfs/0GE4BJ2aOnciKNiIV1wDRZAh7rS/O+uTQcb6JV
+# zBVmPP63k5xcZNzGo4DOTV+sM1nVrDycWEYS8bSS0lCSeclkTcPjQah9Xs7xbOBo
+# CdmahSfg8Km8ffq8PhdoAXYKOI+wlaJj+PbEuwm6rHcm24jhqQfQyYbOUFTKWFe9
+# 01VdyMC4gRwRAq04FH2VTjBdCkhKts5Py7H73obMGrxN1uGgVyZho4FkqXA8/uk6
+# nkzPH9QyHIED3c9CGIJ098hU4Ig2xRjhTbengoncXUeo/cfpKXDeUcAKcuKUYRNd
+# GDlf8WnwbyqUblj4zj1kQZSnZud5EtmjIdPLKce8UhKl5+EEJXQp1Fkc9y5Ivk4A
+# ZacGMCVG0e+wwGsjcAADRO7Wga89r/jJ56IDK773LdIsL3yANVvJKdeeS6OOEiH6
+# hpq2yT+jJ/lHa9zEdqFqMwIDAQABo4IBjjCCAYowHwYDVR0jBBgwFoAUX1jtTDF6
+# omFCjVKAurNhlxmiMpswHQYDVR0OBBYEFIhhjKEqN2SBKGChmzHQjP0sAs5PMA4G
+# A1UdDwEB/wQEAwIGwDAMBgNVHRMBAf8EAjAAMBYGA1UdJQEB/wQMMAoGCCsGAQUF
+# BwMIMEoGA1UdIARDMEEwNQYMKwYBBAGyMQECAQMIMCUwIwYIKwYBBQUHAgEWF2h0
+# dHBzOi8vc2VjdGlnby5jb20vQ1BTMAgGBmeBDAEEAjBKBgNVHR8EQzBBMD+gPaA7
+# hjlodHRwOi8vY3JsLnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1lU3RhbXBp
+# bmdDQVIzNi5jcmwwegYIKwYBBQUHAQEEbjBsMEUGCCsGAQUFBzAChjlodHRwOi8v
+# Y3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1lU3RhbXBpbmdDQVIzNi5j
+# cnQwIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNlY3RpZ28uY29tMA0GCSqGSIb3
+# DQEBDAUAA4IBgQACgT6khnJRIfllqS49Uorh5ZvMSxNEk4SNsi7qvu+bNdcuknHg
+# XIaZyqcVmhrV3PHcmtQKt0blv/8t8DE4bL0+H0m2tgKElpUeu6wOH02BjCIYM6HL
+# InbNHLf6R2qHC1SUsJ02MWNqRNIT6GQL0Xm3LW7E6hDZmR8jlYzhZcDdkdw0cHhX
+# jbOLsmTeS0SeRJ1WJXEzqt25dbSOaaK7vVmkEVkOHsp16ez49Bc+Ayq/Oh2BAkST
+# Fog43ldEKgHEDBbCIyba2E8O5lPNan+BQXOLuLMKYS3ikTcp/Qw63dxyDCfgqXYU
+# hxBpXnmeSO/WA4NwdwP35lWNhmjIpNVZvhWoxDL+PxDdpph3+M5DroWGTc1ZuDa1
+# iXmOFAK4iwTnlWDg3QNRsRa9cnG3FBBpVHnHOEQj4GMkrOHdNDTbonEeGvZ+4nSZ
+# XrwCW4Wv2qyGDBLlKk3kUW1pIScDCpm/chL6aUbnSsrtbepdtbCLiGanKVR/KC1g
+# sR0tC6Q0RfWOI4owggaCMIIEaqADAgECAhA2wrC9fBs656Oz3TbLyXVoMA0GCSqG
+# SIb3DQEBDAUAMIGIMQswCQYDVQQGEwJVUzETMBEGA1UECBMKTmV3IEplcnNleTEU
+# MBIGA1UEBxMLSmVyc2V5IENpdHkxHjAcBgNVBAoTFVRoZSBVU0VSVFJVU1QgTmV0
+# d29yazEuMCwGA1UEAxMlVVNFUlRydXN0IFJTQSBDZXJ0aWZpY2F0aW9uIEF1dGhv
+# cml0eTAeFw0yMTAzMjIwMDAwMDBaFw0zODAxMTgyMzU5NTlaMFcxCzAJBgNVBAYT
+# AkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28g
+# UHVibGljIFRpbWUgU3RhbXBpbmcgUm9vdCBSNDYwggIiMA0GCSqGSIb3DQEBAQUA
+# A4ICDwAwggIKAoICAQCIndi5RWedHd3ouSaBmlRUwHxJBZvMWhUP2ZQQRLRBQIF3
+# FJmp1OR2LMgIU14g0JIlL6VXWKmdbmKGRDILRxEtZdQnOh2qmcxGzjqemIk8et8s
+# E6J+N+Gl1cnZocew8eCAawKLu4TRrCoqCAT8uRjDeypoGJrruH/drCio28aqIVEn
+# 45NZiZQI7YYBex48eL78lQ0BrHeSmqy1uXe9xN04aG0pKG9ki+PC6VEfzutu6Q3I
+# cZZfm00r9YAEp/4aeiLhyaKxLuhKKaAdQjRaf/h6U13jQEV1JnUTCm511n5avv4N
+# +jSVwd+Wb8UMOs4netapq5Q/yGyiQOgjsP/JRUj0MAT9YrcmXcLgsrAimfWY3MzK
+# m1HCxcquinTqbs1Q0d2VMMQyi9cAgMYC9jKc+3mW62/yVl4jnDcw6ULJsBkOkrcP
+# LUwqj7poS0T2+2JMzPP+jZ1h90/QpZnBkhdtixMiWDVgh60KmLmzXiqJc6lGwqoU
+# qpq/1HVHm+Pc2B6+wCy/GwCcjw5rmzajLbmqGygEgaj/OLoanEWP6Y52Hflef3XL
+# vYnhEY4kSirMQhtberRvaI+5YsD3XVxHGBjlIli5u+NrLedIxsE88WzKXqZjj9Zi
+# 5ybJL2WjeXuOTbswB7XjkZbErg7ebeAQUQiS/uRGZ58NHs57ZPUfECcgJC+v2wID
+# AQABo4IBFjCCARIwHwYDVR0jBBgwFoAUU3m/WqorSs9UgOHYm8Cd8rIDZsswHQYD
+# VR0OBBYEFPZ3at0//QET/xahbIICL9AKPRQlMA4GA1UdDwEB/wQEAwIBhjAPBgNV
+# HRMBAf8EBTADAQH/MBMGA1UdJQQMMAoGCCsGAQUFBwMIMBEGA1UdIAQKMAgwBgYE
+# VR0gADBQBgNVHR8ESTBHMEWgQ6BBhj9odHRwOi8vY3JsLnVzZXJ0cnVzdC5jb20v
+# VVNFUlRydXN0UlNBQ2VydGlmaWNhdGlvbkF1dGhvcml0eS5jcmwwNQYIKwYBBQUH
+# AQEEKTAnMCUGCCsGAQUFBzABhhlodHRwOi8vb2NzcC51c2VydHJ1c3QuY29tMA0G
+# CSqGSIb3DQEBDAUAA4ICAQAOvmVB7WhEuOWhxdQRh+S3OyWM637ayBeR7djxQ8Si
+# hTnLf2sABFoB0DFR6JfWS0snf6WDG2gtCGflwVvcYXZJJlFfym1Doi+4PfDP8s0c
+# qlDmdfyGOwMtGGzJ4iImyaz3IBae91g50QyrVbrUoT0mUGQHbRcF57olpfHhQESt
+# z5i6hJvVLFV/ueQ21SM99zG4W2tB1ExGL98idX8ChsTwbD/zIExAopoe3l6JrzJt
+# Pxj8V9rocAnLP2C8Q5wXVVZcbw4x4ztXLsGzqZIiRh5i111TW7HV1AtsQa6vXy63
+# 3vCAbAOIaKcLAo/IU7sClyZUk62XD0VUnHD+YvVNvIGezjM6CRpcWed/ODiptK+e
+# vDKPU2K6synimYBaNH49v9Ih24+eYXNtI38byt5kIvh+8aW88WThRpv8lUJKaPn3
+# 7+YHYafob9Rg7LyTrSYpyZoBmwRWSE4W6iPjB7wJjJpH29308ZkpKKdpkiS9WNsf
+# /eeUtvRrtIEiSJHN899L1P4l6zKVsdrUu1FX1T/ubSrsxrYJD+3f3aKg6yxdbugo
+# t06YwGXXiy5UUGZvOu3lXlxA+fC13dQ5OlL2gIb5lmF6Ii8+CQOYDwXM+yd9dbmo
+# cQsHjcRPsccUd5E9FiswEqORvz8g3s+jR3SFCgXhN4wz7NgAnOgpCdUo4uDyllU9
+# PzGCBkEwggY9AgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28g
+# TGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWduaW5nIENB
+# IFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAYBgorBgEE
+# AYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwG
+# CisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCnzR74
+# Ah7Pt3ZmY25Zk/WF2tkNmijXC/P1Stl/O39jOzANBgkqhkiG9w0BAQEFAASCAgDw
+# lkD1WtulhFgjMT/ntnrvYYYTzrs/enfUitxDVfkOLbBqVsyBtzjbX0XPTD6y9e5Z
+# oz+R0zTrc2TlJWY0QeNDhLWTjCgcOyqoti1j3mjuBZtbEF+ZNbPi++z//yADuIwJ
+# QCN/GqdZudgueTJibtezunCF+fmJUc0+57EI3nI7v2K9gpaoebFoS4t9zgZr30aU
+# +JhsPjTNYb5fwGGkOkFk+Y13p2hSufD7GZ3c3lqTcBo1v5DgAwx5OAh5tN1bIfhC
+# goDgFas6ncjaeSQBHIR3I21uWwnr85WWaJkvBcOPSuVKXCZWewkZnLSiX+uO4JVf
+# eMtYQP+EjtycZMFfFocIhMgUaOxWUiuDdPFoh6reoTfb/Q9Q+pmUtbpMx+rj+8eT
+# 3WaXTWmzeRKPEmTHd/dfZmCrEc+v3/p1PfTNkW9K0o79WbzHrdweP8PXgY1jeJW2
+# kZSVbMtoUQg7bLxIwJ+JFd1V+BPYZ+YKTxgNP8ehzipYVRaMBF8TXINeEyioNV7S
+# t9HfG/UOUk5GC3yuaCQp7lJiO1bbhdP6Jdr0Huy3NxDjx3PTEoPrHhLJNSF6TVSz
+# vk/lVf1m5OEWLlupRQYJlBIHHhjaj7ohpzt+AKtepQxVFE3HfrkI6nV0GGnF+k2g
+# /psOSYsBaA2UVnsvxyen4rcA1q09cLsNd9C/J9pf9KGCAyMwggMfBgkqhkiG9w0B
+# CQYxggMQMIIDDAIBATBqMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdv
+# IExpbWl0ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcg
+# Q0EgUjM2AhEApCk7bh7d16c0CIetek63JDANBglghkgBZQMEAgIFAKB5MBgGCSqG
+# SIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDQwNzE5NTg0
+# NlowPwYJKoZIhvcNAQkEMTIEMNlqcUSqQmFVHkxhHps0ZyVMgjupsI+E/uSomHnm
+# u5T2j+uS3r8oaNi72fuuA4f9nzANBgkqhkiG9w0BAQEFAASCAgBK34Qx7oI7EZj3
+# TskJeTWKz+YfNf6DIBiT7mKaCinp9CY0512VTsdMnafUKL92fX3BYjKgCn88s/P8
+# +eS/aGRDkTMa51zJBSyfb28WMlNnjD0nTN3mbkv5cd2F9COJY7w6CcE8Ht5KXYYh
+# MQ9Wkz9Go1sFnrhWydtbSvKGgVDj3xtTJ3jeNXuYln+528Ef61ASwZtWeJAa34QM
+# qOsJgny4SC5hQlk7pTQO7wm5L//JXB1SVWxFhvbErNEJA5nAPd8yi1MANhxAey7A
+# mIvL4gKHUV17qj6Rg83TobCkUVdoWFenGUyFvA6zqxgZ2h2SK2Ib8hIQu2ZXnHjN
+# B9vCzQhh33tJ41kpDvk3QEOIuX46v3t2AChnl6jmk00PryLLbjZJdnEKZE3JQ7Y8
+# Xalv99G6cP48QOOCcMI23IpbU72seD9i508bGaUDW8EutR+owkzr/KtojuxEbXMp
+# DCaxPHSZWKTeVxllTnEhEVk/ID2JEleE+HkCsBm2La8dd/es9aLU5Fcra1vHEeXN
+# k0OSzzt0P0uXpqvfISb7Bg8r2NERBlaU6qRL0zVSYQDNeKInnHCIvIPF/ZlojbCG
+# AaCtftyTu8PVAFdpzG1q71Ex85VF2RqwVoGHdA8k5o2fFA/BKot1OatTCZ1w91Fu
+# AbBtW0LEisYclmzeIJqLvkx2uOXx0A==
 # SIG # End signature block

@@ -50,6 +50,12 @@ function Invoke-GeoAPI {
     <#
     .SYNOPSIS
         Sends a request to the WhatsUp Gold REST API with automatic token refresh.
+    .DESCRIPTION
+        When the WhatsUpGoldPS module is loaded and connected (global WUG bearer
+        headers exist), calls are routed through Get-WUGAPIResponse for unified
+        logging, token management, and integrity. When the module is not available
+        (e.g. standalone scheduled-task execution), the function falls back to
+        direct Invoke-RestMethod with its own token refresh logic.
     .PARAMETER Config
         The configuration hashtable (from Import-GeolocationConfig).
     .PARAMETER Endpoint
@@ -65,6 +71,23 @@ function Invoke-GeoAPI {
         [string]$Method = 'GET',
         [string]$Body
     )
+
+    $uri = "$($Config.BaseUri)$Endpoint"
+
+    # --- Prefer WhatsUpGoldPS module when loaded ---
+    if ($global:WUGBearerHeaders -and $global:WhatsUpServerBaseURI -and (Get-Command 'Get-WUGAPIResponse' -ErrorAction SilentlyContinue)) {
+        try {
+            Write-Verbose "Invoke-GeoAPI: routing through Get-WUGAPIResponse -> $Method $Endpoint"
+            $moduleParams = @{ Uri = $uri; Method = $Method }
+            if ($Body) { $moduleParams.Body = $Body }
+            return (Get-WUGAPIResponse @moduleParams)
+        }
+        catch {
+            Write-Verbose "Get-WUGAPIResponse failed ($($_.Exception.Message)), falling back to direct REST."
+        }
+    }
+
+    # --- Fallback: direct Invoke-RestMethod with own token refresh ---
 
     # Check if token needs refreshing (within 5 minutes of expiry)
     if ((Get-Date) -ge $Config._Expiry.AddMinutes(-5)) {
@@ -89,7 +112,6 @@ function Invoke-GeoAPI {
         "Content-Type"  = "application/json"
         "Authorization" = "$($Config._TokenType) $($Config._AccessToken)"
     }
-    $uri = "$($Config.BaseUri)$Endpoint"
     $params = @{ Uri = $uri; Method = $Method; Headers = $headers; ErrorAction = 'Stop' }
     if ($Body) { $params.Body = $Body }
 
@@ -190,19 +212,27 @@ function Get-GeoDevicesWithLocation {
         Queries all devices in WUG, then fetches their attributes looking for
         "LatLong" (single attribute with "lat,lng") or built-in "Latitude"/"Longitude".
         Returns an array of objects with device info and parsed coordinates.
+
+        Uses a JSON location cache to avoid re-fetching coordinates for devices
+        whose locations haven't changed (coordinates are static; status comes from
+        the overview endpoint and is always fresh).  New or uncached devices are
+        fetched with a PS 5.1-compatible runspace pool for parallelism.
     .PARAMETER Config
         The configuration hashtable from Connect-GeoWUGServer.
     .PARAMETER GroupName
         Optional device group name to filter devices. Default is all devices.
     .PARAMETER UseBuiltinCoords
         If set, uses separate "Latitude" and "Longitude" attributes instead of "LatLong".
+    .PARAMETER RefreshCache
+        Force re-fetch all device coordinates from the API, ignoring the cache.
     .OUTPUTS
         Array of PSCustomObject: Name, DeviceId, Latitude, Longitude, State, Status
     #>
     param(
         [Parameter(Mandatory)][hashtable]$Config,
         [string]$GroupName,
-        [switch]$UseBuiltinCoords
+        [switch]$UseBuiltinCoords,
+        [switch]$RefreshCache
     )
 
     $devices = @()
@@ -247,69 +277,165 @@ function Get-GeoDevicesWithLocation {
 
     Write-Verbose "Found $($devices.Count) devices. Checking for location attributes..."
 
-    $geoDevices = @()
-    $totalDevices = $devices.Count
-    $currentIndex = 0
+    # --- Location cache: device coordinates rarely change ---
+    $cacheDir  = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Cache'
+    $cacheFile = Join-Path $cacheDir 'geolocation-coords.json'
+    $cache     = @{}
+    if (-not $RefreshCache -and (Test-Path $cacheFile)) {
+        try {
+            $cacheRaw = Get-Content -Path $cacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($entry in $cacheRaw) {
+                $cache["$($entry.Id)"] = @{ Lat = [double]$entry.Lat; Lng = [double]$entry.Lng }
+            }
+            Write-Verbose "Loaded $($cache.Count) cached device coordinates."
+        }
+        catch { Write-Verbose "Cache read failed, will re-fetch all: $_" }
+    }
 
+    # Separate devices into cached (coords known) vs uncached (need API fetch)
+    $cachedDevices   = @()
+    $uncachedDevices = @()
     foreach ($device in $devices) {
-        $currentIndex++
-        $pct = [Math]::Round(($currentIndex / $totalDevices) * 100, 0)
-        Write-Progress -Activity "Fetching device locations" -Status "$currentIndex of $totalDevices" -PercentComplete $pct
-
         $deviceId = if ($device.id) { $device.id } else { $device.deviceId }
         if (-not $deviceId) { continue }
+        if ($cache.ContainsKey("$deviceId")) {
+            $cachedDevices += $device
+        }
+        else {
+            $uncachedDevices += $device
+        }
+    }
+    Write-Verbose "Cache hit: $($cachedDevices.Count), miss: $($uncachedDevices.Count)"
 
-        try {
+    # --- Fetch coordinates for uncached devices via runspace pool (PS 5.1 parallel) ---
+    $fetchedCoords = @{}  # deviceId -> @{Lat;Lng}
+
+    if ($uncachedDevices.Count -gt 0) {
+        $totalUncached = $uncachedDevices.Count
+        $poolSize = [Math]::Min(8, $totalUncached)
+        $baseUri      = $Config.BaseUri
+        $accessToken  = $Config._AccessToken
+        $tokenType    = $Config._TokenType
+        $useBuiltin   = [bool]$UseBuiltinCoords
+
+        $pool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, $poolSize)
+        $pool.Open()
+
+        $scriptBlock = {
+            param($BaseUri, $DeviceId, $TokenType, $AccessToken, $UseBuiltin)
+            $headers = @{
+                "Content-Type"  = "application/json"
+                "Authorization" = "$TokenType $AccessToken"
+            }
             $lat = $null; $lng = $null
-
-            if ($UseBuiltinCoords) {
-                # Fetch Latitude and Longitude as separate attributes
-                $attrResult = Invoke-GeoAPI -Config $Config -Endpoint "/api/v1/devices/$deviceId/attributes/-?names=Latitude&names=Longitude&limit=10"
-                if ($attrResult.data) {
-                    foreach ($attr in $attrResult.data) {
-                        if ($attr.name -eq 'Latitude')  { $lat = [double]$attr.value }
-                        if ($attr.name -eq 'Longitude') { $lng = [double]$attr.value }
+            try {
+                if ($UseBuiltin) {
+                    $uri = "$BaseUri/api/v1/devices/$DeviceId/attributes/-?names=Latitude&names=Longitude&limit=10"
+                    $result = Invoke-RestMethod -Uri $uri -Headers $headers -ErrorAction Stop
+                    if ($result.data) {
+                        foreach ($attr in $result.data) {
+                            if ($attr.name -eq 'Latitude')  { $lat = [double]$attr.value }
+                            if ($attr.name -eq 'Longitude') { $lng = [double]$attr.value }
+                        }
                     }
                 }
-            }
-            else {
-                # Fetch LatLong as a single attribute
-                $attrResult = Invoke-GeoAPI -Config $Config -Endpoint "/api/v1/devices/$deviceId/attributes/-?names=LatLong&limit=10"
-                if ($attrResult.data) {
-                    foreach ($attr in $attrResult.data) {
-                        if ($attr.name -eq 'LatLong' -and $attr.value) {
-                            $parts = $attr.value -split ','
-                            if ($parts.Count -ge 2) {
-                                $lat = [double]$parts[0].Trim()
-                                $lng = [double]$parts[1].Trim()
+                else {
+                    $uri = "$BaseUri/api/v1/devices/$DeviceId/attributes/-?names=LatLong&limit=10"
+                    $result = Invoke-RestMethod -Uri $uri -Headers $headers -ErrorAction Stop
+                    if ($result.data) {
+                        foreach ($attr in $result.data) {
+                            if ($attr.name -eq 'LatLong' -and $attr.value) {
+                                $parts = $attr.value -split ','
+                                if ($parts.Count -ge 2) {
+                                    $lat = [double]$parts[0].Trim()
+                                    $lng = [double]$parts[1].Trim()
+                                }
                             }
                         }
                     }
                 }
             }
+            catch { }
+            return @{ DeviceId = $DeviceId; Lat = $lat; Lng = $lng }
+        }
 
-            if ($null -ne $lat -and $null -ne $lng) {
-                # Status is already available from the overview view (no extra API call)
-                $bestState  = if ($device.bestState)  { $device.bestState }  else { 'Unknown' }
-                $worstState = if ($device.worstState) { $device.worstState } else { 'Unknown' }
+        $jobs = [System.Collections.Generic.List[object]]::new()
+        foreach ($device in $uncachedDevices) {
+            $deviceId = if ($device.id) { $device.id } else { $device.deviceId }
+            $ps = [System.Management.Automation.PowerShell]::Create()
+            $ps.RunspacePool = $pool
+            [void]$ps.AddScript($scriptBlock)
+            [void]$ps.AddArgument($baseUri)
+            [void]$ps.AddArgument($deviceId)
+            [void]$ps.AddArgument($tokenType)
+            [void]$ps.AddArgument($accessToken)
+            [void]$ps.AddArgument($useBuiltin)
+            $handle = $ps.BeginInvoke()
+            $jobs.Add(@{ PS = $ps; Handle = $handle; DeviceId = $deviceId })
+        }
 
-                $geoDevices += [PSCustomObject]@{
-                    Type                  = 'Device'
-                    Name                  = if ($device.name) { $device.name } elseif ($device.displayName) { $device.displayName } else { "Device $deviceId" }
-                    DeviceId              = $deviceId
-                    Latitude              = $lat
-                    Longitude             = $lng
-                    BestState             = $bestState
-                    WorstState            = $worstState
-                    TotalMonitors         = if ($device.totalActiveMonitors) { $device.totalActiveMonitors } else { 0 }
-                    DownMonitors          = if ($device.totalActiveMonitorsDown) { $device.totalActiveMonitorsDown } else { 0 }
-                    DownMonitorDetails    = if ($device.downActiveMonitors) { $device.downActiveMonitors } else { @() }
+        $completed = 0
+        foreach ($job in $jobs) {
+            $completed++
+            $pct = [Math]::Round(($completed / $totalUncached) * 100, 0)
+            Write-Progress -Activity "Fetching device locations (uncached)" `
+                -Status "$completed of $totalUncached" -PercentComplete $pct
+            try {
+                $result = $job.PS.EndInvoke($job.Handle)
+                if ($result -and $null -ne $result.Lat -and $null -ne $result.Lng) {
+                    $fetchedCoords["$($result.DeviceId)"] = @{ Lat = $result.Lat; Lng = $result.Lng }
                 }
             }
+            catch { Write-Verbose "Runspace error for device $($job.DeviceId): $_" }
+            finally { $job.PS.Dispose() }
         }
-        catch {
-            Write-Verbose "Error fetching attributes for device $deviceId : $($_.Exception.Message)"
+        $pool.Close()
+        $pool.Dispose()
+        Write-Progress -Activity "Fetching device locations (uncached)" -Completed
+        Write-Verbose "Fetched $($fetchedCoords.Count) new coordinates via runspace pool."
+    }
+
+    # --- Merge cached + freshly fetched coordinates ---
+    $allCoords = @{}
+    foreach ($k in $cache.Keys)         { $allCoords[$k] = $cache[$k] }
+    foreach ($k in $fetchedCoords.Keys) { $allCoords[$k] = $fetchedCoords[$k] }
+
+    # --- Build result objects (status from overview, coords from cache/fetch) ---
+    $geoDevices = @()
+    foreach ($device in $devices) {
+        $deviceId = if ($device.id) { $device.id } else { $device.deviceId }
+        if (-not $deviceId) { continue }
+        $coords = $allCoords["$deviceId"]
+        if (-not $coords) { continue }
+
+        $bestState  = if ($device.bestState)  { $device.bestState }  else { 'Unknown' }
+        $worstState = if ($device.worstState) { $device.worstState } else { 'Unknown' }
+
+        $geoDevices += [PSCustomObject]@{
+            Type                  = 'Device'
+            Name                  = if ($device.name) { $device.name } elseif ($device.displayName) { $device.displayName } else { "Device $deviceId" }
+            DeviceId              = $deviceId
+            Latitude              = $coords.Lat
+            Longitude             = $coords.Lng
+            BestState             = $bestState
+            WorstState            = $worstState
+            TotalMonitors         = if ($device.totalActiveMonitors) { $device.totalActiveMonitors } else { 0 }
+            DownMonitors          = if ($device.totalActiveMonitorsDown) { $device.totalActiveMonitorsDown } else { 0 }
+            DownMonitorDetails    = if ($device.downActiveMonitors) { $device.downActiveMonitors } else { @() }
         }
+    }
+
+    # --- Update cache on disk ---
+    if ($allCoords.Count -gt 0) {
+        try {
+            if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
+            $cacheData = $allCoords.Keys | ForEach-Object {
+                [PSCustomObject]@{ Id = $_; Lat = $allCoords[$_].Lat; Lng = $allCoords[$_].Lng }
+            }
+            $cacheData | ConvertTo-Json -Depth 3 | Set-Content -Path $cacheFile -Encoding UTF8 -Force
+            Write-Verbose "Saved $($allCoords.Count) coordinates to cache."
+        }
+        catch { Write-Verbose "Failed to write location cache: $_" }
     }
 
     Write-Progress -Activity "Fetching device locations" -Completed
@@ -472,6 +598,10 @@ function Export-GeolocationMapHtml {
         For better security, omit this parameter and enter keys via the map's
         Settings > API Keys panel instead. Keys entered in-browser are stored in
         localStorage (never written to disk in the HTML file).
+    .PARAMETER RefreshIntervalSeconds
+        If specified, adds a meta refresh tag so the browser reloads the page
+        automatically at the given interval. Useful when a scheduled task
+        regenerates the HTML file. Default is 0 (disabled).
     .EXAMPLE
         Export-GeolocationMapHtml -Data $geoData -OutputPath "C:\Maps\WUG-Map.html"
     .EXAMPLE
@@ -486,7 +616,8 @@ function Export-GeolocationMapHtml {
         [double]$DefaultLat  = 39.8283,
         [double]$DefaultLng  = -98.5795,
         [int]$DefaultZoom    = 5,
-        [hashtable]$TileApiKeys
+        [hashtable]$TileApiKeys,
+        [int]$RefreshIntervalSeconds = 0
     )
 
     if (-not $TemplatePath) {
@@ -511,6 +642,14 @@ function Export-GeolocationMapHtml {
     $html = $html.Replace('%%DEFAULT_ZOOM%%', $DefaultZoom.ToString())
     $html = $html.Replace('%%WUG_BASE_URL%%', $WugBaseUrl)
     $html = $html.Replace('%%GENERATED_AT%%', (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+
+    # Auto-refresh meta tag (0 = disabled)
+    if ($RefreshIntervalSeconds -gt 0) {
+        $html = $html.Replace('%%AUTO_REFRESH%%', "<meta http-equiv=`"refresh`" content=`"$RefreshIntervalSeconds`" />")
+    }
+    else {
+        $html = $html.Replace('%%AUTO_REFRESH%%', '')
+    }
 
     # Inject tile provider API keys
     if ($TileApiKeys -and $TileApiKeys.Count -gt 0) {
@@ -792,10 +931,10 @@ function Import-GeolocationConfig {
 }
 
 # SIG # Begin signature block
-# MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIrwgYJKoZIhvcNAQcCoIIrszCCK68CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJPlA66qc4Tn2i
-# 12ColaHsiYYgtQKjezUpDiYPXAFshKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmrqdCp60vt+9m
+# zTMycDAohlkSLL1N/bci2lwa2E5feKCCJNcwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -824,88 +963,206 @@ function Import-GeolocationConfig {
 # J3LFI+ICOBpMIOLbAffNRk8monxmwFE2tokCVMf8WPtsAO7+mKYulaEMUykfb9gZ
 # pk+e96wJ6l2CxouvgKe9gUhShDHaMuwV5KZMPWw5c9QLhTkg4IUaaOGnSDip0TYl
 # d8GNGRbFiExmfS9jzpjoad+sPKhdnckcW67Y8y90z7h+9teDnRGWYpquRRPaf9xH
-# +9/DUp/mBlXpnYzyOmJRvOwkDynUWICE5EV7WtgwggYaMIIEAqADAgECAhBiHW0M
-# UgGeO5B5FSCJIRwKMA0GCSqGSIb3DQEBDAUAMFYxCzAJBgNVBAYTAkdCMRgwFgYD
-# VQQKEw9TZWN0aWdvIExpbWl0ZWQxLTArBgNVBAMTJFNlY3RpZ28gUHVibGljIENv
-# ZGUgU2lnbmluZyBSb290IFI0NjAeFw0yMTAzMjIwMDAwMDBaFw0zNjAzMjEyMzU5
-# NTlaMFQxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzAp
-# BgNVBAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYwggGiMA0G
-# CSqGSIb3DQEBAQUAA4IBjwAwggGKAoIBgQCbK51T+jU/jmAGQ2rAz/V/9shTUxjI
-# ztNsfvxYB5UXeWUzCxEeAEZGbEN4QMgCsJLZUKhWThj/yPqy0iSZhXkZ6Pg2A2NV
-# DgFigOMYzB2OKhdqfWGVoYW3haT29PSTahYkwmMv0b/83nbeECbiMXhSOtbam+/3
-# 6F09fy1tsB8je/RV0mIk8XL/tfCK6cPuYHE215wzrK0h1SWHTxPbPuYkRdkP05Zw
-# mRmTnAO5/arnY83jeNzhP06ShdnRqtZlV59+8yv+KIhE5ILMqgOZYAENHNX9SJDm
-# +qxp4VqpB3MV/h53yl41aHU5pledi9lCBbH9JeIkNFICiVHNkRmq4TpxtwfvjsUe
-# dyz8rNyfQJy/aOs5b4s+ac7IH60B+Ja7TVM+EKv1WuTGwcLmoU3FpOFMbmPj8pz4
-# 4MPZ1f9+YEQIQty/NQd/2yGgW+ufflcZ/ZE9o1M7a5Jnqf2i2/uMSWymR8r2oQBM
-# dlyh2n5HirY4jKnFH/9gRvd+QOfdRrJZb1sCAwEAAaOCAWQwggFgMB8GA1UdIwQY
-# MBaAFDLrkpr/NZZILyhAQnAgNpFcF4XmMB0GA1UdDgQWBBQPKssghyi47G9IritU
-# pimqF6TNDDAOBgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNV
-# HSUEDDAKBggrBgEFBQcDAzAbBgNVHSAEFDASMAYGBFUdIAAwCAYGZ4EMAQQBMEsG
-# A1UdHwREMEIwQKA+oDyGOmh0dHA6Ly9jcmwuc2VjdGlnby5jb20vU2VjdGlnb1B1
-# YmxpY0NvZGVTaWduaW5nUm9vdFI0Ni5jcmwwewYIKwYBBQUHAQEEbzBtMEYGCCsG
-# AQUFBzAChjpodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNDb2Rl
-# U2lnbmluZ1Jvb3RSNDYucDdjMCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0
-# aWdvLmNvbTANBgkqhkiG9w0BAQwFAAOCAgEABv+C4XdjNm57oRUgmxP/BP6YdURh
-# w1aVcdGRP4Wh60BAscjW4HL9hcpkOTz5jUug2oeunbYAowbFC2AKK+cMcXIBD0Zd
-# OaWTsyNyBBsMLHqafvIhrCymlaS98+QpoBCyKppP0OcxYEdU0hpsaqBBIZOtBajj
-# cw5+w/KeFvPYfLF/ldYpmlG+vd0xqlqd099iChnyIMvY5HexjO2AmtsbpVn0OhNc
-# WbWDRF/3sBp6fWXhz7DcML4iTAWS+MVXeNLj1lJziVKEoroGs9Mlizg0bUMbOalO
-# hOfCipnx8CaLZeVme5yELg09Jlo8BMe80jO37PU8ejfkP9/uPak7VLwELKxAMcJs
-# zkyeiaerlphwoKx1uHRzNyE6bxuSKcutisqmKL5OTunAvtONEoteSiabkPVSZ2z7
-# 6mKnzAfZxCl/3dq3dUNw4rg3sTCggkHSRqTqlLMS7gjrhTqBmzu1L90Y1KWN/Y5J
-# KdGvspbOrTfOXyXvmPL6E52z1NZJ6ctuMFBQZH3pwWvqURR8AgQdULUvrxjUYbHH
-# j95Ejza63zdrEcxWLDX6xWls/GDnVNueKjWUH3fTv1Y8Wdho698YADR7TNx8X8z2
-# Bev6SivBBOHY+uqiirZtg0y9ShQoPzmCcn63Syatatvx157YK9hlcPmVoa1oDE5/
-# L9Uo2bC5a4CH2RwwggY+MIIEpqADAgECAhAHnODk0RR/hc05c892LTfrMA0GCSqG
-# SIb3DQEBDAUAMFQxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
-# ZWQxKzApBgNVBAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYw
-# HhcNMjYwMjA5MDAwMDAwWhcNMjkwNDIxMjM1OTU5WjBVMQswCQYDVQQGEwJVUzEU
-# MBIGA1UECAwLQ29ubmVjdGljdXQxFzAVBgNVBAoMDkphc29uIEFsYmVyaW5vMRcw
-# FQYDVQQDDA5KYXNvbiBBbGJlcmlubzCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCC
-# AgoCggIBAPN6aN4B1yYWkI5b5TBj3I0VV/peETrHb6EY4BHGxt8Ap+eT+WpEpJyE
-# tRYPxEmNJL3A38Bkg7mwzPE3/1NK570ZBCuBjSAn4mSDIgIuXZnvyBO9W1OQs5d6
-# 7MlJLUAEufl18tOr3ST1DeO9gSjQSAE5Nql0QDxPnm93OZBon+Fz3CmE+z3MwAe2
-# h4KdtRAnCqwM+/V7iBdbw+JOxolpx+7RVjGyProTENIG3pe/hKvPb501lf8uBAAD
-# LdjZr5ip8vIWbf857Yw1Bu10nVI7HW3eE8Cl5//d1ribHlzTzQLfttW+k+DaFsKZ
-# BBL56l4YAlIVRsrOiE1kdHYYx6IGrEA809R7+TZA9DzGqyFiv9qmJAbL4fDwetDe
-# yIq+Oztz1LvEdy8Rcd0JBY+J4S0eDEFIA3X0N8VcLeAwabKb9AjulKXwUeqCJLvN
-# 79CJ90UTZb2+I+tamj0dn+IKMEsJ4v4Ggx72sxFr9+6XziodtTg5Luf2xd6+Phha
-# mOxF2px9LObhBLLEMyRsCHZIzVZOFKu9BpHQH7ufGB+Sa80Tli0/6LEyn9+bMYWi
-# 2ttn6lLOPThXMiQaooRUq6q2u3+F4SaPlxVFLI7OJVMhar6nW6joBvELTJPmANSM
-# jDSRFDfHRCdGbZsL/keELJNy+jZctF6VvxQEjFM8/bazu6qYhrA7AgMBAAGjggGJ
-# MIIBhTAfBgNVHSMEGDAWgBQPKssghyi47G9IritUpimqF6TNDDAdBgNVHQ4EFgQU
-# 6YF0o0D5AVhKHbVocr8GaSIBibAwDgYDVR0PAQH/BAQDAgeAMAwGA1UdEwEB/wQC
-# MAAwEwYDVR0lBAwwCgYIKwYBBQUHAwMwSgYDVR0gBEMwQTA1BgwrBgEEAbIxAQIB
-# AwIwJTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwCAYGZ4EM
-# AQQBMEkGA1UdHwRCMEAwPqA8oDqGOGh0dHA6Ly9jcmwuc2VjdGlnby5jb20vU2Vj
-# dGlnb1B1YmxpY0NvZGVTaWduaW5nQ0FSMzYuY3JsMHkGCCsGAQUFBwEBBG0wazBE
-# BggrBgEFBQcwAoY4aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGlj
-# Q29kZVNpZ25pbmdDQVIzNi5jcnQwIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNl
-# Y3RpZ28uY29tMA0GCSqGSIb3DQEBDAUAA4IBgQAEIsm4xnOd/tZMVrKwi3doAXvC
-# wOA/RYQnFJD7R/bSQRu3wXEK4o9SIefye18B/q4fhBkhNAJuEvTQAGfqbbpxow03
-# J5PrDTp1WPCWbXKX8Oz9vGWJFyJxRGftkdzZ57JE00synEMS8XCwLO9P32MyR9Z9
-# URrpiLPJ9rQjfHMb1BUdvaNayomm7aWLAnD+X7jm6o8sNT5An1cwEAob7obWDM6s
-# X93wphwJNBJAstH9Ozs6LwISOX6sKS7CKm9N3Kp8hOUue0ZHAtZdFl6o5u12wy+z
-# zieGEI50fKnN77FfNKFOWKlS6OJwlArcbFegB5K89LcE5iNSmaM3VMB2ADV1FEcj
-# GSHw4lTg1Wx+WMAMdl/7nbvfFxJ9uu5tNiT54B0s+lZO/HztwXYQUczdsFon3pjs
-# Nrsk9ZlalBi5SHkIu+F6g7tWiEv3rtVApmJRnLkUr2Xq2a4nbslUCt4jKs5UX4V1
-# nSX8OM++AXoyVGO+iTj7z+pl6XE9Gw/Td6WKKKsxggMaMIIDFgIBATBoMFQxCzAJ
-# BgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNl
-# Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
-# N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
-# BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgoioW9J6Tj1RcmpUI25E3Tov3DZ0XtI3C
-# cg4X5QBO69kwDQYJKoZIhvcNAQEBBQAEggIAVSAB7lq1Fe6VOhzDZ7sIGFWw9YeO
-# 6/8pPrjVrxOiwEWKRuXBhrHDefz2t3eq/mulmsLxSNkB6K5c0g/2ZS/S/bk9NahE
-# XBQhGPLABz+UCthWvRKLtwHMtQivUxFEw6D1Ag3mWHuh6y9thD8X5wFsdRIjp6md
-# tp22OtPOFu6caTRhkBua4oejrESibzsPS78VcyrmkhTxq/1rkewC623eGgwKxTbc
-# 65jue9fNDbXBw69CcNx0xFGqqIMSYriAw94pRwYEBrS1xvdBloYcWD4MJoPq7ndU
-# kpLmwJ1zF2PmVSF4EeGaw/lYJ1eoL+hlLEu+HnHvnmpPx6zJ/ZEpkXSCKW7EMw6W
-# EpO+Z7UQgcEJF5ZLhtEHc87tcO56aPTkEzHoWnEBIgbd07SNmJiG46TeqfYyxM6L
-# 0MtiLHdZdpBEe2zU9PB7sW29uIpg3qrCVPqTxlCQ5wD9kmmXFbi97NX+UNSobS+P
-# WqTY1Y7844D0+zNHRtPQZqgicQFY+hi++WO5lNozzKny5mLXnR+MGz9NtXfDCUkQ
-# LGYyPlbYTAWlUvqMpoMBOjq4QBa4Z+0GLCX1D05vj5QjTWOFX4uWXTYcoTeJCkqm
-# 4LW4pUUKMs5XjyxJVd/sX58I2ywpD9h/50jjCHzL1SLkSiz5CJoqCICAyoN2pfxB
-# rUZFBp+3xrQLi0Y=
+# +9/DUp/mBlXpnYzyOmJRvOwkDynUWICE5EV7WtgwggYUMIID/KADAgECAhB6I67a
+# U2mWD5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYD
+# VQQKEw9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRp
+# bWUgU3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1
+# OTU5WjBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
+# KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNjCCAaIw
+# DQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAM2Y2ENBq26CK+z2M34mNOSJjNPv
+# IhKAVD7vJq+MDoGD46IiM+b83+3ecLvBhStSVjeYXIjfa3ajoW3cS3ElcJzkyZlB
+# nwDEJuHlzpbN4kMH2qRBVrjrGJgSlzzUqcGQBaCxpectRGhhnOSwcjPMI3G0hedv
+# 2eNmGiUbD12OeORN0ADzdpsQ4dDi6M4YhoGE9cbY11XxM2AVZn0GiOUC9+XE0wI7
+# CQKfOUfigLDn7i/WeyxZ43XLj5GVo7LDBExSLnh+va8WxTlA+uBvq1KO8RSHUQLg
+# zb1gbL9Ihgzxmkdp2ZWNuLc+XyEmJNbD2OIIq/fWlwBp6KNL19zpHsODLIsgZ+WZ
+# 1AzCs1HEK6VWrxmnKyJJg2Lv23DlEdZlQSGdF+z+Gyn9/CRezKe7WNyxRf4e4bwU
+# trYE2F5Q+05yDD68clwnweckKtxRaF0VzN/w76kOLIaFVhf5sMM/caEZLtOYqYad
+# tn034ykSFaZuIBU9uCSrKRKTPJhWvXk4CllgrwIDAQABo4IBXDCCAVgwHwYDVR0j
+# BBgwFoAU9ndq3T/9ARP/FqFsggIv0Ao9FCUwHQYDVR0OBBYEFF9Y7UwxeqJhQo1S
+# gLqzYZcZojKbMA4GA1UdDwEB/wQEAwIBhjASBgNVHRMBAf8ECDAGAQH/AgEAMBMG
+# A1UdJQQMMAoGCCsGAQUFBwMIMBEGA1UdIAQKMAgwBgYEVR0gADBMBgNVHR8ERTBD
+# MEGgP6A9hjtodHRwOi8vY3JsLnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LmNybDB8BggrBgEFBQcBAQRwMG4wRwYIKwYBBQUHMAKG
+# O2h0dHA6Ly9jcnQuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY1RpbWVTdGFtcGlu
+# Z1Jvb3RSNDYucDdjMCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNv
+# bTANBgkqhkiG9w0BAQwFAAOCAgEAEtd7IK0ONVgMnoEdJVj9TC1ndK/HYiYh9lVU
+# acahRoZ2W2hfiEOyQExnHk1jkvpIJzAMxmEc6ZvIyHI5UkPCbXKspioYMdbOnBWQ
+# Un733qMooBfIghpR/klUqNxx6/fDXqY0hSU1OSkkSivt51UlmJElUICZYBodzD3M
+# /SFjeCP59anwxs6hwj1mfvzG+b1coYGnqsSz2wSKr+nDO+Db8qNcTbJZRAiSazr7
+# KyUJGo1c+MScGfG5QHV+bps8BX5Oyv9Ct36Y4Il6ajTqV2ifikkVtB3RNBUgwu/m
+# SiSUice/Jp/q8BMk/gN8+0rNIE+QqU63JoVMCMPY2752LmESsRVVoypJVt8/N3qQ
+# 1c6FibbcRabo3azZkcIdWGVSAdoLgAIxEKBeNh9AQO1gQrnh1TA8ldXuJzPSuALO
+# z1Ujb0PCyNVkWk7hkhVHfcvBfI8NtgWQupiaAeNHe0pWSGH2opXZYKYG4Lbukg7H
+# pNi/KqJhue2Keak6qH9A8CeEOB7Eob0Zf+fU+CCQaL0cJqlmnx9HCDxF+3BLbUuf
+# rV64EbTI40zqegPZdA+sXCmbcZy6okx/SjwsusWRItFA3DE8MORZeFb6BmzBtqKJ
+# 7l939bbKBy2jvxcJI98Va95Q5JnlKor3m0E7xpMeYRriWklUPsetMSf2NvUQa/E5
+# vVyefQIwggYaMIIEAqADAgECAhBiHW0MUgGeO5B5FSCJIRwKMA0GCSqGSIb3DQEB
+# DAUAMFYxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxLTAr
+# BgNVBAMTJFNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBSb290IFI0NjAeFw0y
+# MTAzMjIwMDAwMDBaFw0zNjAzMjEyMzU5NTlaMFQxCzAJBgNVBAYTAkdCMRgwFgYD
+# VQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNlY3RpZ28gUHVibGljIENv
+# ZGUgU2lnbmluZyBDQSBSMzYwggGiMA0GCSqGSIb3DQEBAQUAA4IBjwAwggGKAoIB
+# gQCbK51T+jU/jmAGQ2rAz/V/9shTUxjIztNsfvxYB5UXeWUzCxEeAEZGbEN4QMgC
+# sJLZUKhWThj/yPqy0iSZhXkZ6Pg2A2NVDgFigOMYzB2OKhdqfWGVoYW3haT29PST
+# ahYkwmMv0b/83nbeECbiMXhSOtbam+/36F09fy1tsB8je/RV0mIk8XL/tfCK6cPu
+# YHE215wzrK0h1SWHTxPbPuYkRdkP05ZwmRmTnAO5/arnY83jeNzhP06ShdnRqtZl
+# V59+8yv+KIhE5ILMqgOZYAENHNX9SJDm+qxp4VqpB3MV/h53yl41aHU5pledi9lC
+# BbH9JeIkNFICiVHNkRmq4TpxtwfvjsUedyz8rNyfQJy/aOs5b4s+ac7IH60B+Ja7
+# TVM+EKv1WuTGwcLmoU3FpOFMbmPj8pz44MPZ1f9+YEQIQty/NQd/2yGgW+ufflcZ
+# /ZE9o1M7a5Jnqf2i2/uMSWymR8r2oQBMdlyh2n5HirY4jKnFH/9gRvd+QOfdRrJZ
+# b1sCAwEAAaOCAWQwggFgMB8GA1UdIwQYMBaAFDLrkpr/NZZILyhAQnAgNpFcF4Xm
+# MB0GA1UdDgQWBBQPKssghyi47G9IritUpimqF6TNDDAOBgNVHQ8BAf8EBAMCAYYw
+# EgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggrBgEFBQcDAzAbBgNVHSAE
+# FDASMAYGBFUdIAAwCAYGZ4EMAQQBMEsGA1UdHwREMEIwQKA+oDyGOmh0dHA6Ly9j
+# cmwuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY0NvZGVTaWduaW5nUm9vdFI0Ni5j
+# cmwwewYIKwYBBQUHAQEEbzBtMEYGCCsGAQUFBzAChjpodHRwOi8vY3J0LnNlY3Rp
+# Z28uY29tL1NlY3RpZ29QdWJsaWNDb2RlU2lnbmluZ1Jvb3RSNDYucDdjMCMGCCsG
+# AQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTANBgkqhkiG9w0BAQwFAAOC
+# AgEABv+C4XdjNm57oRUgmxP/BP6YdURhw1aVcdGRP4Wh60BAscjW4HL9hcpkOTz5
+# jUug2oeunbYAowbFC2AKK+cMcXIBD0ZdOaWTsyNyBBsMLHqafvIhrCymlaS98+Qp
+# oBCyKppP0OcxYEdU0hpsaqBBIZOtBajjcw5+w/KeFvPYfLF/ldYpmlG+vd0xqlqd
+# 099iChnyIMvY5HexjO2AmtsbpVn0OhNcWbWDRF/3sBp6fWXhz7DcML4iTAWS+MVX
+# eNLj1lJziVKEoroGs9Mlizg0bUMbOalOhOfCipnx8CaLZeVme5yELg09Jlo8BMe8
+# 0jO37PU8ejfkP9/uPak7VLwELKxAMcJszkyeiaerlphwoKx1uHRzNyE6bxuSKcut
+# isqmKL5OTunAvtONEoteSiabkPVSZ2z76mKnzAfZxCl/3dq3dUNw4rg3sTCggkHS
+# RqTqlLMS7gjrhTqBmzu1L90Y1KWN/Y5JKdGvspbOrTfOXyXvmPL6E52z1NZJ6ctu
+# MFBQZH3pwWvqURR8AgQdULUvrxjUYbHHj95Ejza63zdrEcxWLDX6xWls/GDnVNue
+# KjWUH3fTv1Y8Wdho698YADR7TNx8X8z2Bev6SivBBOHY+uqiirZtg0y9ShQoPzmC
+# cn63Syatatvx157YK9hlcPmVoa1oDE5/L9Uo2bC5a4CH2RwwggY+MIIEpqADAgEC
+# AhAHnODk0RR/hc05c892LTfrMA0GCSqGSIb3DQEBDAUAMFQxCzAJBgNVBAYTAkdC
+# MRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNlY3RpZ28gUHVi
+# bGljIENvZGUgU2lnbmluZyBDQSBSMzYwHhcNMjYwMjA5MDAwMDAwWhcNMjkwNDIx
+# MjM1OTU5WjBVMQswCQYDVQQGEwJVUzEUMBIGA1UECAwLQ29ubmVjdGljdXQxFzAV
+# BgNVBAoMDkphc29uIEFsYmVyaW5vMRcwFQYDVQQDDA5KYXNvbiBBbGJlcmlubzCC
+# AiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAPN6aN4B1yYWkI5b5TBj3I0V
+# V/peETrHb6EY4BHGxt8Ap+eT+WpEpJyEtRYPxEmNJL3A38Bkg7mwzPE3/1NK570Z
+# BCuBjSAn4mSDIgIuXZnvyBO9W1OQs5d67MlJLUAEufl18tOr3ST1DeO9gSjQSAE5
+# Nql0QDxPnm93OZBon+Fz3CmE+z3MwAe2h4KdtRAnCqwM+/V7iBdbw+JOxolpx+7R
+# VjGyProTENIG3pe/hKvPb501lf8uBAADLdjZr5ip8vIWbf857Yw1Bu10nVI7HW3e
+# E8Cl5//d1ribHlzTzQLfttW+k+DaFsKZBBL56l4YAlIVRsrOiE1kdHYYx6IGrEA8
+# 09R7+TZA9DzGqyFiv9qmJAbL4fDwetDeyIq+Oztz1LvEdy8Rcd0JBY+J4S0eDEFI
+# A3X0N8VcLeAwabKb9AjulKXwUeqCJLvN79CJ90UTZb2+I+tamj0dn+IKMEsJ4v4G
+# gx72sxFr9+6XziodtTg5Luf2xd6+PhhamOxF2px9LObhBLLEMyRsCHZIzVZOFKu9
+# BpHQH7ufGB+Sa80Tli0/6LEyn9+bMYWi2ttn6lLOPThXMiQaooRUq6q2u3+F4SaP
+# lxVFLI7OJVMhar6nW6joBvELTJPmANSMjDSRFDfHRCdGbZsL/keELJNy+jZctF6V
+# vxQEjFM8/bazu6qYhrA7AgMBAAGjggGJMIIBhTAfBgNVHSMEGDAWgBQPKssghyi4
+# 7G9IritUpimqF6TNDDAdBgNVHQ4EFgQU6YF0o0D5AVhKHbVocr8GaSIBibAwDgYD
+# VR0PAQH/BAQDAgeAMAwGA1UdEwEB/wQCMAAwEwYDVR0lBAwwCgYIKwYBBQUHAwMw
+# SgYDVR0gBEMwQTA1BgwrBgEEAbIxAQIBAwIwJTAjBggrBgEFBQcCARYXaHR0cHM6
+# Ly9zZWN0aWdvLmNvbS9DUFMwCAYGZ4EMAQQBMEkGA1UdHwRCMEAwPqA8oDqGOGh0
+# dHA6Ly9jcmwuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY0NvZGVTaWduaW5nQ0FS
+# MzYuY3JsMHkGCCsGAQUFBwEBBG0wazBEBggrBgEFBQcwAoY4aHR0cDovL2NydC5z
+# ZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljQ29kZVNpZ25pbmdDQVIzNi5jcnQwIwYI
+# KwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNlY3RpZ28uY29tMA0GCSqGSIb3DQEBDAUA
+# A4IBgQAEIsm4xnOd/tZMVrKwi3doAXvCwOA/RYQnFJD7R/bSQRu3wXEK4o9SIefy
+# e18B/q4fhBkhNAJuEvTQAGfqbbpxow03J5PrDTp1WPCWbXKX8Oz9vGWJFyJxRGft
+# kdzZ57JE00synEMS8XCwLO9P32MyR9Z9URrpiLPJ9rQjfHMb1BUdvaNayomm7aWL
+# AnD+X7jm6o8sNT5An1cwEAob7obWDM6sX93wphwJNBJAstH9Ozs6LwISOX6sKS7C
+# Km9N3Kp8hOUue0ZHAtZdFl6o5u12wy+zzieGEI50fKnN77FfNKFOWKlS6OJwlArc
+# bFegB5K89LcE5iNSmaM3VMB2ADV1FEcjGSHw4lTg1Wx+WMAMdl/7nbvfFxJ9uu5t
+# NiT54B0s+lZO/HztwXYQUczdsFon3pjsNrsk9ZlalBi5SHkIu+F6g7tWiEv3rtVA
+# pmJRnLkUr2Xq2a4nbslUCt4jKs5UX4V1nSX8OM++AXoyVGO+iTj7z+pl6XE9Gw/T
+# d6WKKKswggZiMIIEyqADAgECAhEApCk7bh7d16c0CIetek63JDANBgkqhkiG9w0B
+# AQwFADBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
+# KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNjAeFw0y
+# NTAzMjcwMDAwMDBaFw0zNjAzMjEyMzU5NTlaMHIxCzAJBgNVBAYTAkdCMRcwFQYD
+# VQQIEw5XZXN0IFlvcmtzaGlyZTEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMTAw
+# LgYDVQQDEydTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIFNpZ25lciBSMzYw
+# ggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQDThJX0bqRTePI9EEt4Egc8
+# 3JSBU2dhrJ+wY7JgReuff5KQNhMuzVytzD+iXazATVPMHZpH/kkiMo1/vlAGFrYN
+# 2P7g0Q8oPEcR3h0SftFNYxxMh+bj3ZNbbYjwt8f4DsSHPT+xp9zoFuw0HOMdO3sW
+# eA1+F8mhg6uS6BJpPwXQjNSHpVTCgd1gOmKWf12HSfSbnjl3kDm0kP3aIUAhsodB
+# YZsJA1imWqkAVqwcGfvs6pbfs/0GE4BJ2aOnciKNiIV1wDRZAh7rS/O+uTQcb6JV
+# zBVmPP63k5xcZNzGo4DOTV+sM1nVrDycWEYS8bSS0lCSeclkTcPjQah9Xs7xbOBo
+# CdmahSfg8Km8ffq8PhdoAXYKOI+wlaJj+PbEuwm6rHcm24jhqQfQyYbOUFTKWFe9
+# 01VdyMC4gRwRAq04FH2VTjBdCkhKts5Py7H73obMGrxN1uGgVyZho4FkqXA8/uk6
+# nkzPH9QyHIED3c9CGIJ098hU4Ig2xRjhTbengoncXUeo/cfpKXDeUcAKcuKUYRNd
+# GDlf8WnwbyqUblj4zj1kQZSnZud5EtmjIdPLKce8UhKl5+EEJXQp1Fkc9y5Ivk4A
+# ZacGMCVG0e+wwGsjcAADRO7Wga89r/jJ56IDK773LdIsL3yANVvJKdeeS6OOEiH6
+# hpq2yT+jJ/lHa9zEdqFqMwIDAQABo4IBjjCCAYowHwYDVR0jBBgwFoAUX1jtTDF6
+# omFCjVKAurNhlxmiMpswHQYDVR0OBBYEFIhhjKEqN2SBKGChmzHQjP0sAs5PMA4G
+# A1UdDwEB/wQEAwIGwDAMBgNVHRMBAf8EAjAAMBYGA1UdJQEB/wQMMAoGCCsGAQUF
+# BwMIMEoGA1UdIARDMEEwNQYMKwYBBAGyMQECAQMIMCUwIwYIKwYBBQUHAgEWF2h0
+# dHBzOi8vc2VjdGlnby5jb20vQ1BTMAgGBmeBDAEEAjBKBgNVHR8EQzBBMD+gPaA7
+# hjlodHRwOi8vY3JsLnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1lU3RhbXBp
+# bmdDQVIzNi5jcmwwegYIKwYBBQUHAQEEbjBsMEUGCCsGAQUFBzAChjlodHRwOi8v
+# Y3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1lU3RhbXBpbmdDQVIzNi5j
+# cnQwIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNlY3RpZ28uY29tMA0GCSqGSIb3
+# DQEBDAUAA4IBgQACgT6khnJRIfllqS49Uorh5ZvMSxNEk4SNsi7qvu+bNdcuknHg
+# XIaZyqcVmhrV3PHcmtQKt0blv/8t8DE4bL0+H0m2tgKElpUeu6wOH02BjCIYM6HL
+# InbNHLf6R2qHC1SUsJ02MWNqRNIT6GQL0Xm3LW7E6hDZmR8jlYzhZcDdkdw0cHhX
+# jbOLsmTeS0SeRJ1WJXEzqt25dbSOaaK7vVmkEVkOHsp16ez49Bc+Ayq/Oh2BAkST
+# Fog43ldEKgHEDBbCIyba2E8O5lPNan+BQXOLuLMKYS3ikTcp/Qw63dxyDCfgqXYU
+# hxBpXnmeSO/WA4NwdwP35lWNhmjIpNVZvhWoxDL+PxDdpph3+M5DroWGTc1ZuDa1
+# iXmOFAK4iwTnlWDg3QNRsRa9cnG3FBBpVHnHOEQj4GMkrOHdNDTbonEeGvZ+4nSZ
+# XrwCW4Wv2qyGDBLlKk3kUW1pIScDCpm/chL6aUbnSsrtbepdtbCLiGanKVR/KC1g
+# sR0tC6Q0RfWOI4owggaCMIIEaqADAgECAhA2wrC9fBs656Oz3TbLyXVoMA0GCSqG
+# SIb3DQEBDAUAMIGIMQswCQYDVQQGEwJVUzETMBEGA1UECBMKTmV3IEplcnNleTEU
+# MBIGA1UEBxMLSmVyc2V5IENpdHkxHjAcBgNVBAoTFVRoZSBVU0VSVFJVU1QgTmV0
+# d29yazEuMCwGA1UEAxMlVVNFUlRydXN0IFJTQSBDZXJ0aWZpY2F0aW9uIEF1dGhv
+# cml0eTAeFw0yMTAzMjIwMDAwMDBaFw0zODAxMTgyMzU5NTlaMFcxCzAJBgNVBAYT
+# AkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28g
+# UHVibGljIFRpbWUgU3RhbXBpbmcgUm9vdCBSNDYwggIiMA0GCSqGSIb3DQEBAQUA
+# A4ICDwAwggIKAoICAQCIndi5RWedHd3ouSaBmlRUwHxJBZvMWhUP2ZQQRLRBQIF3
+# FJmp1OR2LMgIU14g0JIlL6VXWKmdbmKGRDILRxEtZdQnOh2qmcxGzjqemIk8et8s
+# E6J+N+Gl1cnZocew8eCAawKLu4TRrCoqCAT8uRjDeypoGJrruH/drCio28aqIVEn
+# 45NZiZQI7YYBex48eL78lQ0BrHeSmqy1uXe9xN04aG0pKG9ki+PC6VEfzutu6Q3I
+# cZZfm00r9YAEp/4aeiLhyaKxLuhKKaAdQjRaf/h6U13jQEV1JnUTCm511n5avv4N
+# +jSVwd+Wb8UMOs4netapq5Q/yGyiQOgjsP/JRUj0MAT9YrcmXcLgsrAimfWY3MzK
+# m1HCxcquinTqbs1Q0d2VMMQyi9cAgMYC9jKc+3mW62/yVl4jnDcw6ULJsBkOkrcP
+# LUwqj7poS0T2+2JMzPP+jZ1h90/QpZnBkhdtixMiWDVgh60KmLmzXiqJc6lGwqoU
+# qpq/1HVHm+Pc2B6+wCy/GwCcjw5rmzajLbmqGygEgaj/OLoanEWP6Y52Hflef3XL
+# vYnhEY4kSirMQhtberRvaI+5YsD3XVxHGBjlIli5u+NrLedIxsE88WzKXqZjj9Zi
+# 5ybJL2WjeXuOTbswB7XjkZbErg7ebeAQUQiS/uRGZ58NHs57ZPUfECcgJC+v2wID
+# AQABo4IBFjCCARIwHwYDVR0jBBgwFoAUU3m/WqorSs9UgOHYm8Cd8rIDZsswHQYD
+# VR0OBBYEFPZ3at0//QET/xahbIICL9AKPRQlMA4GA1UdDwEB/wQEAwIBhjAPBgNV
+# HRMBAf8EBTADAQH/MBMGA1UdJQQMMAoGCCsGAQUFBwMIMBEGA1UdIAQKMAgwBgYE
+# VR0gADBQBgNVHR8ESTBHMEWgQ6BBhj9odHRwOi8vY3JsLnVzZXJ0cnVzdC5jb20v
+# VVNFUlRydXN0UlNBQ2VydGlmaWNhdGlvbkF1dGhvcml0eS5jcmwwNQYIKwYBBQUH
+# AQEEKTAnMCUGCCsGAQUFBzABhhlodHRwOi8vb2NzcC51c2VydHJ1c3QuY29tMA0G
+# CSqGSIb3DQEBDAUAA4ICAQAOvmVB7WhEuOWhxdQRh+S3OyWM637ayBeR7djxQ8Si
+# hTnLf2sABFoB0DFR6JfWS0snf6WDG2gtCGflwVvcYXZJJlFfym1Doi+4PfDP8s0c
+# qlDmdfyGOwMtGGzJ4iImyaz3IBae91g50QyrVbrUoT0mUGQHbRcF57olpfHhQESt
+# z5i6hJvVLFV/ueQ21SM99zG4W2tB1ExGL98idX8ChsTwbD/zIExAopoe3l6JrzJt
+# Pxj8V9rocAnLP2C8Q5wXVVZcbw4x4ztXLsGzqZIiRh5i111TW7HV1AtsQa6vXy63
+# 3vCAbAOIaKcLAo/IU7sClyZUk62XD0VUnHD+YvVNvIGezjM6CRpcWed/ODiptK+e
+# vDKPU2K6synimYBaNH49v9Ih24+eYXNtI38byt5kIvh+8aW88WThRpv8lUJKaPn3
+# 7+YHYafob9Rg7LyTrSYpyZoBmwRWSE4W6iPjB7wJjJpH29308ZkpKKdpkiS9WNsf
+# /eeUtvRrtIEiSJHN899L1P4l6zKVsdrUu1FX1T/ubSrsxrYJD+3f3aKg6yxdbugo
+# t06YwGXXiy5UUGZvOu3lXlxA+fC13dQ5OlL2gIb5lmF6Ii8+CQOYDwXM+yd9dbmo
+# cQsHjcRPsccUd5E9FiswEqORvz8g3s+jR3SFCgXhN4wz7NgAnOgpCdUo4uDyllU9
+# PzGCBkEwggY9AgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28g
+# TGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWduaW5nIENB
+# IFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAYBgorBgEE
+# AYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwG
+# CisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD6+5p4
+# ANWfxQrrRezdnmNaihAUNC45BVywIzzHFjC3hzANBgkqhkiG9w0BAQEFAASCAgDA
+# bmtG/QWeOOGxFFr6zWP0NwR4+X6ra5B05hPUcgL3L0wLhY6XsKZHlvPyC+7rzCF/
+# L6jzkJuEgAqbhE6xfdy/0w0UG3QqG6Y7KXEmqC2RM5JFcvPQDYo3vZmNyFvQRTLA
+# gx+XFYfHDoVwQNMj7JAauJ7Vvb/DmiIhMjP2xjaKQjWfhWY1QMPvhsrqMpbIfSE5
+# Gp2IzFA3rYj0sBs6RxDY8woKvM7QmwChI6iNtYb+eePJVAouasFaTdCBvJOSagD/
+# PetV02W6N79yMJx2oX9u7SjKY/QDRNu1+hykZrF//5/mTEPJlkiUZv267Nwp8cUt
+# 6Fnon8oGo5gpt+7V0MLu1AbEIXow7z85POo9VbmVmav6c3jq35QhUtV73eYlce92
+# WcMy6KcoYWXcbeUTiHrNiBNffhoZRdf0ClA9aEnEwEXQSI53/cAvmKegEWpuXxli
+# l4fxUhyI+94d49fZZUadTgiHNKrJWISbbdYRYQYC7XM0NGWVc8yZ02Dlrr1tw9A1
+# u66qnTDszDwKiiC0R4QEzWBjtj8rD0oM93zggcIu4CUcRHObN21inf40fC+efAmx
+# FxIE2VNae4JCnEGRhG3OHhMtdjW8XLyuhDAG8j/yYAv9Xi2gh3DBL8PJulVMN+Qw
+# CqpGBMPOJF8Hjqmcx31nshdNbmbJqMEYz3A/r6i80aGCAyMwggMfBgkqhkiG9w0B
+# CQYxggMQMIIDDAIBATBqMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdv
+# IExpbWl0ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcg
+# Q0EgUjM2AhEApCk7bh7d16c0CIetek63JDANBglghkgBZQMEAgIFAKB5MBgGCSqG
+# SIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDQwNzE4NTIy
+# NFowPwYJKoZIhvcNAQkEMTIEMODTAZN6RxD88KsRRPrZcKS6aT17WfZqqszW6Xuz
+# dL8m/zHF1x69K2bKFcWi9i+e+jANBgkqhkiG9w0BAQEFAASCAgCyywxGRJFfu9bT
+# Tti+FRjA6OBu9bixg2JVx1Z4jUV4GOOYPNwdPPGtn/zCl2e7ce6DmdgMm0/4SS0S
+# +E6n8BL/GRoFDV81ryEYPNXs0Bl42rIPG6KQBIPNbT8H2cTpz6fp7xK5PEUSt8b7
+# GzUfaMY4H9aqp9+QCBnJXjobG91T/iPbArj3k/qaUHP/d2ONuy3YIMzVCqynFl8g
+# 7vOVSmodjvEj/aM25sTPn3EfYfilQ5jvzqO1xv4kGnny8HF+vtACVSshcjFQSxYi
+# AtWEVYEKgO3slmZ97MrjMa1I+aBVp9AWytZRnTity4ZU4OthRMyYdxnedrB2/lq+
+# 75afSqBLgA/5UdMvKVEfephxNwLnJKLgFuUF6j+Rkt6oyGSvoW0lvULDcGI1IG45
+# Cld2lb+QqozX3+8ZbwkBh9GOJDCoFkIWc1SdgDyGlHt4wARBrrAhgZboZIsA2DgJ
+# n8bh7L92XR3t02+5G8GuvByQswUwGAtUhm+FR6UtF8XIuDv5i1kFMp2ClTVNL8I2
+# 2hq502LWccHnjyMZIkp7a1ss5+jOLvkgJ0m/nm3vmG7iEcw0DGmw0ShLTvuw8sdb
+# 1JhyBYA55O42nRrX1cN/nbM1i9cBU1oIfibgBrhUErjfJph/DLSzKSXUBx69zc8E
+# nFktJP0jQFjcvEACFgXbwkkPXGKEMg==
 # SIG # End signature block

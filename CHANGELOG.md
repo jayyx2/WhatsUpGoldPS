@@ -1,5 +1,5 @@
 ﻿﻿# WhatsUpGoldPS Release History
-## 0.1.21 - 2026-04-05 [Unreleased]
+## 0.1.21 - 2026-04-08 [Unreleased]
 * Added -- New Functions (92 total exports; psm1 and psd1 in sync)
   * `Get-WUGPassiveMonitor` -- Retrieve passive monitor templates from the library (`GET /monitors/-?type=passive`), a single template by ID (`GET /monitors/{id}?type=passive`), or device assignments (`GET /devices/{id}/monitors/-?type=passive`); supports `-Search`, `-View`, `-DeviceId`, `-AssignmentView`, `-MonitorId`, pagination
   * `Set-WUGPassiveMonitor` -- Update passive monitor template definitions via `PUT /monitors/{id}?type=passive`; supports `-Name`, `-Description`, `-PropertyBags`, `-UseInDiscovery`
@@ -267,6 +267,12 @@
     * Fixed TXT export: replaced hardcoded WUG device field names (`id`, `name`, `networkAddress`, `hostName`, `downActiveMonitors`) with dynamic `Object.keys()` -- all templates and `Bootstrap-Table-Sample.html` now export actual column data instead of `undefined`
     * Added full export suite to Fortinet dark-theme dashboard (FileSaver, XLSX, html2canvas libraries + export dropdown in header)
   * Replaced all Unicode em-dash (U+2014) characters with ASCII dashes across entire project to prevent encoding corruption on Windows systems
+  * `AzureHelpers.ps1` -- Removed Az PowerShell module dependency entirely; all Azure operations now use pure REST API calls (`Invoke-AzureREST`); `Connect-AzureREST` replaces `Connect-AzAccount`; `Get-AzureDashboard.ps1`, `discover-azure-*.ps1`, `DiscoveryProvider-Azure.ps1`, `Setup-Azure-Discovery.ps1` updated to REST-only
+  * `ProxmoxHelpers.ps1` -- Added `-ApiToken` parameter to `Get-ProxmoxNodes`, `Get-ProxmoxVMs`, `Get-ProxmoxNodeDetail`, `Get-ProxmoxVMDetail`, `Get-ProxmoxDashboard`; all pass through to `Invoke-ProxmoxAPI -ApiToken`; `Get-ProxmoxDashboard -Cookie` no longer mandatory (token-only auth supported)
+  * `ProxmoxHelpers.ps1` -- Fixed PS 5.1 header validation failure for `PVEAPIToken=user@realm!tokenid=secret` format; `Connect-ProxmoxServer` uses `HttpWebRequest.Headers.Add()` on PS 5.1 (bypasses `WebHeaderCollection` validation); `Invoke-ProxmoxAPI` uses `WebRequestSession.Headers` on PS 5.1; PS 7+ uses `-SkipHeaderValidation`
+  * `Invoke-WUGHelperTest.ps1` -- Proxmox auth now offers `[1] Username + Password  [2] API Token  [S] Skip`; option 2 resolves `Proxmox.<host>.Token` from DPAPI vault with `BearerToken` CredType (matches `Setup-Proxmox-Discovery.ps1` pattern); vault save/clear on pass/fail for both auth methods
+  * `Invoke-WUGHelperTest.ps1` -- Geolocation console URL auto-derived from `WUG.Server` vault data (`$protocol://$server:443`) instead of prompting via `Read-Host`
+  * `Invoke-WUGHelperTest.ps1` -- AWS tests auto-expand across all enabled regions; EC2/RDS/ELB loop through `Get-AWSRegionList`; multi-region dashboard passes all discovered regions
 
 * Fixed
   * Fixed HTML test report showing empty table when only one test result -- `ConvertTo-Json` pipeline with single item produces `{}` instead of `[{}]`; switched to `ConvertTo-Json -InputObject @($array)` in `Invoke-WUGHelperTest.ps1`
@@ -295,9 +301,6 @@
   * NmConsole dashboard files were publicly accessible without authentication; added child `web.config` with `<deny users="?" />` to `NmConsole\dashboards\` subdirectory; centralized `Deploy-DashboardWebConfig` function in `DiscoveryHelpers.ps1`; all 12 Setup scripts and `Update-GeolocationMap.ps1` now deploy the web.config automatically after copying dashboards; added `<customErrors>` redirect to `/NmConsole` for unauthenticated users
   * Dashboard HTML files were being copied to the NmConsole root directory (risking filename collisions); moved all dashboards to `NmConsole\dashboards\` subdirectory; updated all 14 files (12 Setup scripts, `Copy-WUGDashboardReports.ps1`, `Update-GeolocationMap.ps1`, `Start-WUGDiscoverySetup.ps1`)
   * Data directory path `%LOCALAPPDATA%\DiscoveryHelpers\` was too generic; relocated to `%LOCALAPPDATA%\WhatsUpGoldPS\DiscoveryHelpers\` (Vault and Output subdirectories) across 19 files -- existing users must move or re-create their vault under the new path
-
-* Added -- Tools
-  * `Build-Release.ps1` -- Generates minimal release zip for deployment; reads version from psd1, stages module files (psd1, psm1, functions/, helpers/, examples/, LICENSE, README, CHANGELOG, NOTICE), excludes dev artifacts (.git, .github, docs, internal); output: `release\WhatsUpGoldPS-<version>.zip`
 
 ## 0.1.19/20 - 2026-03-15 [Released to PowerShell Gallery]
 * Added  -- New Functions (85 total exports; psm1 and psd1 in sync)

@@ -132,7 +132,7 @@ param(
     [string]$Mode,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'Nutanix', 'OCI', 'Proxmox', 'VMware')]
+    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
     [string]$Provider,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -161,7 +161,7 @@ param(
     [string]$WUGServer,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'Nutanix', 'OCI', 'Proxmox', 'VMware')]
+    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
     [string[]]$RunnerProviders,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -205,6 +205,8 @@ $providerScripts = @{
     OCI      = Join-Path $discoveryDir 'Setup-OCI-Discovery.ps1'
     Proxmox  = Join-Path $discoveryDir 'Setup-Proxmox-Discovery.ps1'
     VMware   = Join-Path $discoveryDir 'Setup-VMware-Discovery.ps1'
+    WindowsAttributes = Join-Path $discoveryDir 'Setup-WindowsAttributes-Discovery.ps1'
+    WindowsDiskIO = Join-Path $discoveryDir 'Setup-WindowsDiskIO-Discovery.ps1'
 }
 
 # Restrict a directory's ACL to current user + SYSTEM + Administrators
@@ -607,8 +609,8 @@ catch {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDEkh1cPbd61BWR
-# +xXCbeHQJ4vznV7Qn889IyWuN6RG7qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHlrT1iZv0jy7C
+# s+UllOhb5SiW5JBEgKcglzJT5MDp4qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -811,33 +813,33 @@ catch {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBbCq94ytRCVErsQBbY5mBcuTuh1t3EGxqFS0NFWkhq1jANBgkqhkiG9w0BAQEF
-# AASCAgDRyGQ7m8klXfEtJqfy7Q9t4N3MGYM4f5EEQn/+6hxyfI76nFs51QYrTcpu
-# Xmr/n4ZPVDRjEgHi0URvLHhg+PwtTdBHFgZtm2VXBGAIHYWQxth9wZVCrrdxZ9g1
-# Yl5SQbQWPONoojKDrIydf+YN9KD3xTr6o7raUIPEVIHTIx8At73mSAs5Y5UVfiJR
-# hi5xvmKhnh+QJFDJnWBN+uVm3QKSTgb/KtDxRCFl03xkQdeZQFIkiy69QhySAfRY
-# lQUhPUwM8vqVOXOrgfUYy3/HrHhLG8CkooKiZACj1ZQEFIYvnrzXUKZ0e2S12Toc
-# RROvbhNCrC5R1VtElvGro4HfoZhjTV2FrBJB3w0Op8pG/pfY5gCSbULdEI682j3a
-# PTPQvy+sFtdpf8ulG8N9HrqCNKlgpneNgQg8UWWobmVptoLlB29TuQ2xazXlsZZ6
-# Np/OYTYywiI/ti412ZlqtxjjGJpUh2Yac6fn77bMqh87zY21+N7ZkM7Rg7W6tztI
-# kshDIHi7ufEYpTxxOE5TmhbOswnO6x6NcTZ+nf3b5mFIg6Iggke9EpPu6gqOmmDp
-# YhZQFPBwfqEjOmYQXZHwsMvrwR3Zc5e9zRz0W9z8VmDJiugr0exUc78q4ze9s8DC
-# rfxRTK1GVPsG0YefNq0YpwGXIfGrJ5PkQ2Ze+1sUBUfnHCvmNaGCAyYwggMiBgkq
+# BCB3A/8FY51slfv755xHzWkHiinW2y68TUe5FVOijA3WaTANBgkqhkiG9w0BAQEF
+# AASCAgAOt24ysM0F+DBzcW+5lg/2KCMxcnVpAkg0NuvTBWUNGGc9eHJ0MQHeM9JP
+# poZAPhytSRZI+HnJw9Ha7iFMLTARmX4gWzxbugHHGDaMQVpZpF1fEx6fJ1+oOVNn
+# cZR74g4MJRQiGwGT/3il/OZRZ7Snw+RhDwsIAgmQWytY87GBfh1JH43yoVyEfolm
+# 2yc1i6ANMmKW8qpl6/98JaTj0C3uo+ckUXROms+dwF5febpwoGjW1QGrkjl7sHv/
+# z8X3pFyol+gAvO3ItIi9noSjJhUqOrTI5jXGDjkii22ddbnY1CvRwn0HAfRkTA4y
+# SWbZ+DomOOyuJIm187JaE7+Whm6nFI9zSJSsFTcPO2bAnzCgNpBUEl+GkN/O73V6
+# Br1kUVDUOOT3mbnTtPqo/k8PU8p5Zv9/F+G7TH8z06YFpiv3jQSqqv1W7Y1kjISp
+# ZY13ljHyOv4lfD1BMZp7apmM4EAlnWIG3O6B5Sh2d643+fDCEpu7Q/F8oDrQPaj/
+# R3SQhFiDJj1zJrXsUE8xXfkpNENnCXj5/y4fXrxzFrHRj+Oi3Fm5OibeFQQZUeyF
+# PLVPSv65SfvIGac9+P0tCSNDOajTryvp1pZKI8cuLj6sWj2BYEDyxuS4HHoNH7Vn
+# FMYpub7O6ERNY7jb0BwVJg+erJWbsPRD+ME/acx82TYh01FszaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MDYxOTMzMTdaMC8GCSqGSIb3DQEJBDEiBCB8lLc/
-# RbfsqCc2LdHrtjB9ETDzqf8BC5sQ5lC7cc0uOTANBgkqhkiG9w0BAQEFAASCAgCM
-# fmvahsbj9ZM6uJ48dOmFFTQUy8gKuDfzS9g8HSO5MaHZDs07FFsQ5FyuMxcEFCUY
-# HMXrGEFWdxq5Nw2BIBwDHUg9JQ4x+1ySsuFEpWqK38qpPTKJl5qX4c6kGR7XPUlp
-# J6W0Z0Eh7T9Y6mycuDHX8witzmA6GuwvYX55NWuDGV1HHtiGLf5CH1o+dh4RwImv
-# 4zt0BCJA+/cKK7u290RVW8mNkbAt4OE8Pdmi//6eg/Wkz+qbrjDNQjZo04MGz/WO
-# OxISGW30IXeL2hTfH2Mhrx4ZbyKwdWWiWVv/sLGItCA3k6Fppa1HdgN6m0HiYkKs
-# temsVF8uzLSQdkMHavoKxYF3u7OHr/mfwP2C/Rpb5PLzRL7OUZFyskHBssM1wAq7
-# 1ywPIWMs9HiET30AfLXud4Fk9z+oAylgihX1GlSHPUwMWwYu4RIhYJx51fQNufYa
-# BbfV1YEtdNA/mGGLeyhC6W3+wI0T9aqpxTpGqMvsP531kfBu6B3PfUIzaIVnQvkz
-# rKzdqTxcKtWLA1p5lKQxUJX833JoyDwkExOi/zrfztwhjWkA8imNbd41OfSHdROa
-# j5AJTz236LTRMggiVOBWE4XqcnegqaLoGBCWrUNKrOYqNEvskw9brWATRvOXLWI6
-# 4pIplHFyOjJHzT1+Bb96dIg0UbtcmKZKJHDtdnlT1w==
+# CSqGSIb3DQEJBTEPFw0yNjA0MTAwMjE0MDFaMC8GCSqGSIb3DQEJBDEiBCDVEDIg
+# ZydSY0dALYFKllxeT4hXDEtqqOkR5tKye+AtvTANBgkqhkiG9w0BAQEFAASCAgBa
+# Ok2o1awjEdAvDUaSiLHZrfOFdopK9B8xL/C26WSBclG2iwydDb92kEFbwoO07FLb
+# ENSx6IVWXY7MFARVWCjxMkoWYVfBRla9gsmiG7AbfSAiw4Nte0K+GdGI2j4f6PYg
+# nS32ePosuOUAV/eXq22BA29wnJYCHyhtghIoMH6jrUXy5ISlgfk5CvKovLoh6ZUX
+# o9jdMBVX1FpGKTEZWX7iEo3o4ZLoPArVQOYA0nle5pz4o8izNBAal5PMZPf8McNE
+# e6CBfXIthf7ObNhboj8uYoGLtKCZJDotETimtsr5bSLhiH0gNlY/ZFMCB0tzUVe7
+# BUkTqMj71KK/D1b30ct/UaMVRbq2xNM2UKri0u/7fLOj0sitFTR0QrICNzlOsIXz
+# HZ5kEAU6CwJ21/CToE9WyIQgA8ayJHG6braZav50FVFxhu/z951omkt4yxY6cWFj
+# xfKNcuvv1v1QBHzisuaPBNP2QfmwiOoqWiu63yP+wvNhAKyi6+i+J8rMlrbo/4Bo
+# 3xh5LN67Rm54Z7uRmbH8LjimBADO6kkt/azAJv0nVmPHLxjDbVhyv8ULcLYUMqTx
+# E5JpZgCaBqdA7NJaDBaPlSp7uf/kvkH2MQuRSC3TCEgAgVoh1uZpWWznQWkM6Rzw
+# iB+CCwdfSUV3ukz7ZGpiehSnzOaC+cEjIVPTnZhNeA==
 # SIG # End signature block

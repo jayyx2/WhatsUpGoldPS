@@ -175,6 +175,19 @@
     * `Setup-HyperV-Discovery.ps1` -- Interactive Hyper-V discovery script with PSCredential vault storage
     * `Setup-Proxmox-Discovery.ps1` -- Interactive Proxmox VE discovery script with API token vault storage; LXC container (`CT`) device type handling; unified "guest" terminology (VMs + CTs); guest-with-IP / guest-without-IP summary; new `DashboardAndPush` action; sequential Dashboard then PushToWUG execution; full PushToWUG pipeline (credential creation, bulk active/perf monitor creation, device template creation, credential assignment); WUG module auto-import; vault-based credential resolution
     * `Setup-VMware-Discovery.ps1` -- Interactive VMware vSphere discovery script with PSCredential vault storage
+    * `Setup-WindowsAttributes-Discovery.ps1` -- Windows system attributes discovery helper; scans WUG devices via WMI (`Win32_OperatingSystem`, `Win32_ComputerSystem`, `Win32_BIOS`, `Win32_Processor`) to collect OS version, CPU, RAM, serial number, domain, last boot time, and more; creates or updates device attributes in WUG via `Set-WUGDeviceAttribute`
+      * 16 attribute keys: OSName, OSVersion, OSBuild, ServicePack, Architecture, Manufacturer, Model, SerialNumber, TotalMemoryGB, CPUName, CPUCores, CPULogical, Domain, LastBootTime, InstallDate, SystemType
+      * `-IncludeAttribute` -- select specific attributes or `All` (default: all 16)
+      * `-AttributePrefix` -- namespace prefix for attribute names (default: `Windows`)
+      * Shared Windows WMI credential vault (`Windows.WMI.Credential.N`) -- same creds used by `Setup-WindowsDiskIO-Discovery.ps1`
+      * Smart device group detection, multi-credential fallback, `-DryRun`, `-NonInteractive` -- same patterns as DiskIO helper
+    * `Setup-WindowsDiskIO-Discovery.ps1` -- Windows disk IO discovery helper; scans WUG devices via WMI to enumerate physical or logical disk instances, creates WmiFormatted performance monitors in the WUG library (one per unique class+property+instance), and assigns them to applicable devices
+      * `-DiskType` (Logical/Physical/All) -- queries `Win32_PerfFormattedData_PerfDisk_LogicalDisk` or `PhysicalDisk`; `All` runs both passes sequentially; default: Logical
+      * `-IncludeCounter` with `All` option -- default: DiskTransfersPersec (total IOPS); `All` enables 8 counters (reads/writes/transfers, bytes read/write/total, avg queue length, % disk time)
+      * `-DeviceGroupSearch 'Windows Infrastructure'` -- auto-finds WUG device group by name; `-WindowsOnly` filters non-Windows devices by role/description
+      * Multi-credential support -- vault stores numbered `Windows.WMI.Credential.1`, `.2`, etc. (shared across all `Setup-Windows*` helpers); per-device fallback on access-denied errors (UnauthorizedAccessException, COM 0x80070005)
+      * Pre-checks existing library monitors and device assignments to skip duplicates; `-DryRun` for preview without changes
+      * DPAPI vault integration via `Resolve-DiscoveryCredential`; WUG server auto-connect from vault; fully non-interactive via `-NonInteractive`
   * helpers/bigleaf/ -- Bigleaf Cloud Connect SD-WAN dashboard suite (API v2)
     * `BigleafHelpers.ps1` -- 13 functions for Bigleaf API integration (HTTP Basic auth, 10 calls/min rate limit)
       * `Connect-BigleafAPI`, `Disconnect-BigleafAPI`, `Invoke-BigleafAPI` (internal wrapper)
@@ -189,7 +202,7 @@
     * `Invoke-WUGDiscoveryVault.ps1` -- Interactive DPAPI vault manager (List/View/Add/Update/Delete credentials); supports AWSKeys, AzureSP, BearerToken, PSCredential types; `-Action`/`-Name`/`-CredType` parameters for non-interactive use
     * `Invoke-WUGDiscoveryHelperTest.ps1` -- Automated test harness for Discovery Framework and DPAPI Credential Vault (12 test areas: provider registration, single/multi-field vault ops, credential expiry, tamper detection, AES-256 double encryption, secret scrubbing, aliases, standalone discovery with mock provider, audit log, ACL permissions, cleanup); uses temp vault, no network access required
     * `Test-Dashboard-Template.html` -- Bootstrap Table HTML template for test result reports
-    * `Register-DiscoveryScheduledTask.ps1` -- Register Windows Scheduled Tasks for recurring discovery runs; three modes: Provider (single provider), Runner (all providers via Invoke-WUGDiscoveryRunner), WUGAction (Setup script action); uses DPAPI vault for fully non-interactive execution; supports 12 providers (AWS, Azure, Bigleaf, Docker, F5, Fortinet, GCP, HyperV, Nutanix, OCI, Proxmox, VMware); `DashboardAndPush` action; new `Set-RestrictedDirectoryAcl` function locks output/log directories to current user + SYSTEM + Administrators via explicit ACL
+    * `Register-DiscoveryScheduledTask.ps1` -- Register Windows Scheduled Tasks for recurring discovery runs; three modes: Provider (single provider), Runner (all providers via Invoke-WUGDiscoveryRunner), WUGAction (Setup script action); uses DPAPI vault for fully non-interactive execution; supports 14 providers (AWS, Azure, Bigleaf, Docker, F5, Fortinet, GCP, HyperV, Nutanix, OCI, Proxmox, VMware, WindowsAttributes, WindowsDiskIO); `DashboardAndPush` action; new `Set-RestrictedDirectoryAcl` function locks output/log directories to current user + SYSTEM + Administrators via explicit ACL
   * helpers/test/Invoke-WUGGeomapTest.ps1 -- Dedicated geolocation E2E integration test harness (21 tests)
     * `Connect-WUGServer` + `Connect-GeoWUGServer` authentication
     * `Add-WUGDeviceTemplate` (create geo test device), `Set-WUGDeviceAttribute` for LatLong (combined) and separate Latitude/Longitude, `Get-WUGDeviceAttribute` verification

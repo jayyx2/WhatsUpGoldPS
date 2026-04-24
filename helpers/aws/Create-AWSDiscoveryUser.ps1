@@ -1,142 +1,201 @@
-﻿# Configuration
-$AWSRegions = @("us-east-1")  # Regions to scan (add more as needed)
+<#
+.SYNOPSIS
+    Creates an AWS IAM user with read-only permissions for WhatsUpGold discovery.
 
-# Check if required modules are installed and loaded
-if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
+.DESCRIPTION
+    Uses the SigV4 REST implementation from AWSHelpers.ps1 -- no AWS CLI needed.
+    Prompts for admin-level AWS credentials, then creates an IAM user with a
+    read-only policy covering EC2, RDS, ELB, CloudWatch, Lambda, S3, and STS.
+    Outputs the new access key and secret key for use with Setup-AWS-Discovery.ps1.
 
-$requiredAWSModules = @('AWS.Tools.Common', 'AWS.Tools.EC2', 'AWS.Tools.RDS',
-    'AWS.Tools.ElasticLoadBalancingV2')
-foreach ($mod in $requiredAWSModules) {
-    if (-not (Get-Module -Name $mod -ListAvailable)) {
-        throw "Required module '$mod' is not installed. Run: Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force; Install-AWSToolsModule EC2, RDS, ElasticLoadBalancingV2 -CleanUp"
-    }
-    if (-not (Get-Module -Name $mod)) { Import-Module $mod }
+.PARAMETER UserName
+    Name for the new IAM user. Default: wug-discovery.
+
+.PARAMETER PolicyName
+    Name for the inline policy. Default: WUGDiscoveryReadOnly.
+
+.PARAMETER AdminAccessKey
+    Admin IAM access key. If omitted, you will be prompted.
+
+.PARAMETER AdminSecretKey
+    Admin IAM secret key. If omitted, you will be prompted.
+
+.EXAMPLE
+    .\Create-AWSDiscoveryUser.ps1
+    .\Create-AWSDiscoveryUser.ps1 -UserName 'my-reader' -AdminAccessKey 'AKIA...' -AdminSecretKey 's3cr3t'
+
+.NOTES
+    No external dependencies -- uses SigV4 REST via AWSHelpers.ps1.
+#>
+param(
+    [string]$UserName   = 'wug-discovery',
+    [string]$PolicyName = 'WUGDiscoveryReadOnly',
+    [string]$AdminAccessKey,
+    [string]$AdminSecretKey
+)
+
+$ErrorActionPreference = 'Stop'
+$scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
+
+# ── Load SigV4 helpers ──────────────────────────────────────────────
+. (Join-Path $scriptDir 'AWSHelpers.ps1')
+
+# ── Prompt for admin credentials if not supplied ────────────────────
+if (-not $AdminAccessKey) {
+    $AdminAccessKey = Read-Host 'Admin Access Key ID'
+}
+if (-not $AdminSecretKey) {
+    $AdminSecretKey = Read-Host 'Admin Secret Access Key'
 }
 
-# Load helper functions
-. "$PSScriptRoot\AWSHelpers.ps1"
+# ── IAM REST helper (global endpoint iam.amazonaws.com) ─────────────
+function Invoke-IAMREST {
+    param(
+        [string]$Action,
+        [hashtable]$Params = @{}
+    )
+    $queryParams = [ordered]@{ Action = $Action; Version = '2010-05-08' }
+    foreach ($k in $Params.Keys) { $queryParams[$k] = $Params[$k] }
 
-# Load vault functions for credential resolution
+    $qs = ($queryParams.GetEnumerator() | Sort-Object Name | ForEach-Object {
+        "$([uri]::EscapeDataString($_.Name))=$([uri]::EscapeDataString($_.Value))"
+    }) -join '&'
+
+    $uri = "https://iam.amazonaws.com/?$qs"
+
+    $sig = _AWSSigV4Sign -AccessKey $AdminAccessKey -SecretKey $AdminSecretKey `
+        -Region 'us-east-1' -Service 'iam' -Method 'GET' -Uri $uri
+
+    $req = [System.Net.HttpWebRequest]::Create($uri)
+    $req.Method = 'GET'
+    $req.Headers.Add('Authorization', $sig.Authorization)
+    $req.Headers.Add('x-amz-date', $sig.'x-amz-date')
+    $req.Headers.Add('x-amz-content-sha256', $sig.'x-amz-content-sha256')
+
+    try {
+        $webResp = $req.GetResponse()
+    }
+    catch [System.Net.WebException] {
+        $errResp = $_.Exception.Response
+        if ($errResp) {
+            $r = [System.IO.StreamReader]::new($errResp.GetResponseStream())
+            $errBody = $r.ReadToEnd(); $r.Close(); $errResp.Close()
+            throw "IAM HTTP $([int]$errResp.StatusCode): $errBody"
+        }
+        throw
+    }
+    try {
+        $reader = [System.IO.StreamReader]::new($webResp.GetResponseStream())
+        $body = $reader.ReadToEnd(); $reader.Close()
+    } finally { $webResp.Close() }
+    return ([xml]$body)
+}
+
+# ── Validate admin credentials via STS ──────────────────────────────
+Write-Host 'Validating admin credentials...' -ForegroundColor Cyan
+try {
+    Connect-AWSProfileREST -AccessKey $AdminAccessKey -SecretKey $AdminSecretKey -Region 'us-east-1'
+    $sts = Invoke-AWSREST -Service 'sts' -Action 'GetCallerIdentity' -Version '2011-06-15' -Region 'us-east-1'
+    $callerArn = $sts.GetCallerIdentityResponse.GetCallerIdentityResult.Arn
+    Write-Host "  Authenticated as: $callerArn" -ForegroundColor Green
+}
+catch {
+    Write-Host "Failed to validate credentials: $($_.Exception.Message)" -ForegroundColor Red
+    return
+}
+
+# ── Step 1: Create IAM user ─────────────────────────────────────────
+Write-Host ''
+Write-Host "Creating IAM user '$UserName'..." -ForegroundColor Cyan
+try {
+    $resp = Invoke-IAMREST -Action 'CreateUser' -Params @{ UserName = $UserName }
+    $userArn = $resp.CreateUserResponse.CreateUserResult.User.Arn
+    Write-Host "  Created: $userArn" -ForegroundColor Green
+}
+catch {
+    if ($_.Exception.Message -match 'EntityAlreadyExists') {
+        Write-Host "  User '$UserName' already exists -- continuing." -ForegroundColor Yellow
+    }
+    else { throw }
+}
+
+# ── Step 2: Attach inline policy ────────────────────────────────────
+$policyDocument = @'
+{"Version":"2012-10-17","Statement":[{"Sid":"WUGDiscoveryReadOnly","Effect":"Allow","Action":["ec2:Describe*","rds:Describe*","rds:ListTagsForResource","elasticloadbalancing:Describe*","cloudwatch:Describe*","cloudwatch:GetMetricData","cloudwatch:GetMetricStatistics","cloudwatch:ListMetrics","lambda:ListFunctions","lambda:GetFunction","s3:ListAllMyBuckets","s3:GetBucketLocation","sts:GetCallerIdentity","iam:GetUser"],"Resource":"*"}]}
+'@
+
+Write-Host "Attaching policy '$PolicyName'..." -ForegroundColor Cyan
+Invoke-IAMREST -Action 'PutUserPolicy' -Params @{
+    UserName       = $UserName
+    PolicyName     = $PolicyName
+    PolicyDocument = $policyDocument
+} | Out-Null
+Write-Host '  Policy attached.' -ForegroundColor Green
+
+# ── Step 3: Create access key ───────────────────────────────────────
+Write-Host 'Generating access key...' -ForegroundColor Cyan
+$keyResp = Invoke-IAMREST -Action 'CreateAccessKey' -Params @{ UserName = $UserName }
+$newAK = $keyResp.CreateAccessKeyResponse.CreateAccessKeyResult.AccessKey.AccessKeyId
+$newSK = $keyResp.CreateAccessKeyResponse.CreateAccessKeyResult.AccessKey.SecretAccessKey
+
+Write-Host ''
+Write-Host '============================================' -ForegroundColor Green
+Write-Host ' IAM User Created Successfully'              -ForegroundColor Green
+Write-Host '============================================' -ForegroundColor Green
+Write-Host ''
+Write-Host "User:       $UserName"  -ForegroundColor Yellow
+Write-Host "Access Key: $newAK"     -ForegroundColor Yellow
+
+# Offer to save to DPAPI vault instead of displaying secret key
 $discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
-if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
-
-# ========================
-# Resolve credentials from vault
-# ========================
-$awsCred = Resolve-DiscoveryCredential -Name 'AWS.Credential' -CredType AWSKeys -ProviderLabel 'AWS' -AutoUse
-if ($awsCred) {
-    $AWSAccessKey = $awsCred.UserName
-    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($awsCred.Password)
-    try { $AWSSecretKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
-    finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-} else {
-    throw "AWS credentials are required. Store them in the vault using Setup-AWS-Discovery.ps1"
-}
-$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
-if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
-$WUGServer = $WUGCred.UserName
-
-# ========================
-# Connect to AWS
-# ========================
-Write-Host "`n=== Connecting to AWS ===" -ForegroundColor Cyan
-Connect-AWSProfile -AccessKey $AWSAccessKey -SecretKey $AWSSecretKey -Region $AWSRegions[0]
-$AWSSecretKey = $null
-
-# ========================
-# Discover Resources and Collect IPs
-# ========================
-$allIPs = @()
-
-foreach ($region in $AWSRegions) {
-    Write-Host "`n=== Region: $region ===" -ForegroundColor Cyan
-
-    # --- EC2 Instances ---
-    Write-Host "  Gathering EC2 instances..." -ForegroundColor Gray
-    try {
-        $ec2Instances = @(Get-AWSEC2Instances -Region $region)
-        Write-Host "    Found $($ec2Instances.Count) EC2 instances" -ForegroundColor Gray
-        foreach ($inst in $ec2Instances) {
-            $ip = Resolve-AWSResourceIP -ResourceType EC2 -Resource $inst
-            if ($ip -and $ip -match '^\d{1,3}(\.\d{1,3}){3}$') {
-                Write-Host "    $($inst.Name) ($($inst.InstanceId)) -> $ip" -ForegroundColor DarkGray
-                $allIPs += $ip
-            } else {
-                Write-Warning "    Skipping EC2 $($inst.Name) ($($inst.InstanceId)) - no resolvable IP"
-            }
-        }
-    }
-    catch {
-        Write-Warning "  Could not enumerate EC2 in $region : $($_.Exception.Message)"
-    }
-
-    # --- RDS Instances ---
-    Write-Host "  Gathering RDS instances..." -ForegroundColor Gray
-    try {
-        $rdsInstances = @(Get-AWSRDSInstances -Region $region)
-        Write-Host "    Found $($rdsInstances.Count) RDS instances" -ForegroundColor Gray
-        foreach ($db in $rdsInstances) {
-            $ip = Resolve-AWSResourceIP -ResourceType RDS -Resource $db
-            if ($ip -and $ip -match '^\d{1,3}(\.\d{1,3}){3}$') {
-                Write-Host "    $($db.DBInstanceId) -> $ip" -ForegroundColor DarkGray
-                $allIPs += $ip
-            } else {
-                Write-Warning "    Skipping RDS $($db.DBInstanceId) - no resolvable IP"
-            }
-        }
-    }
-    catch {
-        Write-Warning "  Could not enumerate RDS in $region : $($_.Exception.Message)"
-    }
-
-    # --- Load Balancers ---
-    Write-Host "  Gathering Load Balancers..." -ForegroundColor Gray
-    try {
-        $loadBalancers = @(Get-AWSLoadBalancers -Region $region)
-        Write-Host "    Found $($loadBalancers.Count) load balancers" -ForegroundColor Gray
-        foreach ($lb in $loadBalancers) {
-            $ip = Resolve-AWSResourceIP -ResourceType ELB -Resource $lb
-            if ($ip -and $ip -match '^\d{1,3}(\.\d{1,3}){3}$') {
-                Write-Host "    $($lb.LoadBalancerName) -> $ip" -ForegroundColor DarkGray
-                $allIPs += $ip
-            } else {
-                Write-Warning "    Skipping ELB $($lb.LoadBalancerName) - no resolvable IP"
-            }
-        }
-    }
-    catch {
-        Write-Warning "  Could not enumerate ELB in $region : $($_.Exception.Message)"
+$vaultAvailable = $false
+if (Test-Path $discoveryHelpersPath) {
+    . $discoveryHelpersPath
+    if (Get-Command -Name 'Save-DiscoveryCredential' -ErrorAction SilentlyContinue) {
+        $vaultAvailable = $true
     }
 }
 
-# Deduplicate IPs
-$allIPs = $allIPs | Select-Object -Unique
-
-Write-Host "`n=== Discovery Summary ===" -ForegroundColor Cyan
-Write-Host "  Unique resolvable IPs: $($allIPs.Count)"
-
-# ========================
-# Add to WhatsUp Gold (bulk discover-then-add)
-# ========================
-Connect-WUGServer -serverUri $WUGServer -Credential $WUGCred -Protocol https -IgnoreSSLErrors
-
-if ($allIPs.Count -gt 0) {
-    Write-Host "`nAdding $($allIPs.Count) devices to WhatsUp Gold..." -ForegroundColor Cyan
-    Add-WUGDevice -IpOrNames $allIPs
-} else {
-    Write-Warning "No valid IP addresses found to add."
+if ($vaultAvailable) {
+    $saveChoice = Read-Host -Prompt "Save to DPAPI vault as 'AWS.Credential'? (Y/n)"
+    if ($saveChoice -ne 'n') {
+        $combined = "$newAK|$newSK"
+        $ss = ConvertTo-SecureString $combined -AsPlainText -Force
+        $combined = $null
+        Save-DiscoveryCredential -Name 'AWS.Credential' -SecureSecret $ss -Description "AWS IAM ($newAK)" -Force | Out-Null
+        Write-Host '  Saved to vault! Secret key is NOT displayed.' -ForegroundColor Green
+        $newSK = $null
+    }
+    else {
+        Write-Host "Secret Key: $newSK" -ForegroundColor Yellow
+        $newSK = $null
+        Write-Host ''
+        Write-Host 'Save these credentials now -- the secret key cannot be retrieved again!' -ForegroundColor Red
+    }
+}
+else {
+    Write-Host "Secret Key: $newSK" -ForegroundColor Yellow
+    $newSK = $null
+    Write-Host ''
+    Write-Host 'Save these credentials now -- the secret key cannot be retrieved again!' -ForegroundColor Red
 }
 
-# Cleanup
-if ($Global:WUGConnection) {
-    Disconnect-WUGServer
-}
+Write-Host ''
+Write-Host 'Permissions granted:' -ForegroundColor Cyan
+Write-Host '  - EC2:   Describe* (instances, VPCs, subnets, volumes, security groups)'
+Write-Host '  - RDS:   Describe* (DB instances, clusters, snapshots)'
+Write-Host '  - ELB:   Describe* (load balancers, target groups, listeners)'
+Write-Host '  - CloudWatch: Describe*, GetMetricData, GetMetricStatistics, ListMetrics'
+Write-Host '  - Lambda: ListFunctions, GetFunction'
+Write-Host '  - S3:    ListAllMyBuckets, GetBucketLocation'
+Write-Host '  - STS:   GetCallerIdentity'
+Write-Host '  - IAM:   GetUser (self)'
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFA36SFkmK5/pQ
-# u/6oXUDgmOE5laneAaUjpduYPPMb5KCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBlnke5mZjHUW2F
+# OX9nFNPWgwdDbaouEDDzlEMYst9PH6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -339,33 +398,33 @@ if ($Global:WUGConnection) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBrRVu0SnYGJUM+vAu5XWY1Wsec9H/HicpKbJZiusprfjANBgkqhkiG9w0BAQEF
-# AASCAgDGp5pAD60sBXucP0kQzyUYwG6shO4/iVdjjDVt9uHyIDMZlFa9VchJbzNr
-# rYLzjnAWaTMRSFiRFPKMEg2C0vVsDUhoe+MDaY/qazFlw64OV6lONhHhKOxduMca
-# RuISjmX0lYUXg+A0IpIvBlkIXA6ZkGZW2cgNVvrBpEQQcI+T8vvs8Sk7UY273QIo
-# PLpNxA1W7dJhplEqNusrP+G64GBRTsMgDUxMrNOrqC4KGAToJm9JANNtG+DCf3iy
-# Uz2cERRpQTPG8M+kO5LdCljzIYPFi+UshSnLDEDE/wR4TJfL3A9D4XjE8Ca4DCW4
-# dVQVkPgxtklx/wBUFsW8Z9ljmURLAkUuam+jAYCgOfrB3oOmP8O8exCNaxUJM2XR
-# jO4m1gIxHm0mbbWoeutBHkjfmF8EMqWAPyb1pMArk+QyrEpxxLsBshSD+I7XUXRl
-# /CT4fAc/Z1mdb6RyA6emNHDx4yzeY6U7NNM3Ir1KkMvQi+B0zNMl5H6wt8+8c/NZ
-# +X5YdtVYQAvokX6aEYKko621Npz7ki6AXS4VP5G3IYYrC2ZEVD7HoxciUbfvmPRg
-# AzTBFPZp+efC1Vdg7R56bGEbiLQS4ilRmVjuDopD0oA/OXorx8oGMyHLSg2LRP9c
-# ULwfv4jENsTi+k/6H2gkKUmVUAPRKr8ZFA2bdfFg9vREwUSjZaGCAyYwggMiBgkq
+# BCAgFdahD3eyQVqOeQaRw7mtPU15fw02uaO2eqr54425ATANBgkqhkiG9w0BAQEF
+# AASCAgCqdvjkTzEyUKvB+PZk0u/CMxkCnMCegelePKtXtcVwqkAwCvxoyIOitRkB
+# yIu+K4aTgZlfyOuUX7SUe3SydmemhYVDWZFDe6Uh+roG4NXuYj5cEcmO0WEYcoyq
+# jwka8dsG/YkkSd2FqCvJjuRAr888ZI9RM84ZDJAu+8Dz+uxo744NJ9+BEMKvxpd4
+# 10mTurF2bqHjEtZfoMV2Q4qeTHmiLHFlr89aGcYF3WlkSYefymliTq6C7HlAqT2X
+# KopYRJ5KxjHsYydNqc5QrziDu08K0SfnHhdYc4vqgJOQ8BR6Hi2kEXJ2uof9JB4E
+# 30lh3yH1Js2v82gV9LiOusvdZn5UzU25eDAIfoLa9WvhUuZZj5rdo2zjsUDvxCcE
+# 93KRX2U9pXG8yx2Hh58gkXbQ1RAkAEl9UfLaht1n+uNux+Khe0/MRwIU/prKZ61P
+# NU7g8GkokxcfQ8kk3/wdj76bi4rr1lIEhFacfosOQ3keqezOddX4P2KcKr4i4K9G
+# lREoBFNkvWahqToMATGC+u5uRfKk14lk9X2jpadVzsHXGkCpI9va/T1wl2cx/g59
+# V/MbWi0gWuecwYGwg7n/P8jVTvmZL37VqpMsN7pvm2mcoMMSChIiEBOy+lYKRRQY
+# LKuSB1fPW6tAOzK6wtXu+f/MsKyGuBnZMWrv4m2qV99wtsI3TqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MjAwMDAwMjlaMC8GCSqGSIb3DQEJBDEiBCBmM7Vw
-# jYz/FYh53RL0AInVL/56SwjC5Rqw08eE/vvvWTANBgkqhkiG9w0BAQEFAASCAgAN
-# 3eBTmQQVPeBPPW+q4wrZRQX3mPNlCRGbye4VwgMS55T2Gv5hg/eG8ranGp67/u78
-# BmYFBj9z+YMyMp9SbXAy5Yu/FPw2uf/ZOvgBKIbWIrOIshfwuOp7ltuY74B0vr+L
-# Wz3721jvu+oNVjHltPJdEIuRdLegrJJyrIxaJlogyABJnAjYevaON6aYIJ7a6cnj
-# 4P3nIibR3AtvuDK+72p9riNM/6JNzASMbY/LqoCKVXZ21ZMkVdf/zWRDY3SiKsZc
-# flNnyrfxi+FgqbKUZwJLOWbKZvyaUGMGapQdwUvAz8tvbiY8+MIXCvXc0UHCZ2g0
-# 01Wd1krPopbyfMtHtgpG0yZHlKdMPnxOReimNQk0+OY0izUO/KaQw72jbAtskl1R
-# cfkipB1HhJGWQIZHEMRzk5U4DtJU/Wb8HeqVl1eg2gr3cnW90Vap9PvXUGddukoD
-# 0o673aZDf217fN3D6sr09xOuel0dYNZDhXFBVrgLpQGrfaO5lo7l4i46m5/0zTw8
-# WKhkk5ArA3S4SPsL/HwXhWH8P3PtziWIdLB2NLOYKndw2jNhXj4gUFEXCUk+lWMt
-# MP3mFR3CkoERAX6XCXNPV5doy1lbM3BPjNlS2AzSfRo0DFWTpFRa89reWXM48PPL
-# QZlFluT5hOX7X3U2HDmfD6EnrKUkg4nNofbxkTF30A==
+# CSqGSIb3DQEJBTEPFw0yNjA0MjAwMDAwMzRaMC8GCSqGSIb3DQEJBDEiBCB0DNaX
+# +dj1v9JqfIzAJW9umgLpcWLIfrLDS/S3ZJxL0zANBgkqhkiG9w0BAQEFAASCAgA7
+# wuXB7FBzMNB4Gnr30ebItyodbErwdh8kZgTxAeqzcuT75o+YAkgYjJiplymUyk9P
+# VLFQiFuRFqEvO8qovdFHOaKbzfZL9pCEVYyIL8C9cRmekEkdxkk2LyX2GU/DRnRV
+# 4nhG4Tn9FojlBkWAPwhTh3Gf98YEipzm/XIQjwfgQ/mYoA2RIqTbDoKp5FrONmy2
+# SIsuwrXlUKWKtt3htX2rUKFWz3CFJIndkcJIBARrqX/ZjfaLuFTXYDTdX+JDnd8a
+# pWgS3MwwxNMDyM9tNPGkqccctwskX9q51ZluMJQB+qLIVgeG6nitVQiY+lDoKu5j
+# 99IekFyP+fLuBqOY8oQbh8hsnpGfyELkxvDBdwx9RZYrpJlsKIf044T7pfidAXdW
+# 6TqX6D77JBD1eGIfYXMJ/30Vyw4q61VTdYCvXuHOy6WFgDZm2Koa4R1keA7z7TdP
+# eGB2UVEdIJbaiTxDfOppY0OBhyWY4DsnnjNlLbvyVVvdcSuMCv6psoV5frt5I8M/
+# bKClJ8d+KwnZ2rl6q3rUjbtCHLG+YZltK5ulYW85jZmFkSBM2DSuDX8AZD/RFPCV
+# 5NXKecytyDjhhy+sN4c1FWQOlLIjezGcQvvGcZ9pOCoGW+9Ty/W31MzqvTXlLObg
+# CrhVUCbXbfc73bSlcG/yqeDo+sWLiw18M8HxERMfNA==
 # SIG # End signature block

@@ -92,6 +92,16 @@
     LastLogonUser, LastLogonTime, DiskCount, TotalDiskGB, DiskSummary,
     NetworkAdapters, RunningServices, StoppedServices, InstalledSoftware.
 
+.PARAMETER Action
+    What to do with discovery results. When specified, skips the interactive menu.
+    Valid values: PushToWUG, ExportJSON, ExportCSV, ShowTable, Dashboard, DashboardAndPush, None.
+    PushToWUG requires devices resolved from WhatsUp Gold (not standalone -Target mode).
+
+.PARAMETER Target
+    Windows host(s) to scan via WMI -- IP address or FQDN. Accepts multiple values.
+    Enables standalone mode (no WhatsUp Gold connection needed for device resolution).
+    PushToWUG action is not available in standalone -Target mode.
+
 .PARAMETER DryRun
     Show what attributes would be set without making changes.
 
@@ -100,6 +110,10 @@
 
 .PARAMETER WUGServer
     WhatsUp Gold server address. Default: resolved from vault.
+
+.PARAMETER WUGCredential
+    PSCredential for authenticating to WhatsUp Gold. When supplied, bypasses
+    the vault-based WUG server resolution and connects directly.
 
 .EXAMPLE
     .\Setup-WindowsAttributes-Discovery.ps1
@@ -121,6 +135,16 @@
     .\Setup-WindowsAttributes-Discovery.ps1 -IncludeAttribute OSName,TotalMemoryGB,CPUName
 
     Only collect OS name, RAM, and CPU info.
+
+.EXAMPLE
+    .\Setup-WindowsAttributes-Discovery.ps1 -Target '10.0.0.5','10.0.0.6' -Action Dashboard
+
+    Standalone mode -- scans hosts directly and generates an HTML dashboard.
+
+.EXAMPLE
+    .\Setup-WindowsAttributes-Discovery.ps1 -Target '10.0.0.5' -Action ExportJSON -NonInteractive
+
+    Scans a host and exports results to JSON. No WUG connection required.
 
 .NOTES
     Author: Jason Alberino (jason@wug.ninja)
@@ -151,11 +175,20 @@ param(
                  'InstalledSoftware')]
     [string[]]$IncludeAttribute,
 
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
+    [string]$Action,
+
+    [string[]]$Target,
+
     [switch]$DryRun,
 
     [switch]$NonInteractive,
 
-    [string]$WUGServer
+    [string]$WUGServer,
+
+    [PSCredential]$WUGCredential,
+
+    [string]$OutputPath
 )
 
 # --- Load discovery helpers (vault, credential resolver) ----------------------
@@ -168,6 +201,14 @@ else {
     Write-Error "DiscoveryHelpers.ps1 not found at '$discoveryHelpersPath'. Cannot continue."
     return
 }
+
+# Load dynamic dashboard generator (fallback)
+$dynDashPath = Join-Path (Split-Path $scriptDir -Parent) 'reports\Export-DynamicDashboardHtml.ps1'
+if (Test-Path $dynDashPath) { . $dynDashPath }
+
+# Load provider-specific Windows dashboard functions
+$winProviderPath = Join-Path $scriptDir 'DiscoveryProvider-Windows.ps1'
+if (Test-Path $winProviderPath) { . $winProviderPath }
 
 # =============================================================================
 # Attribute definitions: key -> WMI query info
@@ -337,8 +378,13 @@ $script:AttributeDefinitions = [ordered]@{
     InstalledSoftware = @{ Compute = {
         param($cache, $ip, $cred)
         try {
-            $reg = Get-WmiObject -List -Namespace root\default -ComputerName $ip -Credential $cred -ErrorAction Stop |
-                   Where-Object { $_.Name -eq 'StdRegProv' }
+            $isLocalConn = ($ip -eq 'localhost' -or $ip -eq '127.0.0.1' -or $ip -eq '::1' -or $ip -eq $env:COMPUTERNAME -or $ip -eq '.')
+            if ($isLocalConn) {
+                $wmiList = Get-WmiObject -List -Namespace root\default -ErrorAction Stop
+            } else {
+                $wmiList = Get-WmiObject -List -Namespace root\default -ComputerName $ip -Credential $cred -ErrorAction Stop
+            }
+            $reg = $wmiList | Where-Object { $_.Name -eq 'StdRegProv' }
             $HKLM = [UInt32]'0x80000002'
             $count = 0
             foreach ($regPath in @(
@@ -421,9 +467,24 @@ foreach ($key in $activeAttributes.Keys) {
 }
 
 # =============================================================================
-# Preflight: WUG connection (vault-backed)
+# Preflight: WUG connection (only needed when resolving devices from WUG or pushing)
 # =============================================================================
+$needsWUG = (-not $Target) -or ($Action -eq 'PushToWUG') -or ($Action -eq 'DashboardAndPush')
+if ($needsWUG) {
 if (-not $global:WUGBearerHeaders -or -not $global:WhatsUpServerBaseURI) {
+    if ($WUGCredential) {
+        # Direct credential supplied -- bypass vault resolution
+        $wugUri = if ($WUGServer) { $WUGServer } else { 'https://localhost:9644' }
+        try {
+            Connect-WUGServer -serverUri $wugUri -Credential $WUGCredential -IgnoreSSLErrors
+            Write-Host "Connected to WhatsUp Gold." -ForegroundColor Green
+        }
+        catch {
+            Write-Error "Failed to connect to WhatsUp Gold: $_"
+            return
+        }
+    }
+    else {
     Write-Host "Not connected to WhatsUp Gold. Resolving from vault..." -ForegroundColor Yellow
     $wugSplat = @{ Name = 'WUG.Server'; CredType = 'WUGServer'; ProviderLabel = 'WhatsUp Gold' }
     if ($NonInteractive) { $wugSplat.NonInteractive = $true }
@@ -451,7 +512,9 @@ if (-not $global:WUGBearerHeaders -or -not $global:WhatsUpServerBaseURI) {
         Write-Error "Failed to connect to WhatsUp Gold: $_"
         return
     }
+    }
 }
+} # end needsWUG
 
 # =============================================================================
 # Resolve WMI credentials (shared Windows vault, multi-credential support)
@@ -523,7 +586,25 @@ Write-Host ""
 Write-Host "=== Windows Attributes Discovery ===" -ForegroundColor Cyan
 Write-Host ""
 
-if ($DeviceId) {
+$standaloneMode = $false
+if ($Target) {
+    # Standalone mode: scan specified hosts directly (no WUG device lookup)
+    $standaloneMode = $true
+    Write-Host "Standalone mode: scanning $($Target.Count) specified host(s)..." -ForegroundColor Cyan
+    $devices = @()
+    $targetId = 0
+    foreach ($t in $Target) {
+        $targetId++
+        $devices += [PSCustomObject]@{
+            id             = "target-$targetId"
+            displayName    = $t
+            hostName       = $t
+            networkAddress = $t
+            role           = 'Windows'
+        }
+    }
+}
+elseif ($DeviceId) {
     Write-Host "Fetching $($DeviceId.Count) specified device(s) from WhatsUp Gold..." -ForegroundColor Cyan
     $devices = @()
     foreach ($dId in $DeviceId) {
@@ -653,9 +734,15 @@ foreach ($dev in $devices) {
 
         try {
             # Query each required WMI class once per device, cache results
+            # WMI does not allow explicit credentials for local connections
+            $isLocal = ($devIP -eq 'localhost' -or $devIP -eq '127.0.0.1' -or $devIP -eq '::1' -or $devIP -eq $env:COMPUTERNAME -or $devIP -eq '.')
             $wmiCache = @{}
             foreach ($cls in $requiredClasses) {
-                $wmiCache[$cls] = Get-WmiObject -Class $cls -ComputerName $devIP -Credential $tryCred -ErrorAction Stop
+                if ($isLocal) {
+                    $wmiCache[$cls] = Get-WmiObject -Class $cls -ErrorAction Stop
+                } else {
+                    $wmiCache[$cls] = Get-WmiObject -Class $cls -ComputerName $devIP -Credential $tryCred -ErrorAction Stop
+                }
             }
 
             # Extract attribute values
@@ -664,9 +751,9 @@ foreach ($dev in $devices) {
                 $def = $activeAttributes[$key]
 
                 if ($def.Compute) {
-                    # Compute-style: pass full cache + connection info
+                    # Compute-style: pass full cache + connection info + local flag
                     try {
-                        $val = & $def.Compute $wmiCache $devIP $tryCred
+                        $val = & $def.Compute $wmiCache $devIP $tryCred $isLocal
                     }
                     catch {
                         Write-Verbose "  Compute failed for '$key' on ${devIP}: $_"
@@ -759,87 +846,229 @@ foreach ($devId in ($deviceAttrs.Keys | Sort-Object)) {
 Write-Host ""
 
 if ($DryRun) {
-    Write-Host "[DRY RUN] No changes made to WhatsUp Gold." -ForegroundColor Yellow
+    Write-Host "[DRY RUN] No changes made." -ForegroundColor Yellow
     return
 }
 
 # =============================================================================
-# STEP 3: Update device attributes in WhatsUp Gold
+# STEP 3: Action routing (menu or -Action parameter)
 # =============================================================================
-Write-Host "Updating device attributes in WhatsUp Gold..." -ForegroundColor Cyan
+if ($OutputPath) {
+    $OutputDir = $OutputPath
+} else {
+    $OutputDir = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
+}
+if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null }
 
-$updatedCount = 0
-$errorCount   = 0
-$totalAttrs   = 0
-
-$devIndex = 0
-foreach ($devId in ($deviceAttrs.Keys | Sort-Object)) {
-    $devIndex++
-    $info  = $deviceInfo[$devId]
-    $attrs = $deviceAttrs[$devId]
-
-    $pct = [Math]::Round(($devIndex / $deviceAttrs.Count) * 100)
-    Write-Progress -Activity "Updating device attributes" `
-        -Status "$($info.Name) [$devIndex of $($deviceAttrs.Count)]" `
-        -PercentComplete $pct
-
-    foreach ($key in $attrs.Keys) {
-        $attrName = "${AttributePrefix}.${key}"
-        $attrVal  = $attrs[$key]
-        $totalAttrs++
-
-        if ([string]::IsNullOrEmpty($attrVal)) {
-            Write-Verbose "  Skipping empty attribute '$attrName' on $($info.Name)"
-            continue
-        }
-
-        if (-not $PSCmdlet.ShouldProcess("$($info.Name) (ID: $devId)", "Set attribute '$attrName' = '$attrVal'")) {
-            continue
-        }
-
-        try {
-            Set-WUGDeviceAttribute -DeviceId $devId -Name $attrName -Value $attrVal -Confirm:$false | Out-Null
-            $updatedCount++
-            Write-Verbose "  Set $attrName = $attrVal on $($info.Name)"
-        }
-        catch {
-            Write-Warning "  Failed to set '$attrName' on $($info.Name) (ID: ${devId}): $_"
-            $errorCount++
-        }
-    }
-
-    # Stamp last-run timestamp per device
-    $lastRunName = "${AttributePrefix}.LastRun"
-    $lastRunVal  = (Get-Date).ToString('o')
-    if ($PSCmdlet.ShouldProcess("$($info.Name) (ID: $devId)", "Set attribute '$lastRunName' = '$lastRunVal'")) {
-        try {
-            Set-WUGDeviceAttribute -DeviceId $devId -Name $lastRunName -Value $lastRunVal -Confirm:$false | Out-Null
-            Write-Verbose "  Set $lastRunName = $lastRunVal on $($info.Name)"
-        }
-        catch {
-            Write-Warning "  Failed to set '$lastRunName' on $($info.Name) (ID: ${devId}): $_"
-        }
+$choice = $null
+if ($Action) {
+    switch ($Action) {
+        'PushToWUG'        { $choice = '1' }
+        'ExportJSON'       { $choice = '2' }
+        'ExportCSV'        { $choice = '3' }
+        'ShowTable'        { $choice = '4' }
+        'Dashboard'        { $choice = '5' }
+        'None'             { $choice = '6' }
+        'DashboardAndPush' { $choice = '7' }
     }
 }
 
-Write-Progress -Activity "Updating device attributes" -Completed
+if (-not $choice) {
+    Write-Host "What would you like to do with the collected attributes?" -ForegroundColor Cyan
+    if ($standaloneMode) {
+        Write-Host "  [1] Push to WhatsUp Gold (not available in standalone mode)" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "  [1] Push attributes to WhatsUp Gold"
+    }
+    Write-Host "  [2] Export to JSON file"
+    Write-Host "  [3] Export to CSV file"
+    Write-Host "  [4] Show full table in console"
+    Write-Host "  [5] Generate HTML dashboard (inventory report)"
+    Write-Host "  [6] Exit (do nothing)"
+    if (-not $standaloneMode) {
+        Write-Host "  [7] Dashboard + Push to WUG"
+    }
+    Write-Host ""
+    $choice = Read-Host -Prompt "Choice [1-7]"
+}
 
-# =============================================================================
-# Final summary
-# =============================================================================
+# Handle DashboardAndPush: run Dashboard then PushToWUG sequentially
+if ($choice -eq '7') {
+    $actionsToRun = @('5', '1')
+} else {
+    $actionsToRun = @($choice)
+}
+
+# Build export-friendly data for JSON/CSV/Table/Dashboard
+# Attribute keys that hold numeric values (cast for dashboard thresholds)
+$numericAttrs = @('TotalMemoryGB', 'FreeMemoryGB', 'RAMSticks', 'RAMSpeedMHz',
+    'CPUCores', 'CPULogical', 'CPUSpeedMHz', 'GPUMemoryMB',
+    'DiskCount', 'TotalDiskGB', 'NetworkAdapters',
+    'RunningServices', 'StoppedServices', 'InstalledSoftware')
+
+$exportData = @()
+foreach ($devId in ($deviceAttrs.Keys | Sort-Object)) {
+    $info  = $deviceInfo[$devId]
+    $attrs = $deviceAttrs[$devId]
+    $row   = [ordered]@{
+        DeviceId = $devId
+        Host     = $info.Name
+        IP       = $info.IP
+    }
+    foreach ($key in $attrs.Keys) {
+        $val = $attrs[$key]
+        if ($numericAttrs -contains $key -and $val -match '^\d+(\.\d+)?$') {
+            $row["${AttributePrefix}.${key}"] = [double]$val
+        }
+        else {
+            $row["${AttributePrefix}.${key}"] = $val
+        }
+    }
+    $exportData += [PSCustomObject]$row
+}
+
+foreach ($currentChoice in $actionsToRun) {
+switch ($currentChoice) {
+    '1' {
+        # PushToWUG
+        if ($standaloneMode) {
+            Write-Warning "Push to WUG requires devices resolved from WhatsUp Gold. Omit -Target or use -DeviceId."
+            continue
+        }
+
+        Write-Host "Updating device attributes in WhatsUp Gold..." -ForegroundColor Cyan
+
+        $updatedCount = 0
+        $errorCount   = 0
+        $totalAttrs   = 0
+
+        $devIndex = 0
+        foreach ($devId in ($deviceAttrs.Keys | Sort-Object)) {
+            $devIndex++
+            $info  = $deviceInfo[$devId]
+            $attrs = $deviceAttrs[$devId]
+
+            $pct = [Math]::Round(($devIndex / $deviceAttrs.Count) * 100)
+            Write-Progress -Activity "Updating device attributes" `
+                -Status "$($info.Name) [$devIndex of $($deviceAttrs.Count)]" `
+                -PercentComplete $pct
+
+            foreach ($key in $attrs.Keys) {
+                $attrName = "${AttributePrefix}.${key}"
+                $attrVal  = $attrs[$key]
+                $totalAttrs++
+
+                if ([string]::IsNullOrEmpty($attrVal)) {
+                    Write-Verbose "  Skipping empty attribute '$attrName' on $($info.Name)"
+                    continue
+                }
+
+                if (-not $PSCmdlet.ShouldProcess("$($info.Name) (ID: $devId)", "Set attribute '$attrName' = '$attrVal'")) {
+                    continue
+                }
+
+                try {
+                    Set-WUGDeviceAttribute -DeviceId $devId -Name $attrName -Value $attrVal -Confirm:$false | Out-Null
+                    $updatedCount++
+                    Write-Verbose "  Set $attrName = $attrVal on $($info.Name)"
+                }
+                catch {
+                    Write-Warning "  Failed to set '$attrName' on $($info.Name) (ID: ${devId}): $_"
+                    $errorCount++
+                }
+            }
+
+            # Stamp last-run timestamp per device
+            $lastRunName = "${AttributePrefix}.LastRun"
+            $lastRunVal  = (Get-Date).ToString('o')
+            if ($PSCmdlet.ShouldProcess("$($info.Name) (ID: $devId)", "Set attribute '$lastRunName' = '$lastRunVal'")) {
+                try {
+                    Set-WUGDeviceAttribute -DeviceId $devId -Name $lastRunName -Value $lastRunVal -Confirm:$false | Out-Null
+                    Write-Verbose "  Set $lastRunName = $lastRunVal on $($info.Name)"
+                }
+                catch {
+                    Write-Warning "  Failed to set '$lastRunName' on $($info.Name) (ID: ${devId}): $_"
+                }
+            }
+        }
+
+        Write-Progress -Activity "Updating device attributes" -Completed
+
+        Write-Host ""
+        Write-Host "=== Windows Attributes Push Complete ===" -ForegroundColor Cyan
+        Write-Host "  Devices processed:     $($deviceAttrs.Count)" -ForegroundColor Green
+        Write-Host "  Attributes updated:    $updatedCount" -ForegroundColor Green
+        Write-Host "  Attributes skipped:    $($totalAttrs - $updatedCount - $errorCount)" -ForegroundColor Gray
+        Write-Host "  Errors:                $errorCount" -ForegroundColor $(if ($errorCount -gt 0) { 'Red' } else { 'Gray' })
+        Write-Host ""
+    }
+    '2' {
+        # ExportJSON
+        $jsonPath = Join-Path $OutputDir "WindowsAttributes-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+        $exportData | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonPath -Encoding UTF8
+        Write-Host "Exported to: $jsonPath" -ForegroundColor Green
+    }
+    '3' {
+        # ExportCSV
+        $csvPath = Join-Path $OutputDir "WindowsAttributes-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+        $exportData | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+        Write-Host "Exported to: $csvPath" -ForegroundColor Green
+    }
+    '4' {
+        # ShowTable
+        $exportData | Format-Table -AutoSize
+    }
+    '5' {
+        # Dashboard - generate HTML inventory report
+        $dashPath = Join-Path $OutputDir 'WindowsAttributes-Dashboard.html'
+
+        if (Get-Command -Name 'Export-WindowsAttributesDashboardHtml' -ErrorAction SilentlyContinue) {
+            Export-WindowsAttributesDashboardHtml -DashboardData $exportData `
+                -OutputPath $dashPath `
+                -ReportTitle 'Windows Attributes Inventory'
+        }
+        elseif (Get-Command -Name 'Export-DynamicDashboardHtml' -ErrorAction SilentlyContinue) {
+            $thresholds = @(
+                @{ Field = 'Windows.FreeMemoryGB'; Warning = 4; Critical = 2; Invert = $true }
+                @{ Field = 'Windows.StoppedServices'; Warning = 50; Critical = 80 }
+            )
+            Export-DynamicDashboardHtml -Data $exportData `
+                -OutputPath $dashPath `
+                -ReportTitle 'Windows Attributes Inventory' `
+                -CardField @('Windows.IsVirtualMachine', 'Windows.Domain') `
+                -ThresholdField $thresholds `
+                -ExportPrefix 'WindowsAttributes'
+        }
+        else {
+            Write-Warning "No dashboard function available. Exporting as JSON instead."
+            $jsonPath = Join-Path $OutputDir "WindowsAttributes-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+            $exportData | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonPath -Encoding UTF8
+            Write-Host "JSON exported: $jsonPath" -ForegroundColor Green
+            break
+        }
+
+        Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
+        Write-Host "  Devices: $($deviceAttrs.Count) | Attributes: $($activeAttributes.Count)" -ForegroundColor Gray
+    }
+    '6' {
+        Write-Host "No action taken." -ForegroundColor Gray
+    }
+    default {
+        Write-Warning "Invalid choice '$currentChoice'."
+    }
+}
+} # end foreach actionsToRun
+
 Write-Host ""
 Write-Host "=== Windows Attributes Discovery Complete ===" -ForegroundColor Cyan
-Write-Host "  Devices processed:     $($deviceAttrs.Count)" -ForegroundColor Green
-Write-Host "  Attributes updated:    $updatedCount" -ForegroundColor Green
-Write-Host "  Attributes skipped:    $($totalAttrs - $updatedCount - $errorCount)" -ForegroundColor Gray
-Write-Host "  Errors:                $errorCount" -ForegroundColor $(if ($errorCount -gt 0) { 'Red' } else { 'Gray' })
 Write-Host ""
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCd+fHXO3EHrf6E
-# 8tH9utfZmvII8R4vfq0VUE/zhynbfqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQjqd18MuT+Qdv
+# fjVppipEeIgLAAdF8jdZwNHBP0fbM6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1042,33 +1271,33 @@ Write-Host ""
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBRsoaMHyDfvJClAyjdLxJNvZ9+PDqKji4NGyPYExxKtDANBgkqhkiG9w0BAQEF
-# AASCAgDNddWWhrYfRCNBtCDq0PUMafHN7blNS7EQStlTHCPzoPoDVjJ5xdnja56T
-# j/z3da/F0svxxsH8H8RQwdbSj6bdojN1o/ePebzqhc72vhF2FFTHGNGbgnTSJk2K
-# u26zc4d6iOBtJXev2Pc4fizq7GceKK9l8XSy/ITkWxID0rB5Uza0RBwuwkDEEsth
-# 8vxL1U4NhosFpF3KLIcIpKGRBTZqh9wPa7pTiAtpBAJYCqzaD6inRGBhrXebRHQd
-# g/1dfLUBaos49phV4RXea5ceezLvieIIrpMFPSZ9HzdcMRsQO65+UFJl4GRSkvrL
-# BCFuJ7NJPxYjozHhFzukL6KwT1M841tzQkEA5ZJPrxepy/XvzCDu68oEocBnQxEp
-# upBjkalpJAro5hOsimyB4wZf92c6HXju8skdwFWHAMrlp5pfdnUp3Vb0lk2iNFx1
-# 8bXsC+WnNh5DK8hlwyBnVd8ACeZPk9p03cnwBR1AtNZOy0U4lzQEpksy88yHzXkM
-# Y+9mRU/nHuot//5YOYDbDwo8EzGssFgqEfkWlywK7jHai6BaDvziFTooeNdX3k3o
-# joqh0W7PA9RmdYqWfJhuoWNRIdkpk5dcwQbhIFje+IKKxXJNeJOeCjbYTsC7PnRW
-# I1pQDxG+mL30st5UeQkVP0rGDIvWjRZVEGw9y0xdj6ARTCNH7aGCAyYwggMiBgkq
+# BCCl4xE9DCSuQEAHAOmAbqZc+WdjhZ+dWymgalCZthHuYjANBgkqhkiG9w0BAQEF
+# AASCAgDdFq5vXheNLsJxzBF/luLd9gAazj1/p8Pd9cHPHFc6s9IUW69H2y4KQMxV
+# iQibbTg9YZ6q2SoGz35WOd5dxahocUYxeK3bx3n6XWOg6yk8ljl+TDCc9OXUvGmM
+# aesZ04MagwIz43y3zbWSYkihISR4yN2MrzpOlyDP2f6meOUmWsiBCTEBtBJJszDT
+# pICvWCYzjHYfO/vvCiAwC38O2ZZHwuo9QtlF6QB40wRmsEtH6jlXzbRu25pqe1Xi
+# c1eelG81lNnvqMjwJ5Ll7CT8afHxqTXjFulpgU1YxXbcf+2+4+0JCxM/yHQU8YyU
+# PV8ccrYTGwXYjLfIu55cztTST+B18tsOJimseAXIWemWgc1ufT96LNTVU2UoGUeM
+# /+u2NrzH3af7lEB3y3X5sQ8SPM9E4q31X/jE8sUb/gt4GF5D0bHCNYAkwvW6mDdB
+# zFmHbRYpOn4WnCLtvCYuTmy+mx4QDTGS4wvJI2B7Pnj8RWl+DtEpkv2v3NW4WSH8
+# cA9wUmOpoD/46jC51BUV9bdHK+ynivHhlRzbHZunULC9SPp9NPXrwZFG5ef/ecZV
+# /QGl3jz8YII4f+O+DTGjT9PSoFBrjE1Dpp2hWF8QhimlTcP2EfMY136P2ZwguTGu
+# jkqUwTjfks0A1ksR+OjSQgA3g4AtsloypEisEhUGMmgt2ZdE+KGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MTAwMjM2MzVaMC8GCSqGSIb3DQEJBDEiBCDVKPLJ
-# 9v6e05KMfJ1r1gty221nuqFciTlaOMq73HbxNzANBgkqhkiG9w0BAQEFAASCAgCg
-# 2+7bfHa0lKj16xnrphpCfyFaWox3mBgAXvR8RZU5316PViH5/bXNHntGHEtFUyMg
-# M7uykzNKPQePHxa6p1b15Z+Th+6PRkXBPENB+ZMKoedL+Yr+pp81/oyCAw50HfMo
-# oF9BulaB2rdsQm8uw7QZr+lAXf5SKL8PWXZBstHe8L2koJROyETp0iZkqUMBGGh+
-# 7WJFfJgVdfB3+CLC11VlU7eknrp/Ojgp1WsuRW3ryn3aLB0YsQSnC0fycwdjCpsw
-# xj+xhfKKZgyXBlCiDbkTA5kBq97HF0GHZQWkR+KAtVzUPuT0Gpyt0/FRe/YcD15x
-# 2WP1pU+mXvDWoADcvKkGIOtyB3huBIt1S4Uk1Stejbvx3VtKfXRZR8y0OtTJtS9i
-# 9fleTl39YWWr9GDlNC2d0LRgy7FjdipwWJRBCxSFkhhtrEbqC+VbBihHsiBAk/3U
-# QBaEjxC7DgfNMqh/uC1JlwN5EnQb7N3R3KYc0JD/j2FdAWdQ527K2eYitYv4GoeP
-# 4DY9O+UMKh/iFMYEeoC4YDJVcPQV8KJCG2LLp9g9pR4CL/ntQ44nF23sWEIP9iyz
-# +nP24TlHsuOQKsoeptS1Q8NRsjtLA/SlF4vf/H3BOtWO4BHEzSjzGRzrWJzME28y
-# Nm56KpAadb6yc+ucN+vEPGI9XKezqAWtQGUTM24UdA==
+# CSqGSIb3DQEJBTEPFw0yNjA0MTkwMDAzNDRaMC8GCSqGSIb3DQEJBDEiBCB2YzKb
+# NfaiWA5EVr/VQHsDXOYeowuOr0Ox8qCiDMrH4TANBgkqhkiG9w0BAQEFAASCAgB4
+# qtI7mh2uwgHXRd6x8mPHFCbIj/QsuNswZadnvaD7EOKhCB8uPfg6N/129rhyeE3T
+# 0A7bb6m04S5XzTIVKEhdII0s0mwlXnoUvYcQCxa5WdeHCiNHrlmgWgXXmMhUjxfq
+# YVoOUlnkQbOu/4P/su4cfxQYgPpYD7W9D+FgY53/1MT0iiLcvtHE/Au2i83vc7XI
+# ZT+yKcmE4K3qiLrCZq8EMcD/KHc+r+L5lWQagXmdcTYEWL1OyzABy6LsTcGKt8TB
+# 8xJED7xuhakrc4SjPkAyzZx6uiOWv9kZsJ2ICD8vT+xaJzl6fr0Nq4NIpYhN/GkV
+# XQva0rC4Sh6c6q8ljNubmF2anSBch+cgNcPAwlusu4kXoDN5tsHb5F+8Ns9z5lDJ
+# egHFYBKke8snJ5cTbyvKmx8zS82Yb2zDpD2bx1ZHpFoQpUMcFKMGl7qEvr+ATtFc
+# Ula3My7YHKckg1JJH5tUzsOszV0ec87DR2xN/IoC3k+Z0PAUANyZjgRqvwZYP9uE
+# TmuYewnNMmyRr2ZR0Yx+ZrXEuL/rfPXxxf8uoduWGQBkg/KKbCsrKdLaNWuyTIGS
+# KKWMsMValY12JTeimiH5aUeetxRRMxvFZHie1f/NXJ///THFpdquYrBzQXXbiitE
+# t2BNvJOvnqfc9BNsEy92oYnvGjvL9JntnGV/GKi9iQ==
 # SIG # End signature block

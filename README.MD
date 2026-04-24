@@ -88,7 +88,7 @@ This allows administrators to:
 ## Features
 
 - **Native PowerShell cmdlets** for the WhatsUp Gold REST API
-- **81 exported functions** covering devices, monitors, groups, reports, performance monitors, passive monitors (SnmpTrap, Syslog, WinEvent), and 20 active monitor types
+- **92 exported functions** covering devices, monitors, groups, reports, performance monitors, passive monitors (SnmpTrap, Syslog, WinEvent), and 20 active monitor types
 - **Infrastructure discovery helpers** for virtualization and cloud platforms
 - **Automation-friendly workflows** for monitoring onboarding and configuration
 - **End-to-end CRUD integration test harness**
@@ -187,7 +187,7 @@ This enables automation scenarios such as:
 
 Current module export:
 
-**81 PowerShell functions**
+**92 PowerShell functions**
 
 ---
 
@@ -215,7 +215,13 @@ The module includes helper scripts to automatically discover infrastructure acro
 
 ```powershell
 Install-Module WhatsUpGoldPS
-Connect-WUGServer -Hostname wug.example.com -Credential (Get-Credential)
+
+# Option 1: Interactive vault-based (prompts once, remembers credentials)
+Connect-WUGServer
+
+# Option 2: Explicit credentials
+Connect-WUGServer -serverUri wug.example.com -Credential (Get-Credential)
+
 Get-WUGDevice
 Get-WUGDeviceReport -ReportType Cpu
 Set-WUGDeviceMaintenance -DeviceId 42 -Duration 60 -Reason "Patching"
@@ -232,8 +238,8 @@ The fastest way to see WhatsUpGoldPS in action.
 # install the module
 Install-Module WhatsUpGoldPS
 
-# connect to your WhatsUp Gold server
-Connect-WUGServer -Hostname wug.example.com -Credential (Get-Credential)
+# connect to your WhatsUp Gold server (uses DPAPI vault after first run)
+Connect-WUGServer
 
 # list monitored devices
 Get-WUGDevice
@@ -248,16 +254,29 @@ This takes less than 60 seconds and demonstrates how monitoring infrastructure c
 
 # Authentication
 
-WhatsUpGoldPS authenticates to the WhatsUp Gold REST API using standard credentials.
+WhatsUpGoldPS authenticates to the WhatsUp Gold REST API using OAuth 2.0 password grant.
 
-Example:
+Credentials are stored in a **DPAPI-encrypted vault** at `%LOCALAPPDATA%\WhatsUpGoldPS\DiscoveryHelpers\Vault` after the first successful connection.
 
 ```powershell
+# Interactive (recommended) -- prompts for server, credentials, saves to vault
+Connect-WUGServer
+
+# Reuse vault credentials for a specific server
+Connect-WUGServer -serverUri 192.168.1.100
+
+# Explicit PSCredential
 $cred = Get-Credential
-Connect-WUGServer -Hostname wug.example.com -Credential $cred
+Connect-WUGServer -serverUri wug.example.com -Credential $cred
+
+# Username with masked password prompt
+Connect-WUGServer -serverUri wug.example.com -Username admin
+
+# Non-interactive (scheduled tasks / CI pipelines)
+Connect-WUGServer -AutoConnect
 ```
 
-For automation scenarios, credentials can be securely stored using tools such as PowerShell SecretManagement or other secure credential stores.
+The vault is interoperable with the Discovery Framework credential vault and uses HMAC-SHA256 integrity verification.
 
 ---
 
@@ -266,7 +285,7 @@ For automation scenarios, credentials can be securely stored using tools such as
 Automatically discover infrastructure and onboard it into monitoring.
 
 ```powershell
-Connect-WUGServer -Hostname wug.example.com -Credential (Get-Credential)
+Connect-WUGServer
 
 # Discover infrastructure (example VMware helper)
 .\helpers\vmware\discover-vsphere-nodes-and-guests-discover-then-add.ps1
@@ -321,7 +340,7 @@ Examples include:
 Example automation:
 
 ```powershell
-Connect-WUGServer -Hostname monitoring.example.com
+Connect-WUGServer -serverUri monitoring.example.com
 Add-WUGDevice -Name "router01" -Address "10.1.1.1"
 Invoke-WUGDevicePollNow -DeviceId 1001
 ```
@@ -357,15 +376,25 @@ The `helpers/` directory contains automation examples and discovery tools.
 
 # Automated Testing
 
-The module includes a **full end-to-end integration test harness**.
+The module includes **multiple end-to-end integration test harnesses** with **473+ tests**.
 
-Run the test suite:
+Run the full test suite:
 
 ```powershell
-.\helpers\test\Invoke-WUGModuleTest.ps1
+.\helpers\test\Invoke-WUGAllE2ETests.ps1 -NonInteractive -OpenReport
 ```
 
-The test suite:
+Or run individual test harnesses:
+
+```powershell
+.\helpers\test\Invoke-WUGModuleTest.ps1          # 207 API CRUD tests
+.\helpers\test\Invoke-WUGDiscoveryE2ETest.ps1     # Discovery framework tests
+.\helpers\test\Invoke-WUGDiscoveryHelperTest.ps1  # Vault + credential tests
+.\helpers\test\Invoke-WUGGeomapTest.ps1           # Geolocation E2E tests (21 tests)
+.\helpers\test\Invoke-WUGCredentialE2ETest.ps1    # Credential CRUD tests
+```
+
+The test suites:
 
 1. creates temporary devices
 2. creates groups and monitors
@@ -447,8 +476,7 @@ The project includes a **CRUD integration test harness** validating API operatio
 # Related Links
 
 WhatsUp Gold REST API documentation  
-https://docs.ipswitch.com/NM/WhatsUpGold2024/02_Guides/rest_api/index.html
-
+https://docs.ipswitch.com/NM/WhatsUpGold2026/02_Guides/rest_api/index.html
 PowerShell Gallery module  
 https://www.powershellgallery.com/packages/WhatsUpGoldPS/
 

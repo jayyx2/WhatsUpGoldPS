@@ -1,142 +1,214 @@
-﻿# Configuration
-$AWSRegions = @("us-east-1")  # Regions to scan (add more as needed)
+<#
+.SYNOPSIS
+    Provider-specific dashboard functions for Windows discovery scripts.
+.DESCRIPTION
+    Contains Export-WindowsAttributesDashboardHtml and Export-WindowsDiskIODashboardHtml
+    which generate Bootstrap Table dashboards from Windows WMI discovery data.
+.NOTES
+    Author: jason@wug.ninja
+    Standalone helper - dot-source from Setup-WindowsAttributes-Discovery.ps1
+    and Setup-WindowsDiskIO-Discovery.ps1.
+#>
 
-# Check if required modules are installed and loaded
-if (-not (Get-Module -Name WhatsUpGoldPS)) { Import-Module WhatsUpGoldPS }
+function Export-WindowsAttributesDashboardHtml {
+    <#
+    .SYNOPSIS
+        Generates a Windows Attributes dashboard HTML file from WMI scan data.
+    .DESCRIPTION
+        Reads the Windows Attributes dashboard template, injects column definitions
+        and row data as JSON, and writes the final HTML to OutputPath. Displays
+        VM/physical grouping, memory thresholds, and domain breakdown.
+    .PARAMETER DashboardData
+        Array of PSCustomObject rows - one per device with Windows.* attributes.
+    .PARAMETER OutputPath
+        File path for the generated HTML.
+    .PARAMETER ReportTitle
+        Dashboard title shown in header and browser tab.
+    .PARAMETER TemplatePath
+        Path to Windows-Attributes-Dashboard-Template.html. Defaults to helpers/windows/.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = 'Windows Attributes Dashboard',
+        [string]$TemplatePath
+    )
 
-$requiredAWSModules = @('AWS.Tools.Common', 'AWS.Tools.EC2', 'AWS.Tools.RDS',
-    'AWS.Tools.ElasticLoadBalancingV2')
-foreach ($mod in $requiredAWSModules) {
-    if (-not (Get-Module -Name $mod -ListAvailable)) {
-        throw "Required module '$mod' is not installed. Run: Install-Module -Name AWS.Tools.Installer -Scope CurrentUser -Force; Install-AWSToolsModule EC2, RDS, ElasticLoadBalancingV2 -CleanUp"
-    }
-    if (-not (Get-Module -Name $mod)) { Import-Module $mod }
-}
-
-# Load helper functions
-. "$PSScriptRoot\AWSHelpers.ps1"
-
-# Load vault functions for credential resolution
-$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
-if (Test-Path $discoveryHelpersPath) { . $discoveryHelpersPath }
-
-# ========================
-# Resolve credentials from vault
-# ========================
-$awsCred = Resolve-DiscoveryCredential -Name 'AWS.Credential' -CredType AWSKeys -ProviderLabel 'AWS' -AutoUse
-if ($awsCred) {
-    $AWSAccessKey = $awsCred.UserName
-    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($awsCred.Password)
-    try { $AWSSecretKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
-    finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-} else {
-    throw "AWS credentials are required. Store them in the vault using Setup-AWS-Discovery.ps1"
-}
-$WUGCred = Resolve-DiscoveryCredential -Name 'WUG.Server' -CredType WUGServer -ProviderLabel 'WhatsUp Gold' -AutoUse
-if (-not $WUGCred) { throw "WhatsUp Gold credentials are required. Store them in the vault first." }
-$WUGServer = $WUGCred.UserName
-
-# ========================
-# Connect to AWS
-# ========================
-Write-Host "`n=== Connecting to AWS ===" -ForegroundColor Cyan
-Connect-AWSProfile -AccessKey $AWSAccessKey -SecretKey $AWSSecretKey -Region $AWSRegions[0]
-$AWSSecretKey = $null
-
-# ========================
-# Discover Resources and Collect IPs
-# ========================
-$allIPs = @()
-
-foreach ($region in $AWSRegions) {
-    Write-Host "`n=== Region: $region ===" -ForegroundColor Cyan
-
-    # --- EC2 Instances ---
-    Write-Host "  Gathering EC2 instances..." -ForegroundColor Gray
-    try {
-        $ec2Instances = @(Get-AWSEC2Instances -Region $region)
-        Write-Host "    Found $($ec2Instances.Count) EC2 instances" -ForegroundColor Gray
-        foreach ($inst in $ec2Instances) {
-            $ip = Resolve-AWSResourceIP -ResourceType EC2 -Resource $inst
-            if ($ip -and $ip -match '^\d{1,3}(\.\d{1,3}){3}$') {
-                Write-Host "    $($inst.Name) ($($inst.InstanceId)) -> $ip" -ForegroundColor DarkGray
-                $allIPs += $ip
-            } else {
-                Write-Warning "    Skipping EC2 $($inst.Name) ($($inst.InstanceId)) - no resolvable IP"
-            }
+    if (-not $TemplatePath) {
+        $TemplatePath = Join-Path $PSScriptRoot '..\windows\Windows-Attributes-Dashboard-Template.html'
+        if (-not (Test-Path $TemplatePath)) {
+            $TemplatePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'windows\Windows-Attributes-Dashboard-Template.html'
         }
     }
-    catch {
-        Write-Warning "  Could not enumerate EC2 in $region : $($_.Exception.Message)"
+    if (-not (Test-Path $TemplatePath)) {
+        Write-Error "Template not found: $TemplatePath"
+        return
     }
 
-    # --- RDS Instances ---
-    Write-Host "  Gathering RDS instances..." -ForegroundColor Gray
-    try {
-        $rdsInstances = @(Get-AWSRDSInstances -Region $region)
-        Write-Host "    Found $($rdsInstances.Count) RDS instances" -ForegroundColor Gray
-        foreach ($db in $rdsInstances) {
-            $ip = Resolve-AWSResourceIP -ResourceType RDS -Resource $db
-            if ($ip -and $ip -match '^\d{1,3}(\.\d{1,3}){3}$') {
-                Write-Host "    $($db.DBInstanceId) -> $ip" -ForegroundColor DarkGray
-                $allIPs += $ip
-            } else {
-                Write-Warning "    Skipping RDS $($db.DBInstanceId) - no resolvable IP"
-            }
-        }
-    }
-    catch {
-        Write-Warning "  Could not enumerate RDS in $region : $($_.Exception.Message)"
+    $titleMap = @{
+        'DeviceId'                    = 'Device ID'
+        'Host'                        = 'Host'
+        'IP'                          = 'IP Address'
+        'Windows.OSName'              = 'OS Name'
+        'Windows.OSVersion'           = 'OS Version'
+        'Windows.OSArchitecture'      = 'Architecture'
+        'Windows.Domain'              = 'Domain'
+        'Windows.IsVirtualMachine'    = 'Virtual'
+        'Windows.Manufacturer'        = 'Manufacturer'
+        'Windows.Model'               = 'Model'
+        'Windows.Processors'          = 'Processors'
+        'Windows.TotalMemoryGB'       = 'Total Memory GB'
+        'Windows.FreeMemoryGB'        = 'Free Memory GB'
+        'Windows.ServicePackVersion'  = 'Service Pack'
+        'Windows.LastBootUpTime'      = 'Last Boot'
+        'Windows.SystemDirectory'     = 'System Dir'
+        'Windows.RunningServices'     = 'Running Svc'
+        'Windows.StoppedServices'     = 'Stopped Svc'
+        'Windows.InstalledRoles'      = 'Installed Roles'
     }
 
-    # --- Load Balancers ---
-    Write-Host "  Gathering Load Balancers..." -ForegroundColor Gray
-    try {
-        $loadBalancers = @(Get-AWSLoadBalancers -Region $region)
-        Write-Host "    Found $($loadBalancers.Count) load balancers" -ForegroundColor Gray
-        foreach ($lb in $loadBalancers) {
-            $ip = Resolve-AWSResourceIP -ResourceType ELB -Resource $lb
-            if ($ip -and $ip -match '^\d{1,3}(\.\d{1,3}){3}$') {
-                Write-Host "    $($lb.LoadBalancerName) -> $ip" -ForegroundColor DarkGray
-                $allIPs += $ip
-            } else {
-                Write-Warning "    Skipping ELB $($lb.LoadBalancerName) - no resolvable IP"
-            }
+    $firstObj = $DashboardData | Select-Object -First 1
+    $columns = @()
+    foreach ($prop in $firstObj.PSObject.Properties) {
+        $title = if ($titleMap.ContainsKey($prop.Name)) { $titleMap[$prop.Name] } else { ($prop.Name -creplace '(?<=[a-z])([A-Z])', ' $1').Trim() }
+        $col = @{
+            field      = $prop.Name
+            title      = $title
+            sortable   = $true
+            searchable = $true
         }
+        if ($prop.Name -eq 'Windows.IsVirtualMachine') { $col.formatter = 'formatIsVM' }
+        if ($prop.Name -eq 'Windows.FreeMemoryGB')     { $col.formatter = 'formatMemory' }
+        if ($prop.Name -eq 'Windows.StoppedServices')  { $col.formatter = 'formatServices' }
+        $columns += $col
     }
-    catch {
-        Write-Warning "  Could not enumerate ELB in $region : $($_.Exception.Message)"
+
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = ConvertTo-Json -InputObject @($DashboardData) -Depth 5 -Compress
+
+    $tableConfig = @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+
+    $html = Get-Content -Path $TemplatePath -Raw
+    $html = $html -replace 'replaceThisHere', $tableConfig
+    $html = $html -replace 'ReplaceYourReportNameHere', $ReportTitle
+    $html = $html -replace 'ReplaceUpdateTimeHere', (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+
+    $parentDir = Split-Path $OutputPath -Parent
+    if ($parentDir -and -not (Test-Path $parentDir)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
     }
+    Set-Content -Path $OutputPath -Value $html -Encoding UTF8
+    Write-Verbose "Dashboard written to: $OutputPath"
+    return $OutputPath
 }
 
-# Deduplicate IPs
-$allIPs = $allIPs | Select-Object -Unique
 
-Write-Host "`n=== Discovery Summary ===" -ForegroundColor Cyan
-Write-Host "  Unique resolvable IPs: $($allIPs.Count)"
+function Export-WindowsDiskIODashboardHtml {
+    <#
+    .SYNOPSIS
+        Generates a Windows Disk IO dashboard HTML file from WMI scan data.
+    .DESCRIPTION
+        Reads the Windows DiskIO dashboard template, injects column definitions
+        and row data as JSON, and writes the final HTML to OutputPath. Displays
+        per-disk-instance counter values with threshold colouring.
+    .PARAMETER DashboardData
+        Array of PSCustomObject rows - one per disk instance per device.
+    .PARAMETER OutputPath
+        File path for the generated HTML.
+    .PARAMETER ReportTitle
+        Dashboard title shown in header and browser tab.
+    .PARAMETER TemplatePath
+        Path to Windows-DiskIO-Dashboard-Template.html. Defaults to helpers/windows/.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$DashboardData,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$ReportTitle = 'Windows Disk IO Dashboard',
+        [string]$TemplatePath
+    )
 
-# ========================
-# Add to WhatsUp Gold (bulk discover-then-add)
-# ========================
-Connect-WUGServer -serverUri $WUGServer -Credential $WUGCred -Protocol https -IgnoreSSLErrors
+    if (-not $TemplatePath) {
+        $TemplatePath = Join-Path $PSScriptRoot '..\windows\Windows-DiskIO-Dashboard-Template.html'
+        if (-not (Test-Path $TemplatePath)) {
+            $TemplatePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'windows\Windows-DiskIO-Dashboard-Template.html'
+        }
+    }
+    if (-not (Test-Path $TemplatePath)) {
+        Write-Error "Template not found: $TemplatePath"
+        return
+    }
 
-if ($allIPs.Count -gt 0) {
-    Write-Host "`nAdding $($allIPs.Count) devices to WhatsUp Gold..." -ForegroundColor Cyan
-    Add-WUGDevice -IpOrNames $allIPs
-} else {
-    Write-Warning "No valid IP addresses found to add."
-}
+    $titleMap = @{
+        'DeviceId'       = 'Device ID'
+        'Host'           = 'Host'
+        'IP'             = 'IP Address'
+        'DiskType'       = 'Disk Type'
+        'Instance'       = 'Instance'
+        '% Disk Time'    = '% Disk Time'
+        '% Idle Time'    = '% Idle Time'
+        'Avg. Disk Queue Length' = 'Avg Queue Length'
+        'Disk Reads/sec'  = 'Reads/sec'
+        'Disk Writes/sec' = 'Writes/sec'
+        'Disk Read Bytes/sec'  = 'Read Bytes/sec'
+        'Disk Write Bytes/sec' = 'Write Bytes/sec'
+        'Disk Transfers/sec'   = 'Transfers/sec'
+        'Avg. Disk sec/Read'   = 'Avg sec/Read'
+        'Avg. Disk sec/Write'  = 'Avg sec/Write'
+        'Avg. Disk sec/Transfer' = 'Avg sec/Transfer'
+        'Current Disk Queue Length' = 'Current Queue'
+        'Split IO/sec'    = 'Split IO/sec'
+    }
 
-# Cleanup
-if ($Global:WUGConnection) {
-    Disconnect-WUGServer
+    $firstObj = $DashboardData | Select-Object -First 1
+    $columns = @()
+    foreach ($prop in $firstObj.PSObject.Properties) {
+        $title = if ($titleMap.ContainsKey($prop.Name)) { $titleMap[$prop.Name] } else { ($prop.Name -creplace '(?<=[a-z])([A-Z])', ' $1').Trim() }
+        $col = @{
+            field      = $prop.Name
+            title      = $title
+            sortable   = $true
+            searchable = $true
+        }
+        if ($prop.Name -eq 'DiskType')                      { $col.formatter = 'formatDiskType' }
+        if ($prop.Name -eq '% Disk Time')                   { $col.formatter = 'formatDiskTime' }
+        if ($prop.Name -match 'Queue Length')                { $col.formatter = 'formatQueueLength' }
+        if ($prop.Name -match 'Reads/sec|Writes/sec|Transfers/sec|Split IO') { $col.formatter = 'formatIOPS' }
+        if ($prop.Name -match 'Bytes/sec')                  { $col.formatter = 'formatBytes' }
+        $columns += $col
+    }
+
+    $columnsJson = $columns | ConvertTo-Json -Depth 5 -Compress
+    $dataJson    = ConvertTo-Json -InputObject @($DashboardData) -Depth 5 -Compress
+
+    $tableConfig = @"
+        columns: $columnsJson,
+        data: $dataJson
+"@
+
+    $html = Get-Content -Path $TemplatePath -Raw
+    $html = $html -replace 'replaceThisHere', $tableConfig
+    $html = $html -replace 'ReplaceYourReportNameHere', $ReportTitle
+    $html = $html -replace 'ReplaceUpdateTimeHere', (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+
+    $parentDir = Split-Path $OutputPath -Parent
+    if ($parentDir -and -not (Test-Path $parentDir)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+    }
+    Set-Content -Path $OutputPath -Value $html -Encoding UTF8
+    Write-Verbose "Dashboard written to: $OutputPath"
+    return $OutputPath
 }
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFA36SFkmK5/pQ
-# u/6oXUDgmOE5laneAaUjpduYPPMb5KCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBefqwp8c2IP7u/
+# 0Xkqxp5OIDKqj8w2ZbfIdA/nRihf26CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -339,33 +411,33 @@ if ($Global:WUGConnection) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBrRVu0SnYGJUM+vAu5XWY1Wsec9H/HicpKbJZiusprfjANBgkqhkiG9w0BAQEF
-# AASCAgDGp5pAD60sBXucP0kQzyUYwG6shO4/iVdjjDVt9uHyIDMZlFa9VchJbzNr
-# rYLzjnAWaTMRSFiRFPKMEg2C0vVsDUhoe+MDaY/qazFlw64OV6lONhHhKOxduMca
-# RuISjmX0lYUXg+A0IpIvBlkIXA6ZkGZW2cgNVvrBpEQQcI+T8vvs8Sk7UY273QIo
-# PLpNxA1W7dJhplEqNusrP+G64GBRTsMgDUxMrNOrqC4KGAToJm9JANNtG+DCf3iy
-# Uz2cERRpQTPG8M+kO5LdCljzIYPFi+UshSnLDEDE/wR4TJfL3A9D4XjE8Ca4DCW4
-# dVQVkPgxtklx/wBUFsW8Z9ljmURLAkUuam+jAYCgOfrB3oOmP8O8exCNaxUJM2XR
-# jO4m1gIxHm0mbbWoeutBHkjfmF8EMqWAPyb1pMArk+QyrEpxxLsBshSD+I7XUXRl
-# /CT4fAc/Z1mdb6RyA6emNHDx4yzeY6U7NNM3Ir1KkMvQi+B0zNMl5H6wt8+8c/NZ
-# +X5YdtVYQAvokX6aEYKko621Npz7ki6AXS4VP5G3IYYrC2ZEVD7HoxciUbfvmPRg
-# AzTBFPZp+efC1Vdg7R56bGEbiLQS4ilRmVjuDopD0oA/OXorx8oGMyHLSg2LRP9c
-# ULwfv4jENsTi+k/6H2gkKUmVUAPRKr8ZFA2bdfFg9vREwUSjZaGCAyYwggMiBgkq
+# BCBsSPvB/n39gc/eyDzhtpq8+yVNj7+hWcP2PGj8mMybuTANBgkqhkiG9w0BAQEF
+# AASCAgBYGswhlZsy9vLpFCVxG66Kjb1tx3itRllJhl4xe8iWOxpA7OEXTEyqBrWT
+# OQ2MgO3GY/moizZYekJKqjc+etfbfa+UNEreHMhroH6i1NnjR0Bu18mPjPl4dcqg
+# lSZ7snIhRPD5bRgJgDIN13itHx/+54Ly+JupKdVixjG6lghKAxg68Xu+IRWtS6OK
+# gidAe6wU8rzZcCuDAm9w9NX1PipHmHTeeVCrmxgrv8RUtpkBzhEepvCVdxS/9qhb
+# 8G2cxCFcvqHnRlrVcl0vL5+GLlG15Pc0NmQV+4KVim0lm1LH7xbscRuVptMKQaun
+# oOzZ1mCh4MSSTfHQowkChWZBdBQ61+zEd6HSoo/9GLKW+mdnJGorRb1MtYbyFoZJ
+# r2TJrz2TN9AB+Q1V2oSsSedUuhREPCrZxkY/tcvMzJpWC3R7kxOlUQiFtw1siGQq
+# LRjG75IvRPPW4sPB/j1oo2xXdH8UmY+U08FTndl2MCHPtxwar5Reuhgc1z1zAK4p
+# FUz7AK4PzqHf/FkLXAOiYBDLvQiDs+4w5mcxqojhSqHa1NAr4ndMihYDS0k18eCx
+# N7x7dS794RZYps6WdqvfxAS0DwX5/k1gv3vlJBakSHO7wgTtXgajHmvHqCwckmhP
+# HT0WC6i8gOz2+fvHV+FW5wdm9NNGaJ7l3ikHha0lwI2d5TWLmqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MjAwMDAwMjlaMC8GCSqGSIb3DQEJBDEiBCBmM7Vw
-# jYz/FYh53RL0AInVL/56SwjC5Rqw08eE/vvvWTANBgkqhkiG9w0BAQEFAASCAgAN
-# 3eBTmQQVPeBPPW+q4wrZRQX3mPNlCRGbye4VwgMS55T2Gv5hg/eG8ranGp67/u78
-# BmYFBj9z+YMyMp9SbXAy5Yu/FPw2uf/ZOvgBKIbWIrOIshfwuOp7ltuY74B0vr+L
-# Wz3721jvu+oNVjHltPJdEIuRdLegrJJyrIxaJlogyABJnAjYevaON6aYIJ7a6cnj
-# 4P3nIibR3AtvuDK+72p9riNM/6JNzASMbY/LqoCKVXZ21ZMkVdf/zWRDY3SiKsZc
-# flNnyrfxi+FgqbKUZwJLOWbKZvyaUGMGapQdwUvAz8tvbiY8+MIXCvXc0UHCZ2g0
-# 01Wd1krPopbyfMtHtgpG0yZHlKdMPnxOReimNQk0+OY0izUO/KaQw72jbAtskl1R
-# cfkipB1HhJGWQIZHEMRzk5U4DtJU/Wb8HeqVl1eg2gr3cnW90Vap9PvXUGddukoD
-# 0o673aZDf217fN3D6sr09xOuel0dYNZDhXFBVrgLpQGrfaO5lo7l4i46m5/0zTw8
-# WKhkk5ArA3S4SPsL/HwXhWH8P3PtziWIdLB2NLOYKndw2jNhXj4gUFEXCUk+lWMt
-# MP3mFR3CkoERAX6XCXNPV5doy1lbM3BPjNlS2AzSfRo0DFWTpFRa89reWXM48PPL
-# QZlFluT5hOX7X3U2HDmfD6EnrKUkg4nNofbxkTF30A==
+# CSqGSIb3DQEJBTEPFw0yNjA0MTkxNzIwMjVaMC8GCSqGSIb3DQEJBDEiBCAb3CTa
+# GHmHru6rwhHkEisjyXaGG0FMnwx1JMzd5GhiVDANBgkqhkiG9w0BAQEFAASCAgBr
+# dcYN5kdeG7suL3/B5j62h5XALOuTZWz8Qi2ahN/28BWQA0wWHFHnwjwzl7gdokJT
+# Tdl/awh/RtU0HzKK/YLaTC0+Kvt6rZ+xJyszbh2vQho/dNCGS48mk4e+aVa17veg
+# HFmT6aCQQQRhMN41a1A8rC5XjYtS2NNm6KG/gHPB2PmdwO1LreukbSAzozucB/KQ
+# S+KFygb3PoeTdRZa1bGs53uO4eKdC0C4zkvAN6Ftpaq0Hzh3aAE64jcGg+Y33VVJ
+# 0BnBDEhKsrSHdVrQd/IuZiGhcQgM9utOZ7rGlYajq9HscuVKwWCxqErlHs+5HFWB
+# NONiMrme2i3Ch2A+ez/5Q7++MWoH6n+l2KyRUC9C1O0uO3/9PoNB4SwCXdF+GfJm
+# /VzMMNV1f1wNBtN1HsrWI6smSf2VMn2hn6Fg32rDVUJszcwtb5QzXXCGh2DD0dEQ
+# VGN6cDfEIW7CskBrJc/CesoBqV8Xss0tv+gILUr5rLti86pydeI8m34njCVR/lWo
+# Esf2svUGhab5IKHb9glbjfE+qykM/syMB7qyQr65zRZKxtA3yrD9kepe66Y7sSLt
+# qSjzGZcvbVSLX0gNiwDG2Xt3R5CCHBkaXbvhp5O6fMz+EZg+bSVwwWu4jsYCG6Cr
+# nk/hDU23qAHHb+JWmQd/m0JtIbQTTQBIY+0c5a5NTQ==
 # SIG # End signature block

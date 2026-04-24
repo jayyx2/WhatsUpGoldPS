@@ -81,11 +81,25 @@
 .PARAMETER NamePrefix
     Prefix for monitor display names. Default: 'PhysDisk'.
 
+.PARAMETER Action
+    What to do with discovery results. When specified, skips the interactive menu.
+    Valid values: PushToWUG, ExportJSON, ExportCSV, ShowTable, Dashboard, DashboardAndPush, None.
+    PushToWUG requires devices resolved from WhatsUp Gold (not standalone -Target mode).
+
+.PARAMETER Target
+    Windows host(s) to scan via WMI -- IP address or FQDN. Accepts multiple values.
+    Enables standalone mode (no WhatsUp Gold connection needed for device resolution).
+    PushToWUG action is not available in standalone -Target mode.
+
 .PARAMETER DryRun
     Show what would be created/assigned without making changes.
 
 .PARAMETER WUGServer
     WhatsUp Gold server address. Default: resolved from vault.
+
+.PARAMETER WUGCredential
+    PSCredential for authenticating to WhatsUp Gold. When supplied, bypasses
+    the vault-based WUG server resolution and connects directly.
 
 .PARAMETER NonInteractive
     Suppress interactive prompts. Uses cached vault credentials.
@@ -115,6 +129,16 @@
     .\Setup-WindowsDiskIO-Discovery.ps1 -DeviceId 42 -Credential $cred -IncludeCounter @('DiskReadsPersec','DiskWritesPersec')
 
     Only creates Disk Reads/sec and Disk Writes/sec monitors.
+
+.EXAMPLE
+    .\Setup-WindowsDiskIO-Discovery.ps1 -Target '10.0.0.5','10.0.0.6' -Action Dashboard
+
+    Standalone mode -- scans hosts directly and generates an HTML dashboard.
+
+.EXAMPLE
+    .\Setup-WindowsDiskIO-Discovery.ps1 -Target '10.0.0.5' -Action ExportJSON -NonInteractive
+
+    Scans a host and exports disk inventory to JSON. No WUG connection required.
 
 .NOTES
     Author: Jason Alberino (jason@wug.ninja)
@@ -150,11 +174,20 @@ param(
 
     [string]$NamePrefix = 'PhysDisk',
 
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
+    [string]$Action,
+
+    [string[]]$Target,
+
     [string]$WUGServer,
+
+    [PSCredential]$WUGCredential,
 
     [switch]$DryRun,
 
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+
+    [string]$OutputPath
 )
 
 # --- Handle 'All' by running twice with each type ----------------------------
@@ -222,6 +255,14 @@ else {
     return
 }
 
+# Load dynamic dashboard generator (fallback)
+$dynDashPath = Join-Path (Split-Path $scriptDir -Parent) 'reports\Export-DynamicDashboardHtml.ps1'
+if (Test-Path $dynDashPath) { . $dynDashPath }
+
+# Load provider-specific Windows dashboard functions
+$winProviderPath = Join-Path $scriptDir 'DiscoveryProvider-Windows.ps1'
+if (Test-Path $winProviderPath) { . $winProviderPath }
+
 # =============================================================================
 # Configuration: Counter definitions
 # =============================================================================
@@ -278,9 +319,24 @@ if ($activeCounters.Count -eq 0) {
 }
 
 # =============================================================================
-# Preflight: WUG connection (vault-backed)
+# Preflight: WUG connection (only needed when resolving devices from WUG or pushing)
 # =============================================================================
+$needsWUG = (-not $Target) -or ($Action -eq 'PushToWUG') -or ($Action -eq 'DashboardAndPush')
+if ($needsWUG) {
 if (-not $global:WUGBearerHeaders -or -not $global:WhatsUpServerBaseURI) {
+    if ($WUGCredential) {
+        # Direct credential supplied -- bypass vault resolution
+        $wugUri = if ($WUGServer) { $WUGServer } else { 'https://localhost:9644' }
+        try {
+            Connect-WUGServer -serverUri $wugUri -Credential $WUGCredential -IgnoreSSLErrors
+            Write-Host "Connected to WhatsUp Gold." -ForegroundColor Green
+        }
+        catch {
+            Write-Error "Failed to connect to WhatsUp Gold: $_"
+            return
+        }
+    }
+    else {
     Write-Host "Not connected to WhatsUp Gold. Resolving from vault..." -ForegroundColor Yellow
     $wugSplat = @{ Name = 'WUG.Server'; CredType = 'WUGServer'; ProviderLabel = 'WhatsUp Gold' }
     if ($NonInteractive) { $wugSplat.NonInteractive = $true }
@@ -309,7 +365,9 @@ if (-not $global:WUGBearerHeaders -or -not $global:WhatsUpServerBaseURI) {
         Write-Error "Failed to connect to WhatsUp Gold: $_"
         return
     }
+    }
 }
+} # end needsWUG
 
 # =============================================================================
 # Resolve WMI credentials (vault-backed, multi-credential support)
@@ -386,7 +444,25 @@ Write-Host ""
 Write-Host "=== Windows Physical Disk IO Discovery ===" -ForegroundColor Cyan
 Write-Host ""
 
-if ($DeviceId) {
+$standaloneMode = $false
+if ($Target) {
+    # Standalone mode: scan specified hosts directly (no WUG device lookup)
+    $standaloneMode = $true
+    Write-Host "Standalone mode: scanning $($Target.Count) specified host(s)..." -ForegroundColor Cyan
+    $devices = @()
+    $targetId = 0
+    foreach ($t in $Target) {
+        $targetId++
+        $devices += [PSCustomObject]@{
+            id             = "target-$targetId"
+            displayName    = $t
+            hostName       = $t
+            networkAddress = $t
+            role           = 'Windows'
+        }
+    }
+}
+elseif ($DeviceId) {
     Write-Host "Fetching $($DeviceId.Count) specified device(s) from WhatsUp Gold..." -ForegroundColor Cyan
     $devices = @()
     foreach ($dId in $DeviceId) {
@@ -485,6 +561,7 @@ Write-Host ""
 $deviceDisks = @{}
 $allInstances = @{}   # unique instance -> $true (dedup across all devices)
 $deviceInfo = @{}     # deviceId -> @{ Name; IP }
+$deviceDiskStats = @{} # deviceId -> @{ "instanceName" -> @{ CounterKey = value; ... } }
 
 $scanIndex = 0
 foreach ($dev in $devices) {
@@ -517,10 +594,11 @@ foreach ($dev in $devices) {
         }
 
         try {
-            $perfData = Get-WmiObject -Class $WmiClass `
-                -ComputerName $devIP `
-                -Credential $tryCred `
-                -ErrorAction Stop |
+            # WMI does not allow explicit credentials for local connections
+            $isLocal = ($devIP -eq 'localhost' -or $devIP -eq '127.0.0.1' -or $devIP -eq '::1' -or $devIP -eq $env:COMPUTERNAME -or $devIP -eq '.')
+            $wmiSplat = @{ Class = $WmiClass; ErrorAction = 'Stop' }
+            if (-not $isLocal) { $wmiSplat.ComputerName = $devIP; $wmiSplat.Credential = $tryCred }
+            $perfData = Get-WmiObject @wmiSplat |
                 Where-Object { $_.Name -and $_.Name -ne '' }
 
             # Success -- process results
@@ -546,6 +624,20 @@ foreach ($dev in $devices) {
 
                 $instances += $instanceName
                 $allInstances[$instanceName] = $true
+
+                # Capture current counter values for dashboard/export
+                if (-not $deviceDiskStats.ContainsKey($devId)) {
+                    $deviceDiskStats[$devId] = @{}
+                }
+                $snap = [ordered]@{}
+                foreach ($ck in $activeCounters.Keys) {
+                    $prop = $activeCounters[$ck].Property
+                    $val  = $disk.$prop
+                    if ($null -ne $val) {
+                        $snap[$ck] = [double]$val
+                    }
+                }
+                $deviceDiskStats[$devId][$instanceName] = $snap
             }
 
             if ($instances.Count -gt 0) {
@@ -652,186 +744,326 @@ if ($DryRun) {
     return
 }
 
-# --- Confirmation prompt (interactive) ----------------------------------------
 # =============================================================================
-# STEP 3: Fetch existing WUG performance monitors to avoid duplicates
+# STEP 3: Action routing (menu or -Action parameter)
 # =============================================================================
-Write-Host "Checking existing performance monitors in WUG library..." -ForegroundColor Cyan
+if ($OutputPath) {
+    $OutputDir = $OutputPath
+} else {
+    $OutputDir = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
+}
+if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null }
 
-$existingMonitors = @(Get-WUGPerformanceMonitor -Search $NamePrefix -View 'info')
-$existingLookup = @{}
-foreach ($mon in $existingMonitors) {
-    # Key by exact monitor name for dedup
-    $existingLookup[$mon.Name] = $mon
+$choice = $null
+if ($Action) {
+    switch ($Action) {
+        'PushToWUG'        { $choice = '1' }
+        'ExportJSON'       { $choice = '2' }
+        'ExportCSV'        { $choice = '3' }
+        'ShowTable'        { $choice = '4' }
+        'Dashboard'        { $choice = '5' }
+        'None'             { $choice = '6' }
+        'DashboardAndPush' { $choice = '7' }
+    }
 }
 
-Write-Host "  Found $($existingMonitors.Count) existing monitor(s) matching prefix '$NamePrefix'." -ForegroundColor Gray
+if (-not $choice) {
+    Write-Host "What would you like to do with the discovered disks?" -ForegroundColor Cyan
+    if ($standaloneMode) {
+        Write-Host "  [1] Push monitors to WhatsUp Gold (not available in standalone mode)" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "  [1] Push monitors to WhatsUp Gold (creates library monitors + assigns)"
+    }
+    Write-Host "  [2] Export to JSON file"
+    Write-Host "  [3] Export to CSV file"
+    Write-Host "  [4] Show full table in console"
+    Write-Host "  [5] Generate HTML dashboard (disk inventory)"
+    Write-Host "  [6] Exit (do nothing)"
+    if (-not $standaloneMode) {
+        Write-Host "  [7] Dashboard + Push to WUG"
+    }
+    Write-Host ""
+    $choice = Read-Host -Prompt "Choice [1-7]"
+}
 
-# Pre-fetch existing monitor assignments per device (to skip already-assigned)
-Write-Host "Checking existing device monitor assignments..." -ForegroundColor Cyan
-$deviceExistingMonitors = @{}  # devId -> hashtable of monitorTypeId -> $true
-foreach ($devId in $deviceDisks.Keys) {
-    $deviceExistingMonitors[$devId] = @{}
-    try {
-        $assigned = @(Get-WUGPerformanceMonitor -DeviceId $devId -Search $NamePrefix -View 'basic')
-        foreach ($a in $assigned) {
-            $typeId = if ($a.MonitorTypeId) { $a.MonitorTypeId } elseif ($a.monitorTypeId) { $a.monitorTypeId } else { $null }
-            if ($typeId) {
-                $deviceExistingMonitors[$devId]["$typeId"] = $true
+# Handle DashboardAndPush: run Dashboard then PushToWUG sequentially
+if ($choice -eq '7') {
+    $actionsToRun = @('5', '1')
+} else {
+    $actionsToRun = @($choice)
+}
+
+# Build export-friendly data for JSON/CSV/Table/Dashboard
+$exportData = @()
+foreach ($devId in ($deviceDisks.Keys | Sort-Object)) {
+    $info  = $deviceInfo[$devId]
+    foreach ($instance in $deviceDisks[$devId]) {
+        $row = [ordered]@{
+            DeviceId = $devId
+            Host     = $info.Name
+            IP       = $info.IP
+            DiskType = $DiskType
+            Instance = $instance
+        }
+        # Add actual counter values from the WMI snapshot
+        $snap = $null
+        if ($deviceDiskStats.ContainsKey($devId) -and $deviceDiskStats[$devId].ContainsKey($instance)) {
+            $snap = $deviceDiskStats[$devId][$instance]
+        }
+        foreach ($ck in $activeCounters.Keys) {
+            $label = $activeCounters[$ck].Label
+            if ($snap -and $snap.Contains($ck)) {
+                $row[$label] = $snap[$ck]
+            }
+            else {
+                $row[$label] = $null
             }
         }
-        Write-Verbose "  Device $devId ($($deviceInfo[$devId].Name)): $($assigned.Count) existing '$NamePrefix' monitors."
-    }
-    catch {
-        Write-Verbose "  Could not check existing monitors for device ${devId}: $_"
+        $exportData += [PSCustomObject]$row
     }
 }
-Write-Host "  Done." -ForegroundColor Gray
-Write-Host ""
 
-# =============================================================================
-# STEP 4: Create library monitors and assign to devices
-# =============================================================================
-$createdCount        = 0
-$skippedCount        = 0
-$assignedCount       = 0
-$alreadyAssignedCount = 0
-$failedCount         = 0
-
-# Cache: monitorName -> libraryMonitorId (for reuse across devices)
-$monitorIdCache = @{}
-
-# Pre-populate cache with existing monitors
-foreach ($mon in $existingMonitors) {
-    $monitorIdCache[$mon.Name] = if ($mon.MonitorId) { $mon.MonitorId } else { $mon.Id }
-}
-
-$totalSteps = $sortedInstances.Count * $activeCounters.Count
-$stepIndex  = 0
-
-foreach ($instance in $sortedInstances) {
-    foreach ($counterKey in $activeCounters.Keys) {
-        $stepIndex++
-        $def     = $activeCounters[$counterKey]
-        $monName = "${NamePrefix} - ${instance} - $($def.Label)"
-
-        $pct = [Math]::Round(($stepIndex / $totalSteps) * 100)
-        Write-Progress -Activity "Creating disk IO monitors" `
-            -Status "$monName [$stepIndex of $totalSteps]" `
-            -PercentComplete $pct
-
-        # --- Create in library if not exists ----------------------------------
-        if ($monitorIdCache.ContainsKey($monName)) {
-            $libId = $monitorIdCache[$monName]
-            Write-Verbose "Monitor '$monName' already exists (ID: $libId). Skipping creation."
-            $skippedCount++
+foreach ($currentChoice in $actionsToRun) {
+switch ($currentChoice) {
+    '1' {
+        # PushToWUG
+        if ($standaloneMode) {
+            Write-Warning "Push to WUG requires devices resolved from WhatsUp Gold. Omit -Target or use -DeviceId."
+            continue
         }
-        else {
-            Write-Host "  Creating: $monName" -ForegroundColor White
-            try {
-                $result = Add-WUGPerformanceMonitor `
-                    -Type WmiFormatted `
-                    -Name $monName `
-                    -WmiFormattedRelativePath $WmiClass `
-                    -WmiFormattedPropertyName $def.Property `
-                    -WmiFormattedDisplayname "$($def.Label) ($instance)" `
-                    -WmiFormattedInstanceName $instance `
-                    -WmiFormattedTimeout $WmiTimeout
 
-                # Extract the new monitor ID from the result
-                if ($result -and $result.data -and $result.data.idMap) {
-                    $libId = $result.data.idMap.resultId
+        # --- Fetch existing WUG performance monitors to avoid duplicates ------
+        Write-Host "Checking existing performance monitors in WUG library..." -ForegroundColor Cyan
+
+        $existingMonitors = @(Get-WUGPerformanceMonitor -Search $NamePrefix -View 'info')
+        $existingLookup = @{}
+        foreach ($mon in $existingMonitors) {
+            $existingLookup[$mon.Name] = $mon
+        }
+
+        Write-Host "  Found $($existingMonitors.Count) existing monitor(s) matching prefix '$NamePrefix'." -ForegroundColor Gray
+
+        # Pre-fetch existing monitor assignments per device
+        Write-Host "Checking existing device monitor assignments..." -ForegroundColor Cyan
+        $deviceExistingMonitors = @{}
+        foreach ($devId in $deviceDisks.Keys) {
+            $deviceExistingMonitors[$devId] = @{}
+            try {
+                $assigned = @(Get-WUGPerformanceMonitor -DeviceId $devId -Search $NamePrefix -View 'basic')
+                foreach ($a in $assigned) {
+                    $typeId = if ($a.MonitorTypeId) { $a.MonitorTypeId } elseif ($a.monitorTypeId) { $a.monitorTypeId } else { $null }
+                    if ($typeId) {
+                        $deviceExistingMonitors[$devId]["$typeId"] = $true
+                    }
                 }
-                elseif ($result -match 'library ID:\s*(\d+)') {
-                    $libId = $Matches[1]
+                Write-Verbose "  Device $devId ($($deviceInfo[$devId].Name)): $($assigned.Count) existing '$NamePrefix' monitors."
+            }
+            catch {
+                Write-Verbose "  Could not check existing monitors for device ${devId}: $_"
+            }
+        }
+        Write-Host "  Done." -ForegroundColor Gray
+        Write-Host ""
+
+        # --- Create library monitors and assign to devices --------------------
+        $createdCount        = 0
+        $skippedCount        = 0
+        $assignedCount       = 0
+        $alreadyAssignedCount = 0
+        $failedCount         = 0
+
+        $monitorIdCache = @{}
+        foreach ($mon in $existingMonitors) {
+            $monitorIdCache[$mon.Name] = if ($mon.MonitorId) { $mon.MonitorId } else { $mon.Id }
+        }
+
+        $totalSteps = $sortedInstances.Count * $activeCounters.Count
+        $stepIndex  = 0
+
+        foreach ($instance in $sortedInstances) {
+            foreach ($counterKey in $activeCounters.Keys) {
+                $stepIndex++
+                $def     = $activeCounters[$counterKey]
+                $monName = "${NamePrefix} - ${instance} - $($def.Label)"
+
+                $pct = [Math]::Round(($stepIndex / $totalSteps) * 100)
+                Write-Progress -Activity "Creating disk IO monitors" `
+                    -Status "$monName [$stepIndex of $totalSteps]" `
+                    -PercentComplete $pct
+
+                if ($monitorIdCache.ContainsKey($monName)) {
+                    $libId = $monitorIdCache[$monName]
+                    Write-Verbose "Monitor '$monName' already exists (ID: $libId). Skipping creation."
+                    $skippedCount++
                 }
                 else {
-                    # Re-fetch from library by name
-                    $refetch = @(Get-WUGPerformanceMonitor -Search $monName -View 'info')
-                    $match = $refetch | Where-Object { $_.Name -eq $monName } | Select-Object -First 1
-                    if ($match) {
-                        $libId = if ($match.MonitorId) { $match.MonitorId } else { $match.Id }
+                    Write-Host "  Creating: $monName" -ForegroundColor White
+                    try {
+                        $result = Add-WUGPerformanceMonitor `
+                            -Type WmiFormatted `
+                            -Name $monName `
+                            -WmiFormattedRelativePath $WmiClass `
+                            -WmiFormattedPropertyName $def.Property `
+                            -WmiFormattedDisplayname "$($def.Label) ($instance)" `
+                            -WmiFormattedInstanceName $instance `
+                            -WmiFormattedTimeout $WmiTimeout
+
+                        if ($result -and $result.data -and $result.data.idMap) {
+                            $libId = $result.data.idMap.resultId
+                        }
+                        elseif ($result -match 'library ID:\s*(\d+)') {
+                            $libId = $Matches[1]
+                        }
+                        else {
+                            $refetch = @(Get-WUGPerformanceMonitor -Search $monName -View 'info')
+                            $match = $refetch | Where-Object { $_.Name -eq $monName } | Select-Object -First 1
+                            if ($match) {
+                                $libId = if ($match.MonitorId) { $match.MonitorId } else { $match.Id }
+                            }
+                            else {
+                                Write-Warning "    Could not determine library ID for '$monName'. Skipping assignments."
+                                $failedCount++
+                                continue
+                            }
+                        }
+
+                        $monitorIdCache[$monName] = $libId
+                        $createdCount++
+                        Write-Host "    Created (ID: $libId)" -ForegroundColor Green
                     }
-                    else {
-                        Write-Warning "    Could not determine library ID for '$monName'. Skipping assignments."
+                    catch {
+                        Write-Error "    Failed to create '$monName': $_"
                         $failedCount++
                         continue
                     }
                 }
 
-                $monitorIdCache[$monName] = $libId
-                $createdCount++
-                Write-Host "    Created (ID: $libId)" -ForegroundColor Green
-            }
-            catch {
-                Write-Error "    Failed to create '$monName': $_"
-                $failedCount++
-                continue
-            }
-        }
+                $libId = $monitorIdCache[$monName]
+                foreach ($devId in $deviceDisks.Keys) {
+                    if ($deviceDisks[$devId] -contains $instance) {
+                        $info = $deviceInfo[$devId]
 
-        # --- Assign to each device that has this disk instance ----------------
-        $libId = $monitorIdCache[$monName]
-        foreach ($devId in $deviceDisks.Keys) {
-            if ($deviceDisks[$devId] -contains $instance) {
-                $info = $deviceInfo[$devId]
+                        if ($deviceExistingMonitors.ContainsKey($devId) -and $deviceExistingMonitors[$devId].ContainsKey("$libId")) {
+                            Write-Verbose "  '$monName' already assigned to $($info.Name) (ID: $devId). Skipping."
+                            $alreadyAssignedCount++
+                            continue
+                        }
 
-                # Check if already assigned on this device
-                if ($deviceExistingMonitors.ContainsKey($devId) -and $deviceExistingMonitors[$devId].ContainsKey("$libId")) {
-                    Write-Verbose "  '$monName' already assigned to $($info.Name) (ID: $devId). Skipping."
-                    $alreadyAssignedCount++
-                    continue
-                }
-
-                Write-Verbose "  Assigning '$monName' to $($info.Name) (ID: $devId)"
-                try {
-                    Add-WUGPerformanceMonitorToDevice `
-                        -DeviceId $devId `
-                        -MonitorId $libId `
-                        -PollingIntervalMinutes $PollingIntervalMinutes `
-                        -Enabled "true"
-                    $assignedCount++
-                    # Update cache so subsequent runs in same session see it
-                    if ($deviceExistingMonitors.ContainsKey($devId)) {
-                        $deviceExistingMonitors[$devId]["$libId"] = $true
-                    }
-                }
-                catch {
-                    $errMsg = $_.Exception.Message
-                    # Duplicate/already-assigned is not fatal
-                    if ($errMsg -match '409|already assigned|already exists|duplicate') {
-                        Write-Host "    Already assigned: $monName -> $($info.Name)" -ForegroundColor DarkGray
-                        $alreadyAssignedCount++
-                    }
-                    else {
-                        Write-Warning "    Failed to assign '$monName' to $($info.Name) (ID: ${devId}): $errMsg"
-                        $failedCount++
+                        Write-Verbose "  Assigning '$monName' to $($info.Name) (ID: $devId)"
+                        try {
+                            Add-WUGPerformanceMonitorToDevice `
+                                -DeviceId $devId `
+                                -MonitorId $libId `
+                                -PollingIntervalMinutes $PollingIntervalMinutes `
+                                -Enabled "true"
+                            $assignedCount++
+                            if ($deviceExistingMonitors.ContainsKey($devId)) {
+                                $deviceExistingMonitors[$devId]["$libId"] = $true
+                            }
+                        }
+                        catch {
+                            $errMsg = $_.Exception.Message
+                            if ($errMsg -match '409|already assigned|already exists|duplicate') {
+                                Write-Host "    Already assigned: $monName -> $($info.Name)" -ForegroundColor DarkGray
+                                $alreadyAssignedCount++
+                            }
+                            else {
+                                Write-Warning "    Failed to assign '$monName' to $($info.Name) (ID: ${devId}): $errMsg"
+                                $failedCount++
+                            }
+                        }
                     }
                 }
             }
         }
+
+        Write-Progress -Activity "Creating disk IO monitors" -Completed
+
+        Write-Host ""
+        Write-Host "=== Disk IO Push Complete ===" -ForegroundColor Cyan
+        Write-Host "  Monitors created:      $createdCount" -ForegroundColor Green
+        Write-Host "  Monitors reused:       $skippedCount" -ForegroundColor Gray
+        Write-Host "  Assignments made:      $assignedCount" -ForegroundColor Green
+        Write-Host "  Already assigned:      $alreadyAssignedCount" -ForegroundColor Gray
+        Write-Host "  Failures:              $failedCount" -ForegroundColor $(if ($failedCount -gt 0) { 'Red' } else { 'Gray' })
+        Write-Host ""
+    }
+    '2' {
+        # ExportJSON
+        $jsonPath = Join-Path $OutputDir "WindowsDiskIO-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+        $exportData | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonPath -Encoding UTF8
+        Write-Host "Exported to: $jsonPath" -ForegroundColor Green
+    }
+    '3' {
+        # ExportCSV
+        $csvPath = Join-Path $OutputDir "WindowsDiskIO-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+        $exportData | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+        Write-Host "Exported to: $csvPath" -ForegroundColor Green
+    }
+    '4' {
+        # ShowTable
+        $exportData | Format-Table -AutoSize
+    }
+    '5' {
+        # Dashboard - generate HTML disk inventory report
+        $dashPath = Join-Path $OutputDir 'WindowsDiskIO-Dashboard.html'
+
+        if (Get-Command -Name 'Export-WindowsDiskIODashboardHtml' -ErrorAction SilentlyContinue) {
+            Export-WindowsDiskIODashboardHtml -DashboardData $exportData `
+                -OutputPath $dashPath `
+                -ReportTitle 'Windows Disk IO Inventory'
+        }
+        elseif (Get-Command -Name 'Export-DynamicDashboardHtml' -ErrorAction SilentlyContinue) {
+            # Build threshold rules for counter columns that have meaningful thresholds
+            $thresholds = @()
+            if ($activeCounters.ContainsKey('PercentDiskTime')) {
+                $thresholds += @{ Field = '% Disk Time'; Warning = 70; Critical = 90 }
+            }
+            if ($activeCounters.ContainsKey('AvgDiskQueueLength')) {
+                $thresholds += @{ Field = 'Avg. Disk Queue Length'; Warning = 2; Critical = 5 }
+            }
+
+            $dashSplat = @{
+                Data         = $exportData
+                OutputPath   = $dashPath
+                ReportTitle  = 'Windows Disk IO Inventory'
+                CardField    = @('Host', 'DiskType')
+                ExportPrefix = 'WindowsDiskIO'
+            }
+            if ($thresholds.Count -gt 0) { $dashSplat.ThresholdField = $thresholds }
+
+            Export-DynamicDashboardHtml @dashSplat
+        }
+        else {
+            Write-Warning "No dashboard function available. Exporting as JSON instead."
+            $jsonPath = Join-Path $OutputDir "WindowsDiskIO-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+            $exportData | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonPath -Encoding UTF8
+            Write-Host "JSON exported: $jsonPath" -ForegroundColor Green
+            break
+        }
+
+        Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
+        Write-Host "  Devices: $($deviceDisks.Count) | Instances: $($sortedInstances.Count) | Counters: $($activeCounters.Count)" -ForegroundColor Gray
+    }
+    '6' {
+        Write-Host "No action taken." -ForegroundColor Gray
+    }
+    default {
+        Write-Warning "Invalid choice '$currentChoice'."
     }
 }
+} # end foreach actionsToRun
 
-Write-Progress -Activity "Creating disk IO monitors" -Completed
-
-# =============================================================================
-# Summary
-# =============================================================================
 Write-Host ""
 Write-Host "=== Disk IO Discovery Complete ===" -ForegroundColor Cyan
-Write-Host "  Monitors created:      $createdCount" -ForegroundColor Green
-Write-Host "  Monitors reused:       $skippedCount" -ForegroundColor Gray
-Write-Host "  Assignments made:      $assignedCount" -ForegroundColor Green
-Write-Host "  Already assigned:      $alreadyAssignedCount" -ForegroundColor Gray
-Write-Host "  Failures:              $failedCount" -ForegroundColor $(if ($failedCount -gt 0) { 'Red' } else { 'Gray' })
 Write-Host ""
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSFSmElEgSlDH2
-# DI/WHZvG3++G8QvuQ7iNxEjd9K0uIqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2rBw2LrbHCrE0
+# bBNCyni8W3TDkDkbi0ufEF5agcjSgqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1034,33 +1266,33 @@ Write-Host ""
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAOq3OwkltG8srPOfyD0BUV9EQHNVJ2IK4jmy1OW8npszANBgkqhkiG9w0BAQEF
-# AASCAgDlcfslLkgGlSgG9W7BKmD/zMIobAs21XyrUNnEyzumjGZvUvxFnfsSPAGE
-# UoYJTIU6Q+B7CFBEPpplrIdmBhLrozKQEM+bXbIZ208GQh0erub0+EzMkmDp1M2h
-# E6kN7CcpZYt6FfTUq9Se8m0zLdmgS+j4u7uKqNpbl8ZBrRUTBqvZ/N4KbjXDAWjh
-# EguSGr9qSFrsLsopYVeFrjxQq7xw+E3Wy6n1V8kDSKor4CpAorVynfFgnwk7um3z
-# W2sEpsCCs4uFmoU4fHSxU62uoAPO8GnOrDbKhFg5SBWtSFYv8ZV2gsRZnSCEE4oJ
-# JoaZUiVOODbh8F2c14LUw27nyDl2sYKmXuQ76enun0r/MdzNJyu1O4aY6aEkiaUB
-# Q8uOJ/OFqOc7zVlspU5/g2KbDNgPWXlM5a4j9Y2/X3SlTmQRe/MqXuAGeXE+DSfY
-# YXQQkm96v8YA2MTjUHV0Ci1HYq9cPM5diPmnPgVeK0Q/HoAuUa7glHRV5UvoAASh
-# +eWzsyxR2b8EOLLYJ/9LwAWDO03U/eSO7gbmMbp4ySGKMoajHxJnAbY1z0IaLSN7
-# eGMPPJFuFx2Dy0x8c87lmLv0uf0laA2w+TgiyhDpFtwVNZqrF3gbQgBWTfrY1Bda
-# H9rHiWsTF+SabimAJc4oJHVQnS/l9S16r0JcWhIqjFQUN/4OkKGCAyYwggMiBgkq
+# BCDcvhxQk0WMaAa67imP4hvWhhgLqOLg2p+NoaNu6dOYhDANBgkqhkiG9w0BAQEF
+# AASCAgDzVB5kisw8HJ30+dT077YjIOXfMTgJC9ns91oQrEPudwO69+fT2IpOZcNX
+# nkc/SqqhFQ4Oh5tgyemQEyEKr+0RlKp7dLDI7RuZwVnD2LC+3o96R2KIq3atM6/H
+# rWVvQZ0jDKybFSBbgaQ/Wyg5+9dKxkuFr13iK7t2YQkVgbL3+L5CQKbXRYIPlfrk
+# EPWLKUA1NdMMDpiyA95xlUJd5tSQV05tf90HVw+CLxcKI1o583qgvgsDAutMBYvg
+# cGwBljz3oyW9k+6z+fH3QMldnoKtndnkBaBqwXOGXPeNjiN+2CzAksfe/NeWXxGi
+# rgRVlecrAmhyLHc81S7XUM+t4pXLEp567vEye8/lXiXf5BJLSqjn2Wf73AJH4/uG
+# S9bdW4vlMgxCSSBUXtJJ/8FQ1B6ISLo0TIzgrJtAteTtXYJ2wgFtbPiAXEP3xTAt
+# kIAyceFqkpZt3sV/HpDZPdD1u6OFDwJ52Y9IeCg7h1Zbd3gBFpHtOQ8eOHw1Cp58
+# KChOY7VLfF6u5WvcNrF6C8nNYwnPpquwe0QYfZrSTVdQOvSycI7Tzx9NusPxa/IF
+# qTnj6IYinRs13NTc5lBCmNeXh123JBvXwZce0KKiUcvlCl/fqtxw80f6UqQ0BtFE
+# 6eYqGsYaaiBC/7O4oq3sg4l1aSSQqdGUosIQSMj5ESRS10F3mKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MTAwMjEzNTlaMC8GCSqGSIb3DQEJBDEiBCBMD4a+
-# 36xKJfvQD1vPZYjgZZGbj06RZL5uQgOQBSNu+zANBgkqhkiG9w0BAQEFAASCAgA9
-# bLDzqYLOoa+g0EbZP/V/11Ndbe7GxrcX7rxf/6gFlMTw78OVeAUZWkXYA0nYf7US
-# rAhWViRAJB0arVppI1yxPc1Sk8/jUgWAUl2OQi4+XmDMFsrjALWXbLz6DTeEjrPo
-# sZbET5D24Ue0Pg25+GL6B8LdmIfNBvDeE8xpoE6iHZtP77CJg6I7IghRfzrcedBr
-# kc4N4PoBTh9/4UZypJzlaB5BnJ0JCDAuc0uTESwnl4iN1melvI2259WZWsm1MBCH
-# CPHv1JHzHR3v/Kp3eF1aeulV6yMBqrcDG9OVqWzc7046mfPG+Ln1qNtHgHBkqL6d
-# gTZm1jjSdHG3J3HG33AjE8yjyh/X11BVxcQtfUZu7EzRSvfi9zGS/YVrT9HqhUSF
-# ZBHY29M9NIMFyYgd7JMwH+CdV/tzHO71+mgFL4UG9SpOrewxffagRUd8AtkPu/Vi
-# xk+jfN9dg7Vh89xYGj1aD6r0Dv9BT1NDDg6OR/7REGHW0motEp7k1ZG4bswc7Exf
-# AD/l9VKBgsfwmpevlFEKWURaYZ7qZD1IuAuEvDVSlniACdB7y3HayoEmJvLPk/PV
-# 11Mh0sKuuIhNFifNxPYxIilN8ezwLWnwA1nlVjXoeRa1kIBgQmGcENJ1C9xuk2tW
-# aJJ3blx/mXCojhEptKVZ5wrEbM4e0MzPoBlVNcWcKw==
+# CSqGSIb3DQEJBTEPFw0yNjA0MTkwMDAzNDZaMC8GCSqGSIb3DQEJBDEiBCA7f9Sg
+# nBmVoO42nvSGARJYbvufqNBZeWAcg0O7VV9AqzANBgkqhkiG9w0BAQEFAASCAgAI
+# rl12k+8w5+9mivaMrUDYkntNoKsWf4jYw+EaOmQBbUUjI4F8Kv28/m/pnAnoaaC1
+# dESFnJHNGChBHrFZo/UnbbTE+J3tiIcgAP2eGKSMr74GJ9+/LEnJgMgeCPpcqlV9
+# JgIR+IUd0SoajcmUuN8EOADxOiP3YbgIGj7kVpsz3BgGyTTw7bYm2SBgukyLjghv
+# EfG8gIy2usEyIODY3sdq+GRL0XOk8NLQhS0RMFtkuIcQ7Uj/CsfRPBO7qC4Vs4m/
+# pzhQKl2+qqXiwmVBlSkAkAwSWJuC4JGXBOtKU4FNc/FzJQ/ptCJuX4+F7UtoGFOO
+# 9l0kTcBzZ4uzIC4ZFLWrZjOK6zHVcAVVRpltZ1mOlqusskkzuU4PofpFy0oINBjq
+# LQIBtUAZfMx8LM/YMY06Gl/pQ3TFd0AMxXx6HG3Xvq+qYSWCx1WwnSTEoXddCmEM
+# RCvqKtjA+ATX6rLE3Jvg05WB6CYXz/exi2a1/lRhTn0kM4VVEt2PPyQAITowhPSw
+# GBBRQ3F3ZudUmL18lyKmv6tGI3xKgkx2ZoJLch/WaNxrPR+dhrlLoLnNec6ERzXu
+# GtrINnzGZOR/euNjeuG+uqkwHhHB569KMPMkSjSPJr/KMjofZ/4agSvnU1Hn7m4n
+# fgnXnqdOZ3N+iG6EBNMlM1un/jAVAgMvo2TpWDfbBg==
 # SIG # End signature block

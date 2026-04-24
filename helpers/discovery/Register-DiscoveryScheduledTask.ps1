@@ -7,14 +7,20 @@
     (or Invoke-WUGDiscoveryRunner.ps1) on a recurring schedule, fully
     non-interactive using DPAPI vault credentials.
 
-    IMPORTANT — DPAPI Constraint:
+    NOTE: For first-time setup, use Start-WUGDiscoverySetup.ps1 instead.
+    That interactive wizard handles provider selection, credential configuration,
+    test runs, and calls this script automatically to register scheduled tasks.
+    Use this script directly only for advanced scenarios or automation.
+
+    IMPORTANT -- DPAPI Constraint:
       The scheduled task MUST run as the same Windows user account that
       originally populated the DPAPI credential vault (interactively).
       The task must also run on the same machine. DPAPI encryption is
       tied to the user profile + machine key.
 
     Typical Workflow:
-      1. Run Setup-*-Discovery.ps1 interactively once to populate the vault
+      1. Run Start-WUGDiscoverySetup.ps1 (recommended) OR
+         Run Setup-*-Discovery.ps1 interactively once to populate the vault
       2. Run this script to register the scheduled task
       3. The task fires on schedule, reads vault creds, runs discovery silently
 
@@ -609,8 +615,8 @@ catch {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHlrT1iZv0jy7C
-# s+UllOhb5SiW5JBEgKcglzJT5MDp4qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB11MK3YjOtmK+4
+# uo7ZjWToY06bAKhdq+oRUXsTmRz316CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -813,33 +819,33 @@ catch {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCB3A/8FY51slfv755xHzWkHiinW2y68TUe5FVOijA3WaTANBgkqhkiG9w0BAQEF
-# AASCAgAOt24ysM0F+DBzcW+5lg/2KCMxcnVpAkg0NuvTBWUNGGc9eHJ0MQHeM9JP
-# poZAPhytSRZI+HnJw9Ha7iFMLTARmX4gWzxbugHHGDaMQVpZpF1fEx6fJ1+oOVNn
-# cZR74g4MJRQiGwGT/3il/OZRZ7Snw+RhDwsIAgmQWytY87GBfh1JH43yoVyEfolm
-# 2yc1i6ANMmKW8qpl6/98JaTj0C3uo+ckUXROms+dwF5febpwoGjW1QGrkjl7sHv/
-# z8X3pFyol+gAvO3ItIi9noSjJhUqOrTI5jXGDjkii22ddbnY1CvRwn0HAfRkTA4y
-# SWbZ+DomOOyuJIm187JaE7+Whm6nFI9zSJSsFTcPO2bAnzCgNpBUEl+GkN/O73V6
-# Br1kUVDUOOT3mbnTtPqo/k8PU8p5Zv9/F+G7TH8z06YFpiv3jQSqqv1W7Y1kjISp
-# ZY13ljHyOv4lfD1BMZp7apmM4EAlnWIG3O6B5Sh2d643+fDCEpu7Q/F8oDrQPaj/
-# R3SQhFiDJj1zJrXsUE8xXfkpNENnCXj5/y4fXrxzFrHRj+Oi3Fm5OibeFQQZUeyF
-# PLVPSv65SfvIGac9+P0tCSNDOajTryvp1pZKI8cuLj6sWj2BYEDyxuS4HHoNH7Vn
-# FMYpub7O6ERNY7jb0BwVJg+erJWbsPRD+ME/acx82TYh01FszaGCAyYwggMiBgkq
+# BCB6eUzEQJ0Nup+2ma23JaN8734U0JKLKk5H8esWCpH6oDANBgkqhkiG9w0BAQEF
+# AASCAgC3jriTFW9OXQ04BYya3M0AmkEK22444/Qa0+Tdm46splJQxs1r1t6K5DdX
+# uY4OSqTKKxqTCjIkor8N+97neelwAJAcViaG+KBzzpGCAp2CCIPChu82Rt29a0he
+# +ajn7gnzIsjPAFGpW1ynkmjDL0WwjENIrWyu1XxkK4b4/iiSKXUk5t4cWUPYTQvA
+# ncMENZz7GVw4/e337+89zx08FwKFRThEjih3ahmZ6OFQMpMy1SaSdGZZezI4r891
+# ftv3E0Hezh3sccmgpchgZvu3z0l2pYY9R0HLwOmJih1ofp0MWSlexgkoOVFTs18Y
+# l606mZt7nXHK4CElEiC5h/6sBlU6Lx3Nh/zNY0qNLGf6Eq0XPuBvUzycQ0y2J0ef
+# U4Ln4ITzUcZyY51QSTeGipO3GRKNRcEhSKxydHYDoCmO9yO2VwiPZB69NBmoI6ru
+# +fvB4y2xoTfaB2q+WziRu+NCca31rgYH72tWW4aIAbT8NLH64afvmlMl/ti+hhr/
+# xTWcIqP+Qs19t7smF8Psdgb+wkaj2lCdjS8N6Gb8L3pskohJpNnQZmoI7fjsdZ4T
+# Ks/hICeuoHwseHIy3gDSbtru0moufnZ6IR9xTd1GS90yLUjcVH44EXlKEdhDXuIL
+# L31SWSMGe+TpJ9erb/e4PjULQtDvSZzHmz0XbuYTMt5aIYJ5NqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MTAwMjE0MDFaMC8GCSqGSIb3DQEJBDEiBCDVEDIg
-# ZydSY0dALYFKllxeT4hXDEtqqOkR5tKye+AtvTANBgkqhkiG9w0BAQEFAASCAgBa
-# Ok2o1awjEdAvDUaSiLHZrfOFdopK9B8xL/C26WSBclG2iwydDb92kEFbwoO07FLb
-# ENSx6IVWXY7MFARVWCjxMkoWYVfBRla9gsmiG7AbfSAiw4Nte0K+GdGI2j4f6PYg
-# nS32ePosuOUAV/eXq22BA29wnJYCHyhtghIoMH6jrUXy5ISlgfk5CvKovLoh6ZUX
-# o9jdMBVX1FpGKTEZWX7iEo3o4ZLoPArVQOYA0nle5pz4o8izNBAal5PMZPf8McNE
-# e6CBfXIthf7ObNhboj8uYoGLtKCZJDotETimtsr5bSLhiH0gNlY/ZFMCB0tzUVe7
-# BUkTqMj71KK/D1b30ct/UaMVRbq2xNM2UKri0u/7fLOj0sitFTR0QrICNzlOsIXz
-# HZ5kEAU6CwJ21/CToE9WyIQgA8ayJHG6braZav50FVFxhu/z951omkt4yxY6cWFj
-# xfKNcuvv1v1QBHzisuaPBNP2QfmwiOoqWiu63yP+wvNhAKyi6+i+J8rMlrbo/4Bo
-# 3xh5LN67Rm54Z7uRmbH8LjimBADO6kkt/azAJv0nVmPHLxjDbVhyv8ULcLYUMqTx
-# E5JpZgCaBqdA7NJaDBaPlSp7uf/kvkH2MQuRSC3TCEgAgVoh1uZpWWznQWkM6Rzw
-# iB+CCwdfSUV3ukz7ZGpiehSnzOaC+cEjIVPTnZhNeA==
+# CSqGSIb3DQEJBTEPFw0yNjA0MTgxNzE0NDBaMC8GCSqGSIb3DQEJBDEiBCAr5fV8
+# ixiWECXwN3fYEYynKQOIF/+o2IyJkoJ6AXlK1DANBgkqhkiG9w0BAQEFAASCAgA+
+# TStGU8B4R9Aa90Ya6a8+UOJ/HxpX+jTHxhEruENqLSA/Axil25E/v1UN1f21vjIK
+# wNRVuY0BSXq5Eq73TMv6Eg6bW6a42pY5f642hXD/FoU/0vR0Kk81+SmJYkzBIz9Z
+# lypLeQ7V77MkZqL5kSEfs4DrdPRwH12zDXvf0D+HSCSYuSoIfqsc2EaSmDgJffhV
+# cHs+flZr18wJJ+u87xxgCVG0yy6aS+x1uWKDKWBhwROUVZxyUhzKNGW06gnB5KKx
+# enGv3GBMCke5N+QYzmhEpAK7Lp5qKp6OSXf+lf2cAr45/AW1Qb7FDPQ53BT0KeyN
+# 3ZpLpIrHW/YHW0Kn5Py580Ri2zhdUJt6azb1oUoLHGIWmQXpHt/E71hub12KUaA8
+# L+uUf45J+OWMOjktzrpbUhhtF8wehedbNknawBMXJw9qt+mJg2ym+5tha4UF8olH
+# GL1F7ugb6wsRiuv7zIwMaMCHxp7hr0aW2scpa1yilE5JWfN9Ua8PbgiiFooLXzEw
+# X9eTTVgdHThHG2xZTDdbDppjU8K28D0spfa7DRbZZ2iFTkPZlgpJUy957WgrtXdz
+# r9DhHAdNU94slJ9c00q0ypnio9tuNbXRwSRuPp9l7BedCN0M1prgvppuCQuusUSu
+# 68K3lo6Ok8+5wPS1xRSWZQGkllseSyA9MwCZ99ideg==
 # SIG # End signature block

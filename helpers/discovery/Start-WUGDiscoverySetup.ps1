@@ -225,6 +225,30 @@ $providerDefs = [ordered]@{
         ApiPort     = 443
         Notes       = 'Requires vSphere API access (read-only role sufficient for discovery).'
     }
+    WindowsAttributes = @{
+        Label       = 'Windows Attributes (WMI inventory)'
+        Script      = 'Setup-WindowsAttributes-Discovery.ps1'
+        TargetLabel = 'Windows host(s) - IP or FQDN (comma-separated)'
+        TargetDefault = ''
+        TargetParam = 'Target'
+        CredType    = 'PSCredential'
+        CredVault   = 'Windows.WMI.Credential.1'
+        AuthChoices = $null
+        ApiPort     = $null
+        Notes       = 'Requires WMI/DCOM or WinRM access with local admin permissions.'
+    }
+    WindowsDiskIO = @{
+        Label       = 'Windows Disk IO (WMI performance monitors)'
+        Script      = 'Setup-WindowsDiskIO-Discovery.ps1'
+        TargetLabel = 'Windows host(s) - IP or FQDN (comma-separated)'
+        TargetDefault = ''
+        TargetParam = 'Target'
+        CredType    = 'PSCredential'
+        CredVault   = 'Windows.WMI.Credential.1'
+        AuthChoices = $null
+        ApiPort     = $null
+        Notes       = 'Requires WMI/DCOM or WinRM access with local admin permissions. Shares credentials with Windows Attributes.'
+    }
 }
 # endregion
 
@@ -814,8 +838,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4Y1o/Yc9pwisK
-# B++ydE293ENsQCQm5CRH9TR/ykaBn6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9CoVy2OTlUYzQ
+# taYaPVjppik1OQr7BZ8IomInxvtgj6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1018,33 +1042,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAnG/8t7+sDTMggVlJDOY2xcs4gy+AHZmBuwQRdsXlCZTANBgkqhkiG9w0BAQEF
-# AASCAgDtCxi84Stikg3iokGyKLH06atP4mrwqn8x9NER2KK0GuFiNSTfhfgt2xPK
-# I980R06slRj3uBiVJy4YAc/KFc+AcHZoJYskNra98sqsiBuNSKvDOQ4kMrToJwe5
-# YnwFPWJ2P4y671yuSnNJFSoss1hes4XfCmHQL4km0l3uEoBNxjkXoOuyT7no9q6q
-# 7NiMm8gS94SsJurQZWq6iWyk9o3rrDshW9jk12/5NJVcOxi7RSNqIyxkL5b6XGQk
-# vdUg8jW/WksO3+YojPUqYfIY7HYpxxvynBEUq/F06Dqp87KjQy7+uYdalt4I4/Sj
-# XxOflcnvmfxCfvIp3hR9fzS+pNwlyRrTqX3s+7DZVdxD0l0d8SiSdOS9gB6+EZKs
-# gVYkQqpPfy3NBZ5L7Q9FErmuC/J+bi5UFZtG2umgcJYSzSNCx4dHWD0R3oFX8kId
-# G+0bbT8RKiD2SDNyHa4fDwHY2cY2rkFPoe9yxkxDODSLZOOohaW/wXSc+qHMdGt+
-# kbp2QQuk7UR8yJt0qcnQ3sGvDAKdOgwBqb1ZUwYL9FMnMoNZ8YjXgArb5NQ9nzRS
-# QI80mR3J7P5CAbGOxu45LQzRmkgUGMZm+PocZnyAajjJ7SMlTjAO1SSDqBSCBFfX
-# jwiMfMp0z8aW8YCPus5iN4IlsrkTlRv++TaS4VQszQnRTxiEwKGCAyYwggMiBgkq
+# BCDdTMGSSmCX0R+wxzr3WFMFYUab7tr2NU1T1DkuvI35ADANBgkqhkiG9w0BAQEF
+# AASCAgCNpwUN7VpdQTokbGnmJVI+3VuieCCi2KpR1lGZAN3uoe1uRBC2IiDnpfGl
+# xOATjfjOe6ni2FHXN1GzZSOwsJKqnos0lfLT0FjwY906LdsSWtecYpML3E5GXG7i
+# KRtm5wI7rOgn7JAcQxj+ox/M6SZYhBFcrGsZaU2M7yshUXdHPbxL5vwZ5Face8KA
+# xiIvSOsI7jyLBzUVVdEroN/HbQ8KjGwa28v0iBgvhLs6JiHi8hU82lF4VEWV7HVN
+# GzUPF/Jh8HSU5ejwzk/z7t+ipdayF+Txge0bRxujAyRKvLnic1phCQ6MBkn7SpAD
+# fDwRWxbQm6q9ghiDylTnYSUIqdb2Ok+Gjg9z/HH/AIowuzf2U+VHhX/lSitSWN6K
+# SHBBV3+8S8AP/GmsP3uJwGlNVw8NFfxSqvME+waIauxGKthIjhGsLbuLM+V7ZzyN
+# vs4GHNCyPAwKoLf7HPl30g1JWL6yziGS79nALB5sjacIlRUlAKaOPGfsxtcn2F9G
+# Pw345nxmqfqHTTA1fSNLncRpxCRM63fFAvc5hvCIxWl+6yyTXS5gyRlA6F++48rJ
+# YrFw6nqyk3VtQSR6nt1y7zqrwBR9JyXe7OewOluH6yqoNmQ5bfOhYdyEQUBpU2IR
+# RdvOCWLvHFzFPKhn3rfYoqEdnOR94K6HRuKYlZELRuoBuhlPzKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MDYxOTMzNDZaMC8GCSqGSIb3DQEJBDEiBCCgTjyT
-# 2Fm3fC35/GdT6H713haSyvbGrk13aoXZhsTngDANBgkqhkiG9w0BAQEFAASCAgAe
-# 2wsmiCrcEgpTHHRqtwC66mHix82iJr2hkQzMPnxEOI3EbvxcMTdtaLqIck9AEoMc
-# Q72Zkmz9Mms97xc1d8yK5dI7eWnQORMKuOVQlEg4egaQbyIn7Gjtb81PgkN0xzkk
-# 4Cm6CxfgSivtR5LO1p7aNU9CUuRoY3FUaJ65AeliAdmBRe03kZpQhKuXTEiixdmN
-# T6TB6B0qPm7bR0zPpB9QdnidObLBCF3dAqgiuGV7SP4LxsJy4eEBhOsY4PkTwlOl
-# im/+GE7gxqK6jS68d9IQlGIo+FtmX68VF86WkkJON2YsBy+nywVs88+bU1CTzZNi
-# zI8wJW57KVDkb7Xexva3AXYrCLp3V9V1mvglaHt0Qo0FBIX5ivta+Mk1rSEAGK3Q
-# Clm2ov0f0GH1UlFnsIalpEKblXxnrfCoXUgsnKP1K/hfmtBUyBzK7c6DwDgHG76V
-# 3SafwdiLEku71DCNIWI6NMmXjvQnw+9BEbq3f43Kz9QvsYric7IQJ4+CLjD/8Bm8
-# KbQgbJp4CoaF2GDxHffgfVKTtaKsjdAW03+b/U/ZN3g4hfg02IU88h9go00u0HQE
-# 7qt1DINeh3CsFnNPitcVDVHvgnfm0ILfYgMQqg3UgkeRDVtWkhTodpjqStzyAOwy
-# DBh++q+JXFThlOzW08lDRBG87fv7wFYubPzYexLEVw==
+# CSqGSIb3DQEJBTEPFw0yNjA0MTgxNzE0MzhaMC8GCSqGSIb3DQEJBDEiBCDZltLe
+# Ksl7uVbPUKVYEvHHw9sF21pKP8zj0qebablyrjANBgkqhkiG9w0BAQEFAASCAgAX
+# 5xYllNiqa0wmtMC2TyWFtrs/eaGtxIhe4akWk38K4DIkfQDX4GuU2OmNBmjJvSiY
+# BXXZxuk3ZuZYOX3ssUCVcJNddxi8bssmNj91I9gZxjq/yAPaDT642+cl1iR7zl4e
+# X5hr7QnZEDwflV35zxXQUz0Tls3dnT5PixA3gyGo77UYwrbD2OFYS2x0nw22Z/Cs
+# Vr3sGleCU55Ca+FxKEawId0QGVZPZz8KbUWgTwIjKmE1LZK46fkfBG9gqOGX11TX
+# M0SfQ5lcFxuD9xyIBCdQQnAiVm+DwmLySJ6jwa3OCbtScTYVqUkotq+gT9ZW2UNz
+# U2Y+eHYJ+v1PcvDC5ngfRiOxh2ksvOJJpEldBh6b3xTDLpvr3lBmFsXJXCd3PZYv
+# dZYN3Fpr2L60ynDEc6TagFL8yd+zcttMHlsdHhBy07M3LMO6flOdYK1S5FLU2dDB
+# nz3VbzUhzfheWj75zjZcKjuFKcLp/zCsZnVNvCJHb4QAy3EOpTmnp8rpVKSJWA0W
+# j4v3IQB5VnvOh0vhYxPlf/Ei3naVwvqsCCNMCNLhHM0hf5bC5B6c1/cAfk+hBMRg
+# 4seTrQhgWSij10FYsRWjK9g73Gjd1UAeipPrZjawRnDDQVlV3XSoCbsXJdmlo6oB
+# WR1gasjeUViP56uWFGJrjNxR42TLIXsiKCExGij1Vw==
 # SIG # End signature block

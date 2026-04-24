@@ -105,6 +105,11 @@
         if (v==='skipped'||v==='skip') return '<span class="status-orange"><span class="status-dot dot-orange"></span>' + escapeHtml(value) + '</span>';
         return '<span class="status-grey"><span class="status-dot dot-grey"></span>' + escapeHtml(value) + '</span>';
     }
+    function durationSorter(a, b, rowA, rowB) {
+        var msA = (rowA && rowA.DurationMs) ? Number(rowA.DurationMs) : 0;
+        var msB = (rowB && rowB.DurationMs) ? Number(rowB.DurationMs) : 0;
+        return msA - msB;
+    }
     function computeSummary(data) {
         var pass=0, fail=0, skip=0;
         data.forEach(function(r) {

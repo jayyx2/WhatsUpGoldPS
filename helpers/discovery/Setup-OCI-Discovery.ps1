@@ -7,25 +7,31 @@
     Interactive script that discovers Oracle Cloud Infrastructure resources via
     the OCI.PSModules, then lets you choose what to do with the results:
 
-      [1] Push monitors to WhatsUp Gold (creates devices + REST API monitors)
+      [1] Push devices to WhatsUp Gold (Ping monitors for public IPs)
       [2] Export discovery plan to JSON
       [3] Export discovery plan to CSV
       [4] Show full plan table in console
-      [5] Exit
+      [5] Generate HTML dashboard with metric snapshots
+      [6] Exit
+      [7] Dashboard + Push to WUG
+
+    Monitor Strategy (Option B -- built-in WUG monitors):
+      OCI REST APIs require HTTP Signature authentication which WUG cannot
+      perform natively. Instead, this script uses built-in WUG Ping monitors
+      for resources with public IPs. Resources without public IPs are included
+      as inventory items in the dashboard only.
 
     Architecture (when pushed to WUG):
       [OCI Compute device in WUG]
-          |-- "OCI Compute Health - <name>"    (REST API Active Monitor)
-          '-- ...
-      [OCI DB System device in WUG]
-          |-- "OCI DB Health - <name>"         (REST API Active Monitor)
-          '-- ...
-      [OCI Autonomous DB device in WUG]
-          |-- "OCI ADB Health - <name>"        (REST API Active Monitor)
-          '-- ...
+          '-- Ping monitor (default, auto-added by WUG)
       [OCI Load Balancer device in WUG]
-          |-- "OCI LB Health - <name>"         (REST API Active Monitor)
-          '-- ...
+          '-- Ping monitor (default, auto-added by WUG)
+      Resources without public IPs:
+          '-- Dashboard inventory only (no WUG device created)
+
+    OCI Monitoring metrics (CPU, memory, disk, network) are queried via
+    OCI.PSModules during discovery and stored as device attributes for
+    dashboard display. The OCI CLI is optional for metrics enrichment.
 
     First Run:
       1. Prompts for OCI config file path and profile name
@@ -68,10 +74,10 @@
     Suppress all prompts. Uses cached vault credentials and parameter defaults.
 
 .NOTES
-    OCI.PSModules handles API request signing via config file.
-    OCI REST API monitors in WUG require OCI request-signing to work
-    (the monitors store URLs for reference; actual polling may need
-    a script-based approach for OCI's signature-based auth).
+    OCI.PSModules handles API request signing via config file for discovery.
+    WUG monitors use built-in Ping (no cloud auth needed).
+    OCI metrics are captured as point-in-time snapshots during discovery
+    and displayed in the dashboard.
 
 .EXAMPLE
     .\Setup-OCI-Discovery.ps1
@@ -225,8 +231,8 @@ $plan = Invoke-Discovery -ProviderName 'OCI' `
     -Credential $ociCredential
 
 if (-not $plan -or $plan.Count -eq 0) {
-    Write-Warning "No items discovered. Check OCI permissions and tenancy access."
-    return
+    Write-Warning "No cloud resources discovered in tenancy."
+    $plan = @()
 }
 
 # ==============================================================================
@@ -236,32 +242,13 @@ $devicePlan = [ordered]@{}
 
 foreach ($item in $plan) {
     $devType = $item.Attributes['OCI.DeviceType']
+    $name = $item.Attributes['ComputedDisplayName']
+    $ip   = $item.Attributes['OCI.IPAddress']
     switch ($devType) {
-        'Compute' {
-            $key  = "compute:$($item.Attributes['OCI.InstanceId'])"
-            $name = $item.Attributes['OCI.InstanceId']
-            # Use the monitor name to derive friendly name
-            if ($item.Name -match 'OCI Compute Health - (.+)$') { $name = $Matches[1] }
-            $ip   = $item.Attributes['OCI.IPAddress']
-        }
-        'DBSystem' {
-            $key  = "db:$($item.Attributes['OCI.DBSystemId'])"
-            $name = $item.Attributes['OCI.DBSystemId']
-            if ($item.Name -match 'OCI DB Health - (.+)$') { $name = $Matches[1] }
-            $ip   = $item.Attributes['OCI.IPAddress']
-        }
-        'AutonomousDB' {
-            $key  = "adb:$($item.Attributes['OCI.AutonomousDbId'])"
-            $name = $item.Attributes['OCI.AutonomousDbId']
-            if ($item.Name -match 'OCI ADB Health - (.+)$') { $name = $Matches[1] }
-            $ip   = $item.Attributes['OCI.IPAddress']
-        }
-        'LoadBalancer' {
-            $key  = "lb:$($item.Attributes['OCI.LoadBalancerId'])"
-            $name = $item.Attributes['OCI.LoadBalancerId']
-            if ($item.Name -match 'OCI LB Health - (.+)$') { $name = $Matches[1] }
-            $ip   = $item.Attributes['OCI.IPAddress']
-        }
+        'Compute'      { $key = "compute:$($item.Attributes['OCI.InstanceId'])" }
+        'DBSystem'     { $key = "db:$($item.Attributes['OCI.DBSystemId'])" }
+        'AutonomousDB' { $key = "adb:$($item.Attributes['OCI.AutonomousDbId'])" }
+        'LoadBalancer'  { $key = "lb:$($item.Attributes['OCI.LoadBalancerId'])" }
         default { continue }
     }
     if (-not $devicePlan.Contains($key)) {
@@ -281,7 +268,10 @@ $dbDevices      = @($devicePlan.Values | Where-Object { $_.Type -eq 'DBSystem' }
 $adbDevices     = @($devicePlan.Values | Where-Object { $_.Type -eq 'AutonomousDB' })
 $lbDevices      = @($devicePlan.Values | Where-Object { $_.Type -eq 'LoadBalancer' })
 
-$activeTemplates = @($plan | Where-Object { $_.ItemType -eq 'ActiveMonitor' } | Select-Object -ExpandProperty Name -Unique)
+# Separate monitorable items from inventory-only
+$monitorableItems = @($plan | Where-Object { -not $_.MonitorParams._InventoryOnly })
+$inventoryItems   = @($plan | Where-Object { $_.MonitorParams._InventoryOnly })
+$activeTemplates  = @($monitorableItems | Where-Object { $_.ItemType -eq 'ActiveMonitor' } | Select-Object -ExpandProperty Name -Unique)
 
 Write-Host ""
 Write-Host "Discovery complete!" -ForegroundColor Green
@@ -289,21 +279,29 @@ Write-Host "  Compute Instances:      $($computeDevices.Count)" -ForegroundColor
 Write-Host "  DB Systems:             $($dbDevices.Count)" -ForegroundColor White
 Write-Host "  Autonomous Databases:   $($adbDevices.Count)" -ForegroundColor White
 Write-Host "  Load Balancers:         $($lbDevices.Count)" -ForegroundColor White
-Write-Host "  Active monitor templates:  $($activeTemplates.Count)  ($(@($plan | Where-Object { $_.ItemType -eq 'ActiveMonitor' }).Count) assignments)" -ForegroundColor White
+Write-Host "  Monitorable items:         $($monitorableItems.Count)  (Ping/TCP)" -ForegroundColor White
+Write-Host "  Inventory-only items:      $($inventoryItems.Count)  (no public IP)" -ForegroundColor White
 Write-Host "  Total plan items:          $($plan.Count)" -ForegroundColor White
 Write-Host ""
 
-Write-Host "Monitor templates:" -ForegroundColor Cyan
-foreach ($t in $activeTemplates) { Write-Host "  [Active] $t" -ForegroundColor White }
-Write-Host ""
+if ($activeTemplates.Count -gt 0) {
+    Write-Host "Monitor templates:" -ForegroundColor Cyan
+    foreach ($t in $activeTemplates) { Write-Host "  [Active] $t" -ForegroundColor White }
+    Write-Host ""
+}
 
 $devicePlan.Values | Sort-Object @{E={$_.Type}}, @{E={$_.Name}} |
-    ForEach-Object { [PSCustomObject]@{
-        Device   = $_.Name
-        Type     = $_.Type
-        IP       = if ($_.IP) { $_.IP } else { '(cloud)' }
-        Monitors = $_.Items.Count
-    }} |
+    ForEach-Object {
+        $monCount = @($_.Items | Where-Object { -not $_.MonitorParams._InventoryOnly }).Count
+        $invCount = @($_.Items | Where-Object { $_.MonitorParams._InventoryOnly }).Count
+        [PSCustomObject]@{
+            Device    = $_.Name
+            Type      = $_.Type
+            IP        = if ($_.IP) { $_.IP } else { '(no public IP)' }
+            Monitors  = $monCount
+            Inventory = if ($invCount -gt 0) { 'yes' } else { '' }
+        }
+    } |
     Format-Table -AutoSize
 
 # ==============================================================================
@@ -345,7 +343,7 @@ if ($choice -eq '7') {
 foreach ($currentChoice in $actionsToRun) {
 switch ($currentChoice) {
     '1' {
-        # --- Push to WUG ---
+        # --- Push to WUG (Ping/TCP monitors -- no REST API credential needed) ---
         Write-Host "Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
         try {
             $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -365,151 +363,27 @@ switch ($currentChoice) {
             Connect-WUGServer -AutoConnect -IgnoreSSLErrors
         }
 
-        $stats = @{ HealthCreated = 0; HealthSkipped = 0; HealthFailed = 0; DevicesCreated = 0; DevicesFound = 0; CredsAssigned = 0 }
+        $stats = @{ DevicesCreated = 0; DevicesFound = 0; DevicesSkipped = 0; MonitorsAssigned = 0 }
         $wugDeviceMap = @{}
         $deviceKeys = @($devicePlan.Keys | Sort-Object)
-        $devTotal = $deviceKeys.Count
 
-        # ---- 1. Create/find REST API credential ---
-        # OCI uses request signing, not simple bearer tokens;
-        # we create a placeholder credential for the REST API monitors
+        # Filter to devices that have at least one monitorable item (has public IP)
+        $monitorableDeviceKeys = @($deviceKeys | Where-Object {
+            $dev = $devicePlan[$_]
+            @($dev.Items | Where-Object { -not $_.MonitorParams._InventoryOnly }).Count -gt 0
+        })
+        $inventoryOnlyDeviceKeys = @($deviceKeys | Where-Object { $_ -notin $monitorableDeviceKeys })
+
         Write-Host ""
-        Write-Host "Setting up OCI REST API credential in WUG..." -ForegroundColor Cyan
-        $credName = "OCI API"
-        $ociCredId = $null
+        Write-Host "  Devices with public IPs (will create in WUG): $($monitorableDeviceKeys.Count)" -ForegroundColor Cyan
+        Write-Host "  Devices without public IPs (inventory only):  $($inventoryOnlyDeviceKeys.Count)" -ForegroundColor DarkGray
 
-        try {
-            $existingCreds = @(Get-WUGCredential -Type restapi -SearchValue $credName -View basic)
-            if ($existingCreds.Count -eq 0) { $existingCreds = @(Get-WUGCredential -SearchValue $credName -View basic) }
-            if ($existingCreds.Count -gt 0) {
-                $matchCred = $existingCreds | Where-Object { $_.name -eq $credName } | Select-Object -First 1
-                if ($matchCred) { $ociCredId = $matchCred.id; Write-Host "  Found existing credential (ID: $ociCredId)" -ForegroundColor Green }
-            }
-        }
-        catch { }
-
-        if (-not $ociCredId) {
-            Write-Host "  Creating credential '$credName'..." -ForegroundColor Yellow
-            try {
-                $credResult = Add-WUGCredential -Name $credName `
-                    -Description "OCI API credential (auto-created by discovery)" `
-                    -Type restapi `
-                    -RestApiUsername '' `
-                    -RestApiPassword '' `
-                    -RestApiAuthType '0' `
-                    -RestApiIgnoreCertErrors 'False'
-                if ($credResult) {
-                    if ($credResult.PSObject.Properties['data']) { $ociCredId = $credResult.data.idMap.resultId }
-                    elseif ($credResult.PSObject.Properties['resourceId']) { $ociCredId = $credResult.resourceId }
-                    elseif ($credResult.PSObject.Properties['id']) { $ociCredId = $credResult.id }
-                    if ($ociCredId) { Write-Host "  Created credential (ID: $ociCredId)" -ForegroundColor Green }
-                }
-            }
-            catch { Write-Verbose "Credential creation failed: $_" }
-            if (-not $ociCredId) {
-                Write-Warning "Could not create REST API credential."
-                Write-Warning "OCI uses request signing -- REST API monitors may need script-based polling."
-            }
-        }
-
-        # ---- 2a. Create active monitors ---
-        Write-Host ""
-        Write-Host "  Creating active monitors in library..." -ForegroundColor Cyan
-
-        $uniqueActiveMonitors = @{}
-        foreach ($key in $deviceKeys) {
-            foreach ($actItem in @($devicePlan[$key].Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' })) {
-                if ($actItem.Name -and -not $uniqueActiveMonitors.ContainsKey($actItem.Name)) {
-                    $uniqueActiveMonitors[$actItem.Name] = $actItem
-                }
-            }
-        }
-
-        $existingActiveNames = @{}
-        foreach ($actName in @($uniqueActiveMonitors.Keys)) {
-            try {
-                $found = @(Get-WUGActiveMonitor -Search $actName)
-                $exact = $found | Where-Object { $_.name -eq $actName } | Select-Object -First 1
-                if ($exact) { $existingActiveNames[$actName] = [int]$exact.id }
-            }
-            catch { }
-        }
-
-        $toCreateActive = @($uniqueActiveMonitors.Keys | Where-Object { -not $existingActiveNames.ContainsKey($_) })
-        $stats.HealthSkipped = $uniqueActiveMonitors.Count - $toCreateActive.Count
-
-        if ($toCreateActive.Count -gt 0) {
-            Write-Host "    Creating $($toCreateActive.Count) new active monitors (bulk)..." -ForegroundColor DarkGray
-
-            $activeTemplateArr = @()
-            $actTplIdMap = @{}
-            $actTplIdx = 0
-            foreach ($actName in $toCreateActive) {
-                $actItem = $uniqueActiveMonitors[$actName]
-                $mp = $actItem.MonitorParams
-                $tplId = "act_$actTplIdx"; $actTplIdMap[$tplId] = $actName; $actTplIdx++
-
-                $bags = @(
-                    @{ name = 'MonRestApi:RestUrl';                value = "$($mp.RestApiUrl)" }
-                    @{ name = 'MonRestApi:HttpMethod';             value = if ($mp.RestApiMethod) { "$($mp.RestApiMethod)" } else { 'GET' } }
-                    @{ name = 'MonRestApi:HttpTimeoutMs';          value = if ($mp.RestApiTimeoutMs) { "$($mp.RestApiTimeoutMs)" } else { '15000' } }
-                    @{ name = 'MonRestApi:IgnoreCertErrors';       value = if ($mp.RestApiIgnoreCertErrors) { "$($mp.RestApiIgnoreCertErrors)" } else { '0' } }
-                    @{ name = 'MonRestApi:UseAnonymousAccess';     value = if ($mp.RestApiUseAnonymous) { "$($mp.RestApiUseAnonymous)" } else { '0' } }
-                    @{ name = 'MonRestApi:CustomHeader';           value = '' }
-                    @{ name = 'MonRestApi:DownIfResponseCodeIsIn'; value = if ($mp.RestApiDownIfResponseCodeIsIn) { "$($mp.RestApiDownIfResponseCodeIsIn)" } else { '[]' } }
-                    @{ name = 'MonRestApi:ComparisonList';         value = if ($mp.RestApiComparisonList) { "$($mp.RestApiComparisonList)" } else { '[]' } }
-                    @{ name = 'Cred:Type';                        value = '8192' }
-                )
-
-                $activeTemplateArr += @{
-                    templateId      = $tplId
-                    name            = $actName
-                    description     = 'OCI RestApi active monitor'
-                    useInDiscovery  = $false
-                    monitorTypeInfo = @{ baseType = 'active'; classId = 'f0610672-d515-4268-bd21-ac5ebb1476ff' }
-                    propertyBags    = $bags
-                }
-            }
-
-            try {
-                $batchSize = 50
-                for ($bi = 0; $bi -lt $activeTemplateArr.Count; $bi += $batchSize) {
-                    $batchEnd = [Math]::Min($bi + $batchSize - 1, $activeTemplateArr.Count - 1)
-                    $actBatch = @($activeTemplateArr[$bi..$batchEnd])
-                    if ($activeTemplateArr.Count -gt $batchSize) {
-                        $batchNum = [Math]::Floor($bi / $batchSize) + 1
-                        $totalBatches = [Math]::Ceiling($activeTemplateArr.Count / $batchSize)
-                        Write-Host "      Batch $batchNum/$totalBatches ($($actBatch.Count) monitors)..." -ForegroundColor DarkGray
-                    }
-
-                    $bulkActResult = Add-WUGMonitorTemplate -ActiveMonitors $actBatch
-                    if ($bulkActResult.idMap) {
-                        foreach ($mapping in $bulkActResult.idMap) {
-                            if ($actTplIdMap.ContainsKey($mapping.templateId) -and $mapping.resultId) {
-                                $existingActiveNames[$actTplIdMap[$mapping.templateId]] = [int]$mapping.resultId
-                                $stats.HealthCreated++
-                            }
-                        }
-                    }
-                    if ($bulkActResult.errors) {
-                        foreach ($err in $bulkActResult.errors) {
-                            Write-Warning "Active monitor error: $($err.messages -join '; ')"
-                            $stats.HealthFailed++
-                        }
-                    }
-                    if ($batchEnd -lt $activeTemplateArr.Count - 1) { Start-Sleep -Seconds 2 }
-                }
-            }
-            catch { Write-Warning "Bulk active monitor creation failed: $_"; $stats.HealthFailed += $toCreateActive.Count }
-        }
-        Write-Host "    Active monitors: $($stats.HealthCreated) created, $($stats.HealthSkipped) existing, $($stats.HealthFailed) failed" -ForegroundColor DarkGray
-
-        # ---- 2b. Check existing vs new devices ---
+        # ---- 1. Check existing vs new devices ---
         Write-Host "  Checking for existing devices..." -ForegroundColor Cyan
         $existingDevices = @{}
         $newDeviceKeys = [System.Collections.Generic.List[string]]::new()
 
-        foreach ($key in $deviceKeys) {
+        foreach ($key in $monitorableDeviceKeys) {
             $dev = $devicePlan[$key]
             $displayName = "$($dev.Name) (OCI)"
             $deviceId = $null
@@ -527,7 +401,7 @@ switch ($currentChoice) {
         }
         Write-Host "    Found $($stats.DevicesFound) existing, $($newDeviceKeys.Count) new" -ForegroundColor DarkGray
 
-        # ---- 2c. Create new devices ---
+        # ---- 2. Create new devices with Ping active monitor (built-in) ---
         if ($newDeviceKeys.Count -gt 0) {
             Write-Host "  Creating $($newDeviceKeys.Count) devices..." -ForegroundColor Yellow
             $devIdx = 0
@@ -537,7 +411,7 @@ switch ($currentChoice) {
                 $addIP = if ($dev.IP) { $dev.IP } else { '0.0.0.0' }
                 $displayName = "$($dev.Name) (OCI)"
 
-                Write-Progress -Activity 'Creating devices' `
+                Write-Progress -Activity 'Creating OCI devices' `
                     -Status "$devIdx / $($newDeviceKeys.Count) - $displayName" `
                     -PercentComplete ([Math]::Round(($devIdx / $newDeviceKeys.Count) * 100))
 
@@ -546,24 +420,16 @@ switch ($currentChoice) {
                     if ($dev.Attrs[$attrName]) { $devAttrs += @{ name = $attrName; value = "$($dev.Attrs[$attrName])" } }
                 }
 
-                $actNames = @()
-                foreach ($actItem in @($dev.Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' })) {
-                    if ($actItem.Name -and $existingActiveNames.ContainsKey($actItem.Name)) { $actNames += $actItem.Name }
-                }
-
-                if ($actNames.Count -eq 0) { continue }
-
+                # Ping is the default active monitor in WUG -- just create the device
+                # with its IP address and WUG adds Ping automatically
                 $splat = @{
-                    displayName            = $displayName
-                    DeviceAddress          = $addIP
-                    Hostname               = $dev.Name
-                    Brand                  = 'Oracle Cloud'
-                    Note                   = "OCI $($dev.Type) (auto-created by discovery)"
-                    NoDefaultActiveMonitor = $true
+                    displayName  = $displayName
+                    DeviceAddress = $addIP
+                    Hostname     = $dev.Name
+                    Brand        = 'Oracle Cloud'
+                    Note         = "OCI $($dev.Type) - discovered $(Get-Date -Format 'yyyy-MM-dd')"
                 }
                 if ($devAttrs.Count -gt 0) { $splat['Attributes'] = $devAttrs }
-                if ($ociCredId) { $splat['CredentialRestApi'] = $credName }
-                if ($actNames.Count -gt 0) { $splat['ActiveMonitors'] = $actNames }
 
                 try {
                     $devResult = Add-WUGDeviceTemplate @splat
@@ -577,28 +443,22 @@ switch ($currentChoice) {
                 }
                 catch { Write-Warning "Error creating device '$displayName': $_" }
             }
-            Write-Progress -Activity 'Creating devices' -Completed
+            Write-Progress -Activity 'Creating OCI devices' -Completed
             Write-Host "    Devices created: $($stats.DevicesCreated)" -ForegroundColor Green
         }
 
-        # ---- 2d. Update existing devices ---
+        # ---- 3. Update attributes on existing devices ---
         if ($existingDevices.Count -gt 0) {
-            Write-Host "  Updating $($existingDevices.Count) existing devices..." -ForegroundColor Cyan
+            Write-Host "  Updating $($existingDevices.Count) existing device attributes..." -ForegroundColor Cyan
             foreach ($key in $existingDevices.Keys) {
-                $deviceId = [int]$existingDevices[$key]
                 $dev = $devicePlan[$key]
-
-                if ($ociCredId) {
-                    try { $null = Set-WUGDeviceCredential -DeviceId $deviceId -CredentialId $ociCredId -Assign; $stats.CredsAssigned++ }
-                    catch { }
+                $devAttrs = @()
+                foreach ($attrName in $dev.Attrs.Keys) {
+                    if ($dev.Attrs[$attrName]) { $devAttrs += @{ name = $attrName; value = "$($dev.Attrs[$attrName])" } }
                 }
-
-                $actMonitorIds = @()
-                foreach ($actItem in @($dev.Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' })) {
-                    if ($actItem.Name -and $existingActiveNames.ContainsKey($actItem.Name)) { $actMonitorIds += $existingActiveNames[$actItem.Name] }
-                }
-                if ($actMonitorIds.Count -gt 0) {
-                    try { Add-WUGActiveMonitorToDevice -DeviceId $deviceId -MonitorId $actMonitorIds -ErrorAction Stop } catch { }
+                if ($devAttrs.Count -gt 0) {
+                    try { Set-WUGDeviceAttribute -DeviceId ([int]$existingDevices[$key]) -Attributes $devAttrs -ErrorAction Stop }
+                    catch { Write-Verbose "Could not update attributes for $($dev.Name): $_" }
                 }
             }
         }
@@ -606,11 +466,11 @@ switch ($currentChoice) {
         # ---- Summary ---
         Write-Host ""
         Write-Host "Push complete!" -ForegroundColor Green
-        Write-Host "  Active monitors:  $($stats.HealthCreated) created, $($stats.HealthSkipped) existing, $($stats.HealthFailed) failed" -ForegroundColor White
         Write-Host "  Devices:          $($stats.DevicesCreated) created, $($stats.DevicesFound) existing" -ForegroundColor White
-        Write-Host "  Creds assigned:   $($stats.CredsAssigned)" -ForegroundColor White
+        Write-Host "  Inventory-only:   $($inventoryOnlyDeviceKeys.Count) (no public IP, skipped)" -ForegroundColor White
         Write-Host ""
-        Write-Host "Note: OCI REST API uses request signing. Monitors may need script-based polling." -ForegroundColor Yellow
+        Write-Host "WUG monitors: Ping (default) monitors network reachability." -ForegroundColor Cyan
+        Write-Host "OCI metric snapshots are stored as device attributes for dashboard." -ForegroundColor Cyan
     }
     '2' {
         $jsonPath = Join-Path $OutputDir 'oci-discovery-plan.json'
@@ -635,65 +495,98 @@ switch ($currentChoice) {
         $dashboardRows = @()
         foreach ($key in $devicePlan.Keys) {
             $dev = $devicePlan[$key]
-            $activeItems = @($dev.Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' })
-            $perfItems   = @($dev.Items | Where-Object { $_.ItemType -eq 'PerformanceMonitor' })
+            $attrs = $dev.Attrs
 
-            foreach ($item in ($activeItems + $perfItems)) {
-                $dashboardRows += [PSCustomObject]@{
-                    Device        = $dev.Name
-                    IP            = if ($dev.IP) { $dev.IP } else { '(cloud)' }
-                    Monitor       = $item.Name -replace '\s*\[.*\]$', ''
-                    Type          = $item.ItemType
-                    Status        = 'Discovered'
-                    LastDiscovery = (Get-Date).ToString('yyyy-MM-dd HH:mm')
+            $row = [ordered]@{
+                Device     = $dev.Name
+                Type       = $dev.Type
+                State      = if ($attrs['OCI.LifecycleState']) { $attrs['OCI.LifecycleState'] } else { 'Unknown' }
+                IP         = if ($dev.IP) { $dev.IP } else { '(no public IP)' }
+                Shape      = if ($attrs['OCI.Shape']) { $attrs['OCI.Shape'] } else { 'N/A' }
+                Region     = if ($attrs['OCI.Region']) { $attrs['OCI.Region'] } else { 'default' }
+                AD         = if ($attrs['OCI.AD']) { $attrs['OCI.AD'] } else { 'N/A' }
+                Created    = if ($attrs['OCI.TimeCreated']) { $attrs['OCI.TimeCreated'] } else { 'N/A' }
+                Monitors   = @($dev.Items | Where-Object { -not $_.MonitorParams._InventoryOnly }).Count
+            }
+
+            # Add metric snapshots if available
+            foreach ($attrKey in @($attrs.Keys | Sort-Object)) {
+                if ($attrKey -match '^OCI\.Metric\.(.+)$') {
+                    $metricName = $Matches[1]
+                    $row[$metricName] = $attrs[$attrKey]
                 }
             }
+
+            $dashboardRows += [PSCustomObject]$row
         }
 
         if ($dashboardRows.Count -eq 0) {
-            Write-Warning "No data to generate dashboard."
+            # Generate a summary dashboard even with 0 resources
+            $configRegion = 'default'
+            try {
+                $cfgContent = Get-Content $ConfigFile -Raw
+                if ($cfgContent -match 'region\s*=\s*(\S+)') { $configRegion = $Matches[1] }
+            } catch { }
+            $dashboardRows = @(
+                [PSCustomObject][ordered]@{
+                    Device   = "(tenancy scan)"
+                    Type     = 'Summary'
+                    State    = 'Scanned'
+                    IP       = 'N/A'
+                    Shape    = 'N/A'
+                    Region   = $configRegion
+                    AD       = 'N/A'
+                    Created  = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+                    Monitors = 0
+                    Compute  = "$($computeDevices.Count) instances"
+                    DBSystem = "$($dbDevices.Count) DB systems"
+                    ADB      = "$($adbDevices.Count) autonomous DBs"
+                    LB       = "$($lbDevices.Count) load balancers"
+                    Tenancy  = $TenancyId
+                }
+            )
+            Write-Host "  No cloud resources found -- generating summary dashboard." -ForegroundColor Yellow
+        }
+
+        $dashPath = Join-Path $OutputDir 'OCI-Dashboard.html'
+
+        if (Get-Command -Name 'Export-DynamicDashboardHtml' -ErrorAction SilentlyContinue) {
+            Export-DynamicDashboardHtml -Data $dashboardRows `
+                -OutputPath $dashPath `
+                -ReportTitle 'OCI Discovery Dashboard' `
+                -CardField 'Type','State' `
+                -StatusField 'State'
         }
         else {
-            $dashPath = Join-Path $OutputDir 'OCI-Dashboard.html'
+            Write-Warning "No dashboard function available. Exporting as JSON instead."
+            $jsonPath = Join-Path $OutputDir "OCI-Plan-$(Get-Date -Format yyyyMMdd-HHmmss).json"
+            $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath
+            Write-Host "JSON exported: $jsonPath" -ForegroundColor Green
+            break
+        }
 
-            if (Get-Command -Name 'Export-DynamicDashboardHtml' -ErrorAction SilentlyContinue) {
-                Export-DynamicDashboardHtml -Data $dashboardRows `
-                    -OutputPath $dashPath `
-                    -ReportTitle 'OCI Discovery Dashboard' `
-                    -CardField 'Device','Type' `
-                    -StatusField 'Status'
-            }
-            else {
-                Write-Warning "No dashboard function available. Exporting as JSON instead."
-                $jsonPath = Join-Path $OutputDir "OCI-Plan-$(Get-Date -Format yyyyMMdd-HHmmss).json"
-                $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath
-                Write-Host "JSON exported: $jsonPath" -ForegroundColor Green
-                break
-            }
+        Write-Host ""
+        Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
+        Write-Host "  Devices: $($devicePlan.Count)  |  Monitors: $($dashboardRows.Count)" -ForegroundColor White
 
-            Write-Host ""
-            Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
-            Write-Host "  Devices: $($devicePlan.Count)  |  Monitors: $($dashboardRows.Count)" -ForegroundColor White
-
-            $nmConsolePaths = @(
-                "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole"
-                "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole"
-            )
-            $nmConsolePath = $nmConsolePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-            if ($nmConsolePath) {
-                $wugDashDir = Join-Path $nmConsolePath 'dashboards'
-                if (-not (Test-Path $wugDashDir)) { New-Item -ItemType Directory -Path $wugDashDir -Force | Out-Null }
-                $wugDashPath = Join-Path $wugDashDir 'OCI-Dashboard.html'
-                try {
-                    Copy-Item -Path $dashPath -Destination $wugDashPath -Force
-                    Write-Host "Copied to WUG: $wugDashPath" -ForegroundColor Green
-                    Write-Host "  Access via WUG web UI: /NmConsole/dashboards/OCI-Dashboard.html" -ForegroundColor Cyan
-                }
-                catch {
-                    Write-Warning "Could not copy to NmConsole (run as admin?): $_"
-                }
-                Deploy-DashboardWebConfig -Path $wugDashDir
+        $nmConsolePaths = @(
+            "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole"
+            "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole"
+        )
+        $nmConsolePath = $nmConsolePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($nmConsolePath) {
+            $wugDashDir = Join-Path $nmConsolePath 'dashboards'
+            if (-not (Test-Path $wugDashDir)) { New-Item -ItemType Directory -Path $wugDashDir -Force | Out-Null }
+            $wugDashPath = Join-Path $wugDashDir 'OCI-Dashboard.html'
+            try {
+                Copy-Item -Path $dashPath -Destination $wugDashPath -Force
+                Write-Host "Copied to WUG: $wugDashPath" -ForegroundColor Green
+                Write-Host "  Access via WUG web UI: /NmConsole/dashboards/OCI-Dashboard.html" -ForegroundColor Cyan
             }
+            catch {
+                Write-Warning "Could not copy to NmConsole (run as admin?): $_"
+            }
+            Deploy-DashboardWebConfig -Path $wugDashDir
         }
     }
     '6' {
@@ -711,8 +604,8 @@ Write-Host "Re-run anytime to discover new OCI resources." -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7NpyhDAnw/Han
-# jhqApERmGLon+WQ/nopTZ/DgYVTHgaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/pKgqP3x2ihu9
+# F/Wx15e2kXUpgy3WHB7Usc8Wda1v/KCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -915,33 +808,33 @@ Write-Host "Re-run anytime to discover new OCI resources." -ForegroundColor Cyan
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCaDKeVF8ANjYgkSjRTXAUPf2SuxF6OmCCIqEG2nW04TzANBgkqhkiG9w0BAQEF
-# AASCAgCxZ9y7RF8/FabsX8jhe1FzlAYeRgEulL8CLhoX+3UaLs7ZmjlP2ktSdv3k
-# 1gZ7rZIg30tOZUlzg6VHdyny8Bicf1fJm9EUpywW5yM8Wfo/FAs3ak5SYJ/ArS9C
-# ZKUkU0gPLL9wgS+W4nq7UwkKVNwzRexsAlMUanH4uK0OwGvlw6Jyd3etmsrl+SNK
-# 0yQkM6aZodiJBml2U43thgLLwrSq8Ruv8SgjtXDlbtwY2ku71GyssnaPRpaa24R3
-# 60WNjzSLTurV8c6WusQiDR01+bjwo5wRWsZZ5sKiJEIPHq4kGDxfa1sJWVckOTnh
-# K8wxs/3Os2xJVeiE6VFy4QHwsCEjYLUtrqk2Nz7p97pCbZuUUFymLBgFPjEHi1wn
-# 6+1f3ZHCgPlnN6IVUkPwgFcOfk56wgfR1tDlY0ZTGqdTZqlCNkP42G9AHFU4BPZD
-# GE55EO3dFbwTBPUHYvMKwOWKDoNPuIuOEMd4d87ZxBBWkam0pbv2alHRa4zyyMrN
-# nsjZFW/Pl75/GgH+R9ZTea723VIVDEt4C+pAaXwhyMNMAdyo9YD6KPfzYaJu5H1+
-# c8au1A9CleNm/2+BT2ViYK7HW/qpSc7K8bdqYIovB1rjbMEHwnEEsc1KNksGZECX
-# CQm9XFAlnzR5VcqYyg4RvlmQ9jBlpdJmqYGfeuPiyr/QJptEqKGCAyYwggMiBgkq
+# BCD3+mLmBurvuR9/atg/ArUrcr+Y3KOkxGdlzW1is5XBtTANBgkqhkiG9w0BAQEF
+# AASCAgCL5nQ8TrPHPk7eHd36f4NkTazEYlaG0sQ8+eNcO4ss6uhih8OtEvO9D0Tt
+# 2X7aoH0I/kQctbnHk5xo2JGTa3Z8rI2s+pbWmvGsV58wn9EK0wKHiKJ0g6WRZ7gF
+# EVxHU1HFZlwuNAlrJLlUPkl7M676QnbwWCAJV4Io2I+2+VGhU8LQ3zhnA//l63pu
+# M3BxgiGTex4CL5ZbsSQg0uayopDlJeJvbEfV7i2HdLBRRVqtpISZKWoh5uYrWyIT
+# jP08k68oYSkhXeA40bCtiP13v8JD7Idd/1+yy9869gUmTibExomAG0+kGkKEhE4X
+# fjtfhZPEMe1cPQXgctbTJSy9hwO2p4qTNtXPakrhGrgVXoWzjDCCDc63QORjgyGH
+# RIgeyWqqFIJFO8KM+bqx1hE/XvLF3ph4gQmGKhIPMdgOwgHS2Qr7xokpAc6WEI/t
+# pZlqQkGZV1pgeM2a3s0TLLO6bGqNVpNKGnrGYsNJvsTIJmJGSRgvMBs8giI0KTOv
+# GqHSJX4RPoIMkOiCDz+BxBs81cOirIzX2LSxyuD3eRCO3P4Ln9ZGuXYzOikiCjZI
+# 37ybGqzrc/2YF7YyE3qFU2j+2BUCIBJ4E93pFY1Mi249bTU2KHOzxnKlJCeqBEI3
+# Jstlw5ReyPR3/7KcYKRw4Kg+u7slaRmc822wHQyNE1QHy2V/dKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MTgxNzUwMDJaMC8GCSqGSIb3DQEJBDEiBCC2kDiA
-# gcM2e9Y9VDv82K0zJGBUyjqWYUNWscSeZF35ezANBgkqhkiG9w0BAQEFAASCAgBF
-# V+PTEecP2KmCE8jimTOQm7ytQ4YK8s/gETomlh+D6dS91KJ3O4Se873ul6+BsJb9
-# Kc1z//gGPXjuyDMbpoOBE3cDa/Nzy3LEwyrLbXHxHj5xixTz03ZmDmcPlnZTA5fC
-# S74x9FSK1R+T2uAJQWghw8+zHHXblXd20claH6XlC2aUgkTpCTrTWSK12gFfo6No
-# BSwaWXHAtEfRaHCsylliNlzlmKTo2AvUeJO7v24lGlLb6EcqvhzwntkG3Z8i+1W7
-# VAEdKuyz3iEMB/bcXqp96KZux65Zax7p0VOxX59WLxMrHO84tLU8JwWroI31dxW9
-# OBdptmg6CIttVxGMxz1NsxqVC1ZIiHGZYYyiqmvfj4gxOajgkzg6SPnld0c1Bngn
-# HJlJ9OHgjtHBzo6dmR5kWmxPuRR/+1XSL/DSgWQNdu7dv4SjX9SpsluUR3Vef11X
-# o0B8PFlvlELS/kp9HNxHj2NxzQ+oWEEpncqMSMH6c5lx/U5hLN0bLWEsfRJ3QCuN
-# zk9s9P3n3pgTp0YJy1lTiDECelJlt1ne8lsQ+eY7KulzWwdTszZye7k4Anqw1GNF
-# XMDcyKurHVBo7U/7BvXQvT0oMH/Hf5SzotVC6RjYJ4ylZffpK6sBQUfXkf9Tp+5W
-# 675IzAWXaGIPYP29C8O1+auXJO704oP8Rsc6x3HjQg==
+# CSqGSIb3DQEJBTEPFw0yNjA0MjUyMDM5MTdaMC8GCSqGSIb3DQEJBDEiBCCakJeR
+# rKymxgxXBnDLQ1LTTj5fICrmP70OCDjEC1iyZjANBgkqhkiG9w0BAQEFAASCAgCO
+# 0psnjEjAjkkVwoS+f+5WulCRnu0tAYbLBnqekYlS9pWqfD9vwKjbAVsmvKHd2cpA
+# n1QT7ojSDJ9v0itSZfI4Wdn9p2IkmnWosEgSxuCbwSdNMuS81JSbEGUH/T1P7F7Y
+# lKTyMUEV88nQCE1g9kwaoVARMi3s7c/4pMgBCqcFt6Cch0itSaUAgPMYVQ158cTe
+# hzN22GYnIZ9FzvC/bAbbHDn5OvDEgnUAsHn8G7KLEtZmdNY/FnXnIjhIPLSD033N
+# EW48P+bB0BM0YzUU21ktOF57u84VHF6n0XYpvrcJvEmVJGyuudnG/Ok1cPUy/5yO
+# GWhdwMGjY8wPfGNghdLU8V+F+gF9vAkrO/IqdzIya423nvjzqq1vBywxrAaUtiyR
+# ksUzfdbL4RFacGe6vI6HeOJDKMmyxbiWTu6XbT7D6NvOznliRoSyAKT/7gZdECPl
+# rlyQIzMfFn0aqsQO2vxlRuav9yrv2NxZpNboWyfhUxbDVMfkGVadfftf6+hzrgtp
+# WSstIKq4QBgzhVATJiMgjkaMmkze3mHH7K9h6R0isYDCwJvsf732/HDmm+ZnlzyE
+# QxpPfRpJJueN2lAHcSdqOePDTKk94gnCJx6LyN4fcT1J3ATRbScgBf3IS0ssl7w7
+# Xhy1ByG35ft0EBPBXsmyD6tHh0nBqqIuAquX7FoZNA==
 # SIG # End signature block

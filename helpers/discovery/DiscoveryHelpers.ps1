@@ -1665,11 +1665,12 @@ function Resolve-DiscoveryCredential {
         Replaces the 40+ line copy-paste pattern in every Setup script with a
         single call. Handles all credential types:
 
-          AWSKeys      — Access Key ID + Secret Access Key
-          AzureSP      — Tenant ID + Application ID + Client Secret
-          BearerToken  — Single API token (Proxmox, Fortinet, etc.)
-          PSCredential — Username + Password (F5, HyperV, VMware, etc.)
-          WUGServer    — WhatsUp Gold server connection info (host, port, protocol, creds)
+          AWSKeys      -- Access Key ID + Secret Access Key
+          AzureSP      -- Tenant ID + Application ID + Client Secret
+          BearerToken  -- Single API token (Proxmox, Fortinet, etc.)
+          OCIConfig    -- OCI config file path + profile + tenancy OCID
+          PSCredential -- Username + Password (F5, HyperV, VMware, etc.)
+          WUGServer    -- WhatsUp Gold server connection info (host, port, protocol, creds)
 
         Flow:
           1. Check vault for existing credential → show safe preview
@@ -1736,7 +1737,7 @@ function Resolve-DiscoveryCredential {
         [string]$Name,
 
         [Parameter()]
-        [ValidateSet('AWSKeys', 'AzureSP', 'BearerToken', 'PSCredential', 'WUGServer')]
+        [ValidateSet('AWSKeys', 'AzureSP', 'BearerToken', 'OCIConfig', 'PSCredential', 'WUGServer')]
         [string]$CredType,
 
         [Parameter()]
@@ -1760,6 +1761,7 @@ function Resolve-DiscoveryCredential {
     if (-not $CredType) {
         if ($Name -match '^AWS\.')                         { $CredType = 'AWSKeys' }
         elseif ($Name -match '^Azure\..*\.ServicePrincipal$' -or $Name -eq 'Azure') { $CredType = 'AzureSP' }
+        elseif ($Name -match '^OCI\.')                     { $CredType = 'OCIConfig' }
         elseif ($Name -match '\.Token$|^FortiGate')        { $CredType = 'BearerToken' }
         elseif ($Name -match '^WUG\.Server')                { $CredType = 'WUGServer' }
         elseif ($Name -match '\.Credential$')              { $CredType = 'PSCredential' }
@@ -1812,6 +1814,12 @@ function Resolve-DiscoveryCredential {
                 if ($t.Length -gt 12) { "Token=$($t.Substring(0,4))...$($t.Substring($t.Length - 4))" }
                 elseif ($t.Length -gt 0) { 'Token=****' }
                 else { '(stored)' }
+            }
+            'OCIConfig' {
+                if ($stored -is [string] -and $stored -match '\|') {
+                    $p = $stored -split '\|', 3
+                    "ConfigFile=$($p[0]), Profile=$($p[1])"
+                } else { '(stored)' }
             }
             'WUGServer' {
                 if ($stored -is [string] -and $stored -match '\|') {
@@ -1948,6 +1956,52 @@ function Resolve-DiscoveryCredential {
             }
             return $token
         }
+        'OCIConfig' {
+            Write-Host ''
+            Write-Host "  Enter OCI configuration details:" -ForegroundColor Yellow
+            $defaultCfg = Join-Path $env:USERPROFILE '.oci\config'
+            $cfgInput = Read-Host -Prompt "    Config file path [default: $defaultCfg]"
+            $cfgPath = if ([string]::IsNullOrWhiteSpace($cfgInput)) { $defaultCfg } else { $cfgInput.Trim() }
+            if (-not (Test-Path $cfgPath)) {
+                Write-Warning "  Config file not found: $cfgPath"
+                Write-Host '  Cancelled.' -ForegroundColor DarkGray; return $null
+            }
+            $profInput = Read-Host -Prompt "    Profile [default: DEFAULT]"
+            $ociProfile = if ([string]::IsNullOrWhiteSpace($profInput)) { 'DEFAULT' } else { $profInput.Trim() }
+
+            # Try to extract tenancy from config file
+            $defaultTenancy = $null
+            try {
+                $cfgContent = Get-Content $cfgPath -Raw
+                if ($cfgContent -match 'tenancy\s*=\s*(ocid1\.tenancy\.[^\s]+)') {
+                    $defaultTenancy = $Matches[1]
+                }
+            }
+            catch { }
+            $tenancyPrompt = if ($defaultTenancy) { "    Tenancy OCID [default: $defaultTenancy]" } else { '    Tenancy OCID' }
+            $tenancyInput = Read-Host -Prompt $tenancyPrompt
+            $ociTenancy = if ([string]::IsNullOrWhiteSpace($tenancyInput) -and $defaultTenancy) { $defaultTenancy } else { $tenancyInput.Trim() }
+            if ([string]::IsNullOrWhiteSpace($ociTenancy)) {
+                Write-Host '  Cancelled.' -ForegroundColor DarkGray; return $null
+            }
+
+            $result = @{
+                ConfigFile = $cfgPath
+                Profile    = $ociProfile
+                TenancyId  = $ociTenancy
+            }
+
+            if (-not $DeferSave) {
+                $combined = "$cfgPath|$ociProfile|$ociTenancy"
+                $ss = ConvertTo-SecureString $combined -AsPlainText -Force
+                Save-DiscoveryCredential -Name $VaultName -SecureSecret $ss `
+                    -Description "OCI ($ociProfile @ $cfgPath)" -Force | Out-Null
+                Write-Host "  Saved to vault as '$VaultName'." -ForegroundColor Green
+            } else {
+                Write-Host "  Credential NOT saved (DeferSave). Validate, then call Save-ResolvedCredential." -ForegroundColor DarkYellow
+            }
+            return $result
+        }
         'PSCredential' {
             Write-Host ''
             $cred = Get-Credential -Message "$ProviderLabel credentials"
@@ -2056,6 +2110,19 @@ function ConvertFrom-VaultStored {
         'BearerToken' {
             return $Stored
         }
+        'OCIConfig' {
+            if ($Stored -is [string] -and $Stored -match '\|') {
+                $parts = $Stored -split '\|', 3
+                if ($parts.Count -ge 3) {
+                    return @{
+                        ConfigFile = $parts[0]
+                        Profile    = $parts[1]
+                        TenancyId  = $parts[2]
+                    }
+                }
+            }
+            return $Stored
+        }
         'WUGServer' {
             if ($Stored -is [string] -and $Stored -match '\|') {
                 $parts = $Stored -split '\|', 5
@@ -2100,7 +2167,7 @@ function Save-ResolvedCredential {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$Name,
-        [Parameter(Mandatory)] [ValidateSet('AWSKeys','AzureSP','BearerToken','PSCredential','WUGServer')] [string]$CredType,
+        [Parameter(Mandatory)] [ValidateSet('AWSKeys','AzureSP','BearerToken','OCIConfig','PSCredential','WUGServer')] [string]$CredType,
         [Parameter(Mandatory)] $Value
     )
 
@@ -2128,6 +2195,12 @@ function Save-ResolvedCredential {
             $ss = ConvertTo-SecureString "$Value" -AsPlainText -Force
             Save-DiscoveryCredential -Name $Name -SecureSecret $ss `
                 -Description 'API token' -Force | Out-Null
+        }
+        'OCIConfig' {
+            $combined = "$($Value.ConfigFile)|$($Value.Profile)|$($Value.TenancyId)"
+            $ss = ConvertTo-SecureString $combined -AsPlainText -Force
+            Save-DiscoveryCredential -Name $Name -SecureSecret $ss `
+                -Description "OCI ($($Value.Profile) @ $($Value.ConfigFile))" -Force | Out-Null
         }
         'PSCredential' {
             $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Value.Password)
@@ -3128,8 +3201,8 @@ function Deploy-DashboardWebConfig {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDu4NeXOAtqXGQN
-# 1n+FBC1vAErFi1bsaquuIfPf1Th/gqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD8ohxKon2u9b8h
+# /BHVlp0sndSb6/YRJ3U4K6oGPpkFy6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -3332,33 +3405,33 @@ function Deploy-DashboardWebConfig {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBYdyv/IJV5S38IRNUqzOfAGHhOaJf5McvOkU8rm2tuRDANBgkqhkiG9w0BAQEF
-# AASCAgAbfhTg9sm4REpI6GIyvikuiXb1k2TMx29Y2cpZ3SphzsfebeSeSGaNER9Q
-# eIEGc8Jn5dnZrPbq7fvyWtYvvzLlkk5Dzgb+ltr/3MVaA3VPQw8JReIcD3RAsjjx
-# TqpF5Uzok06ysL9OGzZ/ZJYMmIQY0i2nwLspvc00m/wAiI0f4A4jM4MZhdyjEGjK
-# eVyUnbBJY4q7rnPlJXdblusoXk/j40qZZ9A/uKFEsLqqdjlginpDLAvjoD9Vbppw
-# gPrdrRV/2jFKbBOkhowrv2tJIpe781YEbjnyxH9XTglIxLcn0YWAoe2eGO+62Uwh
-# KQo5z38p9nD/6R3SzSutu+HTmdjbYgTAmaNtFov+2JNb6D/jWUfTSWkyOlVewqFJ
-# ad3R3vTl0RKz2S4B5FgNfZ5krDYSRokBXVxDOJzqG0ZSdiKlzZ0Xnr41GVs22r38
-# pBTypEnmG+LD1Kp5NELS6DFwIwEDHV6W4EYeTpG/9y+hdCgLGX2QAqvnC18CRnsU
-# efqFLRoNxPsvdHmyd9qR/dLQmdMx7WhJFt+IMltYuCEL8RoTnDNhgWeyU+EeQWv5
-# QyRpHxBn/Ywve0XkIuW/hwRpL8Ctc/mNZ3MZAfyXW0ZgBIRrK8Q0YIXcWpuyysIx
-# 0TjAwTOcWGk6wll5j4pVwDfJ8txuJaVLMIO3r2oKS3HdZ3Q5zaGCAyYwggMiBgkq
+# BCAFKp0t+QtU3jj1xM74cP3Je2C5LPR01iHppfBeQKWZbTANBgkqhkiG9w0BAQEF
+# AASCAgC1An95QY37ojO9aWR3uP79m0CdeXpkRSxwdYIgjGclA216U5e4GrUGc7D/
+# f6A4NX8zAEFSGfxm3MMETI+1oZ+pH3OGl8NU99DjnliUq1YcjXLeO074Hw+nXd5F
+# FP0BnJicBs3n0Z5+Za8djo+ywHUt0o/bXRwa4b8nykR2HIepPpBskHJ2tXsFRHsS
+# yFz2wycsm3YAt19JFNa8YVQuUXFYcYV0KPImEY85vKXePCcnQ7jarw8ihcgxVMra
+# hrsIuvPxx3OvcRUjITcpI/QV63kwbF3TTrcg0242FZ6RQoXFi9+IwpxwTryut8S/
+# MxGzTKUAmaCsRrN6XPVX5svvYNAt5q0tYFJkv6TRwV2K0dwV5RA4WJVIt2x11XvD
+# 5zsZJwsSd4X1nG3wF2SMwLxwE8OeWCCIJAP7VgjFM1y5KV/+VT3bOtl8+w1eeiHA
+# rR6JD28H7LTocRXGit6Rf0XE+POELo7JnzNapHk0tXIvPu0I4eCbdAZy4+xK3/C3
+# JXoS/OPfeHl0SVMKtWtfgZa9wfKvNDwm1FTtfvyETll7qfhyt4JqQxTG1eUbBgzj
+# ItPTKlwnLj477VYMqEBcsI2JVueTzuJO3RGcl+X8bFvlVUKNiA5C+ugi/4ZmCnJd
+# TiozSj1Oqz6I7XinIsO9LX1T4ugmwERjlaSo/+nnLXIqf4h6k6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MDYxOTMzMTVaMC8GCSqGSIb3DQEJBDEiBCCuiqU2
-# adr2Dp/yjK/2hmbEHd+zRpYxgqEJcU0jsGG61DANBgkqhkiG9w0BAQEFAASCAgB8
-# /wLpUhcj5wY8vguzNhlWurUTRmopbLzdNqyWUHZzQD7LhYxJRic4ruDBondbLxIr
-# PkG3PqAlKFDMHnframt84ynnzyQ+r3WIcNMBtXZWHKYrfJHWlot3hfRsqjczfWd9
-# NOepNwkmNodZa9xhu2BkBW4cy2A84IWRkHWwJsj7scAyza/AjEIzDz46ymaHXGpq
-# pbiZiA0k/AvkVst/GKFs3n+kbm0B7+0QU1VBN4l3dNsJp2VNcnxHwUklZ7BeNXTv
-# zN7e5F8u8YgzZSwzJvMpL9LapEJsgSZjgnczjAVqgQ1yhOEOkGzrqpZe01pze3AT
-# zuYIxs3MuC1WtsFuEBGJ6SiUCI0PJ61vUCq2bbHsUe92M62foruEF240Gz5JIKAl
-# etzoga4ZuqjkiFmCzAIz6kj/hKPj+8gaYAoBc6E593TqMAqXIj0O8ZaIz6JOSYQ4
-# evGyCeXNiJ5meE/9BdnjycQ6WU3WJO9+eGadt7O/UqA9Xoq+wGCcDalNJVFipqVM
-# ssXwKyEINFLMAOjgYe3/ohoJzmXkO7u19VnfqEw4jPRi+4ANBFQBsXKxBvzaS2RC
-# 0JQshLZu8ydZPSxpzvmRcvLuL7IqCMhVJoxZCOsD5qaj0BViKUyL4VzUPICzhjTK
-# aQUgRrHqZSTezGHiELCFRnpBIS48zY/3UpzDwEMF0g==
+# CSqGSIb3DQEJBTEPFw0yNjA0MjUyMDA3MjlaMC8GCSqGSIb3DQEJBDEiBCBNBqP/
+# 3BtP5x0FS1YUzzMv6+GciKezJqdY9Vq/MmCWnTANBgkqhkiG9w0BAQEFAASCAgCT
+# e/PXp+O2HgiVC1/+PIDEfsG9rxOI6PgeeAbcq/Lg3intoIlgxAv5Mz0BdvQ44tq0
+# TRDEqpn1sGH05bhj9nMJIUJJqEfc0UsUrlwlh0Lodf3Cn5pRhgH+43oT+AqaQPDX
+# Kekob/nWFoParpUqG18AlhNZc9+E/46j3wiLLCAbhU2DIQVzJbgWc4aU5owCSpFq
+# v0din/4CGQKLFXoHVrqjdpDIdzHADxSR8cgczIWbuIysEey6VAynst7ANqHQUyL4
+# K2tvKRMZvVotj//duOHK+lhJIAv+tmR1GeHzDfnStyk07GaqmAwhtHJVn4eIqE1z
+# aEVkEQ1DJOhuLSxBnlGmDp1QOHaceMU2graqkOYv5NgWx+FL2xmCyGn65RKdkwSX
+# HzYqF2qeJJUgKHztwM9s4VvN3Dk8yIK45gCN3LbYx9bFIGjdboST/goFf/lL0hOl
+# IkSDccGtZ33hG/BsFyTSfSpOCR3chbXD76tH458/QUSAEGll0geZOLjPpIJQC5JQ
+# SrlN75+K6HcYOKpCI5RHSG3FZkRTSLtc1eYjfhRYiu1AqxaW8WsCC2QtuJAkzutv
+# WSt8uOb3Uah4jYv0MAoxcIutToDiJUGnUOxq359gdtC43SLHxPgkaEMdTsbQB0o1
+# dhQ/uS56HlcVYfeNVrtMkP7rHJBWZ2yqm0FIR7jMyQ==
 # SIG # End signature block

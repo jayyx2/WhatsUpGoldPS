@@ -174,6 +174,21 @@ $providerDefs = [ordered]@{
         ApiPort     = $null
         Notes       = 'Requires WinRM/CIM access with Hyper-V admin permissions.'
     }
+    LoadMaster = @{
+        Label       = 'Kemp LoadMaster'
+        Script      = 'Setup-LoadMaster-Discovery.ps1'
+        TargetLabel = 'LoadMaster host(s) - IP or FQDN (comma-separated)'
+        TargetDefault = ''
+        TargetParam = 'Target'
+        CredType    = $null
+        CredVault   = $null
+        AuthChoices = @(
+            @{ Key = '1'; Label = 'API Key (recommended for WUG monitoring)'; Value = 'ApiKey'; CredType = 'BearerToken' }
+            @{ Key = '2'; Label = 'bal:password (standalone discovery or Basic Auth)'; Value = 'Password'; CredType = 'PSCredential' }
+        )
+        ApiPort     = 443
+        Notes       = 'Requires LoadMaster firmware 7.2.50+ for APIv2 JSON support.'
+    }
     Nutanix  = @{
         Label       = 'Nutanix AHV / Prism'
         Script      = 'Setup-Nutanix-Discovery.ps1'
@@ -838,8 +853,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9CoVy2OTlUYzQ
-# taYaPVjppik1OQr7BZ8IomInxvtgj6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBr18kLT0PXet18
+# Avz4IWUY4HeX5j/PfGAia3fP6Ii4K6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1042,33 +1057,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDdTMGSSmCX0R+wxzr3WFMFYUab7tr2NU1T1DkuvI35ADANBgkqhkiG9w0BAQEF
-# AASCAgCNpwUN7VpdQTokbGnmJVI+3VuieCCi2KpR1lGZAN3uoe1uRBC2IiDnpfGl
-# xOATjfjOe6ni2FHXN1GzZSOwsJKqnos0lfLT0FjwY906LdsSWtecYpML3E5GXG7i
-# KRtm5wI7rOgn7JAcQxj+ox/M6SZYhBFcrGsZaU2M7yshUXdHPbxL5vwZ5Face8KA
-# xiIvSOsI7jyLBzUVVdEroN/HbQ8KjGwa28v0iBgvhLs6JiHi8hU82lF4VEWV7HVN
-# GzUPF/Jh8HSU5ejwzk/z7t+ipdayF+Txge0bRxujAyRKvLnic1phCQ6MBkn7SpAD
-# fDwRWxbQm6q9ghiDylTnYSUIqdb2Ok+Gjg9z/HH/AIowuzf2U+VHhX/lSitSWN6K
-# SHBBV3+8S8AP/GmsP3uJwGlNVw8NFfxSqvME+waIauxGKthIjhGsLbuLM+V7ZzyN
-# vs4GHNCyPAwKoLf7HPl30g1JWL6yziGS79nALB5sjacIlRUlAKaOPGfsxtcn2F9G
-# Pw345nxmqfqHTTA1fSNLncRpxCRM63fFAvc5hvCIxWl+6yyTXS5gyRlA6F++48rJ
-# YrFw6nqyk3VtQSR6nt1y7zqrwBR9JyXe7OewOluH6yqoNmQ5bfOhYdyEQUBpU2IR
-# RdvOCWLvHFzFPKhn3rfYoqEdnOR94K6HRuKYlZELRuoBuhlPzKGCAyYwggMiBgkq
+# BCDQDGypDsQQy9twQiRcsIDTpehE2di7x4Gt4g7rU7sXTzANBgkqhkiG9w0BAQEF
+# AASCAgDgmk0kWg/9JdQdbtfxa/JEUgkqXnM4pSaZSvyeK5GB2e7WNmr4/D1VFzZq
+# 2k1FQZQqJTATqZJk5KcySkqgXWU21FDKqEJmxnLW00TkGsVSzQTeA7pX6btRvcCz
+# qV/68+LwMd1KwPoL0j77CmOwC1ZbHkITp6GrCG/ruaQlmZ7i2MneQSPKIqro4TBz
+# gtHgI0SikSP0QV0X3gGhlOrMBL7xbic2HL95O8LEnmFKvmh5rEhrNJZX09LGw+d1
+# tNVfvnBQsr/9STdNcKrSLW7dQ7NyYFJAI6WhYAQHEg1enaRVRjYqPWlmFlUYY0Kq
+# LCns1FEUmBNlIuzRFapCi4HJDvGvwwQgby7NCJl0iq4KfJbK4uLBoQ6lFrE2SXJg
+# EtNsLsBespOjEdjnftiAbEbHhxtxiMqQmAQ3NZd9IXAOVuV/78CgtEjZYwXPjpLA
+# X6HhDn2yqTQk0kKHNLAwww44VDjJtfE0AzNYnpyaCdTQwrpQSLs0mKqJGKGwXaco
+# Ap4PzuN0bULz87NByN0ZAIcSHHD3TUytKrPtWTjp4XpyzdHhwgqDjF+opLhkOinL
+# BOEnxxJSPDkz29PpuVXYO0QVdSC0IkA4ly4AB9YoQTnApFoThwrKKhtavokDtMIa
+# NivZo4KJJ8euvi1EyhoNrmPTQYsXFgcmKgYiVsJgKqLpkvzD/6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MTgxNzE0MzhaMC8GCSqGSIb3DQEJBDEiBCDZltLe
-# Ksl7uVbPUKVYEvHHw9sF21pKP8zj0qebablyrjANBgkqhkiG9w0BAQEFAASCAgAX
-# 5xYllNiqa0wmtMC2TyWFtrs/eaGtxIhe4akWk38K4DIkfQDX4GuU2OmNBmjJvSiY
-# BXXZxuk3ZuZYOX3ssUCVcJNddxi8bssmNj91I9gZxjq/yAPaDT642+cl1iR7zl4e
-# X5hr7QnZEDwflV35zxXQUz0Tls3dnT5PixA3gyGo77UYwrbD2OFYS2x0nw22Z/Cs
-# Vr3sGleCU55Ca+FxKEawId0QGVZPZz8KbUWgTwIjKmE1LZK46fkfBG9gqOGX11TX
-# M0SfQ5lcFxuD9xyIBCdQQnAiVm+DwmLySJ6jwa3OCbtScTYVqUkotq+gT9ZW2UNz
-# U2Y+eHYJ+v1PcvDC5ngfRiOxh2ksvOJJpEldBh6b3xTDLpvr3lBmFsXJXCd3PZYv
-# dZYN3Fpr2L60ynDEc6TagFL8yd+zcttMHlsdHhBy07M3LMO6flOdYK1S5FLU2dDB
-# nz3VbzUhzfheWj75zjZcKjuFKcLp/zCsZnVNvCJHb4QAy3EOpTmnp8rpVKSJWA0W
-# j4v3IQB5VnvOh0vhYxPlf/Ei3naVwvqsCCNMCNLhHM0hf5bC5B6c1/cAfk+hBMRg
-# 4seTrQhgWSij10FYsRWjK9g73Gjd1UAeipPrZjawRnDDQVlV3XSoCbsXJdmlo6oB
-# WR1gasjeUViP56uWFGJrjNxR42TLIXsiKCExGij1Vw==
+# CSqGSIb3DQEJBTEPFw0yNjA1MDYyMzU5MjhaMC8GCSqGSIb3DQEJBDEiBCC3EO7C
+# w/cx/q+621MFu+iFgdCaFr9KeRPxKifI2aoKNjANBgkqhkiG9w0BAQEFAASCAgCI
+# vjwdzu+tePAcvG/ambdqbqgXxDzSYsbcVzuNZCd4mWIo7XPuq+xi+lhquI1BmMBI
+# UvA+p4AMa/MjgXbaUwh7oFuNqvnC1LYhFBE2tXycYVJrfQvShUDF287hxrEhfMCn
+# ea/cqQpdTFfIdXQv8jljptHOwa1KX/+lP97vi9oS4LOOghBqqPGZ5st+IrgkvVtb
+# FrHUdfZWjm+Ic8KiD36PQ+oCQphslFp+ZMRme/02DnPdyjwy3H6QyPakIwOYDOB0
+# CwZEFSkR92QbKbfgXvGp6G7thp7MpQOO/oZCV2pL8c1HkziVbY6q3oWc45C2/cB0
+# 5T25OdaVTpktrGFfUNp+RKvgbpq/VltRu06NKALxPSn9rtlAQseLuTZVLh6j/wQH
+# pnYf6PthCJCB9cvmBKlDYY+Y0/YlFTnwz2IDPtHOUBHXOHcd9zIZEzxR1GJH45YV
+# Zi4pHxwl0NMcuD9UGyioxJQoO1xDexuDOd3fZ+QmvacpRfP/3ABxqX/WeKjMNOBP
+# lZ9MmLJkXV2LwU5vHPFBeJIUGlJojkwNhVUTg3qOk33abSI4fmjMvYjqc4XSixYx
+# AtDuIo4MZWHKrBTqhcL4tUCfGResEjArhyWdFnmJU0IXeOsBGL1AWdKuiaLN1/Db
+# 5TnWRML60MHSpBGDrfwC0nc+ZQjsHzr2yGL0LZQTaQ==
 # SIG # End signature block

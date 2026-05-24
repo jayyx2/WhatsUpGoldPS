@@ -1,11 +1,76 @@
-# Copilot customization (local dev preferences)
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+*.orig
+
+# VS Code — keep shared settings, ignore personal state
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# =========================
+# Copilot / AI (local dev preferences)
+# =========================
 .github/copilot-instructions.md
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+*.secret
+*.key
+*.pem
+*.pfx
 
 # DPAPI credential vault (user-specific encrypted secrets)
 **/Vault/
 **/.vault-*
 *.cred
 
+# =========================
 # Release build output
+# =========================
 release/
-Build-Release.ps1
+
+# =========================
+# PowerShell / Module
+# =========================
+# PSScriptAnalyzer output
+*ScriptAnalyzer*
+
+# Module test scratch
+TestResults/
+
+# =========================
+# Logs / Temp
+# =========================
+logs/
+*.log
+tmp/
+temp/
+
+# =========================
+# Node (if doc-gen or tooling uses it)
+# =========================
+node_modules/
+npm-debug.log*
+
+# =========================
+# Python (if helper scripts use it)
+# =========================
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# =========================
+# Archives / Binaries
+# =========================
+*.zip
+*.7z
+*.tar

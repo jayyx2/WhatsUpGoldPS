@@ -1,201 +1,130 @@
 ﻿<#
 .SYNOPSIS
-    Creates an AWS IAM user with read-only permissions for WhatsUpGold discovery.
+    Builds a release .zip of WhatsUpGoldPS for easy deployment.
 
 .DESCRIPTION
-    Uses the SigV4 REST implementation from AWSHelpers.ps1 -- no AWS CLI needed.
-    Prompts for admin-level AWS credentials, then creates an IAM user with a
-    read-only policy covering EC2, RDS, ELB, CloudWatch, Lambda, S3, and STS.
-    Outputs the new access key and secret key for use with Setup-AWS-Discovery.ps1.
+    Creates a minimal .zip archive containing only the files needed to
+    Import-Module and use the helpers. Excludes .git, .github, docs,
+    code-of-conduct, contributing, and other repo-only files.
 
-.PARAMETER UserName
-    Name for the new IAM user. Default: wug-discovery.
+    Output: release\WhatsUpGoldPS-<version>.zip
 
-.PARAMETER PolicyName
-    Name for the inline policy. Default: WUGDiscoveryReadOnly.
-
-.PARAMETER AdminAccessKey
-    Admin IAM access key. If omitted, you will be prompted.
-
-.PARAMETER AdminSecretKey
-    Admin IAM secret key. If omitted, you will be prompted.
+.PARAMETER OutputDir
+    Directory for the .zip file. Default: release\ under the repo root.
 
 .EXAMPLE
-    .\Create-AWSDiscoveryUser.ps1
-    .\Create-AWSDiscoveryUser.ps1 -UserName 'my-reader' -AdminAccessKey 'AKIA...' -AdminSecretKey 's3cr3t'
+    .\Build-Release.ps1
+
+    Creates release\WhatsUpGoldPS-0.1.21.zip
+
+.EXAMPLE
+    .\Build-Release.ps1 -OutputDir C:\Temp
+
+    Creates C:\Temp\WhatsUpGoldPS-0.1.21.zip
 
 .NOTES
-    No external dependencies -- uses SigV4 REST via AWSHelpers.ps1.
+    Author  : jason@wug.ninja
+    Date    : 2026-04-06
 #>
 param(
-    [string]$UserName   = 'wug-discovery',
-    [string]$PolicyName = 'WUGDiscoveryReadOnly',
-    [string]$AdminAccessKey,
-    [string]$AdminSecretKey
+    [string]$OutputDir
 )
 
 $ErrorActionPreference = 'Stop'
-$scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
+$repoRoot = Split-Path $MyInvocation.MyCommand.Path -Parent
 
-# ── Load SigV4 helpers ──────────────────────────────────────────────
-. (Join-Path $scriptDir 'AWSHelpers.ps1')
+# Read version from manifest
+$manifest = Import-PowerShellDataFile (Join-Path $repoRoot 'WhatsUpGoldPS.psd1')
+$version = $manifest.ModuleVersion
 
-# ── Prompt for admin credentials if not supplied ────────────────────
-if (-not $AdminAccessKey) {
-    $AdminAccessKey = Read-Host 'Admin Access Key ID'
+if (-not $OutputDir) {
+    $OutputDir = Join-Path $repoRoot 'release'
 }
-if (-not $AdminSecretKey) {
-    $AdminSecretKey = Read-Host 'Admin Secret Access Key'
+if (-not (Test-Path $OutputDir)) {
+    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 }
 
-# ── IAM REST helper (global endpoint iam.amazonaws.com) ─────────────
-function Invoke-IAMREST {
-    param(
-        [string]$Action,
-        [hashtable]$Params = @{}
-    )
-    $queryParams = [ordered]@{ Action = $Action; Version = '2010-05-08' }
-    foreach ($k in $Params.Keys) { $queryParams[$k] = $Params[$k] }
+$zipName = "WhatsUpGoldPS-$version.zip"
+$zipPath = Join-Path $OutputDir $zipName
 
-    $qs = ($queryParams.GetEnumerator() | Sort-Object Name | ForEach-Object {
-        "$([uri]::EscapeDataString($_.Name))=$([uri]::EscapeDataString($_.Value))"
-    }) -join '&'
+# Stage into a temp directory
+$stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) "WhatsUpGoldPS-release-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+$stagingDir = Join-Path $stagingRoot 'WhatsUpGoldPS'
+New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
 
-    $uri = "https://iam.amazonaws.com/?$qs"
+# Items to include (relative to repo root)
+$includes = @(
+    'WhatsUpGoldPS.psd1',
+    'WhatsUpGoldPS.psm1',
+    'LICENSE.md',
+    'README.MD',
+    'CHANGELOG.md',
+    'NOTICE.TXT',
+    'functions',
+    'helpers',
+    'examples'
+)
 
-    $sig = _AWSSigV4Sign -AccessKey $AdminAccessKey -SecretKey $AdminSecretKey `
-        -Region 'us-east-1' -Service 'iam' -Method 'GET' -Uri $uri
+Write-Host "Building release: $zipName" -ForegroundColor Cyan
+Write-Host "  Version : $version" -ForegroundColor White
+Write-Host "  Staging : $stagingDir" -ForegroundColor DarkGray
 
-    $req = [System.Net.HttpWebRequest]::Create($uri)
-    $req.Method = 'GET'
-    $req.Headers.Add('Authorization', $sig.Authorization)
-    $req.Headers.Add('x-amz-date', $sig.'x-amz-date')
-    $req.Headers.Add('x-amz-content-sha256', $sig.'x-amz-content-sha256')
-
-    try {
-        $webResp = $req.GetResponse()
+foreach ($item in $includes) {
+    $src = Join-Path $repoRoot $item
+    if (-not (Test-Path $src)) {
+        Write-Host "  Skipped (not found): $item" -ForegroundColor DarkGray
+        continue
     }
-    catch [System.Net.WebException] {
-        $errResp = $_.Exception.Response
-        if ($errResp) {
-            $r = [System.IO.StreamReader]::new($errResp.GetResponseStream())
-            $errBody = $r.ReadToEnd(); $r.Close(); $errResp.Close()
-            throw "IAM HTTP $([int]$errResp.StatusCode): $errBody"
-        }
-        throw
-    }
-    try {
-        $reader = [System.IO.StreamReader]::new($webResp.GetResponseStream())
-        $body = $reader.ReadToEnd(); $reader.Close()
-    } finally { $webResp.Close() }
-    return ([xml]$body)
-}
-
-# ── Validate admin credentials via STS ──────────────────────────────
-Write-Host 'Validating admin credentials...' -ForegroundColor Cyan
-try {
-    Connect-AWSProfileREST -AccessKey $AdminAccessKey -SecretKey $AdminSecretKey -Region 'us-east-1'
-    $sts = Invoke-AWSREST -Service 'sts' -Action 'GetCallerIdentity' -Version '2011-06-15' -Region 'us-east-1'
-    $callerArn = $sts.GetCallerIdentityResponse.GetCallerIdentityResult.Arn
-    Write-Host "  Authenticated as: $callerArn" -ForegroundColor Green
-}
-catch {
-    Write-Host "Failed to validate credentials: $($_.Exception.Message)" -ForegroundColor Red
-    return
-}
-
-# ── Step 1: Create IAM user ─────────────────────────────────────────
-Write-Host ''
-Write-Host "Creating IAM user '$UserName'..." -ForegroundColor Cyan
-try {
-    $resp = Invoke-IAMREST -Action 'CreateUser' -Params @{ UserName = $UserName }
-    $userArn = $resp.CreateUserResponse.CreateUserResult.User.Arn
-    Write-Host "  Created: $userArn" -ForegroundColor Green
-}
-catch {
-    if ($_.Exception.Message -match 'EntityAlreadyExists') {
-        Write-Host "  User '$UserName' already exists -- continuing." -ForegroundColor Yellow
-    }
-    else { throw }
-}
-
-# ── Step 2: Attach inline policy ────────────────────────────────────
-$policyDocument = @'
-{"Version":"2012-10-17","Statement":[{"Sid":"WUGDiscoveryReadOnly","Effect":"Allow","Action":["ec2:Describe*","rds:Describe*","rds:ListTagsForResource","elasticloadbalancing:Describe*","cloudwatch:Describe*","cloudwatch:GetMetricData","cloudwatch:GetMetricStatistics","cloudwatch:ListMetrics","lambda:ListFunctions","lambda:GetFunction","s3:ListAllMyBuckets","s3:GetBucketLocation","sts:GetCallerIdentity","iam:GetUser"],"Resource":"*"}]}
-'@
-
-Write-Host "Attaching policy '$PolicyName'..." -ForegroundColor Cyan
-Invoke-IAMREST -Action 'PutUserPolicy' -Params @{
-    UserName       = $UserName
-    PolicyName     = $PolicyName
-    PolicyDocument = $policyDocument
-} | Out-Null
-Write-Host '  Policy attached.' -ForegroundColor Green
-
-# ── Step 3: Create access key ───────────────────────────────────────
-Write-Host 'Generating access key...' -ForegroundColor Cyan
-$keyResp = Invoke-IAMREST -Action 'CreateAccessKey' -Params @{ UserName = $UserName }
-$newAK = $keyResp.CreateAccessKeyResponse.CreateAccessKeyResult.AccessKey.AccessKeyId
-$newSK = $keyResp.CreateAccessKeyResponse.CreateAccessKeyResult.AccessKey.SecretAccessKey
-
-Write-Host ''
-Write-Host '============================================' -ForegroundColor Green
-Write-Host ' IAM User Created Successfully'              -ForegroundColor Green
-Write-Host '============================================' -ForegroundColor Green
-Write-Host ''
-Write-Host "User:       $UserName"  -ForegroundColor Yellow
-Write-Host "Access Key: $newAK"     -ForegroundColor Yellow
-
-# Offer to save to DPAPI vault instead of displaying secret key
-$discoveryHelpersPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'discovery\DiscoveryHelpers.ps1'
-$vaultAvailable = $false
-if (Test-Path $discoveryHelpersPath) {
-    . $discoveryHelpersPath
-    if (Get-Command -Name 'Save-DiscoveryCredential' -ErrorAction SilentlyContinue) {
-        $vaultAvailable = $true
-    }
-}
-
-if ($vaultAvailable) {
-    $saveChoice = Read-Host -Prompt "Save to DPAPI vault as 'AWS.Credential'? (Y/n)"
-    if ($saveChoice -ne 'n') {
-        $combined = "$newAK|$newSK"
-        $ss = ConvertTo-SecureString $combined -AsPlainText -Force
-        $combined = $null
-        Save-DiscoveryCredential -Name 'AWS.Credential' -SecureSecret $ss -Description "AWS IAM ($newAK)" -Force | Out-Null
-        Write-Host '  Saved to vault! Secret key is NOT displayed.' -ForegroundColor Green
-        $newSK = $null
+    $dest = Join-Path $stagingDir $item
+    if ((Get-Item $src).PSIsContainer) {
+        Copy-Item -Path $src -Destination $dest -Recurse -Force
+        $count = (Get-ChildItem $dest -Recurse -File).Count
+        Write-Host "  Copied : $item\ ($count files)" -ForegroundColor Green
     }
     else {
-        Write-Host "Secret Key: $newSK" -ForegroundColor Yellow
-        $newSK = $null
-        Write-Host ''
-        Write-Host 'Save these credentials now -- the secret key cannot be retrieved again!' -ForegroundColor Red
+        Copy-Item -Path $src -Destination $dest -Force
+        Write-Host "  Copied : $item" -ForegroundColor Green
     }
 }
-else {
-    Write-Host "Secret Key: $newSK" -ForegroundColor Yellow
-    $newSK = $null
-    Write-Host ''
-    Write-Host 'Save these credentials now -- the secret key cannot be retrieved again!' -ForegroundColor Red
+
+# Remove any vault/credential artifacts that may have leaked in
+$vaultPatterns = @('*.cred', '*.vault', 'Vault', '.env', '*.key')
+$removed = 0
+foreach ($pattern in $vaultPatterns) {
+    $found = Get-ChildItem $stagingDir -Recurse -Filter $pattern -Force -ErrorAction SilentlyContinue
+    foreach ($f in $found) {
+        Remove-Item $f.FullName -Recurse -Force
+        $removed++
+    }
+}
+if ($removed -gt 0) {
+    Write-Host "  Cleaned : $removed vault/credential files removed" -ForegroundColor Yellow
 }
 
+# Build zip
+if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory($stagingRoot, $zipPath, 'Optimal', $false)
+
+# Cleanup staging
+Remove-Item $stagingRoot -Recurse -Force
+
+$size = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+$fileCount = 0
+$zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+$fileCount = $zip.Entries.Count
+$zip.Dispose()
+
 Write-Host ''
-Write-Host 'Permissions granted:' -ForegroundColor Cyan
-Write-Host '  - EC2:   Describe* (instances, VPCs, subnets, volumes, security groups)'
-Write-Host '  - RDS:   Describe* (DB instances, clusters, snapshots)'
-Write-Host '  - ELB:   Describe* (load balancers, target groups, listeners)'
-Write-Host '  - CloudWatch: Describe*, GetMetricData, GetMetricStatistics, ListMetrics'
-Write-Host '  - Lambda: ListFunctions, GetFunction'
-Write-Host '  - S3:    ListAllMyBuckets, GetBucketLocation'
-Write-Host '  - STS:   GetCallerIdentity'
-Write-Host '  - IAM:   GetUser (self)'
+Write-Host "  Output  : $zipPath" -ForegroundColor Cyan
+Write-Host "  Size    : $size MB ($fileCount files)" -ForegroundColor White
+Write-Host "  Done." -ForegroundColor Green
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4uBvECZdX9nMn
-# nMO1lORn3kSs9x/dKm/IP8p0NEoPuaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDooOfNs3UCOXYS
+# t4gtRIypgXx6FOYlD2pyAyeCbP29qqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -398,33 +327,33 @@ Write-Host '  - IAM:   GetUser (self)'
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDX5B1tNd3pAJa9OTmfsRfn0H+Y8zjjC0tGdx/r5wQIqTANBgkqhkiG9w0BAQEF
-# AASCAgBt2+dvtkW3cYOW2hXsUw2SryZlrfoa6vMjo+X7Tyb0hNNY6p3BQsedeiQa
-# ft1zjIK23njsEMbDSg8XDFlBb6mhMiT0CyPzJTzARP7f608BX5z87KAfXUNlK835
-# I0Fn274XEHHUEkHJPeSRRPoOHUa1TPMBF5NSs6gU5PL/u7kJKqMK2fhvKAeJ+cuK
-# 9744tV2Uc0SAkw2rrqZIX+QZZCr+yNVyvgo6YzFIW37B4zAeBTeKwtVtWM1yoEEX
-# isZs72VQ0Woe7GlaAsD8xD553hjKTCj4Lo3lIUd9nXPx7rjbK6MR1FwKj46lmp9L
-# P4hyLs5reJ8hq5d3vabBHc64DPLqwizdJ8BSgPm3ABsAYVLUO7xPtBQU4YoU25+z
-# OTr7Zg33qqzvV80dZ7uD5BcN2u87E3n7C3izcoEq1izLWQaMt7oq0BIBA/eAdeF+
-# kY14lo6+jlAhv0T1eXlxULTXGmIYrI2bqp4j5VEPalDg1l/a8vSfR5CUleTdynNM
-# xqWAV2Uz1tDGLaCW7RtEtHPsxaoU/Yknwc5iaOPmabtff6opGNTrruc7DH7XpF/5
-# xul2PHbt/R0HUVVRZ15aPQLGERlGRW5iawLszgU2QTuTmyOLMxNrZOLzq9TGj9te
-# khCkAbsv6fbW4igHViO9OvAmoMYcP+cu53WCVRNRZUwm97gA86GCAyYwggMiBgkq
+# BCDr5w8Qs5IenxOu5KATgTBCxbFIS94T9GhGH3Vk1iozjzANBgkqhkiG9w0BAQEF
+# AASCAgCXidV9gVCazSYtfGbPvpSbTmgtorY7vgS9gopvfGWecQUvclsDafQyY2gS
+# fVSm0X3SbZebPsdVuNZLrANz9hPZOBVbYduDWYcwPtlJfd9vumOFxHzTUTyWLyWK
+# KuRDtm7THc3OoBS5YnjhvBcFTvlkZ3MoDATSJ7LvjTVq99DGpV/mdQOfNmh8vpM+
+# P94kYai6LTOqyfRdKtURvPZyiJaCaUhIVOMgjSjplALgFSA6vVCn/9WoUV7UqYxu
+# mj+4jKmILe8kEHb3ZXL2X9mEWaSHFIvbiLZsX1rz5teBeBYZBEcUWVaVj3fPKdXg
+# foq9URpIKhxfcm4o1Bouj7THTniey7A6/yjeMS0QPwjkrth4CzCMhSJvisNYYtvs
+# rvESP0jPROlNWNBIM9M3UCYEenfwby21eZepvQ963iVM+ooTfsVWLzqDohJ7txF8
+# FngSA5HGo1Adjx/OTfddos+FCSGcbPr2hVI7cUpD0u69me8S1Zzk0HLtSN/vy0VX
+# 0mzQlhwvcZQ37Nkw4gFvNRx4xw31srcMF31R1ytOp97vsqIFzNw48H7E4LnM3GF/
+# 4hmtQiQAmJORlVK3SQN0kcFPTmkLPCJXi7ias6it/kv6ALkC8WPqBFPM+HCxqNxY
+# LvW835U9vZQkad42JqHkbGWFQASUX3gdmVJUSO02YqpS3tFaEqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjQxNzQwNTFaMC8GCSqGSIb3DQEJBDEiBCCQ20lT
-# iBwEen3+ds/J3NSV4TVa4DTpMGpnLRI8AB32WjANBgkqhkiG9w0BAQEFAASCAgAr
-# /bT3iZFLzT1CcWXCT+VfipVPxch3BwvCpdHNMUetOhNQAQERQpmdGyodUhRPxCSZ
-# Qmz/TUYCLi5iDpD5VliZ4OkoGLyF7WLN+ajBl7ykYBXMeZuCNsJC4dgaF/Wk/m1Z
-# kUfmDdPtQ41jQQ5y4VZVVVyBx4zbbWVRDaP78ga0LTfjzaJ8irmPAWTwUAX7jNV8
-# NpMc+sJ/cucOPSDNSJt9ZUkS1hoP1VIBsEI1idSB/ZQW9QOwYSB2eV9Di2ltxN5t
-# bPYOoX6DTBOUZhdS+QbwQfBkCpUc2G8SG3+fY0huIjq1NainnJXca1cprl6Xk/q8
-# L9zrF87Z/2FC1+2Bb7d7unvKnSQtdG1BSsX9l4ZYYoTX1hHS6d5POFN5bZ5lmmQV
-# rn+SQ0oZr9pJ4s0igMxpBMoyQr2Fj6+bAQpOzJDYar2ZmGI/ahV3iBikkUlit3Io
-# UUB259EzbdM5sq38f5FHj9OobXJ6f8Y61hXTHNKE6rz1Agr3sW7SJ8BGObU3gwdS
-# qFA4P5eMwcjNCDi2nBU4BbXTECEoQFAnzKfLVhVMAI/xc+pi1vG6pdVnJY/ase47
-# hAYankt/HPA4fdEM8qy24shbwjsNsWD8pjaDQfB1eSkTzHDjximW7aM6ZXhzhYq9
-# dHeuSGX3uzzPIuynAkvMWnf+ITSqryZUObFEJEMZTA==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjQxNzQyMTBaMC8GCSqGSIb3DQEJBDEiBCD8+Inu
+# AzccuFwrkRPqbGZCi3tS6B4DRKI80HEQFLUEmzANBgkqhkiG9w0BAQEFAASCAgAE
+# bZ4ciLWWqUsumGE7yJSNrpngPPxOY8itRveVnj1ZlxsQ1OSJzaVRn7PdcE7xatn9
+# R9mZ01+fnihkfCi6T9tcFFCK+JtqbVJzDYY8oik96OgbHZngm1Nw6AAjGq7/u7wQ
+# XYjVWY9dxVBO4tR7Netny7+68hr2RICL0zgsmB110cH9PY78ixyj1kWMQkpp0+YZ
+# T7vS/x/jkhNAn5OKiZeVmZmcxd+3TuA2PDW6MH+W4zDbCMjPeiIq0uws+ruvxUgM
+# /IBbA22/Ojs6zNdxbw3NaQ5avBIEa4XrbGncbibbuhGqQjIN76D8tv3bGETOrMEf
+# 4T75xC/Ivk8yIslQK8GflQqylE4+f/f4ICtdt06RalsOAd3Eti9loKNu5rdERAz9
+# neLDLJyydhLI/RIEi3pvHgHjbTvqdpOvOELp+fd7TnoIPH7pUQoAEt+KWKZ4giFN
+# 4CaJrdzrm2ruc6R6HOppyN3F/L6qlPDBFEFja7p8e53mpfISTyzDzoQ/n+5Kcj0x
+# 2qKgFfwstSIdcof8bA3GPd+uE4B5hsL61opyIxHWU+EvPlO2oJe0RdHzMlbDxBaM
+# V7Ip+xV6SpLi37Va72IlEdr4UfcNPJDsRW9A8JwLJIPKN19mrwHvpddC9AdsczjC
+# yXhdgizVPLtDGhTYXVHNCRmZZcE56lOcRASUlOZycg==
 # SIG # End signature block

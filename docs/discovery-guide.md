@@ -33,7 +33,8 @@ Each discovery provider knows how to talk to a specific platform (Azure, AWS, VM
 | **LoadMaster** | Virtual services on Kemp LoadMaster load balancers |
 | **Fortinet** | Interfaces, VPNs, and health on FortiGate firewalls |
 | **Bigleaf** | SD-WAN circuits and tunnel health on Bigleaf Networks devices |
-| **Windows** | Disk I/O and system attributes on Windows servers |
+| **Windows Attributes** | OS, hardware, BIOS, and memory info as device attributes on Windows servers |
+| **Windows Disk I/O** | Disk instance discovery and disk I/O performance monitors on Windows servers |
 
 ---
 

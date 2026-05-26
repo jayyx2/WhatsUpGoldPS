@@ -138,7 +138,7 @@ param(
     [string]$Mode,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
+    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
     [string]$Provider,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -167,7 +167,7 @@ param(
     [string]$WUGServer,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
+    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
     [string[]]$RunnerProviders,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -207,6 +207,7 @@ $providerScripts = @{
     Fortinet = Join-Path $discoveryDir 'Setup-Fortinet-Discovery.ps1'
     GCP      = Join-Path $discoveryDir 'Setup-GCP-Discovery.ps1'
     HyperV   = Join-Path $discoveryDir 'Setup-HyperV-Discovery.ps1'
+    LoadMaster = Join-Path $discoveryDir 'Setup-LoadMaster-Discovery.ps1'
     Nutanix  = Join-Path $discoveryDir 'Setup-Nutanix-Discovery.ps1'
     OCI      = Join-Path $discoveryDir 'Setup-OCI-Discovery.ps1'
     Proxmox  = Join-Path $discoveryDir 'Setup-Proxmox-Discovery.ps1'
@@ -349,7 +350,7 @@ if ($Mode -eq 'WUGAction') {
 # region  Validation
 # ============================================================================
 if ($Mode -eq 'Provider' -and -not $Provider) {
-    Write-Error '-Provider is required when Mode is Provider. Valid: AWS, Azure, F5, Fortinet, HyperV, Proxmox, VMware.'
+    Write-Error '-Provider is required when Mode is Provider. Valid: AWS, Azure, Bigleaf, Docker, F5, Fortinet, GCP, HyperV, LoadMaster, Nutanix, OCI, Proxmox, VMware, WindowsAttributes, WindowsDiskIO.'
     return
 }
 
@@ -615,8 +616,8 @@ catch {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB11MK3YjOtmK+4
-# uo7ZjWToY06bAKhdq+oRUXsTmRz316CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC6E9WZ6ZQWc0Ad
+# Peu0485JoZgK05sTdGGpWnfoW13v6aCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -819,33 +820,33 @@ catch {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCB6eUzEQJ0Nup+2ma23JaN8734U0JKLKk5H8esWCpH6oDANBgkqhkiG9w0BAQEF
-# AASCAgC3jriTFW9OXQ04BYya3M0AmkEK22444/Qa0+Tdm46splJQxs1r1t6K5DdX
-# uY4OSqTKKxqTCjIkor8N+97neelwAJAcViaG+KBzzpGCAp2CCIPChu82Rt29a0he
-# +ajn7gnzIsjPAFGpW1ynkmjDL0WwjENIrWyu1XxkK4b4/iiSKXUk5t4cWUPYTQvA
-# ncMENZz7GVw4/e337+89zx08FwKFRThEjih3ahmZ6OFQMpMy1SaSdGZZezI4r891
-# ftv3E0Hezh3sccmgpchgZvu3z0l2pYY9R0HLwOmJih1ofp0MWSlexgkoOVFTs18Y
-# l606mZt7nXHK4CElEiC5h/6sBlU6Lx3Nh/zNY0qNLGf6Eq0XPuBvUzycQ0y2J0ef
-# U4Ln4ITzUcZyY51QSTeGipO3GRKNRcEhSKxydHYDoCmO9yO2VwiPZB69NBmoI6ru
-# +fvB4y2xoTfaB2q+WziRu+NCca31rgYH72tWW4aIAbT8NLH64afvmlMl/ti+hhr/
-# xTWcIqP+Qs19t7smF8Psdgb+wkaj2lCdjS8N6Gb8L3pskohJpNnQZmoI7fjsdZ4T
-# Ks/hICeuoHwseHIy3gDSbtru0moufnZ6IR9xTd1GS90yLUjcVH44EXlKEdhDXuIL
-# L31SWSMGe+TpJ9erb/e4PjULQtDvSZzHmz0XbuYTMt5aIYJ5NqGCAyYwggMiBgkq
+# BCAlTB54WuBz3/A/r1CAl7hvhBs7honArz4GlCrmchNSEDANBgkqhkiG9w0BAQEF
+# AASCAgAq9pjEqXtltVV9Rd9S/XDZgkZ8OZwNtMpFAf8/delyYZQhIn2zugjfqKYf
+# p3rpEQ6FiZ2et+vrEFeSjdkHUG/0jJbBNbLWdI4e/7Nvp+EQS0ZCQxlMaFenO+ak
+# WGudp3yqiGK1TLdPtlnEb35G+x9K5qVd/MtsHDFTHy1CeYrOA6QKO2wKbXHNoki4
+# jNUt9GdbM8KR3dG5N+1iqadT8jYo6cOklMD6wuTU9qetmey96Tvtd8f2RA/zUViG
+# 3u7osh+TMcfaSlG3hQolniQx+7SLlc4fJ3FdBeIDBcGfQUQLgTod8p1pZe6FSTJw
+# Sy0gb7sjvxBGtBKVEzmJQSwgRZ20IXK4+ZGHYWyZSzc6RuP1uC53uHzIqbbzusVI
+# xHeUNtoPcYmAbnSrcjA3zM1M2RVjs3vI1Su9UNVyKMHKEZCztDftMt5L/4Sp0Ou1
+# rqz2Z+zT1w2A49p47BofS5qr37UruyT2Yqy5fokR9QlpYDSFabNWbHYFhNVeT4EX
+# HkVO1hTqUe0Lie70i5S0igoFctCn1iJpV5rZokDZ1gEzAhX1gL93ebgi0hE9ytml
+# MEbn1n5T1KNprO35rRh8nhgMjP864zWAnj64aYlNc1mR4StIPxEnhnDc35PMZT+j
+# F2Bua+w9bghrDAwLxpCpIpWor/d1SmyA6pzFrMQ2qgdZo4m8yqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MTgxNzE0NDBaMC8GCSqGSIb3DQEJBDEiBCAr5fV8
-# ixiWECXwN3fYEYynKQOIF/+o2IyJkoJ6AXlK1DANBgkqhkiG9w0BAQEFAASCAgA+
-# TStGU8B4R9Aa90Ya6a8+UOJ/HxpX+jTHxhEruENqLSA/Axil25E/v1UN1f21vjIK
-# wNRVuY0BSXq5Eq73TMv6Eg6bW6a42pY5f642hXD/FoU/0vR0Kk81+SmJYkzBIz9Z
-# lypLeQ7V77MkZqL5kSEfs4DrdPRwH12zDXvf0D+HSCSYuSoIfqsc2EaSmDgJffhV
-# cHs+flZr18wJJ+u87xxgCVG0yy6aS+x1uWKDKWBhwROUVZxyUhzKNGW06gnB5KKx
-# enGv3GBMCke5N+QYzmhEpAK7Lp5qKp6OSXf+lf2cAr45/AW1Qb7FDPQ53BT0KeyN
-# 3ZpLpIrHW/YHW0Kn5Py580Ri2zhdUJt6azb1oUoLHGIWmQXpHt/E71hub12KUaA8
-# L+uUf45J+OWMOjktzrpbUhhtF8wehedbNknawBMXJw9qt+mJg2ym+5tha4UF8olH
-# GL1F7ugb6wsRiuv7zIwMaMCHxp7hr0aW2scpa1yilE5JWfN9Ua8PbgiiFooLXzEw
-# X9eTTVgdHThHG2xZTDdbDppjU8K28D0spfa7DRbZZ2iFTkPZlgpJUy957WgrtXdz
-# r9DhHAdNU94slJ9c00q0ypnio9tuNbXRwSRuPp9l7BedCN0M1prgvppuCQuusUSu
-# 68K3lo6Ok8+5wPS1xRSWZQGkllseSyA9MwCZ99ideg==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjUyMzU1NDRaMC8GCSqGSIb3DQEJBDEiBCBb38Z3
+# lFypj/J14LbtqDRjZns4WXZZ2cXz5DHIyyL2HDANBgkqhkiG9w0BAQEFAASCAgC+
+# AVImRPThspVtCrHu6Lff1U+4fXEGsayKsDJdkjw1xnT/Uue8E0RqyZMVaZjnSVvi
+# vvH2bjhn8m5YiM/2SePNkcIUqXcGe19BnrzhFbjxjxQf1+/uLA6W+Ly/SrhLrdLU
+# TUKNM1reWl0uDgL632ax4NGWA6P88JBqDU8mLAZt5iJFh3AFbOMutuUwMQTRiX7L
+# zkr8r8uKx0sB9aQHQRSf8kCYR+DThBYqVxXmbFDW5iDWS89FKpWVPGJGp3UUG0+k
+# uHBcDBOJpiDkAhxswMHex6j2zQ/AkwEHfuYx3+GpO16WKd1WzmX/IU4lMt9pi6l0
+# Y72x2BWqhBaSsIh0WqyV16YOlRlPviZIrgwVAGGpmEiBbyVTwc6S3cOVVaVl9/KC
+# DG3Oahz3Bifd/HhAPu0J4kkKomUT7bsjTDFiekMH1dbjTLheWNwu9b5Qgzspwctt
+# cZEo1n+D+sn1zZK84zoK4l9pgShPja4pMLrkuxslYtv4aQUhBXRD9pJzXefyawK0
+# /zreXHgJx4zH287sJlLDqo4fXAakh4OJbrtYV/YIzl3Fj8RtZFxREc+beCebEnrp
+# uEdqul4fAmh1cZBRNHut/gcXhITCCpjiMTNn0h6dB3NzGrA32ae6zcy5xY2ZgJdE
+# xFdXjNxjyw5T8baL1jzU8REnL4AvOoG+Pu9qa6DdKA==
 # SIG # End signature block

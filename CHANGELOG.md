@@ -1,4 +1,6 @@
 ﻿﻿# WhatsUpGoldPS Release History
+## 0.1.22 - [Unreleased]
+
 ## 0.1.21 - 2026-05-24
 * Added -- New Functions (92 total exports; psm1 and psd1 in sync)
   * `Get-WUGPassiveMonitor` -- Retrieve passive monitor templates from the library (`GET /monitors/-?type=passive`), a single template by ID (`GET /monitors/{id}?type=passive`), or device assignments (`GET /devices/{id}/monitors/-?type=passive`); supports `-Search`, `-View`, `-DeviceId`, `-AssignmentView`, `-MonitorId`, pagination

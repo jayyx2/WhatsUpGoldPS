@@ -97,7 +97,7 @@ $providerDefs = [ordered]@{
         TargetDefault = ''
         TargetParam = 'SubscriptionFilter'
         CredType    = 'AzureSP'
-        CredVault   = 'Azure.Credential'
+        CredVault   = 'Azure'
         AuthChoices = $null
         ApiPort     = $null
         Notes       = 'Requires a Service Principal (App Registration) with Reader role.'
@@ -156,7 +156,7 @@ $providerDefs = [ordered]@{
         TargetLabel = 'GCP project ID(s) (comma-separated)'
         TargetDefault = ''
         TargetParam = 'Target'
-        CredType    = 'FilePath'
+        CredType    = $null
         CredVault   = 'GCP.KeyFile'
         AuthChoices = $null
         ApiPort     = $null
@@ -207,7 +207,7 @@ $providerDefs = [ordered]@{
         TargetLabel = 'OCI tenancy OCID (or blank to use config file)'
         TargetDefault = ''
         TargetParam = 'TenancyId'
-        CredType    = 'FilePath'
+        CredType    = 'OCIConfig'
         CredVault   = 'OCI.Config'
         AuthChoices = $null
         ApiPort     = $null
@@ -509,7 +509,14 @@ foreach ($provKey in $selectedProviders) {
             CredType      = $credType
             ProviderLabel = $provKey
         }
-        $credResolved = Resolve-DiscoveryCredential @credSplat
+        try {
+            $credResolved = Resolve-DiscoveryCredential @credSplat
+        }
+        catch {
+            Write-Host "  Error resolving credential for ${provKey}: $_" -ForegroundColor Red
+            Write-Host "  Skipping $provKey." -ForegroundColor Yellow
+            continue
+        }
         if (-not $credResolved) {
             Write-Host "  Credential not provided - skipping $provKey." -ForegroundColor Yellow
             continue
@@ -861,8 +868,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAt98RFaIazw6ik
-# nU3DAJ2GpBxNhC41Jw0nPfSJYv2Ha6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZDtHXjn4ncb7g
+# rVTdcem+GQnrsf8jDXMfGpjYXBeRfqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1065,33 +1072,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAuMIVoKZx4fjpRwwUiNmBqNFBxVBLmM0jtURQwXpCFjTANBgkqhkiG9w0BAQEF
-# AASCAgDVPZLzyL2sgHEfaynQMn/SVq/q1vmJ3QqwgK5ckNSxJnLQDQYPIkIRsYG8
-# 6t9RzDpdrmB94ZPVYsyN5x5YPLuyQVTL4AZkhfHBJEeqQX5iizAVyE+vz6ZZ8/nE
-# CpHNbVblQYWxeJA1uJXmtkSYl5EipJt2xQNgMSs/4mUz9fBoogOVhe3R+64LGrZV
-# rXdIrWpjNx1ER8MbwBknlTMg8Z7Bgsis+gaQlPvogjA/mj1SJXTHRwEyWk88Bih9
-# 91ZFUzEu9JGO4z444VQwNnfOjV3R6ZnLcB5YXG0OMO7bpVGhRkzb7U3s7TgFw2ou
-# hr6jYYkkdF0ETyBmH+3ehxFPzy6Kin+Lj2ovfPT6EfFlMc4vbtnm+kEMH+s/SNJh
-# v8H0bJSSmcRvpaGP1AbLLE1VFYWMyACtSZ+yyXzVnvNDE8sVdEjPHc9r8ka490fZ
-# vOhhLOVRv68IRWbDIPxOvnUlDRpnKNFqPrsO36je01av90R0NVOSYCTWzidaI7KO
-# f7KViEuG8xlgL8mJ/w5tUv8hAuU+jiwVjXfMpdxSgglp6XhkztnwHv9zs7iNlql1
-# oG4ncsZV8wVw3xKKrnEeocE6pZCRYe+BJUZVEjP2UBze1G30z9CAM9qkXt6AFrCX
-# payDJPkBlDsN8KOUc6ZR+/WpEqK2lRYuuksga6gcCUXbDNZg6qGCAyYwggMiBgkq
+# BCCWEmoxld/qPb+6/szvQzIaqAWmtcI9o8LKdy0Lq+AzUDANBgkqhkiG9w0BAQEF
+# AASCAgAiiaJ4olnbR9+Q12nCikNTvelq1qUt98BrmE630ULsZkn+lvmouWn0pltv
+# 2muE9ni7JVfwxk7b7gr+UfWegz9ycxUnrK8rRNN7Ldk6+5CvQJQRDiCvgIfE1yBJ
+# 6jAmx8C0lLXGEUQLTmBCa7NxH6RBpLSDBlPqLPoyUEbFA7NtvmnZWcG8BZ83zQDy
+# sZonjgT626QIS5ioFmu4zWGPA3nknrd7RYLGFm1WRdvt70O9FQRwS7IC2KM8OLLA
+# o+hWpaRi664l9g1BJXjXVZG9ME9IME3s9R8x2nl4dc5WMop+UEtjWnQ+sgfuQllW
+# 3R+egialnMhhcpL3jC5NsdWWmNA9J+UPPCHOxWVBOEkjXF2NMKzy9b1gipKLyfds
+# HO+1g2aV28s5TaomqAxDxQ/t8Yax2/y7M/FXB5jctOjJBKERPetqlj+cV3xuu6r/
+# sBPazEbM4e8vkSgGOe5u1JAviy32TfTSDn1WXlprhOj2aUd3BD74T0f58K6cusjt
+# 2BkGsgvf2auVjeyQSRLYOlVR888IVeNrPieYDnjExylXTCLSkOVrwviKQdz49trF
+# VD8P36PRYmLsg5xJ6iw54/Tbl56bpMr2vnh83pSff817uFz87kWHnet/AC6AjP9N
+# F6FO3S3r26vAL3sQA9o21VosWF0mXE1VX84yz0Tsam9FsAuxPqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjUyMzU1NThaMC8GCSqGSIb3DQEJBDEiBCDk3LUx
-# 1yowxuldQ+Juc2tMRqOGu9KcpA+0cb+LwlmemDANBgkqhkiG9w0BAQEFAASCAgAB
-# DWnSKsj2Jzrr5H8kGqipV0TLcMAQGQ6tiSLyqhP+RSsiLNWEbQ/Z9piaBl/7S+gU
-# pbMTCq4/aWSv07RFf9js+tGJ/q8baju7NdRGqVuXxV7gpECBPiW0ebuWHDnPKVLc
-# LuyCwTto89KAycx+3bbDRlyTP8Zn0ViI52L7txk90iKQWPfIkaciVAQCCEaPe3CO
-# AZeb0omXSnLyGunWHqDOBwA0/N9U7K8cPDn+CRZbxVrn/JWAIUK5NpAfuKl6Z4FA
-# orYLYbFLhxHVlmGKaU2VmlT4C37xJEOEvvhh0WNvcgdRaZOBcTyMstFJVOp6M/kD
-# WW5avuJFFVrECRaHxtOmmLCerra6Vg5PG97UvoGPrGcS4oFNZIqgwNZwDbZ6reCY
-# Im6eDWlj0TXvOrWeHRJ/QkUGpiILss0Uj24f8n11SeVBMEFaEeqWI+WZ6pQF7wFN
-# rb2v3rwQa01S2dbDnxWoOZE1mqFilvrsWAlnTA4e2hubvxg7GEnITjC7usk2V+SY
-# cKC44CQgb3AiC3/2wVpcWbHKDDQOOktQBIi18edqKi8qzTbzgy6eGCP9h0IMEiT1
-# r+l4To2WX+hhu3AJzOygkGV4JEFllwy3Rvh/bG1WPF2NabN46QFaRxg0GCZ2oyVm
-# 0TXvNNvHxMKF4hHG+oM1fln50A8mTvDXzDc9riIgDw==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjYxMTMyNDJaMC8GCSqGSIb3DQEJBDEiBCCKgMIg
+# EuL+a2MHd6QVt305yO783Wm1NtS/WUueMH2IVTANBgkqhkiG9w0BAQEFAASCAgAa
+# Y0TgD57O62WIFj6FM10aHei4QLKWT3hvjCFDdRyuo6t8GNOXkZrW5BqEC9B7wjer
+# fl8mesvY48Tlsfu5z9+/JxgJ6rtpfKVoPXHTczR4HLLYjOQz/IuTO952h0UaQAHs
+# GBAHxB7VwcKpSTLkzwgrZ+t0rVUgH0ioacRbypU5Q/IFxyE7jpDN3spIkqqL+Ofy
+# M5kASmYsyPJRW0Te+SA7aMJYFjpXELqsKYmAizlqMf04MF0NkfkxTl/y8u1qqW7D
+# +iEEFpUg1Yqt/YlFYN2FF5/JuI+xbN/T8CH0OvlsHd4DPjkS63gX/ZL1yLR8Ee/P
+# WK9Y37ojFUkIbq48MQblzMZLyWhGwepVLAA6sNvJ2Cu/SRSLLCM0NI+ufjA7pECL
+# s9OaPNKDDPGRNKOecJh90qf+KcZq7Ygi9lEoKgowijpvZ5+Q64UQZtIXX2VLgPff
+# L9OsrA0iDo7h1OJeNIPornnH3aAEjibM3kw3G9ugfa5CwEYcWfsohLBSB8Nq9YmJ
+# 4jks5HTbasHWxnWiQaiPcpViddWpwkOG1Rw+tMSA0mtUDvyWX+e8QyHoY84bLOSv
+# J2pf6xVLIQqPiCYYRQJ/vF2B2qIvIIaZM/PViYT2zQMDjbDch5rKV6u9yuIGoVCo
+# M73mxMoKLZZnHWxQBQ3EeiKYdVDckQzcVVZJmjwxTA==
 # SIG # End signature block

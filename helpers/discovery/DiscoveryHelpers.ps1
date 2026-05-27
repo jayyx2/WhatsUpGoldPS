@@ -2008,19 +2008,24 @@ function Resolve-DiscoveryCredential {
             if ($skipCheck -match '^[Nn]') {
                 Write-Host '  Skipped.' -ForegroundColor DarkGray; return $null
             }
-            $cred = Get-Credential -Message "$ProviderLabel credentials"
-            if (-not $cred) {
+            Write-Host "  Enter ${ProviderLabel} credentials:" -ForegroundColor Yellow
+            $userName = Read-Host -Prompt "    Username"
+            if ([string]::IsNullOrWhiteSpace($userName)) {
                 Write-Host '  Cancelled.' -ForegroundColor DarkGray; return $null
             }
+            $passwordSS = Read-Host -AsSecureString -Prompt "    Password"
+            $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($passwordSS)
+            try { $plainPwd = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+            finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+            if ([string]::IsNullOrWhiteSpace($plainPwd)) {
+                Write-Host '  Cancelled.' -ForegroundColor DarkGray; return $null
+            }
+            $cred = [PSCredential]::new($userName, $passwordSS)
             if (-not $DeferSave) {
-                $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($cred.Password)
-                try { $plainPwd = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
-                finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-
-                $combined = "$($cred.UserName)|$plainPwd"
+                $combined = "$userName|$plainPwd"
                 $ss = ConvertTo-SecureString $combined -AsPlainText -Force
                 Save-DiscoveryCredential -Name $VaultName -SecureSecret $ss `
-                    -Description "$ProviderLabel ($($cred.UserName))" -Force | Out-Null
+                    -Description "$ProviderLabel ($userName)" -Force | Out-Null
                 Write-Host "  Saved to vault as '$VaultName'." -ForegroundColor Green
             } else {
                 Write-Host "  Credential NOT saved (DeferSave). Validate, then call Save-ResolvedCredential." -ForegroundColor DarkYellow
@@ -2039,10 +2044,19 @@ function Resolve-DiscoveryCredential {
             $port = if ([string]::IsNullOrWhiteSpace($pInput)) { 9644 } else { [int]$pInput }
             $prInput = Read-Host -Prompt "    Protocol [https]"
             $proto = if ([string]::IsNullOrWhiteSpace($prInput)) { 'https' } else { $prInput.Trim() }
-            $cred = Get-Credential -Message "WhatsUp Gold credentials for $srv"
-            if (-not $cred) {
+            Write-Host "  Enter WhatsUp Gold credentials for $srv`:" -ForegroundColor Yellow
+            $wugUser = Read-Host -Prompt "    Username"
+            if ([string]::IsNullOrWhiteSpace($wugUser)) {
                 Write-Host '  Cancelled.' -ForegroundColor DarkGray; return $null
             }
+            $wugPassSS = Read-Host -AsSecureString -Prompt "    Password"
+            $bstrWug = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($wugPassSS)
+            try { $plainWugPwd = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrWug) }
+            finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrWug) }
+            if ([string]::IsNullOrWhiteSpace($plainWugPwd)) {
+                Write-Host '  Cancelled.' -ForegroundColor DarkGray; return $null
+            }
+            $cred = [PSCredential]::new($wugUser, $wugPassSS)
             $sslInput = Read-Host -Prompt "    Ignore SSL errors? [Y/n]"
             $ignoreSSL = -not ($sslInput -match '^[Nn]')
 
@@ -2055,13 +2069,10 @@ function Resolve-DiscoveryCredential {
             }
 
             if (-not $DeferSave) {
-                $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($cred.Password)
-                try { $plainPwd = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
-                finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-                $combined = "$srv|$port|$proto|$($cred.UserName)|$plainPwd"
+                $combined = "$srv|$port|$proto|$wugUser|$plainWugPwd"
                 $ss = ConvertTo-SecureString $combined -AsPlainText -Force
                 Save-DiscoveryCredential -Name $VaultName -SecureSecret $ss `
-                    -Description "WUG $proto`://$srv`:$port ($($cred.UserName))" -Force | Out-Null
+                    -Description "WUG $proto`://$srv`:$port ($wugUser)" -Force | Out-Null
                 Write-Host "  Saved to vault as '$VaultName'." -ForegroundColor Green
             } else {
                 Write-Host "  Credential NOT saved (DeferSave). Validate, then call Save-ResolvedCredential." -ForegroundColor DarkYellow
@@ -3205,8 +3216,8 @@ function Deploy-DashboardWebConfig {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBN5ylXbT+2tRBr
-# RsHYXCg/k+sXsHeq1xt5vu/krf6du6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJtlsATpG7F633
+# HTV93fvFPwv4N5iZzoN3R9i3akayO6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -3409,33 +3420,33 @@ function Deploy-DashboardWebConfig {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDUM7VndtIJFnaihjvv4lMq5OIdDMT116HL/oSEtrJjWzANBgkqhkiG9w0BAQEF
-# AASCAgDgv0Zgw43tJZjBQt38Iq6RklSqVkl0OwzMImLQer3umHQtVrf0NKG7LaYq
-# XdppE+Y/PMunD/ra5m8mR8904OBgrFX/IlhbfVj3s1EvynINU807z2vnXqs6hRwG
-# FBXrvcTeT5y8RIOffclbjB53KR3fkK1CLvygu1+JVbiD1pBEFoHYfLIUvMpFRP/Z
-# iHHuotZMLXuzNbht/CADVkGJ12luGI4x+A4DsQg9DE+vuptL6yTg+R4hOrv8OJCG
-# ACab909R8qewafRXGhho2zDa2u0/wBiX3x10ktc246SHqw3upoC0/CkoLGq8odIg
-# sxyokrFEJWBRH7S08leCJLzmxLtbgRofjf4dDY5RwGMTqd0dRiGMzJX8q1YTG0X5
-# 0vMDd3RJi/gCA2BaIfMNCX1U7lkbqMNuIfILMSk6EoYm31og1AKmUn2LYO33/SiK
-# rr24VieTamrImz/V6NAxcmaxtxTd0+mzmApkdY95CMhi9CKSlzp5kvQDY8RnFb3k
-# cZ33+kkQM6SZib3kx9kXb4/gEWSTOYb7AC+wDWq3YEw6i3/z0T04+ypWiQLD3FVT
-# XFRBO2tOVeDYm6wPc7mKRzy3k/x0eNyjaqi68INSMk+bBygEsufuTqYJi1OPhhu1
-# HUnMpLluPWXM7zbGueFYPzsAWogA7ZxD2ImLpo+ZI4lXkt5sMKGCAyYwggMiBgkq
+# BCAm+t1STblQupRxiUgt2LQYdPUiw2ijSaoy08VdcvP3PzANBgkqhkiG9w0BAQEF
+# AASCAgCHygrEl29fQLL2APbK2tVQDBwuWXgAWNxh62cXgkaNmA/JowM4F7WxF0LQ
+# BKWc6FpksuMRb+hghBnTvqR7G1KSjPJoIr59uEpiO8Js9Tswnb4zwHS8HRxvOuDw
+# 9LBOEcGTY39duDnvfJ5yTfYhNnBL7xSn6WK/6tcgp5fdmmWvb60Ka9hCUlHqENd0
+# 7rkRkoY02FcpxEHaWL5seBUQRv2xxUC588cBe8iZiCH6Eh/qDRj2Jw+ipn0XE4jP
+# l+kXY5YocdhiOWCBhknGiV8Q5J5kbHBLI4xzyhqfcNY0Y0BLwvYpWeAQvYrIk7ep
+# PCB50sO2jb2EZm3MCQF8td6n14v64z0gmQLU1sQnMyHULMNvctUFnBiMSP+qkPFY
+# DTTuKWT2jREpdsNK7gKuVRv6ljgMxGYQw2tJJr6mDio+ra4CeA6hKNRGhl76pnx9
+# rjyh/JsvcbfziUKEixmq/Eo6KmBmH/5w672btWI3+kH5ImBm3jOzVyCihflm++w1
+# He9BLQ3+Lz/1q/IftZ1juZCn7jWcp10ySLBeGN9HuVdnU91Ydrbe4FiRZ6Rm/Zbn
+# oRDRabnF+LnXdQBTCl/+cdjqxx+EUtaFPXYmJsNkULQYXDpEQb7gR5Ca9eUK6t1l
+# kEMbR4UA+kZ7BTD231JYmPR3rcZck88dK4D93tq8JUhfksAyLaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjYxMTE0NDFaMC8GCSqGSIb3DQEJBDEiBCBb2K/p
-# lp75cQ8d6JF1LVud60lKNMGPjkeK/BoPSrHZVjANBgkqhkiG9w0BAQEFAASCAgBj
-# YxIM607KOazvJiQmdpdYbbpZ9kfN1aD0mccdwHQIeM9MlO8ch8tHZ/BBX2SVV1Ta
-# mXbMP/2YHFk7knsgSodHI4546LHO4a7mY7F9/m7E3jxXPPk4SnrLvDZf1GF35jl7
-# I7IKvrZsEWf/8Q5jCQqdKopRjtT7jcRKzqfuUBI0FaphLCqdXo3VI4ZgNmeStqqv
-# yjmVP2ovh2Qx7u4EmByPlshpBQwN5LCnBQMwKZqHFl3wkgc0sKIqZWDieotkweFa
-# ir7dshbndxh3vmdBzs9SyliztoztXc3/rfqoXfNaZmnQ+8G4JyTfG6At/hJmvd+d
-# /YHC4qnLV3rdddCvdN64bTAMcrFOIAHv5tQDXuqSCQwpeQ9I40IMrLGv4Fm5cTmw
-# ahUP7ah5pNiiC+RkRXO1pvjznaJS4QDkK460CbHR3IgghputjdhqfK2OY5rdv3RA
-# ziaWwHAc+vjWN9LfnWAO8xj5BC28m/eBta+IgQk4b6njU/XJRnAk68wYC4dsD00n
-# fp8yxRt+hF33hsmS61FSOqrB+wNrv3dEPUyIl8OSCHyONlyoHqsRfQ8q6Q4tfogE
-# 777JPowV3boQM/aw1u1+CPn90PZYlInx5o+iHVGbZVjSRTJGZlHKonytxJwb44KC
-# STVYXvnrhbUjSCPxoEwiUHsdNuZVhhIvdRGPfPapBg==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjcxNjM1MDlaMC8GCSqGSIb3DQEJBDEiBCDNKNzE
+# RY85fu4SqI8iClYFZFWf2iuH6khwKVZ/XzhraDANBgkqhkiG9w0BAQEFAASCAgCo
+# fRhPc4Mz1/ZEeFrfbBrOWKmRAicBxUXMkQC29YdO7QahEzPoWhdbFQ27e4U6ve1l
+# ecMj6JVlzZRL02i+UHaGZRAv03zL6ndLW2C4aoW9ecISVmQbDam3wf61a762gPnx
+# Jd+wVNoDrwVjswV/61jh7VtT3niYK6IJlWyoCtQ1qhmJjyEOoGMuJJcAlFZvY2if
+# 7ncpDzMpRyO06UMHBScKhC8Kfzt67nL1AexZ2akr682nihQkTD201vTfWP6TVqU1
+# vw/A6uYvGfSW7q+18TozOCycX7YEShcIk6ybqyQIFM4EONwFinbpok+YJ3FeJfQK
+# quxWisNQeXRigNfvlSY4RCLjobGBZ2Jip9r6qCqVd+3IolWR7KI/CDWAJzTMBRcy
+# MhIKUpzwVPT86VCIisR6ImQGaOYobMV7jjsq83zm2ZUb1ubIxQkDH8C/eFj28XCq
+# sTu5N4/k8Xpr2ddRsz7US9FzP0kZ71LwOMAlafpBv2hK9Tjt20reBOx7XiBhncCx
+# HsJL6j1CspSsdua4hzeIrae0UJ+lRc2UzxnOZB2SuEiycws2ObzQPLHXrLDnD6BM
+# T49HclEZ2vYl1WrY/rGNMrnBMONxIPyEYdfBQXlyg88HLim4HAbrvoG/FU8ZVoZK
+# 7pbWzSRzDrz+M0MnUAKLWthGtR+iyANoshrV3QsJFA==
 # SIG # End signature block

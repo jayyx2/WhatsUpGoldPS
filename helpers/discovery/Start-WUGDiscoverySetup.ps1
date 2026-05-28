@@ -157,7 +157,7 @@ $providerDefs = [ordered]@{
         TargetDefault = ''
         TargetParam = 'Target'
         CredType    = $null
-        CredVault   = 'GCP.KeyFile'
+        CredVault   = 'GCP.ServiceAccount'
         AuthChoices = $null
         ApiPort     = $null
         Notes       = 'Requires a service account JSON key file with Compute Viewer role.'
@@ -648,6 +648,15 @@ if (-not $SkipSchedule) {
     $schedChoice = Read-Host -Prompt '  Choice [Y/N, default: N]'
 
     if ($schedChoice -match '^[Yy]') {
+        # Check if running as Administrator (required for Register-ScheduledTask)
+        $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator
+        )
+        if (-not $isAdmin) {
+            Write-Host ''
+            Write-Host '  NOTE: A UAC elevation prompt will appear to register the tasks.' -ForegroundColor Yellow
+        }
+
         # Choose action for scheduled runs
         Write-Host ''
         Write-Host '  What should scheduled discovery do?' -ForegroundColor Cyan
@@ -696,46 +705,120 @@ if (-not $SkipSchedule) {
             Write-Host "  Register-DiscoveryScheduledTask.ps1 not found. Skipping." -ForegroundColor Yellow
         }
         else {
-            foreach ($provKey in $providerConfigs.Keys) {
-                $cfg = $providerConfigs[$provKey]
-                Write-Host ''
-                Write-Host "  Registering scheduled task for $provKey..." -ForegroundColor Cyan
+            if ($isAdmin) {
+                # Already elevated — register directly
+                foreach ($provKey in $providerConfigs.Keys) {
+                    $cfg = $providerConfigs[$provKey]
+                    Write-Host ''
+                    Write-Host "  Registering scheduled task for $provKey..." -ForegroundColor Cyan
 
-                try {
-                    $regArgs = @{
-                        Mode        = 'Provider'
-                        Provider    = $provKey
-                        Action      = $schedAction
-                        TriggerType = $schedTrigger
-                        OutputPath  = $OutputPath
-                    }
-                    if ($cfg.Target) {
-                        if ($cfg.Target -match ',') {
-                            $regArgs['Target'] = ($cfg.Target -split ',' | ForEach-Object { $_.Trim() })
+                    try {
+                        $regArgs = @{
+                            Mode        = 'Provider'
+                            Provider    = $provKey
+                            Action      = $schedAction
+                            TriggerType = $schedTrigger
+                            OutputPath  = $OutputPath
+                        }
+                        if ($cfg.Target) {
+                            if ($cfg.Target -match ',') {
+                                $regArgs['Target'] = ($cfg.Target -split ',' | ForEach-Object { $_.Trim() })
+                            }
+                            else {
+                                $regArgs['Target'] = @($cfg.Target)
+                            }
+                        }
+                        if ($cfg.AuthMethod) {
+                            $regArgs['AuthMethod'] = $cfg.AuthMethod
+                        }
+                        if ($wugServer) {
+                            $regArgs['WUGServer'] = $wugServer
+                        }
+                        if ($schedTrigger -eq 'Hourly') {
+                            $regArgs['RepeatIntervalMinutes'] = $schedInterval
                         }
                         else {
-                            $regArgs['Target'] = @($cfg.Target)
+                            $regArgs['TimeOfDay'] = $schedTime
+                        }
+
+                        & $regScript @regArgs
+                        Write-Host "  $provKey - task registered." -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Host "  $provKey - failed to register task: $_" -ForegroundColor Red
+                    }
+                }
+            }
+            else {
+                # Not elevated — build temporary script and self-elevate via UAC
+                Write-Host ''
+                Write-Host '  Launching elevated prompt to register tasks...' -ForegroundColor Cyan
+
+                $tempScript = Join-Path $env:TEMP "DiscoverySyncRegister_$(Get-Date -Format yyyyMMdd_HHmmss).ps1"
+                $sl = [System.Collections.Generic.List[string]]::new()
+                [void]$sl.Add('# Elevated scheduled task registration')
+                [void]$sl.Add("`$ErrorActionPreference = 'Stop'")
+                [void]$sl.Add("`$regScript = '$($regScript -replace "'","''")'")
+                [void]$sl.Add('')
+
+                foreach ($provKey in $providerConfigs.Keys) {
+                    $cfg = $providerConfigs[$provKey]
+                    [void]$sl.Add("Write-Host '  Registering $provKey...' -ForegroundColor Cyan")
+                    [void]$sl.Add('try {')
+                    [void]$sl.Add("    `$a = @{")
+                    [void]$sl.Add("        Mode        = 'Provider'")
+                    [void]$sl.Add("        Provider    = '$provKey'")
+                    [void]$sl.Add("        Action      = '$schedAction'")
+                    [void]$sl.Add("        TriggerType = '$schedTrigger'")
+                    [void]$sl.Add("        OutputPath  = '$($OutputPath -replace "'","''")'")
+                    [void]$sl.Add('    }')
+                    if ($cfg.Target) {
+                        if ($cfg.Target -match ',') {
+                            $tArr = ($cfg.Target -split ',' | ForEach-Object { "'$($_.Trim())'" }) -join ', '
+                            [void]$sl.Add("    `$a['Target'] = @($tArr)")
+                        }
+                        else {
+                            [void]$sl.Add("    `$a['Target'] = @('$($cfg.Target)')")
                         }
                     }
                     if ($cfg.AuthMethod) {
-                        $regArgs['AuthMethod'] = $cfg.AuthMethod
+                        [void]$sl.Add("    `$a['AuthMethod'] = '$($cfg.AuthMethod)'")
                     }
                     if ($wugServer) {
-                        $regArgs['WUGServer'] = $wugServer
+                        [void]$sl.Add("    `$a['WUGServer'] = '$wugServer'")
                     }
                     if ($schedTrigger -eq 'Hourly') {
-                        $regArgs['RepeatIntervalMinutes'] = $schedInterval
+                        [void]$sl.Add("    `$a['RepeatIntervalMinutes'] = $schedInterval")
                     }
                     else {
-                        $regArgs['TimeOfDay'] = $schedTime
+                        [void]$sl.Add("    `$a['TimeOfDay'] = '$schedTime'")
                     }
+                    [void]$sl.Add('    & $regScript @a')
+                    [void]$sl.Add("    Write-Host '  $provKey - task registered.' -ForegroundColor Green")
+                    [void]$sl.Add('} catch {')
+                    [void]$sl.Add("    Write-Host `"  $provKey - FAILED: `$_`" -ForegroundColor Red")
+                    [void]$sl.Add('}')
+                    [void]$sl.Add('')
+                }
 
-                    & $regScript @regArgs
-                    Write-Host "  $provKey - task registered." -ForegroundColor Green
+                [void]$sl.Add("Write-Host ''")
+                [void]$sl.Add("Write-Host '  Press Enter to close...' -ForegroundColor Gray")
+                [void]$sl.Add('Read-Host')
+
+                ($sl -join "`r`n") | Set-Content -Path $tempScript -Encoding UTF8
+
+                try {
+                    Start-Process powershell -Verb RunAs -ArgumentList @(
+                        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $tempScript
+                    ) -Wait
+                    Write-Host '  Elevated registration complete.' -ForegroundColor Green
                 }
                 catch {
-                    Write-Host "  $provKey - failed to register task: $_" -ForegroundColor Red
-                    Write-Host '  You may need to run as Administrator.' -ForegroundColor Yellow
+                    Write-Host "  Failed to launch elevated prompt: $_" -ForegroundColor Red
+                    Write-Host '  Run this wizard as Administrator to register tasks.' -ForegroundColor Yellow
+                }
+                finally {
+                    Remove-Item $tempScript -ErrorAction SilentlyContinue
                 }
             }
         }
@@ -793,19 +876,56 @@ if (-not $SkipSchedule) {
             Write-Host "  Destination: $nmPath" -ForegroundColor White
             Write-Host ''
 
-            try {
-                $copyArgs = @{
-                    Register   = $true
-                    SourcePath = $OutputPath
-                    Destination = $nmPath
+            # Check if running as Administrator
+            $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+                [Security.Principal.WindowsBuiltInRole]::Administrator
+            )
+
+            if ($isAdmin) {
+                try {
+                    $copyArgs = @{
+                        Register    = $true
+                        SourcePath  = $OutputPath
+                        Destination = $nmPath
+                    }
+                    & $copyScript @copyArgs
+                    Write-Host '  Dashboard copy task registered.' -ForegroundColor Green
                 }
-                & $copyScript @copyArgs
-                Write-Host '  Dashboard copy task registered.' -ForegroundColor Green
+                catch {
+                    Write-Host "  Failed to register dashboard copy task: $_" -ForegroundColor Red
+                }
             }
-            catch {
-                Write-Host "  Failed to register dashboard copy task: $_" -ForegroundColor Red
-                Write-Host '  You may need to run as Administrator.' -ForegroundColor Yellow
-                Write-Host "  Manual: .\Copy-WUGDashboardReports.ps1 -SourcePath '$OutputPath' -Destination '$nmPath'" -ForegroundColor Gray
+            else {
+                Write-Host '  Launching elevated prompt to register copy task...' -ForegroundColor Yellow
+
+                $tempScript = Join-Path $env:TEMP "DashboardCopyRegister_$(Get-Date -Format yyyyMMdd_HHmmss).ps1"
+                $cmd = @(
+                    "`$copyScript = '$($copyScript -replace "'","''")'",
+                    'try {',
+                    "    & `$copyScript -Register -SourcePath '$($OutputPath -replace "'","''")' -Destination '$($nmPath -replace "'","''")'",
+                    "    Write-Host '  Dashboard copy task registered.' -ForegroundColor Green",
+                    '} catch {',
+                    "    Write-Host `"  FAILED: `$_`" -ForegroundColor Red",
+                    '}',
+                    "Write-Host ''",
+                    "Write-Host '  Press Enter to close...' -ForegroundColor Gray",
+                    'Read-Host'
+                ) -join "`r`n"
+                $cmd | Set-Content -Path $tempScript -Encoding UTF8
+
+                try {
+                    Start-Process powershell -Verb RunAs -ArgumentList @(
+                        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $tempScript
+                    ) -Wait
+                    Write-Host '  Elevated registration complete.' -ForegroundColor Green
+                }
+                catch {
+                    Write-Host "  Failed to launch elevated prompt: $_" -ForegroundColor Red
+                    Write-Host "  Manual: .\Copy-WUGDashboardReports.ps1 -SourcePath '$OutputPath' -Destination '$nmPath'" -ForegroundColor Gray
+                }
+                finally {
+                    Remove-Item $tempScript -ErrorAction SilentlyContinue
+                }
             }
         }
     }
@@ -847,10 +967,10 @@ Write-Host ''
 Write-Host '  What to do next:' -ForegroundColor Cyan
 Write-Host ''
 Write-Host '  Run a single provider:' -ForegroundColor White
-Write-Host '    .\Setup-Proxmox-Discovery.ps1 -Target 192.168.1.39 -Action Dashboard' -ForegroundColor Gray
+Write-Host '    .\Setup-Proxmox-Discovery.ps1 -Target 192.168.1.30 -Action Dashboard' -ForegroundColor Gray
 Write-Host ''
 Write-Host '  Run non-interactively (uses vault creds):' -ForegroundColor White
-Write-Host '    .\Setup-Proxmox-Discovery.ps1 -Target 192.168.1.39 -Action PushToWUG -NonInteractive' -ForegroundColor Gray
+Write-Host '    .\Setup-Proxmox-Discovery.ps1 -Target 192.168.1.30 -Action PushToWUG -NonInteractive' -ForegroundColor Gray
 Write-Host ''
 Write-Host '  View scheduled tasks:' -ForegroundColor White
 Write-Host '    .\Register-DiscoveryScheduledTask.ps1 -Show' -ForegroundColor Gray
@@ -868,8 +988,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZDtHXjn4ncb7g
-# rVTdcem+GQnrsf8jDXMfGpjYXBeRfqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTOHqxiC1cslS6
+# V+fFK5OHp9DZEs6fC38uwaQiSWl1MqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1072,33 +1192,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCWEmoxld/qPb+6/szvQzIaqAWmtcI9o8LKdy0Lq+AzUDANBgkqhkiG9w0BAQEF
-# AASCAgAiiaJ4olnbR9+Q12nCikNTvelq1qUt98BrmE630ULsZkn+lvmouWn0pltv
-# 2muE9ni7JVfwxk7b7gr+UfWegz9ycxUnrK8rRNN7Ldk6+5CvQJQRDiCvgIfE1yBJ
-# 6jAmx8C0lLXGEUQLTmBCa7NxH6RBpLSDBlPqLPoyUEbFA7NtvmnZWcG8BZ83zQDy
-# sZonjgT626QIS5ioFmu4zWGPA3nknrd7RYLGFm1WRdvt70O9FQRwS7IC2KM8OLLA
-# o+hWpaRi664l9g1BJXjXVZG9ME9IME3s9R8x2nl4dc5WMop+UEtjWnQ+sgfuQllW
-# 3R+egialnMhhcpL3jC5NsdWWmNA9J+UPPCHOxWVBOEkjXF2NMKzy9b1gipKLyfds
-# HO+1g2aV28s5TaomqAxDxQ/t8Yax2/y7M/FXB5jctOjJBKERPetqlj+cV3xuu6r/
-# sBPazEbM4e8vkSgGOe5u1JAviy32TfTSDn1WXlprhOj2aUd3BD74T0f58K6cusjt
-# 2BkGsgvf2auVjeyQSRLYOlVR888IVeNrPieYDnjExylXTCLSkOVrwviKQdz49trF
-# VD8P36PRYmLsg5xJ6iw54/Tbl56bpMr2vnh83pSff817uFz87kWHnet/AC6AjP9N
-# F6FO3S3r26vAL3sQA9o21VosWF0mXE1VX84yz0Tsam9FsAuxPqGCAyYwggMiBgkq
+# BCBIb5lVYsjAkNuz+Ia3RvJLk/xtL0CSHF+ohxiGXCakuzANBgkqhkiG9w0BAQEF
+# AASCAgBFJAKuYPrYphmO6/6MDNeoLUpRSpfZQYgINOam+JofLmNv00Rk5sHnUZT7
+# /1OBuzfnqFDMA6cfuh2vEUyqixW4Gu2oUx1wmp0tuc3QXQwNqYl1/GMCGh/Uly13
+# P4ZM0vlijPSaosytExjAb0T1wsmGQ7/R7ABVI0RJc+TqhIpTcqPSbnM22V6NYLw2
+# aQXJ9H4XoKUQrjjSponi5NtGmvgITcoFKhUpCFqZEeN0v2O5axp7xKO0e8yav8zp
+# QnV+e3kcZucRUUDjtviWMqhIVh4H1c1X4m4vKMa2XocqLlIZAldeYVoKkpdQ5SLN
+# JfXJAgOFO+XJpMjUcE4/jzu6zYhoGHENUNEWJI3sBZHRBAnrGlbQ+MFmQCAOJJN0
+# 7zcd9KA9VDMlVneDMNZ8sQj6DB+dEccDTk3tOjraG6l720c9EK652/piqJPoEzsU
+# /b4uZRhYgnRcT+N+Qrb8TWoZHmZaeaVW7h80FmO1y/XWGObAVlm/YqfYQ3Ob2eFx
+# oSMbf/WV29/LgixnHkqqBFEpVyLmX5gIwoz4d5yvZ2ejNyjKBrxK3ZGj7RQJHPXI
+# sfY9Wch8yscjx3W4rUZNqlALtnzXU+ME50wN1KxWiihxNBZ30zVZ2efhkG2RL8KQ
+# 99Oy7yekeLBcHUEJ4Qkp17SH1uwbsp/tKRjTaGqYBH6dcRc7+qGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjYxMTMyNDJaMC8GCSqGSIb3DQEJBDEiBCCKgMIg
-# EuL+a2MHd6QVt305yO783Wm1NtS/WUueMH2IVTANBgkqhkiG9w0BAQEFAASCAgAa
-# Y0TgD57O62WIFj6FM10aHei4QLKWT3hvjCFDdRyuo6t8GNOXkZrW5BqEC9B7wjer
-# fl8mesvY48Tlsfu5z9+/JxgJ6rtpfKVoPXHTczR4HLLYjOQz/IuTO952h0UaQAHs
-# GBAHxB7VwcKpSTLkzwgrZ+t0rVUgH0ioacRbypU5Q/IFxyE7jpDN3spIkqqL+Ofy
-# M5kASmYsyPJRW0Te+SA7aMJYFjpXELqsKYmAizlqMf04MF0NkfkxTl/y8u1qqW7D
-# +iEEFpUg1Yqt/YlFYN2FF5/JuI+xbN/T8CH0OvlsHd4DPjkS63gX/ZL1yLR8Ee/P
-# WK9Y37ojFUkIbq48MQblzMZLyWhGwepVLAA6sNvJ2Cu/SRSLLCM0NI+ufjA7pECL
-# s9OaPNKDDPGRNKOecJh90qf+KcZq7Ygi9lEoKgowijpvZ5+Q64UQZtIXX2VLgPff
-# L9OsrA0iDo7h1OJeNIPornnH3aAEjibM3kw3G9ugfa5CwEYcWfsohLBSB8Nq9YmJ
-# 4jks5HTbasHWxnWiQaiPcpViddWpwkOG1Rw+tMSA0mtUDvyWX+e8QyHoY84bLOSv
-# J2pf6xVLIQqPiCYYRQJ/vF2B2qIvIIaZM/PViYT2zQMDjbDch5rKV6u9yuIGoVCo
-# M73mxMoKLZZnHWxQBQ3EeiKYdVDckQzcVVZJmjwxTA==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjgxMjA0MzlaMC8GCSqGSIb3DQEJBDEiBCCgfzJc
+# IJTbl6Tny/BzO+lzmxGv+mZKRYoTiMXiZTK4nTANBgkqhkiG9w0BAQEFAASCAgCY
+# trz/Z1CK4yEs2ZeloLoCiJW2ujnKSQf7oofwz24wZbuogwJilubW6HmMbXk1ONt6
+# bH/7HOMOR26DmejDc08Xe2WjU0uMLXgYYxaBl26XT9usTuJmYxRuihbvB7pLmceJ
+# wtZqnYUDTsf2ByLO6kgcrosprdCI9Use73RSLNh8CfYdnQmdoPPs5faFUtqkgZgo
+# BuTjz9PkzXfSRk2DITQm8J5EmX1/bm3ZVLwk+WtfkBMGbr/kdI+BdE2LVclF0Sct
+# HSKxbCKp6Q/9iktUAnBMS673V3Yvkxzu0geR78XbpNrogIcDnuE3K9KuMRE7tS/y
+# csSD2Jrx+LUjRoj5ATn7a5nmejR8TWWpGi29JYH+TrX9+QK5wCaYH5g+oEtPzAl0
+# hUj8pwv+DG/5SVMxHdwQw2I6JyyMGbs3y6//6q462n7dyn7dcRHjzvUBIKmppdwY
+# UT6k+X1BLgWSy6C7Er0SpM63eTFMZypJajYTltptVKlZAP9rvaMsuImvd+D6Pxrw
+# JD85yxWrFwwA8rEbqdUu+5ii5sZ9T41cpW9jhFABbRoguQPOmLofvfA8xK9Yy68B
+# fPyjW5H85IRFqfTRPumIWcAtR2lcupe5iQpCrlIwjQxtoKGTapvK1QvNyOy3BctN
+# D8LfzZ9JM/q28alApwoBHO0VdQhKmjOk6dV0amOJ+Q==
 # SIG # End signature block

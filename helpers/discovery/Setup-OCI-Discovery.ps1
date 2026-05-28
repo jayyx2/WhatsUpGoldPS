@@ -320,6 +320,8 @@ if ($Action) {
     }
 }
 
+if (-not $choice -and $NonInteractive) { $choice = '5' }
+
 if (-not $choice) {
     Write-Host "What would you like to do?" -ForegroundColor Cyan
     Write-Host "  [1] Push monitors to WhatsUp Gold"
@@ -433,12 +435,28 @@ switch ($currentChoice) {
 
                 try {
                     $devResult = Add-WUGDeviceTemplate @splat
-                    if ($devResult -and -not $devResult.error) {
+
+                    $isErrorResult = $false
+                    if ($devResult -is [array]) { $isErrorResult = $true }
+                    elseif ($devResult -and $devResult.PSObject.Properties['messages']) { $isErrorResult = $true }
+
+                    if ($devResult -and -not $isErrorResult) {
                         $newDeviceId = $null
                         if ($devResult.idMap) { $newDeviceId = ($devResult.idMap | Select-Object -First 1).resultId }
                         elseif ($devResult.PSObject.Properties['resultId']) { $newDeviceId = $devResult.resultId }
-                        if ($newDeviceId) { $wugDeviceMap[$key] = $newDeviceId }
-                        $stats.DevicesCreated++
+                        if ($newDeviceId) {
+                            $wugDeviceMap[$key] = $newDeviceId
+                            $stats.DevicesCreated++
+                            Write-Verbose "Created device '$displayName' (ID: $newDeviceId)"
+                        } else {
+                            Write-Warning "Device '$displayName' - API returned success but no device ID."
+                        }
+                    } else {
+                        $errMsgs = @()
+                        if ($devResult -is [array]) { foreach ($e in $devResult) { if ($e.PSObject.Properties['messages']) { $errMsgs += ($e.messages -join '; ') } } }
+                        elseif ($devResult -and $devResult.PSObject.Properties['messages']) { $errMsgs += ($devResult.messages -join '; ') }
+                        $errText = if ($errMsgs.Count -gt 0) { $errMsgs -join ' | ' } else { 'Unknown error (no details returned)' }
+                        Write-Warning "Failed to create device '$displayName': $errText"
                     }
                 }
                 catch { Write-Warning "Error creating device '$displayName': $_" }
@@ -604,8 +622,8 @@ Write-Host "Re-run anytime to discover new OCI resources." -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/pKgqP3x2ihu9
-# F/Wx15e2kXUpgy3WHB7Usc8Wda1v/KCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApvUCfZ140tOkA
+# hQXxpbXFNp9miWP1RKOxBjR4Yy0Ci6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -808,33 +826,33 @@ Write-Host "Re-run anytime to discover new OCI resources." -ForegroundColor Cyan
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCD3+mLmBurvuR9/atg/ArUrcr+Y3KOkxGdlzW1is5XBtTANBgkqhkiG9w0BAQEF
-# AASCAgCL5nQ8TrPHPk7eHd36f4NkTazEYlaG0sQ8+eNcO4ss6uhih8OtEvO9D0Tt
-# 2X7aoH0I/kQctbnHk5xo2JGTa3Z8rI2s+pbWmvGsV58wn9EK0wKHiKJ0g6WRZ7gF
-# EVxHU1HFZlwuNAlrJLlUPkl7M676QnbwWCAJV4Io2I+2+VGhU8LQ3zhnA//l63pu
-# M3BxgiGTex4CL5ZbsSQg0uayopDlJeJvbEfV7i2HdLBRRVqtpISZKWoh5uYrWyIT
-# jP08k68oYSkhXeA40bCtiP13v8JD7Idd/1+yy9869gUmTibExomAG0+kGkKEhE4X
-# fjtfhZPEMe1cPQXgctbTJSy9hwO2p4qTNtXPakrhGrgVXoWzjDCCDc63QORjgyGH
-# RIgeyWqqFIJFO8KM+bqx1hE/XvLF3ph4gQmGKhIPMdgOwgHS2Qr7xokpAc6WEI/t
-# pZlqQkGZV1pgeM2a3s0TLLO6bGqNVpNKGnrGYsNJvsTIJmJGSRgvMBs8giI0KTOv
-# GqHSJX4RPoIMkOiCDz+BxBs81cOirIzX2LSxyuD3eRCO3P4Ln9ZGuXYzOikiCjZI
-# 37ybGqzrc/2YF7YyE3qFU2j+2BUCIBJ4E93pFY1Mi249bTU2KHOzxnKlJCeqBEI3
-# Jstlw5ReyPR3/7KcYKRw4Kg+u7slaRmc822wHQyNE1QHy2V/dKGCAyYwggMiBgkq
+# BCCRVC/nGqkV/UfNcpUAeQKtl39tMGi/V3hjwh5Noo8cKDANBgkqhkiG9w0BAQEF
+# AASCAgBb6e3/3ujsj8vO70kJabT9eYQHve53tuHhzeTujdfzniJkAHzB1HwAct0Z
+# bzgZYYamOQ2YX2iStFhQLtBp4Iooen1z/YEWAc/+jxi0olf6DtyNK4D+yJQ0qu5h
+# lqsAYLrqwFF70sTYH8M+2gcBRkCe8QCQ5ZJ0Dkzdh6hxzxEy/aFEXhQf6e3JD1bU
+# jFkT5UwS2Mgu3PczfpbouxGfftoLfHTKNh2TQg8+MCgSxC3QVF2MbhA1Gpg6alk0
+# 1L0ZjumAfyJlOJdaSgQatB0N0Cg7Wp5EPo3IIjU84wGWutJna2KR9xQ8BrzI4fsI
+# gkI3letNTTWs/sWZHPfGzl17M6LNQH4TfnBE2iXeIOXnLqSa+O8kcX13QArGSXFm
+# SeMlH3NUbxh4Td1U1svRdsOQyogmY0eh/oF+R+N2T6EIx7XCQECDoBQcxDVplb/3
+# XGHxRyfpDbX1u5f3Mpwyq//SlQIv4Wtrc4pyPQ0f2P+Uq0cbY95oT3ua6XSeGvKP
+# +jsArJPRTxGvQBK7Q0homBeN+g7vAYCnfC8Y/xjrSDpvAQsq90tUMc38Ab3o9rdS
+# 2bsppmUrwcRRe6uXh6BD+mSMapUCK8YHBHVMGyErKJLnZhr7s3007WNNjVrCoRu9
+# eddVOVSB6E0O5P22Mkpy1aJvxybN0D9IpCtkRvtFuRU99p0pwKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MjUyMDM5MTdaMC8GCSqGSIb3DQEJBDEiBCCakJeR
-# rKymxgxXBnDLQ1LTTj5fICrmP70OCDjEC1iyZjANBgkqhkiG9w0BAQEFAASCAgCO
-# 0psnjEjAjkkVwoS+f+5WulCRnu0tAYbLBnqekYlS9pWqfD9vwKjbAVsmvKHd2cpA
-# n1QT7ojSDJ9v0itSZfI4Wdn9p2IkmnWosEgSxuCbwSdNMuS81JSbEGUH/T1P7F7Y
-# lKTyMUEV88nQCE1g9kwaoVARMi3s7c/4pMgBCqcFt6Cch0itSaUAgPMYVQ158cTe
-# hzN22GYnIZ9FzvC/bAbbHDn5OvDEgnUAsHn8G7KLEtZmdNY/FnXnIjhIPLSD033N
-# EW48P+bB0BM0YzUU21ktOF57u84VHF6n0XYpvrcJvEmVJGyuudnG/Ok1cPUy/5yO
-# GWhdwMGjY8wPfGNghdLU8V+F+gF9vAkrO/IqdzIya423nvjzqq1vBywxrAaUtiyR
-# ksUzfdbL4RFacGe6vI6HeOJDKMmyxbiWTu6XbT7D6NvOznliRoSyAKT/7gZdECPl
-# rlyQIzMfFn0aqsQO2vxlRuav9yrv2NxZpNboWyfhUxbDVMfkGVadfftf6+hzrgtp
-# WSstIKq4QBgzhVATJiMgjkaMmkze3mHH7K9h6R0isYDCwJvsf732/HDmm+ZnlzyE
-# QxpPfRpJJueN2lAHcSdqOePDTKk94gnCJx6LyN4fcT1J3ATRbScgBf3IS0ssl7w7
-# Xhy1ByG35ft0EBPBXsmyD6tHh0nBqqIuAquX7FoZNA==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjgyMDA4MjNaMC8GCSqGSIb3DQEJBDEiBCCrv22D
+# errnfEF0Q+L/ztLPC/KZhGsGiNmKlSRXPPBsmDANBgkqhkiG9w0BAQEFAASCAgBx
+# oxBHGWyFe4TO2Re1o8/OmL/mAvE7E7MT50f6Zt+NqeKBp1b/IUTKXTMgAMer1nzi
+# rEouw5XJ0+5+cysMvUVIpWTyAcUjBHwQDRhAdgHCFILLlj+DpEMLeSeSsd8b+X1C
+# uQKA/1UBVeBzcsSFhaaSy+rGl0nk7GZuDx/IGIYXHuqDrA6ZW69f5UuEjGU2sWOi
+# 7GBCAJYhiyDSCo9WAru0MJRITwzuF280J/RRRSYJei7OPZdi8mLm20PMk4c2Eahb
+# CVtV1GMr1GVHgl+W6jEmFKWBoBvK4L4ycjBzWYJgXB6/qWH2JOTriaBVsmUFXhFQ
+# Y+VtuaDI6A2UrUQ5orw1TCRvModHEug28iaHIj1UyBWc5FZiPtAtGiTbPHuj2Ml2
+# cXr4H6mlci3BS3qkN7VPYiJHW/W2HTH6h4/pKntFJ11bPdK/8YKyCsd6K5SELLwK
+# aibVy7w1a5T7bzBNiV2pDYtRFLjWOqhFem2+JOGOkSjINwM4sHypHlSwjd9fHeOn
+# YKjHBd7Uk9sT5i2J8R2vNlCBaJektU5PLrjvZZp8TFPQh6erkP4nEldNrOR7ZpWH
+# J0XWaqSZrFl9xyNgKluIrjyn/UWxAeTUT/WCpy666heO5OvpkpzjlNUW3PIOA5T+
+# BWgdOZJjdtkHl78oF7zQGD0ymVrt8kDQ3HgQZkLIXA==
 # SIG # End signature block

@@ -1686,7 +1686,7 @@ function Resolve-DiscoveryCredential {
           $null         — if skipped, cancelled, or non-interactive with no vault entry
 
     .PARAMETER Name
-        Vault credential name (e.g., 'AWS.Credential', 'Proxmox.192.168.1.39.Token').
+        Vault credential name (e.g., 'AWS.Credential', 'Proxmox.192.168.1.30.Token').
     .PARAMETER CredType
         Credential type: 'AWSKeys', 'AzureSP', 'BearerToken', 'PSCredential'.
         If omitted, auto-detected from the Name pattern.
@@ -1712,7 +1712,7 @@ function Resolve-DiscoveryCredential {
 
     .EXAMPLE
         # Proxmox — existing token from vault, auto-use
-        $token = Resolve-DiscoveryCredential -Name 'Proxmox.192.168.1.39.Token' -AutoUse
+        $token = Resolve-DiscoveryCredential -Name 'Proxmox.192.168.1.30.Token' -AutoUse
 
     .EXAMPLE
         # WUG Server — all connection info from vault
@@ -1737,7 +1737,7 @@ function Resolve-DiscoveryCredential {
         [string]$Name,
 
         [Parameter()]
-        [ValidateSet('AWSKeys', 'AzureSP', 'BearerToken', 'OCIConfig', 'PSCredential', 'WUGServer')]
+        [ValidateSet('AWSKeys', 'AzureSP', 'BearerToken', 'FilePath', 'OCIConfig', 'PSCredential', 'WUGServer')]
         [string]$CredType,
 
         [Parameter()]
@@ -1762,6 +1762,7 @@ function Resolve-DiscoveryCredential {
         if ($Name -match '^AWS\.')                         { $CredType = 'AWSKeys' }
         elseif ($Name -match '^Azure\..*\.ServicePrincipal$' -or $Name -eq 'Azure') { $CredType = 'AzureSP' }
         elseif ($Name -match '^OCI\.')                     { $CredType = 'OCIConfig' }
+        elseif ($Name -match '\.ServiceAccount$|\.KeyFile$') { $CredType = 'FilePath' }
         elseif ($Name -match '\.Token$|^FortiGate')        { $CredType = 'BearerToken' }
         elseif ($Name -match '^WUG\.Server')                { $CredType = 'WUGServer' }
         elseif ($Name -match '\.Credential$')              { $CredType = 'PSCredential' }
@@ -1826,6 +1827,9 @@ function Resolve-DiscoveryCredential {
                     $wp = $stored -split '\|', 5
                     "Server=$($wp[0]):$($wp[1]) ($($wp[2])), User=$($wp[3])"
                 } else { '(stored)' }
+            }
+            'FilePath' {
+                "Path=$stored"
             }
             default { '(stored)' }
         }
@@ -2079,6 +2083,26 @@ function Resolve-DiscoveryCredential {
             }
             return $result
         }
+        'FilePath' {
+            Write-Host ''
+            $pathInput = Read-Host -Prompt "  Path to ${ProviderLabel} file"
+            if ([string]::IsNullOrWhiteSpace($pathInput)) {
+                Write-Host '  Cancelled.' -ForegroundColor DarkGray; return $null
+            }
+            $pathInput = $pathInput.Trim()
+            if (-not (Test-Path $pathInput)) {
+                Write-Warning "  File not found: $pathInput"
+            }
+            if (-not $DeferSave) {
+                $ss = ConvertTo-SecureString $pathInput -AsPlainText -Force
+                Save-DiscoveryCredential -Name $VaultName -SecureSecret $ss `
+                    -Description "$ProviderLabel ($pathInput)" -Force | Out-Null
+                Write-Host "  Saved to vault as '$VaultName'." -ForegroundColor Green
+            } else {
+                Write-Host "  Credential NOT saved (DeferSave). Validate, then call Save-ResolvedCredential." -ForegroundColor DarkYellow
+            }
+            return $pathInput
+        }
     }
     return $null
 }
@@ -2182,7 +2206,7 @@ function Save-ResolvedCredential {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$Name,
-        [Parameter(Mandatory)] [ValidateSet('AWSKeys','AzureSP','BearerToken','OCIConfig','PSCredential','WUGServer')] [string]$CredType,
+        [Parameter(Mandatory)] [ValidateSet('AWSKeys','AzureSP','BearerToken','FilePath','OCIConfig','PSCredential','WUGServer')] [string]$CredType,
         [Parameter(Mandatory)] $Value
     )
 
@@ -2234,6 +2258,11 @@ function Save-ResolvedCredential {
             $ss = ConvertTo-SecureString $combined -AsPlainText -Force
             Save-DiscoveryCredential -Name $Name -SecureSecret $ss `
                 -Description "WUG $($Value.Protocol)://$($Value.Server):$($Value.Port) ($($c.UserName))" -Force | Out-Null
+        }
+        'FilePath' {
+            $ss = ConvertTo-SecureString "$Value" -AsPlainText -Force
+            Save-DiscoveryCredential -Name $Name -SecureSecret $ss `
+                -Description "File path: $Value" -Force | Out-Null
         }
     }
     Write-Host "  Saved to vault as '$Name'." -ForegroundColor Green
@@ -3216,8 +3245,8 @@ function Deploy-DashboardWebConfig {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJtlsATpG7F633
-# HTV93fvFPwv4N5iZzoN3R9i3akayO6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDyIc64k59grYDK
+# pogQt8ssWglUUUjkLtuotHaukmuPjKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -3420,33 +3449,33 @@ function Deploy-DashboardWebConfig {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAm+t1STblQupRxiUgt2LQYdPUiw2ijSaoy08VdcvP3PzANBgkqhkiG9w0BAQEF
-# AASCAgCHygrEl29fQLL2APbK2tVQDBwuWXgAWNxh62cXgkaNmA/JowM4F7WxF0LQ
-# BKWc6FpksuMRb+hghBnTvqR7G1KSjPJoIr59uEpiO8Js9Tswnb4zwHS8HRxvOuDw
-# 9LBOEcGTY39duDnvfJ5yTfYhNnBL7xSn6WK/6tcgp5fdmmWvb60Ka9hCUlHqENd0
-# 7rkRkoY02FcpxEHaWL5seBUQRv2xxUC588cBe8iZiCH6Eh/qDRj2Jw+ipn0XE4jP
-# l+kXY5YocdhiOWCBhknGiV8Q5J5kbHBLI4xzyhqfcNY0Y0BLwvYpWeAQvYrIk7ep
-# PCB50sO2jb2EZm3MCQF8td6n14v64z0gmQLU1sQnMyHULMNvctUFnBiMSP+qkPFY
-# DTTuKWT2jREpdsNK7gKuVRv6ljgMxGYQw2tJJr6mDio+ra4CeA6hKNRGhl76pnx9
-# rjyh/JsvcbfziUKEixmq/Eo6KmBmH/5w672btWI3+kH5ImBm3jOzVyCihflm++w1
-# He9BLQ3+Lz/1q/IftZ1juZCn7jWcp10ySLBeGN9HuVdnU91Ydrbe4FiRZ6Rm/Zbn
-# oRDRabnF+LnXdQBTCl/+cdjqxx+EUtaFPXYmJsNkULQYXDpEQb7gR5Ca9eUK6t1l
-# kEMbR4UA+kZ7BTD231JYmPR3rcZck88dK4D93tq8JUhfksAyLaGCAyYwggMiBgkq
+# BCB/mOUYjt173jepUL2bxbW9DNx3TDbZ4CNS3h0xIsg/PjANBgkqhkiG9w0BAQEF
+# AASCAgB28zZjbMjdShPYW0MWifZTuToIK8oe2iO3sr2rXC+nHbtM4a4BPXaNbhXo
+# 0wsbCV6W4J6osvR/ukSIqLlfc2BIh4xgXtJGqUjaHYHcK2HkNetdmCMgI4S0djfM
+# TtDmeaX1OvPInZJ1NoL9BGg6ZXiT/H/y8kh7TUrkhCZowouNHC3EkqnxPMt5eiZq
+# asW6VkxgTdoaWcWvPBOo3wWlT/ntnbI195nJpklI4zyHoeUV+iZ6g0HGzetOUsdc
+# NCbsK03K0wr6rWCFkrcWsboI9QR9/2r7ekxSsEIP3r2lJw0EFJWJD/GSb58h5xx9
+# rLChSqv/oGhz1S8659gclBwFXWT3z7rhAJNH4KzQWHZ1Jn4rit8M070XTo8jeDH3
+# fU03QU60gtJ5An/PcvBA/tpp3vkQy+OEmDRUfVvTQnOecWg+/GSQlU84f+fsVnxv
+# Ams48t572//ypCpD4prLRfygjQWeguLvZkHoiXjXZ9tB4cIQfXNFzRbR7hGgfmc5
+# uYSxUf26zdkrKxbukLzR0XlbfBJCBXOThG2SQq6CvESLf2Gq5KKouQCYYox4i+vt
+# oezTeTTBb/xZUHehNMDGsEJuuDumX69dzfesusBk4hcmJ+O5Qley4f9sI7BbGKyS
+# OZhiwI5j7m3S/pNOAOz6OS50Ds79NXry2crEcNtIUs+Vih8Y0aGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjcxNjM1MDlaMC8GCSqGSIb3DQEJBDEiBCDNKNzE
-# RY85fu4SqI8iClYFZFWf2iuH6khwKVZ/XzhraDANBgkqhkiG9w0BAQEFAASCAgCo
-# fRhPc4Mz1/ZEeFrfbBrOWKmRAicBxUXMkQC29YdO7QahEzPoWhdbFQ27e4U6ve1l
-# ecMj6JVlzZRL02i+UHaGZRAv03zL6ndLW2C4aoW9ecISVmQbDam3wf61a762gPnx
-# Jd+wVNoDrwVjswV/61jh7VtT3niYK6IJlWyoCtQ1qhmJjyEOoGMuJJcAlFZvY2if
-# 7ncpDzMpRyO06UMHBScKhC8Kfzt67nL1AexZ2akr682nihQkTD201vTfWP6TVqU1
-# vw/A6uYvGfSW7q+18TozOCycX7YEShcIk6ybqyQIFM4EONwFinbpok+YJ3FeJfQK
-# quxWisNQeXRigNfvlSY4RCLjobGBZ2Jip9r6qCqVd+3IolWR7KI/CDWAJzTMBRcy
-# MhIKUpzwVPT86VCIisR6ImQGaOYobMV7jjsq83zm2ZUb1ubIxQkDH8C/eFj28XCq
-# sTu5N4/k8Xpr2ddRsz7US9FzP0kZ71LwOMAlafpBv2hK9Tjt20reBOx7XiBhncCx
-# HsJL6j1CspSsdua4hzeIrae0UJ+lRc2UzxnOZB2SuEiycws2ObzQPLHXrLDnD6BM
-# T49HclEZ2vYl1WrY/rGNMrnBMONxIPyEYdfBQXlyg88HLim4HAbrvoG/FU8ZVoZK
-# 7pbWzSRzDrz+M0MnUAKLWthGtR+iyANoshrV3QsJFA==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjgxMjA0MzdaMC8GCSqGSIb3DQEJBDEiBCAMCZIs
+# Qj9l3OCwmu+Ufckyitg2BvWiFP4eQSDye2fwVTANBgkqhkiG9w0BAQEFAASCAgC2
+# yc//sRQFaJOmay0LO8GvRrWj45fgXwSVQJFBCI18dPfbMPCZ7PufsQIR6m+O40gr
+# 3zSFwHASXnCY0YoMxRyV7Br7sg3h+nzWZazpUITxdsE0FDKShYldIUbGvEb1THpc
+# LtPveCz0suLmWFi4E4Quneco9xmlWhVS/dzo/H9bVt2ls5drVTYutvfG2qSeDQs7
+# 2zEAPaDTma2KXbmks3eFQ1E47XPVUM0lqkPZ3PIR2k+gUQzh02sN4yFrdbKJMlwP
+# O7ww3Whl2NoPanFT+T/Bu22T8Q8IfWkX4QWmCTgSvdcexvrSmkqQmEfsoIYcH4SA
+# e5otX34IYIqOGtHvIqt/FT5epaLA4qk9K9o1x2vJe+POkNmMSoW8AxwTdbsCrggl
+# 80/udco7sDRCVivXEpc075GamyeL28P9ij0YRYOaUrjfZiyUR521mtDzbNH4jrlG
+# oHayTndcA/3H16oRY3qlMliGpNFRHnDplqa08ytmVjDtYwJeyPKFhpRcL+2DiPK8
+# R4Iw4YiEiYJxumEPnSbLSFGWptieapfwkPcX+4rouc9ofh4PSMWWngMOVlFCD8aZ
+# O3z2iGy5g7GJfkcvtkHh0KACakMxrS0XX696RXyu4gfcEOvzuritUlTTqdbgkx6P
+# 9qadIg46aqPnUoXh06ClEey2aDU36PFqhFW/QGnYZA==
 # SIG # End signature block

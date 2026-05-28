@@ -57,7 +57,7 @@
     F5 iControl REST API port. Default: 443.
 
 .PARAMETER WUGServer
-    WhatsUp Gold server address. Default: 192.168.1.250.
+    WhatsUp Gold server address. Default: 192.168.74.74.
 
 .PARAMETER WUGCredential
     PSCredential for WhatsUp Gold admin login (non-interactive WUG push).
@@ -258,7 +258,7 @@ switch ($currentChoice) {
         # Export JSON
         # ----------------------------------------------------------------
         $jsonPath = Join-Path $OutputDir "F5-Plan-$(Get-Date -Format yyyyMMdd-HHmmss).json"
-        $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath
+        $plan | Export-DiscoveryPlan -Format JSON -Path $jsonPath -IncludeParams
         Write-Host "JSON exported: $jsonPath" -ForegroundColor Green
     }
     '3' {
@@ -367,8 +367,8 @@ switch ($currentChoice) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsiGaCS+fr3JSn
-# SLAFmWqUFNmmph7dzzfh4sQ8Y1QY6qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB9C16BKEUSfe5j
+# jkNJ4zs3bEHfkJR4tEhUJ+UonuYYK6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -571,33 +571,33 @@ switch ($currentChoice) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCA+buGGlmrrV7UQK38pQG8drdpPUJcVvugeMZmFhAxh/jANBgkqhkiG9w0BAQEF
-# AASCAgBZBWUtagsJ/lyFcmdpYyPPlQXCG13L1AX9I6c3frB77oaskIvRpOSmxehm
-# zPexvoIAGT5H+JZG28fAw4rmHZyC9lBKRFRVmye9sy53CgRPG619jhJHaxJwRjzu
-# 6Uch7Vg1TzeLGwea4GD6lY1wAoiIdKqbgLYJ3+Y+34FapwR5qKzgl+j54Q/0IH5N
-# YogydNHRZgnjzpbB0Fib9xXqWkopYifqN2czTNXkQefcS3c/Am3fyui3NO3p8/0L
-# uwfNJUXr2GPfGaTeMyIPQNTZ73Uy/fOfDuDl9Y+1esTN4oTiXQma3iNIwCE94IHx
-# nBQydLHLIBXspnaHhgak42CnS4isnBaCkMBX0zD5qRrNgj4/wA0/Z9ebBgqF1hvg
-# PP1BaWRyXmqaqEuEGAfSjXmvaPvW5vT7FXOweJWAUU2dI3CnOB00uwGY/Ro1GG3U
-# B9uMx2PYy6s5RbLJb5wo2Fi7edINcQTvWY70GjNBtNIRkunUFpdjVdorFLkGt+GQ
-# 1CWgAYSow52DGnyQtsDJHOycdiq7iPjh/CkGgXcTROw0cFic571xBi5fs9QOxJbr
-# YcB5QmdjQ4FhpswrMEoNl1O6w5hPVFx9pPDRcxtQ+KJaDEygv9he3JnjDs/8RTcD
-# jd9DFHYoox7ymz5BnldloXvx+IfJYIYyty2DYJmebHBisuZo2aGCAyYwggMiBgkq
+# BCCtTTtT1PxV+uEm338yJNF6/tV3FggBNUMt17hz0e2yzzANBgkqhkiG9w0BAQEF
+# AASCAgAaU/Xmn1RRRkElAqAo83wzwXHhEqrs0Bkf4EJ1tzhBtrq2R65EfvYLLfaC
+# qmZItu+cvCgvFWqdlGprV2F7Hp+CmU5IKzSELHlhyjxKJKn0zQYIN2/m8yB/9anv
+# KPKqVEH8DySaw+fxyiSwqTOrAPDcvq8CrYxbyHoDZ8sgYnBqkonaaglfMPW6dnC7
+# 8HxhDpp/veNu5dfgtzwPHlPPmzLGequG2gFA12mULWPaQPpQ9qXjqLxIgKzjyINV
+# JVEYERNJlLZI8FSHZeTQBmM9kyds27FosiGZ831ouigm8fldF05YbYYAMcKTOLpe
+# j8g/cPAwDGY9J6YoSr7stLF0hyBhCNz9PE5IXhxh1KL8QE1ra64PFxrQZX9QPWdy
+# SZQqfH0iaRsEF+/4hhuT5zrcBhRYt66F+RPDQcc2othArpeil1vrJQBNSg+5F7qw
+# Z/YPuofdowp4a+lBCzugZU97ODa4r08kOt3lypH0+RvQ06pssPsNgl9IM/zyK4SS
+# Kv9OFypkeYxrybLuT8qoipCz5aKaTldnFm0wnbFBSqphcA+5ShM+cqrWbQs69+0Q
+# eCR7qPcNMT+Yqf57wwHk+HUyhxclkN6uYK5keM3KmJ2CZZB8AFqBKpaTbz5q+lqJ
+# Uv9+b9P/bgcEF03odJWWyTG1H+vC6TuX6fsdl8YfGVIzmRwikqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MTgxNzIzNTFaMC8GCSqGSIb3DQEJBDEiBCBytzeH
-# HAJjKhMctA8PxJ8WK7EtUwhjcoSu3ygfLspunzANBgkqhkiG9w0BAQEFAASCAgB6
-# gZ7eoTcMslapOIpJ3tTLP0tih4GfT8FaZPO/6jzBzFyz/CfvwapekId3psSBoZSn
-# PfqJSS/qfwYQRKh5yigU1zAt2T5Z66kRVD5TDKXCrCavctpGRixk5SNK0gaAP81x
-# LVBOqFxMfBYJUaL56xWh5xtPrHo35Bz9pip9m9lFN8qmy466HgQ/Isfg4EyoXCPJ
-# dk/HLO9gDkAofMJ1AzJzl0eOojXiKRQml0X0VJcwpcUvGX3BOf/f68rWn9D4bzrJ
-# ywLj9iPgJH0lOTcqKtrwvw1UEubp5ZMDg2RecJkFHAIt/q3BMLgEES7+yPwpyN1K
-# 2L6OtrLSg9dodIkO4rWUcZIpYBFrNwemFjNyF8LAT+IijHHRCIfFo+MWOeEKBRe5
-# DhQEcgri24+dqdyImUMmO9GLehbPx4z5rgIaxGi7DUTjchoNWQnqKKcuNvkma1Jn
-# mRF/D5GQ8lOTDbV1bOrs70V+x/SSH1GVxXa0XR7K9iHCYlTL+MvwSZLwmw2z2QiL
-# oGOr5N+qx8DO0N//giGPzuQ4K6Jts8ijhs+aWHy2cCfuVyEfBpwyGsEKwNJefqjz
-# 1I6iLkUqtv5QL1cTb1CiRsgylcz4xaWfm4aAGt2ZzkL8Dz9c5BZKddMN/rKTpzwt
-# mKvIt9SPqhmX5NKNumT5GmUUHbjSGoT+a1016wub3w==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjgyMDE2MjJaMC8GCSqGSIb3DQEJBDEiBCD4dVtf
+# 82xoJcIKO4O3JuQhJIlZ3Y1ZrDzZ28zuiUJJmzANBgkqhkiG9w0BAQEFAASCAgAk
+# Deff4q0GQdVfIN3XC9AB1bbOZG3yzYyyF/CnblKkmknlpbAkK7zOIq7gP+yTaGr6
+# qPj26oy2idkUcvSN7VNAspKv0T8OEcqdqBNDKnR/FWCagN/Qz1c4w4iQa6ahOVQ/
+# wAJ3Y8XTUfHs30d7UIYAnkUsvnOBM1ZjudzqRK5U4roe7wfm3qNIQSMqwwkW6BbL
+# Lzfv04gXgcvK2TOr9vPkxu/JNGHGPXOdAnUM9JCUdIfJoXbd5ZoCxX//ouGIU0wR
+# 0OIanGN+TYIWL7S3sO7mLAszIz5lQX14OWXelx8MuULm7KQv6djBCqtzHuBOdjIa
+# BXo8AQJfVYVNWM1Abrokncx4D99OwuziAsivFJUd0YAoouQfKhkx2+s6I47sEXFD
+# c/8a4bxX7I+9adeL17bBuzg3I6YsaOm30c0rQu9PL3GpNMwn1oke80pLj4LG+hfV
+# 6yJDY4UtKfvvW7asx2EgGs7OGj7b2tzdp7e/VsoC5Yd9A0AWtS9u5iQqmE5hXaSQ
+# SK3b2xbLGIU1tHn4RJ4IyFil2/CXlBUjEakOV/IWa7ewHHybJrlSKa2NwTzFl8DQ
+# 4sPFKHL2LUsEUOhL8ydAv+erV3nQkaKmQfDoANrCJ6i7QQRG4SlViYbQB8uVJ/76
+# SXTBc6tiGXINzkV7mpq+MB1f9UzQxG/6i4hhSqAZDg==
 # SIG # End signature block

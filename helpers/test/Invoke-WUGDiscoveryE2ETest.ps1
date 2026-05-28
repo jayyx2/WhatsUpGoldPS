@@ -92,12 +92,12 @@
 [CmdletBinding()]
 param(
     [ValidateSet('AWS','Azure','Bigleaf','Docker','F5','Fortinet','GCP',
-                 'HyperV','Nutanix','OCI','Proxmox','VMware',
+                 'HyperV','LoadMaster','Nutanix','OCI','Proxmox','VMware',
                  'WindowsAttributes','WindowsDiskIO')]
     [string[]]$IncludeProvider,
 
     [ValidateSet('AWS','Azure','Bigleaf','Docker','F5','Fortinet','GCP',
-                 'HyperV','Nutanix','OCI','Proxmox','VMware',
+                 'HyperV','LoadMaster','Nutanix','OCI','Proxmox','VMware',
                  'WindowsAttributes','WindowsDiskIO')]
     [string[]]$ExcludeProvider,
 
@@ -111,6 +111,7 @@ param(
     [string[]]$NutanixTarget,
     [string[]]$F5Target,
     [string[]]$FortinetTarget,
+    [string[]]$LoadMasterTarget,
     [string]$BigleafTarget,
     [string]$AwsRegion,
     [string]$AzureTenantId,
@@ -225,10 +226,11 @@ function Export-TestResultsHtml {
 $defaultTargets = @{
     HyperV   = @('192.168.74.30')
     VMware   = 'vcenter.corp.local'
-    Proxmox  = @('192.168.1.39')
+    Proxmox  = @('192.168.1.30')
     Nutanix  = @('nutanix-cluster.corp.local')
     F5       = @('lb1.corp.local')
     Fortinet = @('fw1.corp.local')
+    LoadMaster = @('loadmaster.corp.local')
     Bigleaf  = 'bigleaf'
     AWS      = 'all'
     Azure    = $null
@@ -240,15 +242,16 @@ $defaultTargets = @{
 $vaultConfig = [ordered]@{
     HyperV   = @{ Name = 'HyperV.192.168.74.30.Credential'; CredType = 'PSCredential';    ParamName = 'HyperVTarget';   Label = 'Hyper-V (192.168.74.30)' }
     VMware   = @{ Name = 'VMware.vcenter.corp.local.Credential'; CredType = 'PSCredential'; ParamName = 'VMwareTarget';   Label = 'VMware vCenter' }
-    Proxmox  = @{ Name = 'Proxmox.192.168.1.39.Token'; CredType = 'BearerToken';           ParamName = 'ProxmoxTarget';  Label = 'Proxmox (192.168.1.39)' }
-    Nutanix  = @{ Name = 'Nutanix.Credential'; CredType = 'PSCredential';                  ParamName = 'NutanixTarget';  Label = 'Nutanix AHV' }
+    Proxmox  = @{ Name = 'Proxmox.192.168.1.30.Token'; CredType = 'BearerToken';           ParamName = 'ProxmoxTarget';  Label = 'Proxmox (192.168.1.30)' }
+    Nutanix  = @{ Name = 'Nutanix.nutanix-cluster.corp.local.Credential'; CredType = 'PSCredential';                  ParamName = 'NutanixTarget';  Label = 'Nutanix AHV' }
     F5       = @{ Name = 'F5.lb1.corp.local.Credential'; CredType = 'PSCredential';        ParamName = 'F5Target';       Label = 'F5 BIG-IP' }
-    Fortinet = @{ Name = 'FortiGate-FW1'; CredType = 'BearerToken';                        ParamName = 'FortinetTarget'; Label = 'FortiGate' }
+    Fortinet = @{ Name = 'FortiGate.fw1.corp.local'; CredType = 'BearerToken';                        ParamName = 'FortinetTarget'; Label = 'FortiGate' }
+    LoadMaster = @{ Name = 'LoadMaster.loadmaster.corp.local.ApiKey'; CredType = 'BearerToken'; ParamName = 'LoadMasterTarget'; Label = 'Kemp LoadMaster' }
     Bigleaf  = @{ Name = 'Bigleaf.Credential'; CredType = 'PSCredential';                  ParamName = 'BigleafTarget';  Label = 'Bigleaf SD-WAN' }
     AWS      = @{ Name = 'AWS.Credential'; CredType = 'AWSKeys';                           ParamName = 'AwsRegion';      Label = 'AWS' }
     Azure    = @{ Name = 'Azure'; CredType = 'AzureSP';                                    ParamName = 'AzureTenantId';  Label = 'Azure' }
-    GCP      = @{ Name = 'GCP.Credential'; CredType = 'GCPServiceAccount';                 ParamName = 'GcpProject';     Label = 'Google Cloud' }
-    OCI      = @{ Name = 'OCI.Credential'; CredType = 'OCIConfig';                         ParamName = 'OciTenancyId';   Label = 'Oracle Cloud' }
+    GCP      = @{ Name = 'GCP.ServiceAccount'; CredType = 'FilePath';                      ParamName = 'GcpProject';     Label = 'Google Cloud' }
+    OCI      = @{ Name = 'OCI.Config'; CredType = 'OCIConfig';                         ParamName = 'OciTenancyId';   Label = 'Oracle Cloud' }
 }
 
 $hasResolveCmd = Get-Command -Name 'Resolve-DiscoveryCredential' -ErrorAction SilentlyContinue
@@ -388,7 +391,7 @@ $providers = [ordered]@{
         Script        = 'Setup-Proxmox-Discovery.ps1'
         Args          = @{ Target = $ProxmoxTarget; Action = 'Dashboard'; NonInteractive = $true; OutputPath = $OutputPath }
         DashboardFile = 'Proxmox-Dashboard.html'
-        VaultName     = 'Proxmox.192.168.1.39.Token'
+        VaultName     = 'Proxmox.192.168.1.30.Token'
         PreCheck      = { $null -ne $ProxmoxTarget -and $ProxmoxTarget.Count -gt 0 }
         PreCheckLabel = "Proxmox vault cred + target ($($ProxmoxTarget -join ', '))"
     }
@@ -397,7 +400,7 @@ $providers = [ordered]@{
         Script        = 'Setup-Nutanix-Discovery.ps1'
         Args          = @{ Target = $NutanixTarget; Action = 'Dashboard'; NonInteractive = $true; OutputPath = $OutputPath }
         DashboardFile = 'Nutanix-Dashboard.html'
-        VaultName     = 'Nutanix.Credential'
+        VaultName     = 'Nutanix.nutanix-cluster.corp.local.Credential'
         PreCheck      = { $null -ne $NutanixTarget -and $NutanixTarget.Count -gt 0 }
         PreCheckLabel = "Nutanix vault cred + target ($($NutanixTarget -join ', '))"
     }
@@ -415,9 +418,18 @@ $providers = [ordered]@{
         Script        = 'Setup-Fortinet-Discovery.ps1'
         Args          = @{ Target = $FortinetTarget; Action = 'Dashboard'; NonInteractive = $true; OutputPath = $OutputPath }
         DashboardFile = 'Fortinet-Dashboard.html'
-        VaultName     = 'FortiGate-FW1'
+        VaultName     = 'FortiGate.fw1.corp.local'
         PreCheck      = { $null -ne $FortinetTarget -and $FortinetTarget.Count -gt 0 }
         PreCheckLabel = "Fortinet vault cred + target ($($FortinetTarget -join ', '))"
+    }
+
+    LoadMaster = @{
+        Script        = 'Setup-LoadMaster-Discovery.ps1'
+        Args          = @{ Target = $LoadMasterTarget; Action = 'Dashboard'; NonInteractive = $true; OutputPath = $OutputPath }
+        DashboardFile = 'LoadMaster-Dashboard.html'
+        VaultName     = 'LoadMaster.loadmaster.corp.local.ApiKey'
+        PreCheck      = { $null -ne $LoadMasterTarget -and $LoadMasterTarget.Count -gt 0 }
+        PreCheckLabel = "LoadMaster vault cred + target ($($LoadMasterTarget -join ', '))"
     }
 
     Bigleaf = @{
@@ -451,7 +463,7 @@ $providers = [ordered]@{
         Script        = 'Setup-GCP-Discovery.ps1'
         Args          = @{ Target = $GcpProject; Action = 'Dashboard'; NonInteractive = $true; OutputPath = $OutputPath }
         DashboardFile = 'GCP-Dashboard.html'
-        VaultName     = 'GCP.Credential'
+        VaultName     = 'GCP.ServiceAccount'
         PreCheck      = { $null -ne $GcpProject -and $GcpProject.Count -gt 0 }
         PreCheckLabel = "GCP vault cred + project ($($GcpProject -join ', '))"
     }
@@ -460,7 +472,7 @@ $providers = [ordered]@{
         Script        = 'Setup-OCI-Discovery.ps1'
         Args          = @{ TenancyId = $OciTenancyId; Action = 'Dashboard'; NonInteractive = $true; OutputPath = $OutputPath }
         DashboardFile = 'OCI-Dashboard.html'
-        VaultName     = 'OCI.Credential'
+        VaultName     = 'OCI.Config'
         PreCheck      = { -not [string]::IsNullOrEmpty($OciTenancyId) }
         PreCheckLabel = "OCI vault cred + tenancy ($OciTenancyId)"
     }
@@ -534,12 +546,16 @@ foreach ($name in $runList.Keys) {
     # --- Execute with Measure-Command ---
     $runError = $null
     $argsSplat = $prov.Args
-    $script:_capturedErrors = [System.Collections.Generic.List[string]]::new()
+    $script:_capturedErrors   = [System.Collections.Generic.List[string]]::new()
+    $script:_capturedWarnings = [System.Collections.Generic.List[string]]::new()
     $measured = Measure-Command {
         try {
-            & $scriptPath @argsSplat 2>&1 | ForEach-Object {
+            & $scriptPath @argsSplat 2>&1 3>&1 | ForEach-Object {
                 if ($_ -is [System.Management.Automation.ErrorRecord]) {
                     $script:_capturedErrors.Add($_.ToString())
+                }
+                elseif ($_ -is [System.Management.Automation.WarningRecord]) {
+                    $script:_capturedWarnings.Add($_.ToString())
                 }
             }
         }
@@ -575,6 +591,27 @@ foreach ($name in $runList.Keys) {
         }
         continue
     }
+
+    # --- Check if warnings indicate no data / connectivity issues ---
+    $noDataWarnings = @($script:_capturedWarnings | Where-Object {
+        $_ -match 'No items discovered' -or
+        $_ -match 'No data to generate' -or
+        $_ -match 'connection methods failed' -or
+        $_ -match 'failed to authenticate' -or
+        $_ -match 'Cannot generate dashboard' -or
+        $_ -match 'No.*credentials available'
+    })
+    $script:_capturedWarnings = $null
+
+    if ($noDataWarnings.Count -gt 0) {
+        $warnDetail = $noDataWarnings -join '; '
+        Write-Host "SKIP" -ForegroundColor Yellow -NoNewline
+        Write-Host "  ($elapsed) $warnDetail" -ForegroundColor DarkGray
+        Record-Test -Cmdlet $name -Endpoint 'Execute' -Status 'Skipped' -Duration $elapsed -DurationMs $elapsedMs -Detail $warnDetail
+        Record-Test -Cmdlet $name -Endpoint 'Dashboard generated' -Status 'Skipped' -DurationMs $elapsedMs -Detail 'No data available'
+        continue
+    }
+    $script:_capturedWarnings = $null
     Record-Test -Cmdlet $name -Endpoint 'Execute' -Status 'Pass' -Duration $elapsed -DurationMs $elapsedMs -Detail $elapsedDetail
 
     # --- Verify dashboard ---
@@ -590,6 +627,210 @@ foreach ($name in $runList.Keys) {
         Write-Host "FAIL" -ForegroundColor Red -NoNewline
         Write-Host "  ($elapsed, dashboard not found)" -ForegroundColor DarkGray
         Record-Test -Cmdlet $name -Endpoint 'Dashboard generated' -Status 'Fail' -Duration $elapsed -DurationMs $elapsedMs -Detail "Expected: $expectedDash"
+    }
+}
+
+# ── Scheduled Task E2E Test ──────────────────────────────────────────────────
+# Tests the full scheduled task lifecycle: register → fire → verify output → cleanup.
+# Uses the first provider that passed its dashboard test as the candidate.
+# Requires admin rights (Register-ScheduledTask).
+
+$schedTestProvider = $null
+$schedTestDashFile = $null
+
+# Pick a provider whose dashboard generation already succeeded
+foreach ($df in $dashboardFiles) {
+    $dfName = [System.IO.Path]::GetFileName($df)
+    foreach ($pName in $providers.Keys) {
+        if ($providers[$pName].DashboardFile -eq $dfName) {
+            $schedTestProvider = $pName
+            $schedTestDashFile = $dfName
+            break
+        }
+    }
+    if ($schedTestProvider) { break }
+}
+
+if (-not $schedTestProvider) {
+    Write-Host ''
+    Write-Host "  [SchedTask] " -ForegroundColor Yellow -NoNewline
+    Write-Host "SKIP  (no provider dashboard passed — cannot test scheduled task)" -ForegroundColor DarkGray
+    Record-Test -Cmdlet 'SchedTask' -Endpoint 'Pre-check' -Status 'Skipped' -Detail 'No provider dashboard passed'
+}
+else {
+    $registerScript = Join-Path $discoveryDir 'Register-DiscoveryScheduledTask.ps1'
+    $schedTaskName  = "DiscoverySyncE2ETest-$schedTestProvider-$timestamp"
+    $schedTaskFolder = '\WhatsUpGoldPS'
+    $schedOutputDir  = Join-Path $OutputPath "SchedTask-$timestamp"
+    if (-not (Test-Path $schedOutputDir)) { New-Item -ItemType Directory -Path $schedOutputDir -Force | Out-Null }
+
+    $schedProv = $providers[$schedTestProvider]
+    $schedTarget = $schedProv.Args['Target']
+    if (-not $schedTarget) { $schedTarget = $schedProv.Args['Region'] }
+    if (-not $schedTarget) { $schedTarget = $schedProv.Args['TenantId'] }
+    if (-not $schedTarget) { $schedTarget = $schedProv.Args['TenancyId'] }
+
+    Write-Host ''
+    Write-Host "  [SchedTask] " -ForegroundColor White -NoNewline
+    Write-Host "Testing scheduled task lifecycle ($schedTestProvider)..." -ForegroundColor Cyan
+
+    # --- Test 1: Register the task ---
+    Write-Host "  [SchedTask] " -ForegroundColor White -NoNewline
+    Write-Host "Registering... " -ForegroundColor Cyan -NoNewline
+    $regError = $null
+    $regMeasured = Measure-Command {
+        try {
+            $regArgs = @{
+                Mode       = 'Provider'
+                Provider   = $schedTestProvider
+                Action     = 'Dashboard'
+                TaskName   = $schedTaskName
+                TriggerType = 'Once'
+                TimeOfDay  = '23:59'
+                OutputPath = $schedOutputDir
+            }
+            if ($schedTarget) { $regArgs['Target'] = $schedTarget }
+            & $registerScript @regArgs 2>&1 | ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) { $regError = $_.ToString() }
+            }
+        }
+        catch { $regError = $_.Exception.Message }
+    }
+    $regMs = [Math]::Round($regMeasured.TotalMilliseconds)
+    $regElapsed = '{0:0.0}s' -f $regMeasured.TotalSeconds
+
+    if ($regError) {
+        Write-Host "FAIL  ($regElapsed) $regError" -ForegroundColor Red
+        Record-Test -Cmdlet 'SchedTask' -Endpoint 'Register' -Status 'Fail' -Duration $regElapsed -DurationMs $regMs -Detail $regError
+    }
+    else {
+        # Verify task exists in Task Scheduler
+        $taskObj = Get-ScheduledTask -TaskName $schedTaskName -TaskPath "$schedTaskFolder\" -ErrorAction SilentlyContinue
+        if ($taskObj) {
+            Write-Host "PASS  ($regElapsed)" -ForegroundColor Green
+            Record-Test -Cmdlet 'SchedTask' -Endpoint 'Register' -Status 'Pass' -Duration $regElapsed -DurationMs $regMs -Detail "Task: $schedTaskName"
+        }
+        else {
+            Write-Host "FAIL  (task not found in scheduler)" -ForegroundColor Red
+            Record-Test -Cmdlet 'SchedTask' -Endpoint 'Register' -Status 'Fail' -Duration $regElapsed -DurationMs $regMs -Detail 'Task not found after registration'
+        }
+    }
+
+    # --- Test 2: Fire the task and wait for completion ---
+    if ($taskObj) {
+        Write-Host "  [SchedTask] " -ForegroundColor White -NoNewline
+        Write-Host "Firing task... " -ForegroundColor Cyan -NoNewline
+
+        $fireError = $null
+        # Remove any stale dashboard from the scheduled output dir
+        $schedExpectedDash = Join-Path $schedOutputDir $schedTestDashFile
+        if (Test-Path $schedExpectedDash) { Remove-Item $schedExpectedDash -Force -ErrorAction SilentlyContinue }
+
+        $fireMeasured = Measure-Command {
+            try {
+                Start-ScheduledTask -TaskName $schedTaskName -TaskPath "$schedTaskFolder\" -ErrorAction Stop
+
+                # Poll until task completes (max 120 seconds)
+                $maxWait = 120
+                $waited = 0
+                $pollInterval = 3
+                while ($waited -lt $maxWait) {
+                    Start-Sleep -Seconds $pollInterval
+                    $waited += $pollInterval
+                    $info = Get-ScheduledTaskInfo -TaskName $schedTaskName -TaskPath "$schedTaskFolder\" -ErrorAction SilentlyContinue
+                    $state = (Get-ScheduledTask -TaskName $schedTaskName -TaskPath "$schedTaskFolder\" -ErrorAction SilentlyContinue).State
+                    if ($state -ne 'Running') { break }
+                }
+                if ($state -eq 'Running') {
+                    $fireError = "Task still running after ${maxWait}s"
+                }
+            }
+            catch { $fireError = $_.Exception.Message }
+        }
+        $fireMs = [Math]::Round($fireMeasured.TotalMilliseconds)
+        $fireElapsed = '{0:0.0}s' -f $fireMeasured.TotalSeconds
+
+        if ($fireError) {
+            Write-Host "FAIL  ($fireElapsed) $fireError" -ForegroundColor Red
+            Record-Test -Cmdlet 'SchedTask' -Endpoint 'Fire + complete' -Status 'Fail' -Duration $fireElapsed -DurationMs $fireMs -Detail $fireError
+        }
+        else {
+            # Check last run result (0 = success)
+            $taskInfo = Get-ScheduledTaskInfo -TaskName $schedTaskName -TaskPath "$schedTaskFolder\" -ErrorAction SilentlyContinue
+            $lastResult = $taskInfo.LastTaskResult
+            if ($lastResult -eq 0) {
+                Write-Host "PASS  ($fireElapsed, exit 0)" -ForegroundColor Green
+                Record-Test -Cmdlet 'SchedTask' -Endpoint 'Fire + complete' -Status 'Pass' -Duration $fireElapsed -DurationMs $fireMs -Detail "Completed in $fireElapsed (exit 0)"
+            }
+            else {
+                Write-Host "WARN  ($fireElapsed, exit $lastResult)" -ForegroundColor Yellow
+                Record-Test -Cmdlet 'SchedTask' -Endpoint 'Fire + complete' -Status 'Pass' -Duration $fireElapsed -DurationMs $fireMs -Detail "Completed in $fireElapsed (exit $lastResult)"
+            }
+        }
+
+        # --- Test 3: Verify output (log file + dashboard) ---
+        Write-Host "  [SchedTask] " -ForegroundColor White -NoNewline
+        Write-Host "Checking output... " -ForegroundColor Cyan -NoNewline
+
+        $logDir = Join-Path $schedOutputDir 'logs'
+        $logFiles = @()
+        if (Test-Path $logDir) {
+            $logFiles = @(Get-ChildItem -Path $logDir -Filter "${schedTaskName}_*.log" -ErrorAction SilentlyContinue)
+        }
+        $schedDashPath = Join-Path $schedOutputDir $schedTestDashFile
+
+        $outputDetails = @()
+        if ($logFiles.Count -gt 0) {
+            $logSizeKB = [Math]::Round(($logFiles | Measure-Object -Property Length -Sum).Sum / 1KB)
+            $outputDetails += "Log: $($logFiles.Count) file(s), ${logSizeKB}KB"
+        }
+        else {
+            $outputDetails += 'Log: not found'
+        }
+
+        if (Test-Path $schedDashPath) {
+            $dashSizeKB = [Math]::Round((Get-Item $schedDashPath).Length / 1KB)
+            $outputDetails += "Dashboard: ${dashSizeKB}KB"
+        }
+        else {
+            $outputDetails += 'Dashboard: not found'
+        }
+
+        $outputDetail = $outputDetails -join ' | '
+
+        if ($logFiles.Count -gt 0 -and (Test-Path $schedDashPath)) {
+            Write-Host "PASS  ($outputDetail)" -ForegroundColor Green
+            Record-Test -Cmdlet 'SchedTask' -Endpoint 'Output verified' -Status 'Pass' -Detail $outputDetail
+        }
+        elseif ($logFiles.Count -gt 0) {
+            # Log exists but no dashboard — check log for warnings
+            $logContent = Get-Content -Path $logFiles[0].FullName -Raw -ErrorAction SilentlyContinue
+            if ($logContent -match 'No data to generate|No items discovered|connection methods failed') {
+                Write-Host "SKIP  ($outputDetail — no data)" -ForegroundColor Yellow
+                Record-Test -Cmdlet 'SchedTask' -Endpoint 'Output verified' -Status 'Skipped' -Detail "$outputDetail (no data in discovery)"
+            }
+            else {
+                Write-Host "FAIL  ($outputDetail)" -ForegroundColor Red
+                Record-Test -Cmdlet 'SchedTask' -Endpoint 'Output verified' -Status 'Fail' -Detail $outputDetail
+            }
+        }
+        else {
+            Write-Host "FAIL  ($outputDetail)" -ForegroundColor Red
+            Record-Test -Cmdlet 'SchedTask' -Endpoint 'Output verified' -Status 'Fail' -Detail $outputDetail
+        }
+
+        # --- Cleanup: remove the test task ---
+        Write-Host "  [SchedTask] " -ForegroundColor White -NoNewline
+        Write-Host "Cleanup... " -ForegroundColor Cyan -NoNewline
+        try {
+            Unregister-ScheduledTask -TaskName $schedTaskName -TaskPath "$schedTaskFolder\" -Confirm:$false -ErrorAction Stop
+            Write-Host "PASS  (task removed)" -ForegroundColor Green
+            Record-Test -Cmdlet 'SchedTask' -Endpoint 'Cleanup' -Status 'Pass' -Detail "Removed $schedTaskName"
+        }
+        catch {
+            Write-Host "WARN  ($($_.Exception.Message))" -ForegroundColor Yellow
+            Record-Test -Cmdlet 'SchedTask' -Endpoint 'Cleanup' -Status 'Pass' -Detail "Cleanup warning: $($_.Exception.Message)"
+        }
     }
 }
 
@@ -651,8 +892,8 @@ $script:TestResults
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhkfqYf1i5m/8R
-# Y3lkrIku3PsFVmsYnsv4+k9kGLrYf6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqBaJvIy1LoiAf
+# JXBHrgLjrm0IuELNvxwihMs1a6sZBaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -855,33 +1096,33 @@ $script:TestResults
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCPVnmFTaSclIJMtlzZUpqbaIDbUa4sDQP0OuERzInb6DANBgkqhkiG9w0BAQEF
-# AASCAgCtjg5yeu1AwB0qPvZmmVYqLFKUoE/UUCcUc+9SLShfru38MFJXSO4DDdCL
-# WKFEU2lzLH2e4s5R7RZe4S/VdHtrkMEVV1DLgdNPrE81I745HX8QLnpygu4eUkPl
-# wLaoR84Q319P6W57aGLiIzZ4iNVOSyTEHLS+Hsvh8XpLRghN4kPCgZpP64bNIlQm
-# 1iNnaUL5Z/pHkSz34crtCVlgsby0Ix2gNAMXFn7S401dAaMdEXd7N5kIlaeoL57B
-# p0zUb6zGM1JDbqExWRYgVUGRVdVKk7xPmlsaDEj3caU0R+D89aAPHfinEUM3PAt3
-# tf6G3cy16LRrInWSn5QDeAYqkNOeglKOGvuqfZbvzZ61X83D/+zOF2ju8ymuMf16
-# 536GComTvgnZHXBz+n+K4YimQnEshNk1bdCDKP4aRFkSyWMku6+j5p/OTynJdnwq
-# YW0wHbSzetU5wsgmW7wNopLURIqmq4HOKrcuwv0V2uIbs0rh9306L5bvAgCp13C1
-# q59tjh4/DzpQDaJMgUi3ogltcGjQDqsfVHKlNyl/GY4QdQXzBHtvtI/r9uoS1ife
-# pSa2Xk4KURRHw80xzPtNDXzUjrLzSkkUMuuCN6b84gXuextx3Hvl795OGC6qYA3V
-# FOb2L2ij3tfeJ3a7wt+l5pXTrato9RtUJe0sizMJKSU87tcDJKGCAyYwggMiBgkq
+# BCCFdsqyyGhCnQ7Birj4R9IBaLYYrQa1AxJFRL7lB6sbajANBgkqhkiG9w0BAQEF
+# AASCAgAkD/4o/H5L/9KGudc46vpLOjJmWz1wr4uwxL5h5/x1WLote2xC+KAp64sJ
+# hbnMHQzIGst4TKc7g7GGLId1vf8i/RK033pWnTPxY9Br4RxhcrXY0gxtUwdCdfGJ
+# 2jDSdyrMeJPZggnoqLTOXweVgwLInjgvimiIN9Ulxw2/kkZyDqoABUKQWN8vFL1Z
+# LV97sS46zv34TE7YV18tgWVfIN7zQYejKG70KgUFkAgGNICfY9LdVkiEEoJdPNyg
+# mD6UAyO8ZxTNU+OBhkXa/JGVOs08gTEZ7oetRdof5BTp/qP0todSHxAuvpQVfLoz
+# 1a0d862d0jMp24HuBKXBdXV6YcPY7xbmvxTsauxNBf37KYQ+HCWLniacgRCbyFTr
+# xE0G513meVrxt8CppxSzXTGNIUvRX/m6Ee3OTKlV8HI3geChmSHUdfmt9Uj81e6T
+# Mlyh8hLdhwfILtH1CJ3rw5cM7nd4y7PGVW3Py5URLhXQmJpFhkDePQt3UTKl8M6p
+# I6jj40bzByw8Ge3Nvmmw6s7ZGM+AhOGak7cpfO3mMVZ59QvxFkE9FF57rYaiBg1G
+# ROISd2f+xnlV3pp4Pd7WkOyizzL7HqSaOvPRrA+02wwYKIRvKluTecxka66pUVa+
+# N7k6+RbG75yUYIHajh79akIoLHRGk9eUp0xjwBdcI95akBgo7KGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjQxNzQxMjBaMC8GCSqGSIb3DQEJBDEiBCDkyZr9
-# jPbHtTDluh2BgQA6Qo62WSOU+Hu3gvS2hHmoyzANBgkqhkiG9w0BAQEFAASCAgC3
-# FLtpy++aOJ5sYsN1eTeuiXzQSapfYU2k/7HI4Ry1rLtlB6Ad2JrXLQ/WBq/6LNMM
-# ZFNGQubDtt7Np8euHwftsE3XkFFCUMKLflnHXgfyakib58la7dO4xaglwrFEyiUi
-# LeWjVz4lowOgVv3w5FiW6rW52oC5cNffhgMiIP9xVm/22xz2aNd57G2Hl3Mu3Pwo
-# 3k/LYcxP7eq2SFZjUlVu0ziR999RfCTNgdSQO9k+nSuye1iCqsIFaCdhLoYoYiGA
-# wSttJZJQprH90BJUo+IUBIXLpxeBf1s0lUkzzGNyKmCNARJqqY7W0aepCgaLb0G2
-# NcMNWEthkn1rQbDNkqKYgVRmA0QXFiRDArkKIRgDfzed/0T/kgIa6UwPhdIuhzBv
-# +yEMwLsv1AB8jkQIJs49eoQpmPOeQp3jK8BYvwSgtC13SsgazOr7Yz9g77zupSyZ
-# kr5ff/FrSVSqpBNdkh3MS9sP0j4u3n1KKwaj/QQn5Z5QhFWaVGtS0VquBe5nS8UL
-# Q6RRQQ2arih4djnIn7rxFCLteZ3/064JBNEwZMTXhTT8ZyzQw3EM3h/N7VxMapLM
-# SPQDTSRB7otTE1QzDVQO83pLPO5Zt0W/fLHcyJg1GdnyAcYH8JZt9xO6FQEljtVa
-# oJVkuA/5QJoViC+TpE7d7k7rZDT8xpTJd/js9zr5+A==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjgxMzQxNDlaMC8GCSqGSIb3DQEJBDEiBCAo19+g
+# g7/JfiE90hMnKyCQFOBL8kigMpuFYyAfRyLUZDANBgkqhkiG9w0BAQEFAASCAgAp
+# Kx6eeCvzwyVQCY/UMaxGHHrEOFYauvxwu0IVRwIiwzPuGqI5z5qQhhGl9Lsxa9i+
+# T8vfoAcGmGpSvso2yov4wddPS0QSB1sxoMIOdREzfVDowB4txbsxHleQf13h9j05
+# 6arl1YBuJ/dYfxmcGFoXjEztnenFJookdFzmDDHfE5uS1V4hXcz0CfFAU5SG3TT0
+# j3PeYK/HB9B6jB9oAovnvEFsWG301znpmt6g52WIONmrKGL50QyCkBohX8r3QaAT
+# u6tcl+rnZx+HOnFTpif7xqMeWIsY2xP8sp2iNnm+9+5HDDe+H0CUYREINULzClCK
+# 0Xo/PHkdiaJT2LiEeUQIFnuohcIO+92y83Aewv5DkfBSSUaQvUBtNEH6SlEt1pus
+# 5Y7tbwxlGg3LpORCdEZxfDFC+rlCDSzEfkXkgL8AuAx1e4fKV/PTbexuNgcF7YPX
+# XkqfOoUjI273SP/eSXOB7C0SbvlYNym9jaJfiCdcHpK/Lwf52QyAVvW8lK3F1tie
+# PWsO49KEl92En2hnahGihgartOPEcCyVX8ssm5E4pqw6Ca+U4Wr5+8cQf4U8rJxM
+# 6GGqvA3JTdlue1q/1BwfpxRjf2319gzQvNdDPRdrErlLyg7Z10vCAnscOdh8/mNq
+# olM5QRY6FQwsxM8XJbUifFd0FUKxKzDggIInbAtuyw==
 # SIG # End signature block

@@ -436,16 +436,18 @@ switch ($TriggerType) {
 # region  Build Task Action + Settings
 # ============================================================================
 $scriptPath  = $MyInvocation.MyCommand.Path
-$psArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$scriptPath`""
+$scriptArgs = ''
 if ($SourcePath) {
-    $psArgs += " -SourcePath '$resolvedSource'"
+    $scriptArgs += " -SourcePath '$resolvedSource'"
 }
 if ($Destination) {
-    $psArgs += " -Destination '$resolvedDest'"
+    $scriptArgs += " -Destination '$resolvedDest'"
 }
 if ($Filter -ne '*-Dashboard.html') {
-    $psArgs += " -Filter '$Filter'"
+    $scriptArgs += " -Filter '$Filter'"
 }
+# Legacy $psArgs kept for display purposes
+$psArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$scriptPath`"$scriptArgs"
 
 $logDir = Join-Path $resolvedSource 'logs'
 if (-not (Test-Path $logDir)) {
@@ -453,15 +455,22 @@ if (-not (Test-Path $logDir)) {
     Set-RestrictedDirectoryAcl -Path $logDir
 }
 
-# Wrap in transcript for logging
-$transcriptCmd = @"
+# Build the full command as a proper multi-line script, then encode as Base64
+# for -EncodedCommand. This avoids ALL quoting issues with Task Scheduler.
+$fullCommand = @"
 `$logFile = Join-Path '$logDir' ('${TaskName}_' + (Get-Date -Format yyyyMMdd_HHmmss) + '.log')
 Start-Transcript -Path `$logFile -Force
-try { & powershell.exe $psArgs }
-finally { Stop-Transcript }
+try {
+    & '$scriptPath'$scriptArgs
+}
+finally {
+    Stop-Transcript
+}
 "@
-$oneLiner = ($transcriptCmd -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join '; '
-$wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"$oneLiner`""
+
+$encodedBytes = [System.Text.Encoding]::Unicode.GetBytes($fullCommand)
+$encodedCommand = [Convert]::ToBase64String($encodedBytes)
+$wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
 
 $taskAction = New-ScheduledTaskAction `
     -Execute 'powershell.exe' `
@@ -552,8 +561,8 @@ catch {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCmwQcz7T09xCEb
-# 7k+d4/tPjqLtFPJmJ0E22+gPtZJP7qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFk4FFWzywbQ22
+# VCCmVGykOKQDVtmRU+Yt3XBf7pWyZ6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -756,33 +765,33 @@ catch {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBSBfPUnX6X1ucAVrgp01o3BgDhG+fe6VzcKEoPu8lDizANBgkqhkiG9w0BAQEF
-# AASCAgAOWlUxaivgNmXOc2iLgJB7BA7jtHy3qzi8rDB8AbZxliwVllXo71tf293L
-# 0M3h/OI2l306eFp8+SqmaSfUlSgzfPbsnfDUIONwR0WnOZZVpE9NqUqGSUstyLrz
-# Md9Vn5A51t/8MSXJCsY9ReYB7Qmfz6h0bAZu6wlnB8AfxeWgmB5IWlzvSNZQogoD
-# dlTQv/5pifaKaNv4VwFE4Pg6fttH3zh2O6j8b33DBxV1dBP6SFfzuxhOGsqsz4Mx
-# tdcJu335CbLNyhEfkGt1bbJt+QDdXOfGgsukUiwPmK41gzOt/HbtR8u+AevEN8GZ
-# guCV/5zP6Ylibpti//zD9pCRH3BkOEAaeY6o+jSG943zaMeR6SpCe6Jhzwz43mtm
-# eUb7H27S6ugH33IsZZtXRxk/SfsD+WxubztBb+SexFJA00mQrUOmKZ5Yfmtj1N2S
-# BqjatuIeN8JEodtTxdG0deNk6PQid4T3CPNREO8eIJAQgwxZ5DgqOr4/RTlogh3g
-# bVndysI4bWucRyU3vfSBNK2hIJwxC1IPkQRz7b8NyZ4ef4xq8F76ocGdzzJKNrIX
-# 3PZ0tnAPlE7J+I32jx24cDQrXxNgmSYbtgr/R9CK0L2yyB5ubVXBFmdekmUZdwvq
-# XpdFcOuEsOUrsfui46mUsDaFteIIG7Qi1YxZv+jdxio9L1LhHKGCAyYwggMiBgkq
+# BCCcdxevQrR02fzGUD+ylUFJnv4nYlj+wggLWM3uuj2KZjANBgkqhkiG9w0BAQEF
+# AASCAgBcbyAvgbdg1OMmBcMBVTg7MGl2/5O8cwvBBPEUEG4r5q2hcyYm64ZoP9F/
+# 787mcYkBwKASuuxtnuRaXHZoZIANLlcVvnbtfYLq+mPmS77n6a72rlq8lphpZ7Bz
+# 8698aYC+M/bh5Oo7hRnj5t+990LDC6dkqnpL2OCkGT23ylBnnEZapgunC1YZGJ9O
+# vHO/ZE64JSTJyf0eddUxEFvqz7UTRMEFB4xtVX3iNjyWLaxNNsgmWL/tLJioJV0g
+# +yFILbnBKcx2ANmrnkAdUSrWpoxNhlSAR40B/xmfW2wuUTuidTHX7cFHNPdNgAMt
+# bAkuJfMHlIXR7uOgQgk1luaQ2bd1qLLx39XApIFQZgqnoYiCaHcH4e0EEIPJ1Qis
+# o3nzjt6FYeIA30sfVoo7Z1jWxE+E64uk/GUGhFMVf+BEnymYED0tsYaLdzEw3UHQ
+# MlLhaT43B3Lsk4bDIzk/Z70Pj+Kr9n5OnCpj/c9l5ssRuJ0709ZGyXaBkbuefj6N
+# dggZzHn3ZrwjovFYsls5ipiR6BdTkaemztRPuRL2tjByw0Ne7vbLHU9oDBUJzZo/
+# WbWnT/t4gFudxJP7DcEX+dhiaJOxh/6ZtAlFfcG8PGwFgY/3ZrCH3sUVE9UciQ9E
+# WJhzLBqBR3PHf6Xt5iiLMQ33rBr02sQtuIDdFyUR3vnvFhKFjaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MDYxOTMzMTNaMC8GCSqGSIb3DQEJBDEiBCChKmX+
-# tfo6MlD9oEctPAR3tr4jFWYf6reFFdeArOrFDjANBgkqhkiG9w0BAQEFAASCAgAj
-# nfzoILX67xCg4mWF+PVRV1B6vLnnUTy8Cu+jsu3ei0spc82qtdpqOWw27ezhWEeu
-# z0I7/4fm8HZf2GWZPy3zgT7UK+Kh3OOmv5pWzz0e3jSo/YF7U39gDXbv/EFNUXTo
-# 62tSazGLAhhyH/UTzMzOuLETQ5MLy0YD5srlvELoYImYU6Cg50hSVMHQb1pld4wg
-# VUWzilZq4O9gs4HO/bI/rrN7TJET6GphtaE/8GbItg1arSPZvU41LxokABMTXhdW
-# 0tlr09lVb4s+/nVGbCRYi8RRALkB3VwEdQPCWxVwG+EMWAvqXTiinHA8TT/6IBlQ
-# viqcYZdrpKx1rno1RbGRpmhp1rL/yWAzUxcwvWGVwpk5FhWQnywrOaLsm3Zk9lAS
-# ibeKccgYGLWKtxYGWQDDQdcIyMXwFEn51Leojt9DK6blo3F6vMoA15/qB2p10Rg7
-# acOb6NA+HC8amC34TFDlxc6RPqEnL71jlA71dLsUFIbs2AhKR6aK/bguDaJYW800
-# BmHjOJb0NcNs/sNtFxC1XNniuoSDftSRDnARlbqmGj28ceCdIbbPmsePZb8Nckii
-# 4C8O5qxC5spO6HTKk0nLy7+gdOhXZzcQANyFtwcFo2CAfTlfHpLQs2upS5F9GeKJ
-# suKfTfuwyxFl55SSBlaRFi2OlDhaJTd5w0kv7fmfwA==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjcxNzEwMDVaMC8GCSqGSIb3DQEJBDEiBCAkLlfr
+# WDwRj1k302sM7mQLcrTe1lk5sRTtA4rw+YxSDDANBgkqhkiG9w0BAQEFAASCAgAV
+# J48uge6/fpmJlPH1373GbBKbPpIIZjzDvBdrLs91GJ3IlTTZ6cosErG0MBNbMzGy
+# zOjR/tP39J5OwnKE7jtFynJc5D5hQ1z9Wfh4qU4rVvAsTow1P0atxhpOhuHKioBK
+# XUu2I3H6WziWJdQUFxOW2qW6EgWNhtldGHh+wsARq9k1d80D3k76kmi18cpmcmnC
+# mZACMpGHkPNVR3SxxZuBul9sY484F7UX55PStGVDldGIevFkhzTMHrQDA9SbjVZT
+# Zcc6qjnjkDIu/ZNuT6CQeo8r9oimRDuW9Jhxm0XE+5adpAmXEU6oYnWNFedRCroL
+# 0M+dnkf2CHjHIJ8mgFG/JpB5CXDwmW9azvcdcFIjp8J5zaxlt5S6cPpwitQo0Hno
+# IVui+x5IMBH2vhyPdiupdflbqKJH7oeNcK2/6KhJnkxYO/qNWjsphlBtuuUQMbTM
+# QshKpP+a2hz3W/m7YojvQdqqmEhqM/wa53MpvbX0rZPksPakOpduWeJtPpOd8Mhc
+# fEaEsnC/ucrml0Lu2NArCOjpJq9IHfSR6K33SnsJFff/FEyCGI/atkEs/IIH2pgq
+# AniverdIGdUc7zo3Si/wqk5s/Ng5vcDsxtuwWJ8aaS1lThotCODnTZRqHml+fYfw
+# vYN+c63pxjTOlHn1boQpi1P5P9IgYyBz3Cm1uM4ELw==
 # SIG # End signature block

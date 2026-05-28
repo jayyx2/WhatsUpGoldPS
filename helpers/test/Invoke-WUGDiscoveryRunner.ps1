@@ -4,8 +4,9 @@
     generates real dashboards, and produces a WUG-ready monitor plan.
 
 .DESCRIPTION
-    Runs every registered discovery provider (AWS, Azure, F5, Fortinet,
-    HyperV, LoadMaster, Proxmox, VMware) against live targets. For each provider it:
+    Runs every registered discovery provider (AWS, Azure, Bigleaf, Docker,
+    F5, Fortinet, GCP, HyperV, LoadMaster, Nutanix, OCI, Proxmox, VMware,
+    WindowsAttributes, WindowsDiskIO) against live targets. For each provider it:
 
       1. Loads credentials from the DPAPI vault (prompts if missing)
       2. Runs Invoke-Discovery to query the target API
@@ -47,6 +48,10 @@
     Include Proxmox VE provider. Default: all run.
 .PARAMETER RunVMware
     Include VMware vSphere provider. Default: all run.
+.PARAMETER RunWindowsAttributes
+    Include Windows Attributes provider (WMI hardware/OS info). Default: all run.
+.PARAMETER RunWindowsDiskIO
+    Include Windows Disk IO provider (WMI perf counters). Default: all run.
 .PARAMETER OutputPath
     Directory for all output files (dashboards, plans, report).
     Defaults to $env:TEMP\DiscoveryRunner.
@@ -89,6 +94,8 @@ param(
     [bool]$RunOCI,
     [bool]$RunProxmox,
     [bool]$RunVMware,
+    [bool]$RunWindowsAttributes,
+    [bool]$RunWindowsDiskIO,
     [string]$OutputPath,
     [switch]$SkipDashboard,
     [switch]$NonInteractive
@@ -97,7 +104,7 @@ param(
 # ============================================================================
 # region  Smart Selective Mode
 # ============================================================================
-$runParams = @('RunAWS','RunAzure','RunBigleaf','RunDocker','RunF5','RunFortinet','RunGCP','RunHyperV','RunLoadMaster','RunNutanix','RunOCI','RunProxmox','RunVMware')
+$runParams = @('RunAWS','RunAzure','RunBigleaf','RunDocker','RunF5','RunFortinet','RunGCP','RunHyperV','RunLoadMaster','RunNutanix','RunOCI','RunProxmox','RunVMware','RunWindowsAttributes','RunWindowsDiskIO')
 $anyExplicit = $runParams | Where-Object { $PSBoundParameters.ContainsKey($_) }
 if ($anyExplicit) {
     foreach ($p in $runParams) {
@@ -145,6 +152,8 @@ $providerScripts = @{
     OCI      = Join-Path $discoveryDir 'DiscoveryProvider-OCI.ps1'
     Proxmox  = Join-Path $discoveryDir 'DiscoveryProvider-Proxmox.ps1'
     VMware   = Join-Path $discoveryDir 'DiscoveryProvider-VMware.ps1'
+    WindowsAttributes = Join-Path $discoveryDir 'DiscoveryProvider-Windows.ps1'
+    WindowsDiskIO     = Join-Path $discoveryDir 'DiscoveryProvider-Windows.ps1'
 }
 
 $helperScripts = @{
@@ -161,6 +170,8 @@ $helperScripts = @{
     OCI      = Join-Path $helpersRoot 'oci\OCIHelpers.ps1'
     Proxmox  = Join-Path $helpersRoot 'proxmox\ProxmoxHelpers.ps1'
     VMware   = Join-Path $helpersRoot 'vmware\VMwareHelpers.ps1'
+    WindowsAttributes = $null                                       # Uses DiscoveryProvider-Windows.ps1 directly
+    WindowsDiskIO     = $null                                       # Uses DiscoveryProvider-Windows.ps1 directly
 }
 # endregion
 
@@ -329,7 +340,7 @@ $ProviderConfig = [ordered]@{
         Targets       = @('fw1.corp.local')
         Port          = 443
         Protocol      = 'https'
-        VaultName     = 'FortiGate-FW1'
+        VaultName     = 'FortiGate.fw1.corp.local'
         CredType      = 'BearerToken'                # Single API token string
         Modules       = @()
         HelperFile    = 'Fortinet'
@@ -343,8 +354,8 @@ $ProviderConfig = [ordered]@{
         Targets       = @('gcp')                     # Uses gcloud CLI / service account
         Port          = $null
         Protocol      = $null
-        VaultName     = 'GCP.Credential'
-        CredType      = 'GCPServiceAccount'
+        VaultName     = 'GCP.ServiceAccount'
+        CredType      = 'FilePath'
         Modules       = @()                          # Requires gcloud CLI
         HelperFile    = 'GCP'
         ProviderFile  = 'GCP'
@@ -385,7 +396,7 @@ $ProviderConfig = [ordered]@{
         Targets       = @('nutanix-cluster.corp.local')
         Port          = 9440
         Protocol      = 'https'
-        VaultName     = 'Nutanix.Credential'
+        VaultName     = 'Nutanix.nutanix-cluster.corp.local.Credential'
         CredType      = 'PSCredential'
         Modules       = @()
         HelperFile    = 'Nutanix'
@@ -399,7 +410,7 @@ $ProviderConfig = [ordered]@{
         Targets       = @('oci')                     # Uses OCI CLI config
         Port          = $null
         Protocol      = $null
-        VaultName     = 'OCI.Credential'
+        VaultName     = 'OCI.Config'
         CredType      = 'OCIConfig'
         Modules       = @()                          # Requires OCI CLI or SDK
         HelperFile    = 'OCI'
@@ -410,10 +421,10 @@ $ProviderConfig = [ordered]@{
     }
     Proxmox = @{
         Toggle        = [ref]$RunProxmox
-        Targets       = @('192.168.1.39')
+        Targets       = @('192.168.1.30')
         Port          = 8006
         Protocol      = 'https'
-        VaultName     = 'Proxmox.192.168.1.39.Token'
+        VaultName     = 'Proxmox.192.168.1.30.Token'
         CredType      = 'BearerToken'
         Modules       = @()
         HelperFile    = 'Proxmox'
@@ -432,8 +443,36 @@ $ProviderConfig = [ordered]@{
         Modules       = @('VMware.PowerCLI')
         HelperFile    = 'VMware'
         ProviderFile  = 'VMware'
-        DashboardFunc = 'Export-VMwareDashboardHtml'
+        DashboardFunc = 'Export-VMwareDiscoveryDashboardHtml'
         DashboardFile = 'VMware-Dashboard.html'
+        GetDashData   = $null
+    }
+    WindowsAttributes = @{
+        Toggle        = [ref]$RunWindowsAttributes
+        Targets       = @('192.168.74.79')           # WUG server (queries WUG-managed devices via WMI)
+        Port          = $null
+        Protocol      = $null
+        VaultName     = 'Windows.WMI.Credential.1'
+        CredType      = 'PSCredential'
+        Modules       = @()
+        HelperFile    = 'WindowsAttributes'
+        ProviderFile  = 'WindowsAttributes'
+        DashboardFunc = 'Export-WindowsAttributesDashboardHtml'
+        DashboardFile = 'WindowsAttributes-Dashboard.html'
+        GetDashData   = $null
+    }
+    WindowsDiskIO = @{
+        Toggle        = [ref]$RunWindowsDiskIO
+        Targets       = @('192.168.74.79')           # WUG server (queries WUG-managed devices via WMI)
+        Port          = $null
+        Protocol      = $null
+        VaultName     = 'Windows.WMI.Credential.1'
+        CredType      = 'PSCredential'
+        Modules       = @()
+        HelperFile    = 'WindowsDiskIO'
+        ProviderFile  = 'WindowsDiskIO'
+        DashboardFunc = 'Export-WindowsDiskIODashboardHtml'
+        DashboardFile = 'WindowsDiskIO-Dashboard.html'
         GetDashData   = $null
     }
 }
@@ -681,6 +720,20 @@ foreach ($providerName in $ProviderConfig.Keys) {
                 PSCredential = $vmCred
             }
         }
+        { $_ -in 'WindowsAttributes', 'WindowsDiskIO' } {
+            # Windows providers use WMI — pass PSCredential directly
+            $winCred = $cred
+            if ($cred -is [string] -and $cred -match '\|') {
+                $parts = $cred -split '\|', 2
+                $secPwd = ConvertTo-SecureString $parts[1] -AsPlainText -Force
+                $winCred = [PSCredential]::new($parts[0], $secPwd)
+            }
+            $discoveryParams.Credential = @{
+                Username     = $winCred.UserName
+                Password     = $winCred.GetNetworkCredential().Password
+                PSCredential = $winCred
+            }
+        }
     }
 
     Invoke-Test -Cmdlet "$providerName Discovery" -Endpoint ($cfg.Targets -join ', ') -Test {
@@ -850,8 +903,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFVswkEVkZY0c1
-# mfsRuLPb8rngd9hIjIQNu+oQUcw93qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyqF8susyMCcps
+# aQfnjE15DMJeEPjjOcl665+R4Xy9KKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1054,33 +1107,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCC7U6IdgoPbCgWL6UBisvk3eB1oqmj2MPKe6nJALtB0DzANBgkqhkiG9w0BAQEF
-# AASCAgDWMNpJ/mC5LMZ0jypx4cu/xYURoHj5CQ/3StEqyQnfWPSozdfpV3a4B7E8
-# yAmz7KQKJE28ZKMYwavr8JNCNrDw+ww6EEbf0j9nXjedbIY6hmPWrIzA7GeVAoPa
-# P4GSxfC2YIodnX5VZIp8F5HHQ/HocHz5YCnAcR4QpfaCXMQWg6rdPlINv7Chp30B
-# cagJ5e5nw5vV8hMlDegbIiQx7/GscUH7GIaeaFo8u3VFD7QA3yYGW6xlFjfpEUgf
-# wQhBtL9JUElBk4XUk3AijDzOrnGe1BAy5fClp8WmUR8FfopLvCIoxbzdCDt9x5cI
-# 7Aq/gWUY/1SkibIN9h9PrigDLKUyWuRj3BT0HBhtA1Jr0VqgHHSaG0Jz4SoFBpRr
-# pf4R407fcOAwhYiRZCxiBLIKca5rq7Gngwa2+dIqYeU0YS6QAB3DFPXZAYiGHcY/
-# keWI/HdPPdV/YokUlvVLjCFFtaN+AFHXkQOsQriQiMm4fDrgWGaZHiuyIMIy7Utr
-# hkLdijfcB6iagtoDUj8fb9oLP5gRj8fdGaqJlazlHPjvNtBZSAsOk4Q+XyGoYh0X
-# 463WRLvJ8VY523OfWOcLT/NBjg8lHxUBig5EK2NiAuBFQmvNvJ1UpVzGld8Z/lzD
-# QxuZUK5doPhtCsQ38mViWtbgB88S1hhynetFzHoepC1xpeUpmaGCAyYwggMiBgkq
+# BCDi1Uz19mnGRdG6TFDt395F02e6/TpfPrVvzGcQ+RcT+DANBgkqhkiG9w0BAQEF
+# AASCAgDEQwdHknZWlgr6v7esHO6BUGd7a+np5yPBf6rUaJDhlkrNkpzFfRPydN2X
+# zisQHeIMk51YxSWDWZTDW8x4XFoKO4pPq/8j8bk/0wIt5bjHfBz36QM2yHSk90gX
+# pGZmwHzjmLyh8NWHhOcXIjTe+pVtd2q8Sl/Hx3ytCv4uctxpALrRlP4ytdx7uyyB
+# Lon49A6yNHx3pe8BgVBPznQOYT0ljIkTqMpP8Eis+RSdqkFEb+2bP3rkkyWnS+io
+# wJPARWLcayGMGNBAmQ6MkSd9yuCrRD9cAcCxkSDqeAU3xNpsXJpmyy9+JTbD4oH1
+# DNwJcKpMLINwSSKc+LjKtq3QuenXogwn9MKmr1qwlfAIbVkNAi8SXRkSjj7t7BHy
+# IbGf6EsZIM/19871YM+ZPo7ueXhS5aY+NrS49AVJfh+lJoAejGnJrjMsgzwIcWYZ
+# jhtf6c6s7rYnDqq/+NLpG0vaazzVwBX4Z3820uO3YejdOcP67l/KVR8uWM2zR983
+# Q1sr+HTaPjj97E05o9mRafmDnJXwQx+5uaChV3rg9Ve7RSDfWec6tmU8bsgqoNKF
+# nOfZNj95LqV8hF9ml46JZdQJJntuASYdXrgHWOJXnxdemE+t20KPlSBZzUrc2wcO
+# G0pV8SBcEqrCjf+X64d+Jv8sSyItNa/9fDXhSuEwpA8ej5z+yKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MDgxOTQ2MDBaMC8GCSqGSIb3DQEJBDEiBCBuKsQZ
-# +uGicza0yHNnsb8ENr+gt+PhLrTDziAzeRVLCjANBgkqhkiG9w0BAQEFAASCAgAp
-# D6dtOUIceC55M7ULfS9zhJiMAKi5z0ESZKqFUFcTFVrwgEiAzZNmeW3+3V6zypbH
-# fWN8DkDte2tYVgMtgdAchaX7QNFqtkvA7wcp8wfebtJrG3HGDGXwgZ5wLoUkmyWT
-# i7w7GwSQ8EBYks7UfIGvPMNwKHTMrNNkQVGh2du3TKtVIj34EQlSGoaAT0BC+kKU
-# kDCLaNA6Ea5VFXvfbP5qfMCMcXaveZ6t/FrHwz/2akUUyDNLeQc+fnWzdqyhdBHe
-# cS/KPpzshaAmhXCurP/+uKpGl7U76DR1bNMMVL/xJWqoPWOWxrYKRR4oiXChnLFO
-# 81Dk1QyMvEEGkteY+lDs2huiGNoVz8Wwj68/bgefmFyD8TZG65va6uWrv7N82xze
-# mN3VH4XQU+go+rIR3mpnxliZUjpPpk7kiErWri/fl9qbEsYIrg60AShTPoK+C23e
-# kN/lFHlO5uXhiBar61kiJKaHwzf1MVosns+fHO5AoBNHLhrHom5carAk9iMIzHO/
-# xmvpt5sRvTMFdM7WTR2saCZw8oloIAbPdqMUZFuS1LbUZpO3ss1GFJ1OAx6dxc1P
-# wGN3rt22CjunqXSfo20/08+xhVwaiGajx8Ev+6hOs8CsU1EohU4LAxJoucR+fdHQ
-# f2jJEbFdknqavxq/KhLwhnhBZTKCJKw3SXUXojwUEQ==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjgxMzQxNDZaMC8GCSqGSIb3DQEJBDEiBCDn4XE9
+# 6vNMFOwHau0WCqboz5q48FdnwuVWhI2bE+AqKDANBgkqhkiG9w0BAQEFAASCAgCe
+# ItF7OKHMNgLupatw6Z6pEVjnIAjlZO0n2znqq31/crV3MuFjVnYzTuluTXNg7YWX
+# 9tUQSBmU9+Yapzg799dB3wecpLm2C7TD4Tov9k8OsTSeRr57/HLXjuQBxcm7wxvz
+# CS9Bpz7f7Neh5xwtVy5ppSaDYt6Xw3iSVBSkfiN8ms0cdH/Eg9uEPQ2d/hfrqChM
+# uou9eDLQBRNeYYBtgpuOJg7tjjKDSuPJsXn1YZx2MMQ0JA/d0mostC8s9YuHIYeQ
+# SehWE00/0p9xPHrclMXbBsrlGtOAVg9LZoJklFZNlQ8Q3kezGL8I5YjAmmiAC7Bd
+# 5RXJNENglASlHZYt76wlL4Pizx6Q+TCdmxaocGWKYXFSu/rNlr1MfC31cu4EM4Zh
+# aOD9zqAswNLKNEyt4jBZiuWjQBN9Z7cVngvsrSjk3Ov30IV+cM73b7G2rz2Z0rtW
+# GaYWZ6U0+WWokDZpfqgiTvtn1mvEn6iWUtKK5heRkJ9camjqC4W++w6k0D2oPeoy
+# /H7PkCXMVIw9C7KVOeUI6vS/MYooknfsWrIfXGbCyYyAQ3HI2Ohp0pi9oUiIo2Z6
+# nLA2sj1TcEyGRQzAy4UdYL6w3Vy9H3TxTMs1Va1T3B4usRo7ve2tjPa5jB9j7Z4X
+# KgRoR9g3QW6cLwdhr/C+M5ZgSow7AQP8lZIBVy7qOw==
 # SIG # End signature block

@@ -767,6 +767,8 @@ if ($Action) {
     }
 }
 
+if (-not $choice -and $NonInteractive) { $choice = '5' }
+
 if (-not $choice) {
     Write-Host "What would you like to do with the discovered disks?" -ForegroundColor Cyan
     if ($standaloneMode) {
@@ -1045,6 +1047,27 @@ switch ($currentChoice) {
 
         Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
         Write-Host "  Devices: $($deviceDisks.Count) | Instances: $($sortedInstances.Count) | Counters: $($activeCounters.Count)" -ForegroundColor Gray
+
+        # Try to copy to WUG NmConsole
+        $nmConsolePaths = @(
+            "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole"
+            "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole"
+        )
+        $nmConsolePath = $nmConsolePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($nmConsolePath) {
+            $wugDashDir = Join-Path $nmConsolePath 'dashboards'
+            if (-not (Test-Path $wugDashDir)) { New-Item -ItemType Directory -Path $wugDashDir -Force | Out-Null }
+            $wugDashPath = Join-Path $wugDashDir 'WindowsDiskIO-Dashboard.html'
+            try {
+                Copy-Item -Path $dashPath -Destination $wugDashPath -Force
+                Write-Host "Copied to WUG: $wugDashPath" -ForegroundColor Green
+                Write-Host "  Access via WUG web UI: /NmConsole/dashboards/WindowsDiskIO-Dashboard.html" -ForegroundColor Cyan
+            }
+            catch {
+                Write-Warning "Could not copy to NmConsole (run as admin?): $_"
+            }
+            Deploy-DashboardWebConfig -Path $wugDashDir
+        }
     }
     '6' {
         Write-Host "No action taken." -ForegroundColor Gray
@@ -1062,8 +1085,8 @@ Write-Host ""
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2rBw2LrbHCrE0
-# bBNCyni8W3TDkDkbi0ufEF5agcjSgqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPyFJnlMl5Z7j/
+# JU3uCWCrT4hnovnIbzQ+J8CgVlPMp6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1266,33 +1289,33 @@ Write-Host ""
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDcvhxQk0WMaAa67imP4hvWhhgLqOLg2p+NoaNu6dOYhDANBgkqhkiG9w0BAQEF
-# AASCAgDzVB5kisw8HJ30+dT077YjIOXfMTgJC9ns91oQrEPudwO69+fT2IpOZcNX
-# nkc/SqqhFQ4Oh5tgyemQEyEKr+0RlKp7dLDI7RuZwVnD2LC+3o96R2KIq3atM6/H
-# rWVvQZ0jDKybFSBbgaQ/Wyg5+9dKxkuFr13iK7t2YQkVgbL3+L5CQKbXRYIPlfrk
-# EPWLKUA1NdMMDpiyA95xlUJd5tSQV05tf90HVw+CLxcKI1o583qgvgsDAutMBYvg
-# cGwBljz3oyW9k+6z+fH3QMldnoKtndnkBaBqwXOGXPeNjiN+2CzAksfe/NeWXxGi
-# rgRVlecrAmhyLHc81S7XUM+t4pXLEp567vEye8/lXiXf5BJLSqjn2Wf73AJH4/uG
-# S9bdW4vlMgxCSSBUXtJJ/8FQ1B6ISLo0TIzgrJtAteTtXYJ2wgFtbPiAXEP3xTAt
-# kIAyceFqkpZt3sV/HpDZPdD1u6OFDwJ52Y9IeCg7h1Zbd3gBFpHtOQ8eOHw1Cp58
-# KChOY7VLfF6u5WvcNrF6C8nNYwnPpquwe0QYfZrSTVdQOvSycI7Tzx9NusPxa/IF
-# qTnj6IYinRs13NTc5lBCmNeXh123JBvXwZce0KKiUcvlCl/fqtxw80f6UqQ0BtFE
-# 6eYqGsYaaiBC/7O4oq3sg4l1aSSQqdGUosIQSMj5ESRS10F3mKGCAyYwggMiBgkq
+# BCAXZX5t8CcO1ix91BCVqLnHw/zbdJzr8gK1Z8IerUENPDANBgkqhkiG9w0BAQEF
+# AASCAgDr28r/3SMCV9p7kiRqbobuq4UG4wXW/5iSX3WkEa6NSptcffPpvQbIbhOU
+# csfI5X/th4iABZCCp3WGfJXgr8FEj0Ts1BykEvr4EX27y65wyBo6UrGjSbLfm7lX
+# R7c0HiWlgWjMVD7qQhQ+jxMoU1KBEf29xdLNudBSBTThmGWX08q4TE8LmIv4QZHk
+# 9wrVxPpZNDW2nnBKHvXSUHvwTuNnDQJYijHE3Z49mezxUeVRPSWcmG8P6EWEv8eK
+# ApX/Jl7qYHlAgO7ADivJHx8W4QBy+HViR4IvQ3Y/9MrQkP9MBnOT8xAaBNzI9iwb
+# NmSBi+SOrz7CEQ0k8cTOHGBf7ghdQyPWYCZaggf6ILPzdwkmW3Ux8lNM1LTmmmlF
+# Upx48wMk086fwwpE+jVFB/UXV7Lb2HZpIUZO4P4DgOTTrTtK9zPkUwxs5mgdThwg
+# juY/Lw+hioWJazTKIPajAVOPqk2GuzWOIGbVJ1/fzkfV5rLsoXE/okpaFZnAF59w
+# gwdQq7JdwnI02NLetW/4f84eELJLrsR1jkUb9dqIr04LcAjoHO6HyvC3DgYYySL3
+# 7H+K6WzlRvneR9Kyzwof33/PzlCoFr0fo2crDq5aqgWgU58cQPMj96y5PDRP8fyS
+# vNmZNeIPhL6ERJNYDcjx9eiXa4yLF0ORIUFuf3NNvWxz5WscY6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MTkwMDAzNDZaMC8GCSqGSIb3DQEJBDEiBCA7f9Sg
-# nBmVoO42nvSGARJYbvufqNBZeWAcg0O7VV9AqzANBgkqhkiG9w0BAQEFAASCAgAI
-# rl12k+8w5+9mivaMrUDYkntNoKsWf4jYw+EaOmQBbUUjI4F8Kv28/m/pnAnoaaC1
-# dESFnJHNGChBHrFZo/UnbbTE+J3tiIcgAP2eGKSMr74GJ9+/LEnJgMgeCPpcqlV9
-# JgIR+IUd0SoajcmUuN8EOADxOiP3YbgIGj7kVpsz3BgGyTTw7bYm2SBgukyLjghv
-# EfG8gIy2usEyIODY3sdq+GRL0XOk8NLQhS0RMFtkuIcQ7Uj/CsfRPBO7qC4Vs4m/
-# pzhQKl2+qqXiwmVBlSkAkAwSWJuC4JGXBOtKU4FNc/FzJQ/ptCJuX4+F7UtoGFOO
-# 9l0kTcBzZ4uzIC4ZFLWrZjOK6zHVcAVVRpltZ1mOlqusskkzuU4PofpFy0oINBjq
-# LQIBtUAZfMx8LM/YMY06Gl/pQ3TFd0AMxXx6HG3Xvq+qYSWCx1WwnSTEoXddCmEM
-# RCvqKtjA+ATX6rLE3Jvg05WB6CYXz/exi2a1/lRhTn0kM4VVEt2PPyQAITowhPSw
-# GBBRQ3F3ZudUmL18lyKmv6tGI3xKgkx2ZoJLch/WaNxrPR+dhrlLoLnNec6ERzXu
-# GtrINnzGZOR/euNjeuG+uqkwHhHB569KMPMkSjSPJr/KMjofZ/4agSvnU1Hn7m4n
-# fgnXnqdOZ3N+iG6EBNMlM1un/jAVAgMvo2TpWDfbBg==
+# CSqGSIb3DQEJBTEPFw0yNjA1MjgyMDE2MjBaMC8GCSqGSIb3DQEJBDEiBCCePe5X
+# N66RRBKPDaW3TKPOt5B6ghdUgIJlum1k4b5L6TANBgkqhkiG9w0BAQEFAASCAgC8
+# RIpYCm/NzwBRYzyLiydjbFLca2I0hrk/3dmvuBnFDbFYQSjwuXPjvEmFs7NO9EIh
+# dA8RqVn9j6kKfgMm0DoZBnGGe5NgZoZ53OPNYaYqj9zxvVsd93f+kTJa5vgjMoqT
+# BYz9aPmz+t1jNvKCnFSqqA7B1Zon8nVRtpTPkxFWc/CYQPu1QwYYhzPlOi2Po60Z
+# uVEJNBsTl1dWY6Sd8T+OsVxA7SmsZak0x3Olbfd+q6YHCRGRC26WQKwbiLQv9x2u
+# dAr0ftGRwgGWDWkAy3CxM31UHhuYl5vNbeCtDvH5eOfwINzQiJherif3ZZltTpA9
+# LALd9xQXm1jpbkNVZBEBTknMeKRtIuaAc5H831knNYEfJaBDH8ukLVURJBSijtXj
+# i0tHcL5R4Z1iFkRoYY7e7MEhKhJ3k8zFijjLOozpHc4Z3WUQzSfdAENM/NGt947v
+# oPUbLVXeAJ2foNhlXQXbhve05XMnWMhDGRiDZeI3iOY3eoLOwk2hM6m9TgwKpEZR
+# 6sacbvGGRh5nBrG1F6ZL5zkV3OCkDjidRCq7N0nCELmp+Kvs0RLIi6u3dqfgsFd8
+# yyNXayynEVm7Fkk23+lfvIzYY0pXc0HdtTCHbAPaX5zabhuEvPt+UvzEckGkOCRD
+# lgPdmQb+/bMzG3VshaHwr/inpos/4g3t2S7lc15mSg==
 # SIG # End signature block

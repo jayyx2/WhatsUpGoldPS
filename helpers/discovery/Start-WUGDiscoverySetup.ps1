@@ -114,6 +114,21 @@ $providerDefs = [ordered]@{
         ApiPort     = $null
         Notes       = 'Requires Bigleaf portal username + password.'
     }
+    CUCM     = @{
+        Label       = 'Cisco Unified Communications Manager (CUCM)'
+        Script      = 'Setup-CUCM-Discovery.ps1'
+        TargetLabel = 'CUCM host(s) - IP or FQDN (comma-separated)'
+        TargetDefault = ''
+        TargetParam = 'Target'
+        CredType    = $null
+        CredVault   = 'CUCM.Snmp'
+        AuthChoices = @(
+            @{ Key = '1'; Label = 'SNMP v2c (community string)'; Value = 'SnmpV2' }
+            @{ Key = '2'; Label = 'SNMP v3 (user/auth/privacy)'; Value = 'SnmpV3' }
+        )
+        ApiPort     = 161
+        Notes       = 'Runs on the WUG server using the built-in SNMP COM API and generates a phone inventory dashboard plus optional SNMPTable phone status monitors.'
+    }
     Docker   = @{
         Label       = 'Docker Hosts'
         Script      = 'Setup-Docker-Discovery.ps1'
@@ -988,8 +1003,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTOHqxiC1cslS6
-# V+fFK5OHp9DZEs6fC38uwaQiSWl1MqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkDwFJEDUDBTa4
+# 9MOVvn/bnWV/eJXRGfGY0lFLNVFoTaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1192,33 +1207,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBIb5lVYsjAkNuz+Ia3RvJLk/xtL0CSHF+ohxiGXCakuzANBgkqhkiG9w0BAQEF
-# AASCAgBFJAKuYPrYphmO6/6MDNeoLUpRSpfZQYgINOam+JofLmNv00Rk5sHnUZT7
-# /1OBuzfnqFDMA6cfuh2vEUyqixW4Gu2oUx1wmp0tuc3QXQwNqYl1/GMCGh/Uly13
-# P4ZM0vlijPSaosytExjAb0T1wsmGQ7/R7ABVI0RJc+TqhIpTcqPSbnM22V6NYLw2
-# aQXJ9H4XoKUQrjjSponi5NtGmvgITcoFKhUpCFqZEeN0v2O5axp7xKO0e8yav8zp
-# QnV+e3kcZucRUUDjtviWMqhIVh4H1c1X4m4vKMa2XocqLlIZAldeYVoKkpdQ5SLN
-# JfXJAgOFO+XJpMjUcE4/jzu6zYhoGHENUNEWJI3sBZHRBAnrGlbQ+MFmQCAOJJN0
-# 7zcd9KA9VDMlVneDMNZ8sQj6DB+dEccDTk3tOjraG6l720c9EK652/piqJPoEzsU
-# /b4uZRhYgnRcT+N+Qrb8TWoZHmZaeaVW7h80FmO1y/XWGObAVlm/YqfYQ3Ob2eFx
-# oSMbf/WV29/LgixnHkqqBFEpVyLmX5gIwoz4d5yvZ2ejNyjKBrxK3ZGj7RQJHPXI
-# sfY9Wch8yscjx3W4rUZNqlALtnzXU+ME50wN1KxWiihxNBZ30zVZ2efhkG2RL8KQ
-# 99Oy7yekeLBcHUEJ4Qkp17SH1uwbsp/tKRjTaGqYBH6dcRc7+qGCAyYwggMiBgkq
+# BCDdTtZJiKaGBegpVO2tX14YQZ51RER84ruKS6v6CbBGmjANBgkqhkiG9w0BAQEF
+# AASCAgBfiZbrW8tKWHh/4n6cBRPX7UJfOPxjob7L7ufIkY6vqrwq/0xTIuL6MhyQ
+# WNOiLK+HaBmGOrVABztWnpZVrQCq89U0kxItB3+KX94le22ZLzqA77IM5AGfvr2m
+# 4XYGtZDGMSnbnWj2SwcKKXWgRvcE5zN/3TqKUgqJKOzz/n0GPbE1JpZG7GFF4T4o
+# /zgI4/NqJCj96VOwuxZqXJsC8CcJxyoU9cA9zCBLy8M5l1Dbh82hE1tMJh7fqte0
+# GMhKIwrRXQez3o4/RLUaCOAtcXnao76O6KK5K02q0d83CIBZl/O21mNHbmM8/lNl
+# lAzLVDwLemrmAykfsNQmFpgMFPWC9/GVyqae/+ShxPpTu5naIttdPeyF6UHnActf
+# s+pua09hLzcKvudkUbBayIPCJLSLJtgs1jua0I0Rpw6vVAm6S8rHHIONVqrKdWLi
+# gWWuhyXt+yZ5JpgQ1Bf95G1bPfJTga8311Kp2IlPaL9ze4R2M1K1X09kZhpoRrIl
+# 5jqF6HsH4rSkZDKj7oWNki99mHraGIICb+VSsZs8Fng2BUw7Ft4+aoHih2WN555x
+# /Ogk/+Amp32KloF2C/2+Vno5CJ0iFXFsbMF6h1i1uPcywHc73u2vBjjdjJEP4P0h
+# JmKAVtF23hs/dJhKP2gO04Id/Y+RGniRS0T1GElvl/daCInic6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjgxMjA0MzlaMC8GCSqGSIb3DQEJBDEiBCCgfzJc
-# IJTbl6Tny/BzO+lzmxGv+mZKRYoTiMXiZTK4nTANBgkqhkiG9w0BAQEFAASCAgCY
-# trz/Z1CK4yEs2ZeloLoCiJW2ujnKSQf7oofwz24wZbuogwJilubW6HmMbXk1ONt6
-# bH/7HOMOR26DmejDc08Xe2WjU0uMLXgYYxaBl26XT9usTuJmYxRuihbvB7pLmceJ
-# wtZqnYUDTsf2ByLO6kgcrosprdCI9Use73RSLNh8CfYdnQmdoPPs5faFUtqkgZgo
-# BuTjz9PkzXfSRk2DITQm8J5EmX1/bm3ZVLwk+WtfkBMGbr/kdI+BdE2LVclF0Sct
-# HSKxbCKp6Q/9iktUAnBMS673V3Yvkxzu0geR78XbpNrogIcDnuE3K9KuMRE7tS/y
-# csSD2Jrx+LUjRoj5ATn7a5nmejR8TWWpGi29JYH+TrX9+QK5wCaYH5g+oEtPzAl0
-# hUj8pwv+DG/5SVMxHdwQw2I6JyyMGbs3y6//6q462n7dyn7dcRHjzvUBIKmppdwY
-# UT6k+X1BLgWSy6C7Er0SpM63eTFMZypJajYTltptVKlZAP9rvaMsuImvd+D6Pxrw
-# JD85yxWrFwwA8rEbqdUu+5ii5sZ9T41cpW9jhFABbRoguQPOmLofvfA8xK9Yy68B
-# fPyjW5H85IRFqfTRPumIWcAtR2lcupe5iQpCrlIwjQxtoKGTapvK1QvNyOy3BctN
-# D8LfzZ9JM/q28alApwoBHO0VdQhKmjOk6dV0amOJ+Q==
+# CSqGSIb3DQEJBTEPFw0yNjA2MTgxNzM0MzdaMC8GCSqGSIb3DQEJBDEiBCCHbTYT
+# 3rCFTCw0TeLCKeUnwT1C2xrnNGsU3cY9npofPTANBgkqhkiG9w0BAQEFAASCAgAt
+# eMkJLRHIBPjA+2aj9JEaO5Jmi+3hKrJ8Lpo1mC3g6crtOhGmFPlHGoFW7ftF/X/E
+# ko+25Dqvuidb+u3Lk39FVufZFzG9w8VF9OzUQeeqUmNEypnjeDTwOa2SJZaIy9ZQ
+# oeOBKKKdlK/FcPp8DchdmUGiePytrqHT0cijFK+Qm4lQLFWMBApPhJhVcbgRuKgi
+# ebfV/qQBOQiTe2O9Dr1FUqplfUGi2NIBEQkLqeLw5D5pJUyyob/ZZLXO6+iUZZFf
+# +dV30V401CvC7hKGJwfy6diFu1mWVzUls/9pVLUyFVjyxiVWn8o65faJlirY9Bwd
+# 82OtKBNjagO8P1XikYysDcAM8+sEbOUa+Frtd7IOBMiww5q9MoSKlKAcpNnUFNUQ
+# 7G8+k4YR0Yl3gOVIGIEirirFXEfRXN3F6mNogPOI87zcRiyzMxb/wpeG/3jZzUx0
+# qTn0HYvlDlnishb7xdolKV2WT114c7I36AyURGiAZfc8rJgb+zmTomaD0R4ovwiL
+# UV/8yaMTWsYw8vvLpKaA9I6KXijZyXLy/Nv/Y72Z6HyhUoM4gGDMLBcTZy5j9NIN
+# NdItva3kiKK66YFLM3w5DmgWDU4rjPaU6Jb5XGCwzRrpqncfdQUB9XGz8g0diian
+# MdRKBzeRPgtoRceAR3ZdAU63K+VEN2OLPV/e9S5YbA==
 # SIG # End signature block

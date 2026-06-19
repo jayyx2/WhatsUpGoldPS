@@ -138,7 +138,7 @@ param(
     [string]$Mode,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
+    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'CUCM', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
     [string]$Provider,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -167,7 +167,7 @@ param(
     [string]$WUGServer,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
+    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'CUCM', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
     [string[]]$RunnerProviders,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -202,6 +202,7 @@ $providerScripts = @{
     AWS      = Join-Path $discoveryDir 'Setup-AWS-Discovery.ps1'
     Azure    = Join-Path $discoveryDir 'Setup-Azure-Discovery.ps1'
     Bigleaf  = Join-Path $discoveryDir 'Setup-Bigleaf-Discovery.ps1'
+    CUCM     = Join-Path $discoveryDir 'Setup-CUCM-Discovery.ps1'
     Docker   = Join-Path $discoveryDir 'Setup-Docker-Discovery.ps1'
     F5       = Join-Path $discoveryDir 'Setup-F5-Discovery.ps1'
     Fortinet = Join-Path $discoveryDir 'Setup-Fortinet-Discovery.ps1'
@@ -629,8 +630,8 @@ catch {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBnPHAo8tNSWq4j
-# WthO8LdvIYBSPQToR3Pl8Aeg7cj4iKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDCteIzaEZttWL5
+# KL+77DJ8O+7K0B5MpyMXmESlBXk3baCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -833,33 +834,33 @@ catch {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDiS/Rx86IO7J7j+v/jkpOoX+iQEFGanNkYMfT2/fmY9DANBgkqhkiG9w0BAQEF
-# AASCAgDS973Ou00wvY6ZGwVfd5nwii3Vx2d0Y+o2/ZOmOP8CgqNeMTZ2QnvqFeLa
-# DId87S++JDwFrPmjleuRqG6E417VdCEXWtqp/iJUu04uO2xkWbRVbfOYJaY7POyd
-# xl6k07U7Xo0JGUfLhTXFi8CnWwoUqjQecPaq95Q4Mlgp6BVMaawJngap6ezT725m
-# zVfjPGtnCapvpD9FW8S7mjCQaSVHdGjO22JPy3td40DytVqXIzhfNplrl+ETapDy
-# kTsbzG2jR7tJOGZ2uri7I/pKj1FwEQo2EKOkpEN9eGdl5LJ2aW+I6FynlZW6Vfah
-# zZ/f8zFYzkD2aI3H8arHmneN3fSQaMncHNqJNk//s6L/db0lbNfpciQqRSCK+3wA
-# MKKHYi7v5n8ShqG1ZhdrH9xO6ARot4D/OfYE1E894mDbwxG8ZLeTV0BD8p5wKO9d
-# qU0FUsb4FXkvJbw0YracEny8VOxeI0WzCx4aLxe/V3+AyyvDyHDldZ6cJuXXDky+
-# zoFuuxoYNnUIMHxFQdi/I59nWee0e/kIfZVzb/aOokE38iXj18sRGhCJi+kELe6d
-# jKX/LflOBapZH3vuPSjANpsLD18D/JauDKWiENevyRlaFxr8l+PwlKa3DJ74Mw3+
-# Vp/uFVUnZe4I1mXRuf62UnZ0n29bOKBbpqfeHTW09ZRUfnP7UKGCAyYwggMiBgkq
+# BCADfeczJPUradLYuGl02kcd7SDM3VC3DnqaPPk2VMSsRjANBgkqhkiG9w0BAQEF
+# AASCAgB0SNrr0ElxG4pfghaCR5jCS48AMTCWwcBsQadvl8/Z2gJi6JBSDFFnwrbb
+# Djx9JmgVd+xqhZXmTorZLUtxTmi1vhmlpO4YT42HbzUegYCjNx2EmuUaH2zriWXi
+# b2/SPSsIzMxqaGwJ8d01s9ySRaL0FqhI25oxd7ohJ6J7M6j7+MORJgpJNMdUMeNE
+# VPWrk7hQXLzKeGs9bQ0vO8gFIj0OgWxxusCzRnC14Jg91MXveo2L4OMf3S6INsLR
+# FWikQrJB1+evd8r8Vs/q4zCH6mkvs2QBRM2w9NohZbxu88ac+No/FDmK5/AOTMV5
+# ZgoUGG/IBm0ei30jGBGc2Tk+R72Jy3OqkSN8LFMaVqmDDCDChWWBl+6Rk/nqZjvz
+# oP0jplRKXHGbMW8YAnhTd1fm4IGvtkbq/7VIV2LnbMRHR7M+Sgp2AOfFV9ulFOE9
+# Y/kOVaKB7Va7GCbrAN7Rd2uAqXlDlstdeqFZMHQMY9WWBlXwEBcMQuB+wRdkEKLG
+# 62vjgR2eoK4m/9BB3yEL7VUeJHWXF3RkF4HPFQP0lPrQsViUwZOhhXuLyGfEHKT9
+# cKpAmlvJcdmmMPGoDKOlzt7dZa7fUnbapXuz3JKQVTnoxEu6wFBEu0cPr2Juinhk
+# j39WT1yzTX+WlGRmLpLffWieZOKex2IkXGyDt8lix6Y/3YJ3IKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjcyMDQ4MzlaMC8GCSqGSIb3DQEJBDEiBCDu3gke
-# 1LUO5yIrqqOuowllnhN+cFMucZ/YB4C/OwKwJTANBgkqhkiG9w0BAQEFAASCAgCV
-# SX6mifk5Mi6o/kyFduKd8x3nrhXi7ciV3FDA1wqCu38stZuRhM3b03LYO0WVABFo
-# 6O8RJnSZhbrNBTI6HDZCA4sypNbzETkMCQMFtzrCil7mjfHb2s0yiwJTXqykDlhV
-# BjEeDujjKPzMdQJnKtB9tcTj+5uUqfPNgWbl6Z2Bj05CXVgghp/sc8G23upZaqqo
-# Y4NGwpzgV+vKgfJWo9O5fOe1t4R2/Kdb5KLb6J60y4YO5pYUoZA+NlojPkG0wv6I
-# EMXFNtxdFhDIGHqv8rC4JF2P+AN0O3Ly3gt97UW/brrvImUwxRZPLr4mQxYkzlU3
-# g3JJWgpDH/uTzonvr1dKA19ahMfk48JLBQz49AU9lawlBLNHuRHuXdA7J7baZD6B
-# ldvJy1uqowB7rDjUI9mT4AhOaBSctWA2D0lhedFMYu01bK7WzhIMjfQfDMqQFOfN
-# Gu9tuksYahfB5KfMoAUYbyjt0MUsbSyDYvP8NaTDZl47RibfSqDRLV+5BBOINh3W
-# wI+mY9cBaNJXdSZZU9jS53M+Ofbl9iLiT3cK6GzHEz8YH5wqHxAu2/9SqlM8PzZT
-# hkScSIBYY1nmsaTob7DuLTgPD/hoq6g7tUlImrVF9TGGQ2PKEc3/ofXXl4Zansuh
-# yoKZ3zzysLpUmkrWu8MwtjMvA8s9IZ3IxTf9qS99GA==
+# CSqGSIb3DQEJBTEPFw0yNjA2MTgxNzM0MzVaMC8GCSqGSIb3DQEJBDEiBCBiI8z0
+# IkEY6BOJwl68CpCdPCSrXlnm1mu/3NYbEQUorzANBgkqhkiG9w0BAQEFAASCAgAW
+# SqZmOHo+AWKsEHL7Jn8eV+XzPCR08WlyxK/WbWFurDDtx1yd824aV8id+Hgrmns3
+# +j832P10MjwWX9U3OUbe1Ma379Qtvs7gabOCE3e+5VE9MPtUFATOo8LCDmVeDw97
+# We6lV4/y0EeLqQOA7WuCfto+VRi9d18k7BtxzPNfWM4R5uO4UfHqvVFA05uify30
+# 6joZbdciVVWQrzyOMTaMMGqFl0+213hhHDdaYkiKbV/QGXqlN6RO4VQa2xTi5gzf
+# keAEGusAxY4+7G8oDLr6WF6se0b1Va93Eh6lK1kHJ2ge7jHJwzZajJM/AMWrzLEd
+# Ls5S17A+yigbsep5NnYIwM4TEBpI/khq5xr7oRqKtu4LBv+1TVjfGWo6xfyYNjoP
+# MugCkTz/skROun7zj4ephsddWmv6sDDs+k8IuNuMNs0mVXvv9lYn8KtKEMpqMjv3
+# kP7ke6vEezPQUDDGOCh/23tGUtfx8DKjitt++EHHBa+EJVXzM8DcylJQHcXFLukD
+# ds6mwzyYgyVyxFAZz3Sp1WahDpemEkacJFvBAR9l59QoTPCsHGHGXFezR86Vzgvh
+# cmIDYbQNBKy6YlsSChgaaQXj0rBP+820mlahtJLBi9fEX2MPBv+Un1Mb/YpuAfs5
+# BiD9AVQvLxMV6X1oRAb24vXmn3ShkltqguZ3Lggvrw==
 # SIG # End signature block

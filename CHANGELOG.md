@@ -10,6 +10,10 @@
   * `Invoke-WUGDiscoveryE2ETest.ps1` -- Fixed vault name/CredType mismatches in both `$vaultConfig` and `$providers` blocks: Fortinet, Nutanix, OCI, GCP vault names and GCP CredType now match Setup scripts
   * `Setup-Proxmox-Discovery.ps1` + `Register-DiscoveryScheduledTask.ps1` + 3 `helpers/proxmox/` example scripts -- Fixed default Proxmox host IP from `192.168.1.39` to `192.168.1.30` in parameter defaults, help text, and usage examples
   * `Setup-F5-Discovery.ps1` + `Setup-Fortinet-Discovery.ps1` -- Fixed `.PARAMETER WUGServer` help text from `192.168.1.250` to `192.168.74.74` (matching actual default values)
+  * `DiscoveryProvider-CUCM.ps1` -- Reworked CUCM SNMP table collection for ccmPhoneTable to walk the full subtree (`1.3.6.1.4.1.9.9.156.1.2.1.1`) and assemble rows post-walk, fixing early termination and zero-row results when index OID handling differed from WUG MIB Walker behavior
+  * `DiscoveryProvider-CUCM.ps1` -- Added CUCM value normalization/translations for status-related causes and common phone type codes to improve readability of discovery output
+  * `Setup-CUCM-Discovery.ps1` -- Reduced dashboard inventory payload to remove low-value/noise columns for faster rendering and cleaner tables
+  * `helpers/reports/Dynamic-Dashboard-Template.html` -- Improved dashboard UX/performance: pagination enabled by default with top+bottom controls, pagination forced for large datasets (>1000 rows), default page size updates, status card color alignment with row status dots, and tuned search behavior
 
 * Added
   * `DiscoveryHelpers.ps1` -- `FilePath` credential type in `Resolve-DiscoveryCredential` and `Save-ResolvedCredential`; supports auto-detect for GCP service account key files (`*.ServiceAccount` / `*.KeyFile` vault names), file-path validation via `Test-Path`, and preview display; replaces the unsupported `GCPServiceAccount` CredType that was never in the ValidateSet

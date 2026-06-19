@@ -60,9 +60,10 @@
             <table id="table"
                 data-classes="table table-light table-striped table-bordered table-responsive table-sm caption-top"
                 data-show-export="false"
-                data-show-toggle="true" data-show-columns="true" data-search="true"
-                data-pagination="false"
-                data-page-size="50" data-page-list="[25, 50, 100, 200, All]"
+                data-show-toggle="true" data-show-columns="true" data-search="true" data-search-on-enter-key="false" data-search-time-out="350"
+                data-pagination="true"
+                data-pagination-v-align="both"
+                data-page-size="100" data-page-list="[50, 100, 250, 500, 1000, All]"
                 data-sort-order="asc">
                 <caption class="p-0 bg-secondary text-white">
                     <div class="d-flex justify-content-between">
@@ -113,9 +114,9 @@
     function formatStatusAuto(value) {
         if (!value) return '<span class="status-grey"><span class="status-dot dot-grey"></span>N/A</span>';
         var v = String(value).toLowerCase();
-        var greens = ['running','active','available','succeeded','up','ok','healthy','online','poweredon','enabled','true','yes','pass','passed','connected','ready','completed'];
-        var reds   = ['stopped','failed','down','error','critical','expired','offline','poweredoff','disabled','false','no','fail','terminated','deleted','disconnected'];
-        var oranges = ['warning','pending','stopping','creating','updating','paused','suspended','degraded','provisioning','unknown'];
+        var greens = ['running','active','available','succeeded','up','ok','healthy','online','poweredon','enabled','true','yes','pass','passed','connected','ready','completed','registered'];
+        var reds   = ['stopped','failed','down','error','critical','expired','offline','poweredoff','disabled','false','no','fail','terminated','deleted','disconnected','unregistered'];
+        var oranges = ['warning','pending','stopping','creating','updating','paused','suspended','degraded','provisioning','unknown','rejected','partiallyregistered'];
         if (greens.indexOf(v) !== -1) return '<span class="status-green"><span class="status-dot dot-green"></span>' + escapeHtml(value) + '</span>';
         if (reds.indexOf(v) !== -1) return '<span class="status-red"><span class="status-dot dot-red"></span>' + escapeHtml(value) + '</span>';
         if (oranges.indexOf(v) !== -1) return '<span class="status-orange"><span class="status-dot dot-orange"></span>' + escapeHtml(value) + '</span>';
@@ -124,6 +125,20 @@
 
     // Palette for card borders (cycles for unlimited cards)
     var cardPalette = ['#343a40','#0d6efd','#198754','#dc3545','#fd7e14','#6f42c1','#20c997','#0dcaf0'];
+
+    // Map card labels to status dot colours so cards and table dots match
+    var statusCardGreens  = ['running','active','available','succeeded','up','ok','healthy','online','poweredon','enabled','true','yes','pass','passed','connected','ready','completed','registered'];
+    var statusCardReds    = ['stopped','failed','down','error','critical','expired','offline','poweredoff','disabled','false','no','fail','terminated','deleted','disconnected','unregistered'];
+    var statusCardOranges = ['warning','pending','stopping','creating','updating','paused','suspended','degraded','provisioning','unknown','rejected','partiallyregistered'];
+
+    function getCardColor(label, paletteIndex) {
+        if (label === 'Total') return '#343a40';
+        var v = String(label).toLowerCase();
+        if (statusCardGreens.indexOf(v) !== -1) return '#198754';
+        if (statusCardReds.indexOf(v) !== -1) return '#dc3545';
+        if (statusCardOranges.indexOf(v) !== -1) return '#fd7e14';
+        return cardPalette[paletteIndex % cardPalette.length];
+    }
 
     function buildAllCardGroups(data) {
         var container = document.getElementById('cardGroups');
@@ -142,7 +157,7 @@
                         else { count++; }
                     });
                 }
-                var color = cardPalette[ci % cardPalette.length];
+                var color = getCardColor(card.label, ci);
                 html += '<div class="col" data-group-index="' + gi + '" data-card-index="' + ci + '" style="max-width:14%">' +
                     '<div class="card summary-card h-100" style="border-left-color:' + color + '">' +
                     '<div class="card-body py-2 px-3">' +
@@ -194,8 +209,37 @@
     function exportSql(rows) { if(!rows.length)return; var h=Object.keys(rows[0]); var s=rows.map(function(r){var v=h.map(function(k){return"'"+String(r[k]==null?'':r[k]).replace(/'/g,"''")+"'";});return'INSERT INTO dashboard_export ('+h.join(', ')+') VALUES ('+v.join(', ')+');';}).join('\r\n'); downloadBlob(s,exportPrefix+'.sql','text/plain;charset=utf-8'); }
     function exportPng() { html2canvas(document.querySelector('#table')).then(function(c){c.toBlob(function(b){saveAs(b,exportPrefix+'.png');}); }); }
 
+    // Search only after 3+ characters to avoid expensive table re-renders on large datasets.
+    function customSearchWithMinimumChars(text, data) {
+        var q = String(text == null ? '' : text).trim().toLowerCase();
+        if (q.length === 0 || q.length < 3) { return data; }
+
+        var filtered = [];
+        for (var i = 0; i < data.length; i++) {
+            var row = data[i];
+            var match = false;
+            for (var key in row) {
+                if (!Object.prototype.hasOwnProperty.call(row, key)) { continue; }
+                var cell = row[key];
+                if (cell == null) { continue; }
+                if (String(cell).toLowerCase().indexOf(q) !== -1) {
+                    match = true;
+                    break;
+                }
+            }
+            if (match) { filtered.push(row); }
+        }
+
+        return filtered;
+    }
+
     $(function () {
-        $table.bootstrapTable({ replaceThisHere });
+        $table.bootstrapTable({
+            replaceThisHere,
+            searchOnEnterKey: false,
+            searchTimeOut: 350,
+            customSearch: customSearchWithMinimumChars
+        });
         allData = $table.bootstrapTable('getData');
         buildAllCardGroups(allData);
 
@@ -237,11 +281,21 @@
             // Pagination toggle + custom export into the button group
             var $btnGroup = $toolbar.find('.columns');
             if ($btnGroup.length) {
+                var forcePagination = allData.length > 1000;
+
                 // Pagination toggle
                 var $pgBtn = $('<button type="button" class="btn btn-secondary" title="Toggle pagination">' +
                     '<i class="bi bi-list-ol"></i></button>');
                 $btnGroup.prepend($pgBtn);
+
+                if (forcePagination) {
+                    $pgBtn.prop('disabled', true)
+                        .addClass('active')
+                        .attr('title', 'Pagination is locked on when total rows exceed 1000');
+                }
+
                 $pgBtn.on('click', function() {
+                    if (forcePagination) { return; }
                     var isOn = $table.bootstrapTable('getOptions').pagination;
                     $table.bootstrapTable('togglePagination');
                     $(this).toggleClass('active', !isOn);

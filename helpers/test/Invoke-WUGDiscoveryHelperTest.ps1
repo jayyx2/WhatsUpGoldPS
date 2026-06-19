@@ -128,6 +128,7 @@ $repoRoot  = Split-Path (Split-Path $scriptDir -Parent) -Parent
 $discoveryDir = Join-Path $repoRoot 'helpers\discovery'
 $helpersFile   = Join-Path $discoveryDir 'DiscoveryHelpers.ps1'
 $providerF5    = Join-Path $discoveryDir 'DiscoveryProvider-F5.ps1'
+$providerCUCM  = Join-Path $discoveryDir 'DiscoveryProvider-CUCM.ps1'
 $providerForti = Join-Path $discoveryDir 'DiscoveryProvider-Fortinet.ps1'
 
 $verboseFlag = @{}
@@ -168,6 +169,14 @@ catch {
 }
 
 try {
+    . $providerCUCM
+    Record-Test -Name 'Load DiscoveryProvider-CUCM.ps1' -Group 'Loading' -Status 'Pass'
+}
+catch {
+    Record-Test -Name 'Load DiscoveryProvider-CUCM.ps1' -Group 'Loading' -Status 'Fail' -Detail $_.Exception.Message
+}
+
+try {
     . $providerForti
     Record-Test -Name 'Load DiscoveryProvider-Fortinet.ps1' -Group 'Loading' -Status 'Pass'
 }
@@ -183,6 +192,12 @@ Invoke-Test -Name 'F5 provider registered' -Group 'Loading' -Test {
     $p = Get-DiscoveryProvider -Name 'F5'
     Assert-NotNull $p "F5 provider not found"
     Assert-Equal 'F5' $p.Name
+}
+
+Invoke-Test -Name 'CUCM provider registered' -Group 'Loading' -Test {
+    $p = Get-DiscoveryProvider -Name 'CUCM'
+    Assert-NotNull $p "CUCM provider not found"
+    Assert-Equal 'CUCM' $p.Name
 }
 
 Invoke-Test -Name 'Fortinet provider registered' -Group 'Loading' -Test {
@@ -769,8 +784,8 @@ else {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYHaf3dZEjQOST
-# rsZ2CFMAGWQLg1ZXZWXZobeAMVNsWqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIQSawisCGcMZp
+# H/hSz0E37uOCPJ8wirM0jHDNEEo2KqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -973,33 +988,33 @@ else {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBMdBRVlobCTbH4MidDwATpetQX/98IeF+1VzZcmrT0LTANBgkqhkiG9w0BAQEF
-# AASCAgCbuHn+tcJX+PGM86/wNZdOdF8b9YJ6jKXRqzpkEPh4TBTyx/VyIOZVG353
-# iuRsTRbEkazD3BItSYyA7XZxSE3aMtcXpF1wg2xyjMkQJsTHRRixRxbIZ5TjsFWc
-# RRtdZx8H+kHOhFIajGykTRU+qooHoOrBCSgZtPCQd7dOTBI6zH584dcczxJvOBGV
-# U8apJkuDA+H7/b62sUXmjxu3v/4kl/1+loab0vwM8w04fnVPj+o2376L128x9nqY
-# +sBFOGxbIyt49wVbkW5ukjOgsWFhxfKwZzFgrbkRKP0Qq3DSVnwoMqiHXtTzrxYn
-# Qe8X47QORhkKPGNH6P7MW3yLz6XhLL53HlJwNGkG9aGSG7d3MZgh3QpK+B6cbvk1
-# ij1cBSkDQKRRD0TtzUT7zthXVQjt26i1Pmxe7TilZ0VJ7E+rm0WmccvU9081imB+
-# 2ILZwAOO6mvV0RFJtVqfslFCPHlhkSCQb1TMLZw9imAyHz9crTUaCFlGz+L8RsSZ
-# AFGsmQYomSmom66IwYEarNv7Do3PgRdnQiU81lKvL5D3vaxDuWTiQuZIrC1t7lda
-# +KbhUUHuLV/GjAeL7nEGtShcA7Ot0I+lE8BIHXly+VYOI4JUyq3gIjVBujvVtEsd
-# OytCqOoUjrvXvBmkpjQCLq5sdC7zTjUzOvQ0tFefTGAk+yvSL6GCAyYwggMiBgkq
+# BCC0Lw60qtqU/id6xug/6rQLuQh2eBgbHMPY2jBWtm+vVjANBgkqhkiG9w0BAQEF
+# AASCAgDZteJkItB7hjb1nZ1fBhxT+yIg/Ftz2Z8K6bINK6kXNlRKgS46IOQeGedu
+# 2Q5GCtB/tvtglrMudL8/EII1ejU+Fp8T6aOTuMl8qhyKS1FpNTPW/N84uuPxuSud
+# txRlqZzCOGpRCLR4+uQn181KgqJRAU2GtNP3mONpqmhiQFb5nH7NjPQp3ohpMewq
+# bYBuVakvcjxfaanrqO66tkiTmYjtQAXJwoq2ZysA4WElz3M70ew4qGuBuBqjsg8m
+# aqDoSOqnnj66cuHr7kuPvFj2BA04SFuogN1H9AoxcW63ZIoQKc34qaDXK0SbYq/i
+# ONlrsWzTNdXYZBJGrI+UbnIBJdoB9Bl+5EzNDAUgaKxoqy3g/Z/kDeMKf2AOTRRj
+# 4aqgzz5V6xGv3qvw3Zj46Wgqa8Tl8b9zgL6Oz87PGnCtBp2eWFJZpOnVvX18Wmna
+# 2aieVO2SWRCSWYv8cgH0Dgz1Qn9C6gk1WAcbxsGC9/E8kcmbDBL/VT6MSXhI0jMv
+# aOl2mjF04LDAFqHH9jjlUpaT71SMZv3oAN/foUYJHeeiV57CcjkGv5LTKNHDUal7
+# evlbLvr+CE7UKKR7CF1CSDBNUTLKouNdarqSybnCfgtQY7te9cQqIFNmQGSGF6gv
+# LxoCD9tPl0+m+V19iL21j2kZIMGY/p/rHsrcPmXcu+lqjcPttKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MjIxOTU1MTJaMC8GCSqGSIb3DQEJBDEiBCCOnLKS
-# 6wUm9nxWw9IGEVYpDJBD1HPedpVuFaGZF118nTANBgkqhkiG9w0BAQEFAASCAgBd
-# sNck0nYGsT3SOOV1FaUq6Dzhd2gUu7dEbVAy0OZV21yYs0yXBP3zRs+gpMbCDf7x
-# 20xPPLjNV8ke/OGt7nMO+KelwPsBH1IkIvvwKJKy6Z+RrxrUEG1Cj76dxHGHVlCw
-# g0UWhcoiiaZTelh2mEIONHfo/tvXUWJiS/yMps5/9jpA5GZnrd9kIZJy53Lx/nZc
-# 9ihknJSk1f08qUgZTNfgY7K3loEmx2IqQcx2dEmyOBEOi5XREOCsTbEMAv5KaLxi
-# wBA6Nln315RNPskhZ/w/5DppapLVQ3WDh5aAJQybE74QNqUVjd4vkt9+5q3tBoFG
-# i5AY0x7I7aq+lcp8TqOdVJRoqHdOmzNE+F+i+/WfIDQcV/l9JS3v6r9Xrqf/dTXj
-# zBt3RMQna5xq5/HIcbQnyMkZrx3BWNeb8igO9sWU9RDjFqsIN4n2PSceqFHXzLyp
-# V3O7V45+frgIFYz0aYEIlpI+d4Jbk8i/gS8G3jB639xNHXVtX7cidxDbsn66tQWs
-# iMGO3noo3fybl2EG2juqURRQPyi8Ha6pHI3/DkXLOcsr2h5HB70W+qYci5irp7XV
-# 4vJJJ87OOtbS3mTbQskU1OgP1KUIhPP5z6j9p75SZLixTQd02e/Bqta/5jQsoh97
-# lEcQO98YhlHh1GFSiJSmRh1F9NzQ8cJlDqM4ZTgtgQ==
+# CSqGSIb3DQEJBTEPFw0yNjA2MTgxNzE3MDlaMC8GCSqGSIb3DQEJBDEiBCAwteyq
+# /xwGARdr/OF9EHGuAwPaF23U32T550eg4JL9izANBgkqhkiG9w0BAQEFAASCAgB3
+# gIyU6OEWVuC7x7eCKDDzq3BZgwukCQO1tusYrJU4NBDwCGb7uQ0/Aak77M2Cn3kv
+# Tjp4gffxVCOJZLflYWEMkm4ifL2dlYvpHOIrpLCm0lAwWcH/ola66uT4ID/Lgibn
+# PUljuoHh+mhtmHyKVbYe5eyJMOPOC+oCLF1Z0i0DpEj4glTJQqHVM9lThVMstKLL
+# sXTRj4ea7oGMZmoWOlpwkG4mNj1a1V9pytW9ggUTidRPAAeoyxU6YD7n8lHTUsxp
+# wk2enWhVbviEp+vkIpzii1DdJkYuafGxwNAYOiW91t/wtiGMcc3cwz4UlzEq5ViI
+# RHDmWq+rAvsBhtcqP+uFOVX10XnRQePB9XJ7q1bp9H92pLFIltUKntff3jr8uLCy
+# tm9AVZa9ToIGDNbKwAmG+B0y+Kc/4i/9AoFRMxtEPmad0ivUst0v/u8ehI9P1Oc1
+# d3+zSxXYawtMEcDKYVc94caShu8JpLMLtqWgqkdp7XxcUOa7GoX1xO90QRyULP2H
+# Ih3W9qX0Go37YOCvocouS5osYpQS1eP/Ho1LpDK/zYNEgQMDTSdm12wzErYOYEeO
+# WggsjFdbqpXff7vi/SXKzXNXnhQIRDqdsuqHnfLXtZJdLYe2rxaElj/mG8Q3pr6R
+# uWtPffzJJXuUE/OmwjVOSzsYB3RQgi+3nTx0WEt50w==
 # SIG # End signature block

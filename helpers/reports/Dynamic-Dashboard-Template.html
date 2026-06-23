@@ -21,7 +21,10 @@
     <script src="https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js" crossorigin="anonymous"></script>
     <style>
         body { background-color: #f8f9fa; }
+        #cardGroups .row { --bs-gutter-x: .5rem; }
+        .summary-card-wrap { flex: 0 0 clamp(160px, 12vw, 220px); max-width: clamp(160px, 12vw, 220px); }
         .summary-card  { border-left: 4px solid; cursor: pointer; transition: box-shadow .15s, transform .1s; user-select: none; min-width: 90px; }
+        .summary-card  { min-height: 82px; }
         .summary-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.15); transform: translateY(-1px); }
         .summary-card.active-filter { box-shadow: 0 0 0 2px #0d6efd; }
         .details-toggle { cursor: pointer; user-select: none; }
@@ -45,6 +48,9 @@
 
 <body>
     <div class="container-fluid p-3">
+        <!-- Back navigation (injected by generator when IndexUrl is provided) -->
+        replaceBackNavHere
+
         <!-- Dynamic summary card groups -->
         <div id="cardGroups"></div>
 
@@ -85,6 +91,30 @@
     var thresholdDefs = replaceThresholdDefsHere;
 
     function escapeHtml(t) { if(t==null)return''; return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+    function normalizeFilterValue(v) { return String(v == null ? '' : v).toLowerCase().replace(/\s+/g, ' ').trim(); }
+
+    function matchesFilterValues(value, filterValues) {
+        var val = normalizeFilterValue(value);
+        if (!Array.isArray(filterValues) || filterValues.length === 0) { return true; }
+        for (var i = 0; i < filterValues.length; i++) {
+            var n = normalizeFilterValue(filterValues[i]);
+            if (!n) { continue; }
+            if (val === n || val.indexOf(n) !== -1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Keep compatibility across bootstrap-table versions loaded from jsdelivr.
+    function setTableData(rows) {
+        var safeRows = Array.isArray(rows) ? rows : [];
+        $table.bootstrapTable('load', safeRows);
+        var loaded = $table.bootstrapTable('getData', { useCurrentPage:false, includeHiddenRows:true }) || [];
+        if (loaded.length !== safeRows.length) {
+            $table.bootstrapTable('refreshOptions', { data: safeRows });
+        }
+    }
 
     // Threshold-based formatter for numeric columns (CPU, memory, disk, etc.)
     function formatThreshold(value, row, index, field) {
@@ -123,21 +153,21 @@
         return '<span class="status-grey"><span class="status-dot dot-grey"></span>' + escapeHtml(value) + '</span>';
     }
 
-    // Palette for card borders (cycles for unlimited cards)
-    var cardPalette = ['#343a40','#0d6efd','#198754','#dc3545','#fd7e14','#6f42c1','#20c997','#0dcaf0'];
-
     // Map card labels to status dot colours so cards and table dots match
     var statusCardGreens  = ['running','active','available','succeeded','up','ok','healthy','online','poweredon','enabled','true','yes','pass','passed','connected','ready','completed','registered'];
     var statusCardReds    = ['stopped','failed','down','error','critical','expired','offline','poweredoff','disabled','false','no','fail','terminated','deleted','disconnected','unregistered'];
     var statusCardOranges = ['warning','pending','stopping','creating','updating','paused','suspended','degraded','provisioning','unknown','rejected','partiallyregistered'];
+    var statusCardGreys   = ['idle','n/a','na','none'];
 
-    function getCardColor(label, paletteIndex) {
+    function getCardColor(label) {
         if (label === 'Total') return '#343a40';
         var v = String(label).toLowerCase();
         if (statusCardGreens.indexOf(v) !== -1) return '#198754';
         if (statusCardReds.indexOf(v) !== -1) return '#dc3545';
         if (statusCardOranges.indexOf(v) !== -1) return '#fd7e14';
-        return cardPalette[paletteIndex % cardPalette.length];
+        if (statusCardGreys.indexOf(v) !== -1) return '#6c757d';
+        // Non-status card groups (for example SSID) should stay neutral.
+        return '#212529';
     }
 
     function buildAllCardGroups(data) {
@@ -152,13 +182,14 @@
                     count = data.length;
                 } else {
                     data.forEach(function(r) {
-                        var val = String(r[card.filterField] == null ? '' : r[card.filterField]).toLowerCase();
-                        if (card.filterValues) { if (card.filterValues.indexOf(val) !== -1) count++; }
+                        if (card.filterValues) {
+                            if (matchesFilterValues(r[card.filterField], card.filterValues)) { count++; }
+                        }
                         else { count++; }
                     });
                 }
-                var color = getCardColor(card.label, ci);
-                html += '<div class="col" data-group-index="' + gi + '" data-card-index="' + ci + '" style="max-width:14%">' +
+                var color = getCardColor(card.label);
+                html += '<div class="summary-card-wrap" data-group-index="' + gi + '" data-card-index="' + ci + '">' +
                     '<div class="card summary-card h-100" style="border-left-color:' + color + '">' +
                     '<div class="card-body py-2 px-3">' +
                     '<div class="text-muted small">' + escapeHtml(card.label) + '</div>' +
@@ -177,7 +208,9 @@
             activeGroupIndex = -1;
             activeCardIndex = -1;
             $('.summary-card').removeClass('active-filter');
-            $table.bootstrapTable('load', allData);
+            setTableData(allData);
+            $table.bootstrapTable('resetSearch', '');
+            $table.bootstrapTable('selectPage', 1);
             return;
         }
         activeGroupIndex = groupIndex;
@@ -185,15 +218,20 @@
         $('.summary-card').removeClass('active-filter');
         $('[data-group-index="' + groupIndex + '"][data-card-index="' + cardIndex + '"] .summary-card').addClass('active-filter');
         if (card.filterField === '__total__') {
-            $table.bootstrapTable('load', allData);
+            setTableData(allData);
+            $table.bootstrapTable('resetSearch', '');
+            $table.bootstrapTable('selectPage', 1);
             return;
         }
         var filtered = allData.filter(function(r) {
-            var val = String(r[card.filterField] == null ? '' : r[card.filterField]).toLowerCase();
-            if (card.filterValues) return card.filterValues.indexOf(val) !== -1;
+            if (card.filterValues) {
+                return matchesFilterValues(r[card.filterField], card.filterValues);
+            }
             return true;
         });
-        $table.bootstrapTable('load', filtered);
+        setTableData(filtered);
+        $table.bootstrapTable('resetSearch', '');
+        $table.bootstrapTable('selectPage', 1);
     }
 
     function getExportRows() { return $table.bootstrapTable('getData', { useCurrentPage:false, includeHiddenRows:true }); }
@@ -210,7 +248,18 @@
     function exportPng() { html2canvas(document.querySelector('#table')).then(function(c){c.toBlob(function(b){saveAs(b,exportPrefix+'.png');}); }); }
 
     // Search only after 3+ characters to avoid expensive table re-renders on large datasets.
-    function customSearchWithMinimumChars(text, data) {
+    function customSearchWithMinimumChars(arg1, arg2) {
+        var data, text;
+        if (Array.isArray(arg1)) {
+            data = arg1;
+            text = arg2;
+        } else {
+            text = arg1;
+            data = arg2;
+        }
+
+        if (!Array.isArray(data)) { data = []; }
+
         var q = String(text == null ? '' : text).trim().toLowerCase();
         if (q.length === 0 || q.length < 3) { return data; }
 

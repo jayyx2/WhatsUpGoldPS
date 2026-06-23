@@ -72,5 +72,7 @@ venv/
 # Archives / Binaries
 # =========================
 *.zip
+# EXCEPTION: SharpSnmpLib is bundled (MIT license, required for module)
+!helpers/snmp/WhatsUpGoldPS.Snmp/lib/SharpSnmpLib-prebuilt.zip
 *.7z
 *.tar

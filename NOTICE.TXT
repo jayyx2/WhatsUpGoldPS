@@ -8,14 +8,40 @@ See LICENSE.md for the full license text.
 Third-party notices
 ===============================================================================
 
-The WhatsUpGoldPS PowerShell module itself is purely PowerShell code and does
-not bundle any third-party libraries. However, the HTML dashboard templates
-(helpers/*-Dashboard-Template.html) and the Geolocation map template
-(helpers/geolocation/Geolocation-Map-Template.html) load the following
-third-party libraries from CDN at runtime. Their licenses are reproduced below.
+The WhatsUpGoldPS PowerShell module includes or references the following
+third-party components:
 
 -------------------------------------------------------------------------------
-1. Bootstrap (MIT)
+1. SharpSnmpLib (MIT)
+   Bundled: helpers/snmp/WhatsUpGoldPS.Snmp/lib/SharpSnmpLib-prebuilt.zip
+   https://github.com/lextudio/sharpsnmplib
+-------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2008-2024 Malcolm Crowe, Lex Li, and other contributors.
+Copyright (c) 2018-2024 LeXtudio Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+2. Bootstrap (MIT)
    https://cdn.jsdelivr.net/npm/bootstrap/dist/css/bootstrap.min.css
    https://cdn.jsdelivr.net/npm/bootstrap/dist/js/bootstrap.min.js
    https://github.com/twbs/bootstrap/blob/main/LICENSE
@@ -44,7 +70,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 -------------------------------------------------------------------------------
-2. Bootstrap Table (MIT)
+3. Bootstrap Table (MIT)
    https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.js
    https://cdn.jsdelivr.net/npm/bootstrap-table/dist/bootstrap-table.min.css
    https://github.com/wenzhixin/bootstrap-table/blob/develop/LICENSE
@@ -73,7 +99,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 -------------------------------------------------------------------------------
-3. Bootstrap Icons (MIT)
+4. Bootstrap Icons (MIT)
    https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.min.css
    https://github.com/twbs/icons/blob/main/LICENSE
 -------------------------------------------------------------------------------
@@ -101,7 +127,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 -------------------------------------------------------------------------------
-4. jQuery (MIT)
+5. jQuery (MIT)
    https://cdn.jsdelivr.net/npm/jquery/dist/jquery.min.js
    https://github.com/jquery/jquery/blob/main/LICENSE.txt
 -------------------------------------------------------------------------------
@@ -128,7 +154,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 -------------------------------------------------------------------------------
-5. Popper.js (MIT)
+6. Popper.js (MIT)
    https://cdn.jsdelivr.net/npm/@popperjs/core/dist/umd/popper.min.js
    https://github.com/floating-ui/floating-ui/blob/master/LICENSE
 -------------------------------------------------------------------------------
@@ -155,7 +181,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 -------------------------------------------------------------------------------
-6. FileSaver.js (MIT)
+7. FileSaver.js (MIT)
    https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js
    https://github.com/eligrey/FileSaver.js/blob/master/LICENSE.md
 -------------------------------------------------------------------------------
@@ -183,7 +209,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 -------------------------------------------------------------------------------
-7. SheetJS / xlsx (Apache 2.0)
+8. SheetJS / xlsx (Apache 2.0)
    https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js
    https://github.com/SheetJS/sheetjs/blob/master/LICENSE
 -------------------------------------------------------------------------------
@@ -203,7 +229,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 -------------------------------------------------------------------------------
-8. html2canvas (MIT)
+9. html2canvas (MIT)
    https://cdn.jsdelivr.net/npm/html2canvas/dist/html2canvas.min.js
    https://github.com/niklasvh/html2canvas/blob/master/LICENSE
 -------------------------------------------------------------------------------
@@ -234,7 +260,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
 -------------------------------------------------------------------------------
-9. Leaflet (BSD 2-Clause)
+10. Leaflet (BSD 2-Clause)
     https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js
     https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css
     https://github.com/Leaflet/Leaflet/blob/main/LICENSE
@@ -242,37 +268,6 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 Copyright (c) 2010-2024, Volodymyr Agafonkin
 Copyright (c) 2010-2011, CloudMade
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice,
-   this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-POSSIBILITY OF SUCH DAMAGE.
-
--------------------------------------------------------------------------------
-10. leaflet-providers (BSD 2-Clause)
-    https://cdnjs.cloudflare.com/ajax/libs/leaflet-providers/2.0.0/leaflet-providers.min.js
-    https://github.com/leaflet-extras/leaflet-providers/blob/master/LICENSE
--------------------------------------------------------------------------------
-
-Copyright (c) 2013 Leaflet Providers contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without

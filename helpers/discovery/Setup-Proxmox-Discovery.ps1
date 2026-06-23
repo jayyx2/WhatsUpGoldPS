@@ -287,6 +287,30 @@ $guestDevices = @($vmDevices) + @($ctDevices)
 $guestWithIP  = @($guestDevices | Where-Object { $_.IP })
 $guestNoIP    = @($guestDevices | Where-Object { -not $_.IP })
 
+# Build deterministic placeholder IPv4 addresses for no-IP guests so
+# each guest can still become a distinct WUG device.
+function Get-ProxmoxPlaceholderDeviceIp {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DeviceKey
+    )
+
+    $idNum = $null
+    if ($DeviceKey -match '^(vm|ct):(\d+)$') {
+        $idNum = [int]$Matches[2]
+    }
+    else {
+        $sum = 0
+        foreach ($ch in $DeviceKey.ToCharArray()) { $sum += [int][char]$ch }
+        $idNum = $sum
+    }
+
+    $idNum = [math]::Abs($idNum)
+    $oct3 = [int](($idNum / 254) % 254) + 1
+    $oct4 = [int]($idNum % 254) + 1
+    return "100.64.${oct3}.${oct4}"
+}
+
 # Count unique monitor TEMPLATES (not total items)
 $activeTemplates = @($plan | Where-Object { $_.ItemType -eq 'ActiveMonitor' } |
     Select-Object -ExpandProperty Name -Unique)
@@ -300,7 +324,7 @@ Write-Host "  VMs:                    $($vmDevices.Count)" -ForegroundColor Whit
 Write-Host "  Containers (LXC):       $($ctDevices.Count)" -ForegroundColor White
 Write-Host "  Guests with IP:         $($guestWithIP.Count)" -ForegroundColor White
 Write-Host "  Guests without IP:      $($guestNoIP.Count)" -ForegroundColor White
-Write-Host "  Total WUG devices:      $($nodeDevices.Count + $guestWithIP.Count + 1) (nodes + guests w/ IP + cluster)" -ForegroundColor White
+Write-Host "  Total WUG devices:      $($nodeDevices.Count + $guestDevices.Count + 1) (nodes + all guests + cluster)" -ForegroundColor White
 Write-Host ""
 Write-Host "  Active monitor templates:  $($activeTemplates.Count)  ($(@($plan | Where-Object { $_.ItemType -eq 'ActiveMonitor' }).Count) assignments)" -ForegroundColor White
 Write-Host "  Perf monitor templates:    $($perfTemplates.Count)  ($(@($plan | Where-Object { $_.ItemType -eq 'PerformanceMonitor' }).Count) assignments)" -ForegroundColor White
@@ -824,9 +848,10 @@ switch ($currentChoice) {
         foreach ($key in $deviceKeys) {
             $devIdx++
             $dev = $devicePlan[$key]
-            # Every device gets created — no-IP guests use 0.0.0.0
+            # Every device gets created — no-IP guests get deterministic
+            # placeholder IPs to avoid address collisions in WUG.
             $rawIP = $dev.IP
-            $addIP = if ($rawIP -and $rawIP -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { $rawIP } else { '0.0.0.0' }
+            $addIP = if ($rawIP -and $rawIP -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { $rawIP } else { Get-ProxmoxPlaceholderDeviceIp -DeviceKey $key }
             $displayName = "$($dev.Name) ($($dev.Type))"
 
             Write-Progress -Activity 'Checking existing devices' `
@@ -844,7 +869,7 @@ switch ($currentChoice) {
                     } | Select-Object -First 1
                     if ($existingDevice) { $deviceId = $existingDevice.id }
                 }
-                if (-not $deviceId -and $dev.IP) {
+                if (-not $deviceId) {
                     $searchResults = @(Get-WUGDevice -SearchValue $addIP)
                     if ($searchResults.Count -gt 0) {
                         $match = $searchResults | Where-Object {
@@ -877,7 +902,7 @@ switch ($currentChoice) {
                 $devIdx++
                 $dev = $devicePlan[$key]
                 $rawIP = $dev.IP
-                $addIP = if ($rawIP -and $rawIP -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { $rawIP } else { '0.0.0.0' }
+                $addIP = if ($rawIP -and $rawIP -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { $rawIP } else { Get-ProxmoxPlaceholderDeviceIp -DeviceKey $key }
                 $displayName = "$($dev.Name) ($($dev.Type))"
 
                 Write-Progress -Activity 'Creating devices' `
@@ -1255,7 +1280,6 @@ public static class SSLValidator {
             if ($dev.Type -ne 'VM') { continue }
             $vmid   = $dev.Attrs['Proxmox.VMID']
             $vmNode = $dev.ParentNode
-            $apiType = 'qemu'
             try {
                 $resp = & $dashInvokeApi "${dashBaseUri}/api2/json/nodes/${vmNode}/qemu/${vmid}/status/current" $dashHdrName $dashHdrVal '1'
                 $d = $resp.data
@@ -1418,8 +1442,8 @@ Write-Host "Re-run anytime to discover new Proxmox nodes/VMs." -ForegroundColor 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDde4eIClKCPgfG
-# 6Fz14e/ZRT1UdV2C47UcEdR3D61r5qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBIQfMkel7MEVQ
+# lDUrbzd1NdMAEEHZ7arNGuscAY8mN6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1622,33 +1646,33 @@ Write-Host "Re-run anytime to discover new Proxmox nodes/VMs." -ForegroundColor 
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDfbZ3TmSZOKfMKt99iJysfQSEPEmBREenrYNhQ56VeJzANBgkqhkiG9w0BAQEF
-# AASCAgCiiRXE98PKxIoVYEzGwuqgXbytB2vJLUGaaHsGRWfxWib8FqOZKNEh98MG
-# xbWcaeP/mgCwP5H9JAkMNxpPOw5oS68aWe1I8LhO0yWUO+yqfHUFGydmcHCmg2yA
-# 0tdNLXd9IpGbuaw+bXMqBRFdHddNMJSk4sFPaAyMUI0klgNFlhsfoIYKg9tuxz0Z
-# lnjbTqW6/iFSUruhKum+FQP96tLVOATMEWv+SQ5jNuGmsv20/kzV2bwLMBGY7dyN
-# JLToE6BMlaiBHBeh8cF8fZnflltEyMgzyEpsX9P7mEyo8IpLusdIMKCW0t5omM3I
-# nTQqbeL8k/Yq9m5+kdgLV/UmFYcFm+LtRYxO19vHo+QpujK3z5gjr9N4FfisRtQv
-# 5mAkwC5lPC8N1m2x3ZJDxNYooHs/50JkLUs4JHYdyT+Kr4YAciS+Kt7/ggfgQoiT
-# 9sZyPRY+pED5CCckwhl5uCPUgQZGIoHjUlB1u6eBfAMyHFu4t1o6EnKnpP3cK7+N
-# D/jIjpG/QwbbeGSmDQSGA8YQDlVX3I558jYs6+qJ6zvlAqa98QefVRSwJ1bv51Je
-# V8pXIgF9dEBpZ+RsVHUVABYE0b9Yjcf11DtggrbWoW96KKcApkn4pdprGA/0mCYq
-# DGagmzcMPZSeS1dF/GOgEKRveY5u/wlk2jYZ2ZzkyRiRuBKKIKGCAyYwggMiBgkq
+# BCDxucBexoYeQXkFjjqwAxr1c0vacROgWM1Kexy6pZUbojANBgkqhkiG9w0BAQEF
+# AASCAgCJn6Fqsrpb/Bgl9vmYkh2waUNob2WXHvgHSo0+vxYLfF2vYWlUPxRfPLVm
+# GkegPBi3fEcLXTB2PI+du4sof0is2Z4jL0BeFVFE/ZNV//q0DwsMwrolE0UBOMRc
+# iJPhLd4Zgj2Ykh7/zxM8PqwS2C23ww0mRzK80VeUBJ+ilc7aIDtP8VH3KKzO520v
+# 4m5AxD4y3EGWkj754yodx72qWMv6sDq/KYj5pn1zG8661yYooTRFptFwdhtjV0x2
+# 8mD4XvzyyTsV46smI+qZ3M3PWgU0p/3cPhWCUbPdDz7GbZ6/f5yeUN/tkBKrt3By
+# S9QfvLeltOI1p3bpiS6pk3YjTIuuFazeoHfzt8rastcpKQCxKikHD6MwRjscyJLC
+# DlpT9bN32THfCPI7ITyR5y2DPSVSha4cZ1RDGLBKAGHFkwYaR34h/aaTfRpADLFb
+# FwcHCpx+vFV6AJ64cfTlk86kh2rKav34+qe0JAXV25glbRWhZcnk7YKag6gIcPVe
+# WJnhk3eqVUGRUMft0CYFQB9nGch9+thpYtotOFq2kTvsJOfEAFFgRuoWaDm3u8En
+# U7Bw2r4xTCanaSZhW8Q1geRjT1D50e/QVhbZtUIgSazTObtJG8j9EU5BiyHTOwqa
+# nwuAaxMQ+b/MWVm3BPeEKtuG0KBPREhCmRClj5ocCcnqPHPEUqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjgyMDA4MjZaMC8GCSqGSIb3DQEJBDEiBCAXEVkZ
-# mmF/AtVhThkukMvHYkO+sG7pZiAZ7dqjldhHPzANBgkqhkiG9w0BAQEFAASCAgCv
-# /FTzBLE5zy9HpJSP2dNxrPsuWZv741rR52rMVo9qRG6GU45311nXjh+q252+Gw9q
-# RyBG/jlEDwQoG9fSAsbdk8/hxwSHZLLaH7q0IJxoPstsZR4POPrG8/yj9EfHOg2X
-# gB7UIX2ZJ9ywYbs2LzggX+FZ4Bhpt3RNSbw9I+d8wIwER6Vj89rRBQcwREegeSCE
-# 3oxdZSPLAKKQ1ihCIxriylJc+4JUTgs87bd814n2PilPNp5nCpAhW2st+vilxVvj
-# K+pOyNG15LeoDBPGq0NgmxRBFDFsE7ruggD0rbZY20U6j4RTucYUBvCXWXsAAx7L
-# naBuxDUyI4wYpemdYTjN0Asn7alfsdQmTnDLSXJsynI9P7o9V/AUq6IRB3JWxAao
-# 7K69BYbTPWITrpb67+RXq/KTqCr9kY0dWCfATRqEUC66oal1MtZg3BKrcv0dU9pR
-# obg3cHGHCnz8dtTzLrvoXFBWeFYX7eI+ZaVP8tVz/4HxspH/9ZdVRLjiti410mP/
-# 7WeTbbmPdMXmcxXF4U5tPr1vvP0Q3uF0q6KflTqe9c8oiYVBTrABUh9GSiwNWoEU
-# azKV2FMWVDvumImWFao2Rv8HJjfZ+EzdbPGp0XUPCVfaqW4c4GaPGA7Mw+SRlizC
-# 832+gJxqvmHyvSngOiZyeqneJYlBY8t/3HSkgWpW1Q==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjExNzQ2MThaMC8GCSqGSIb3DQEJBDEiBCBlFREz
+# PBjGT1OnlYhvrJXER/WQB7wosUk6uwOTH8w2ozANBgkqhkiG9w0BAQEFAASCAgAp
+# r74T7Gb5w19Mk668nKjIhC7QRU8Yo1zg2B/MzloFF58uE9gtUF5kH00uHhF3oFnC
+# fN1VuSfUUT2NPiw/r+NskRTtD++4BkxGNjwgrTcF0rqmEGJab4+ZboxkvO9vjlim
+# 3/E3HhDVOqK72ahsgQP5/8h0BSFq3kp3fXvLpJVAdTvAn9rlQgPvqFuq5h4Pa6RN
+# hzFUDySF1EVe0B0G6AdItIChYu8KNRDKxpqqYApVpnCvCc/Jn2Bp2vcSro+WQfXQ
+# OKcAp/PP0tTTvpGQNQ+2W4Bcs3HQyQsDXQdgMbTJxScT/N2tRJUB/vR7z2s8LsuC
+# mCUJ8S/S2mfiqTPoZ1wEiWY9Ggy1xFx6aW/he6P+HkcYEbhVJiHjIQ7x7jNH1k4A
+# GytQoLT7rZ7IqU1melf3q/GOwvB0jugcb7PiV4UGYN471csvHZEKzfrGWpnCtT2C
+# wFL+otXDNiFwgctdHCP8bq6HHbFn0fKLUokOEsYLDO964tHbY7H80H2IcMKR8kyF
+# t28YbDmEAUh7MzyLZGqLTWffbPyGTZKptd7QCVnCClM6y7lq12sBf7OskyM443KM
+# JgA6DPzQkHRwvVJPKIQBXzdbMuVzI9Dq45YqIglzbzWJYDyGy0f1bN+ys4CIzZLl
+# QP+wiguYoZtmiUeCZjOFJibdWtuLelLW+gpTGSfxng==
 # SIG # End signature block

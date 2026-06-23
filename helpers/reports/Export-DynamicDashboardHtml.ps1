@@ -104,6 +104,8 @@
 
         [string]$TemplatePath,
 
+        [string]$IndexUrl,
+
         [switch]$Offline
     )
 
@@ -282,16 +284,47 @@
             $label = ($label -creplace '([A-Z]+)([A-Z][a-z])', '$1 $2').Trim()
             $label = $label.Substring(0,1).ToUpper() + $label.Substring(1)
 
-            $uniqueVals = @($allData | ForEach-Object { $_.$field } | Where-Object { $_ -ne $null -and $_ -ne '' } | Sort-Object | Select-Object -Unique)
+            # Count occurrences of each unique value
+            $valueCounts = @{}
+            foreach ($val in @($allData | ForEach-Object { $_.$field } | Where-Object { $_ -ne $null -and $_ -ne '' })) {
+                $key = "$val"
+                if (-not $valueCounts.ContainsKey($key)) {
+                    $valueCounts[$key] = 0
+                }
+                $valueCounts[$key]++
+            }
+
+            # Separate frequent and rare values; only collapse into "others" when >6 distinct values
+            $allVals = @($valueCounts.Keys | Sort-Object)
+            if ($allVals.Count -gt 6) {
+                $frequentVals = @($valueCounts.Keys | Where-Object { $valueCounts[$_] -gt 1 } | Sort-Object)
+                $rareVals = @($valueCounts.Keys | Where-Object { $valueCounts[$_] -eq 1 } | Sort-Object)
+            } else {
+                $frequentVals = $allVals
+                $rareVals = @()
+            }
+
             $cards = @()
             $cards += @{ label = 'Total'; filterField = '__total__' }
-            foreach ($val in $uniqueVals) {
+            
+            # Add cards only for values that appear >1 time
+            foreach ($val in $frequentVals) {
                 $cards += @{
                     label        = "$val"
                     filterField  = $field
                     filterValues = @("$val".ToLower())
                 }
             }
+
+            # Add "others" card if there are rare values
+            if ($rareVals.Count -gt 0) {
+                $cards += @{
+                    label        = "others"
+                    filterField  = $field
+                    filterValues = @($rareVals | ForEach-Object { $_.ToLower() })
+                }
+            }
+
             $cardGroups += @{ groupLabel = $label; cards = $cards }
         }
         if ($cardGroups.Count -eq 0) {
@@ -377,6 +410,20 @@
         $html = $html.Replace('ReplaceYourReportNameHere',    $ReportTitle)
         $html = $html.Replace('ReplaceUpdateTimeHere',        (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))
 
+        # --- Back navigation button (only when IndexUrl is provided) ---
+        if ($IndexUrl) {
+            $backNav = @"
+        <div class="mb-3">
+            <a href="$IndexUrl" class="btn btn-sm btn-outline-secondary" title="Back to dashboard index">
+                <i class="bi bi-arrow-left"></i> back to index
+            </a>
+        </div>
+"@
+        } else {
+            $backNav = ''
+        }
+        $html = $html.Replace('replaceBackNavHere', $backNav)
+
         # --- Resolve local dependencies (offline mode) ---
         if ($Offline) {
             $depFolder = Join-Path $PSScriptRoot 'dependency'
@@ -397,6 +444,10 @@
                 foreach ($cdn in $cdnMap.GetEnumerator()) {
                     $html = $html.Replace($cdn.Key, $cdn.Value)
                 }
+
+                # Local file:/// dependencies can fail in Chromium when crossorigin is present.
+                # Remove it in offline mode to keep jquery/bootstrap loading deterministic.
+                $html = [regex]::Replace($html, '\s+crossorigin="anonymous"', '')
                 Write-Verbose "Using local dependencies from $depFolder"
             }
             else {
@@ -413,8 +464,8 @@
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPp+B95MQppI5a
-# Vp2Aan4MVRVjqFfI7DxYseuSHeZ4nqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+0EzQtu7bHqTF
+# W+GD4jQ4mDCrfep6zY0NHbHDWE9Tj6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -617,33 +668,33 @@
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAoQAflKZ7GO1nxXmB/kFeXnhpAFyfbQGyoT1sbJmuC+TANBgkqhkiG9w0BAQEF
-# AASCAgCaIec+F8YGNPtdJbGvaqytrep82e+jqGfJ6pd+3mKYMsnBm0L7A9e1xcW5
-# Bbm8dkP2hTY2gTksg97paMh5ScU9Rs/dQhWazJfz9SpgFN68VmDwOXWC1VFh2Cob
-# bKBaY8DcoiueQ/fjQQyZkl7Bm0h19Zpoxy147vSO6/k04BycDeUr97PDFA2oFVkW
-# k07H1z0FP66v++ohI5Tg0/h/5P4EvEXjj1Pna80C+LYffZs0wVN0sec9AEjEplQL
-# rOQMOtftQj859qKahUo5vd2EjT2gngAKmK2I1GdK5a1o5oyfpoquQGRtTNMpDTGo
-# t+9/Rv5ioLeQJ+as6iL7p64T3g2BsQk4hvIca3JG60vM4zCl2YIRzcClhqSp+U9Z
-# FmY8lEPJC+KCI+KhUby/sq76xQ2fnmqpJFCrcjxkVlp8h5QqHES5Exb/UEokTvxj
-# 0QgtH4zdcIIW2AYo7sE2YFE3CNOfs9REvlcgpyaMxcR6DhIFGCukabbyOFaeQWaj
-# hQhgL2WMvhHsJqx7MTrz6BZGEMN6muPW+3EExoC59uro4FalnIHa0QH7hrWw+Jjf
-# GdLwAR86YV6YUmjSgKT0q74DXtSZ/aARF8YPrYMHPKAdrqthhGDrx8D36LNwM6Xi
-# O5cV1DYH3qL9M4MKdsa9+dMFzbi3Dbear0DmDplZ+YuLYPa//qGCAyYwggMiBgkq
+# BCBZAp8DjxljTmal5tTiSYzFL1izTgQvc7E0M3BcNne4SDANBgkqhkiG9w0BAQEF
+# AASCAgBPo8VJ4DsLIFalcSoVW/tsEOdS8LNYE2hlnTXkZiSZapzuRtJWU4Sk5bH4
+# ieyWDmr8XG8ev+0ykf7swQ23UMwoXa6KXtQjHQyVEy4kejbsSbo2wmgVLGVmKy7h
+# JAAeHNFTSjmetCV/C0vy57I2K/4RUlQ5Kh6734fFqVHM26oTIfCpYRE0DVY+h0ZA
+# NXt3OqXMvq1bQu+ApUsmdpxwOeHIqPUAIgv+pmCEM6qYJ6d4Q7QSrzRfhaGFliWO
+# ZFSezeKFt/SDfvtlf5v9pgALCwLGA0j5bDEd+KkeWR8gQiaTJmsIPTk+RxJtSxCe
+# MrFrSWabYnT8hTBXkrlK3u3by8ztYsxyCLdu7nE6jlcUOmOLJ6TTHCgdX25I+HyG
+# Bi9++B/BQHcWsjpYFkNHn+zGVcLF/8id+IwplLBLDAR6sFUjq+gnG5AXq9oJYwyh
+# QAU3FG9fRpd0AuiTcq9iDdJEAO7jDNkBZpw4K8X6KS/Xrc61S5jjtPpnuEZQhxBU
+# nA6GQ+mfgTE7GN+DZ/P761+d/NVllC5k4n5bLx7OzwYlyLrH/Hrlm7L6vORvdljd
+# AgHcZNvWqDTGU1q/6CEZJJjUqU4n8OXnmuMqxdDZPrzfIDn6HKgi9GteGfMUMdUh
+# 2ZIDepkw8Itf7MlsjnHokvpcN+Q6TbgNfu3u4yi86VIDf8J9s6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjQxNzQxMTJaMC8GCSqGSIb3DQEJBDEiBCAeyuf4
-# sOQlGdVy6U11LMRj6nk8jscmios+k8G553GJZjANBgkqhkiG9w0BAQEFAASCAgBt
-# doJAPSgzYZesQAwXRtpVl8tBvKCOxt8d39YjWZNapUL8XDENpyvX3qqxybDiE4h9
-# hwIT7DSJiJU/TKvPVi8vRKh9XHSiUdefVGYYWSRqP4kgyjUPqN6/5boDJSt/Fo/X
-# 7zdPBwt2mDEugd/KOaqHJ9PQbLY6j8geeIRmjI+qaSjfZtBOZJUad14lSNr2Zjds
-# 2QXvssmgeeRfAEOuLxWN9MlfKes4kiC1112x/XcUV+MPyft9xZSNNt6GcDRvVTvB
-# gIlBdtKHqaZXyWr1w2J17WPp27NiMiPsosSX2HBOyI0T/Hn+0nlYR/Tcyl5jTY5X
-# E0hd+HrqG+LD8C+PsG83d4hQwLvlVr3AfJzSOSQ+Qn1+EWxcPcPncaHencVzx67F
-# VFfph0Rj1dERMa4zdyk+C7yemi5/WjjnwsCYX5COf2YTm3Pl9xaR37y9rRgBu5Vy
-# yrERerao0ui0z+yG9LF4lBfwECRcroodD3krsUQnOxFGIr1R5C7YN565r3keEtud
-# 0X9KXf0hhekMHnE4gL3bBfINSf0FRf+Wfzvxr1RK9HsnZMARLq1ftYqgBFX1Q/Tr
-# OyEIW5NdzJOIWHmBGqn+pJaqv+oCvV9NrN/XgRNceQk2263sNzTTOIdL0uXS/npK
-# GulSMaehgI2LZ/4uXsdcUlBHNbf2yguW+PBmBasJTg==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjMxMTM1MTJaMC8GCSqGSIb3DQEJBDEiBCAMTa4s
+# omE5uFC3RhOmCKGvWmtN5CrLk1ORrnnf0yvfeDANBgkqhkiG9w0BAQEFAASCAgAy
+# sVOmTrGnaxpc0PJiaP4pHfgfiyPw7L/CA4fPBuZODSpHuWcvb3DLf85116XyOAmC
+# R62R2nIRPgKi5injLfxJ7ZK8P11piWHddHHtl2t1kXDByaZCc3yJzP4TFDfG4tYS
+# 4G+mjF7jR08jLUIIULmL69NyaTRjgf/Ba8Hq6Qsh7qmUTis/FvhScCwupv257NSQ
+# N1hZQA/xptN7m1v3WmMfn6aCgzSeHsnJxdJ33RAEFFGMDrKHTb3Ul93eD+6OL0JU
+# lRId8UDwFiFTKveaO4qM7V/+UBsxKbxVqoT0ghRg6A9jd8UCLtMVDPeDl0b/M09+
+# urUUW5NQ0+vniIFmj0J8MRzIGOXkIPAMspUu+c/DKlNF4bG6wyesyf1CAAgSTMUd
+# 3AAmtIxIr7IqnbKUr3QOJwaOqRyFGbPc0avQtzdmmCRDlJVSUT1PMO2wzGzn5Mpa
+# W79bw5+xD7gBJjJyU1y3WsT42eJ5q6pgoz+oNhIUO7wVQMkj72pVZbzUpP6glx+W
+# rTFMX02iw7xzbG7aAM9WRA23PXuqnUMNi8Lfo8QtbF8FO+Vc2Pgg6Zd6RAspwHwo
+# jMKFE5ZD9KAhD8xG46ExSym9j0W4vrVai4qlSVTKFhR1KS7SXO7uRD8OYZ+5OvbS
+# 5ca6GmtODB30AsFnO3nrfxql9wKFFZKzh2Zusr296w==
 # SIG # End signature block

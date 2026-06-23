@@ -38,13 +38,13 @@
     SNMP v3 context.
 
 .PARAMETER SnmpAuthProtocol
-    SNMP v3 auth protocol numeric value passed to Initialize4.
+    SNMP v3 auth protocol. Valid values: 'None', 'MD5', 'SHA', 'SHA1', 'SHA256', 'SHA384', 'SHA512'.
 
 .PARAMETER SnmpAuthPassword
     SNMP v3 auth password.
 
 .PARAMETER SnmpPrivacyProtocol
-    SNMP v3 privacy protocol numeric value passed to Initialize4.
+    SNMP v3 privacy protocol. Valid values: 'None', 'DES', '3DES', 'TripleDES', 'AES', 'AES128', 'AES192', 'AES256'.
 
 .PARAMETER SnmpPrivacyPassword
     SNMP v3 privacy password.
@@ -86,7 +86,7 @@
     .\Setup-CUCM-Discovery.ps1 -Target 192.168.75.33 -SnmpVersion 2 -Community public -Action PushToWUG -NonInteractive
 
 .NOTES
-    Requires: PowerShell 5.1+, WhatsUp Gold SNMP COM components on the host.
+    Requires: PowerShell 5.1+, WhatsUpGoldPS.Snmp module (SharpSnmpLib).
     Encoding: UTF-8 with BOM
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -106,11 +106,13 @@ param(
 
     [string]$SnmpContext,
 
-    [int]$SnmpAuthProtocol = 0,
+    [ValidateSet('None', 'MD5', 'SHA', 'SHA1', 'SHA256', 'SHA384', 'SHA512')]
+    [string]$SnmpAuthProtocol = 'SHA256',
 
     [System.Security.SecureString]$SnmpAuthPassword,
 
-    [int]$SnmpPrivacyProtocol = 0,
+    [ValidateSet('None', 'DES', '3DES', 'TripleDES', 'AES', 'AES128', 'AES192', 'AES256')]
+    [string]$SnmpPrivacyProtocol = 'AES256',
 
     [System.Security.SecureString]$SnmpPrivacyPassword,
 
@@ -172,6 +174,63 @@ function ConvertTo-CUCMSecureString {
     }
 
     return (ConvertTo-SecureString -String $Value -AsPlainText -Force)
+}
+
+function ConvertTo-WUGAuthProtocolCode {
+    <#
+    .SYNOPSIS
+        Converts friendly SNMP auth protocol names to WUG numeric codes.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Protocol
+    )
+
+    $map = @{
+        'None' = '0'
+        'MD5' = '1'
+        'SHA' = '3'
+        'SHA1' = '3'
+        'SHA256' = '5'
+        'SHA384' = '6'
+        'SHA512' = '7'
+    }
+
+    if ($map.ContainsKey($Protocol)) {
+        return $map[$Protocol]
+    }
+
+    throw "Unsupported SNMP auth protocol '$Protocol' for WUG. Supported: $($map.Keys -join ', ')"
+}
+
+function ConvertTo-WUGPrivProtocolCode {
+    <#
+    .SYNOPSIS
+        Converts friendly SNMP privacy protocol names to WUG numeric codes.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Protocol
+    )
+
+    $map = @{
+        'None' = '0'
+        'DES' = '1'
+        '3DES' = '2'
+        'TripleDES' = '2'
+        'AES' = '3'
+        'AES128' = '3'
+        'AES192' = '4'
+        'AES256' = '5'
+    }
+
+    if ($map.ContainsKey($Protocol)) {
+        return $map[$Protocol]
+    }
+
+    throw "Unsupported SNMP privacy protocol '$Protocol' for WUG. Supported: $($map.Keys -join ', ')"
 }
 
 function Get-CUCMDashboardRows {
@@ -553,19 +612,9 @@ function Ensure-CUCMSnmpCredential {
                 throw 'PushToWUG requires SNMPv3 username and auth password so a WUG credential can be created.'
             }
 
-            $authProtocol = switch ([int]$SnmpSettings.AuthProtocol) {
-                1 { '1' }
-                3 { '3' }
-                default { throw 'PushToWUG currently supports SNMPv3 auth protocol values 1 (MD5) and 3 (SHA).' }
-            }
-
-            $encryptProtocol = '1'
-            if ([int]$SnmpSettings.PrivacyProtocol -eq 3) {
-                $encryptProtocol = '3'
-            }
-            elseif ([int]$SnmpSettings.PrivacyProtocol -notin @(0, 1)) {
-                throw 'PushToWUG currently supports SNMPv3 privacy protocol values 0, 1 (DES), or 3 (AES128).'
-            }
+            # Convert friendly protocol names to WUG numeric codes
+            $authProtocol = ConvertTo-WUGAuthProtocolCode -Protocol $SnmpSettings.AuthProtocol
+            $encryptProtocol = ConvertTo-WUGPrivProtocolCode -Protocol $SnmpSettings.PrivacyProtocol
 
             return (Add-WUGCredential -Name $credentialName -Type snmpV3 `
                 -SnmpV3Username $SnmpSettings.Username `
@@ -818,53 +867,60 @@ foreach ($currentChoice in $actionsToRun) {
             }
         }
         '5' {
-            $dashboardFiles = @()
+            Write-Host ''
+            Write-Host 'Generating dashboards...' -ForegroundColor Cyan
+
+            # Aggregate all phone rows
+            $allRows = @()
             foreach ($device in $devicePlan.Values) {
-                $rows = @(Get-CUCMDashboardRows -PhoneRows @($device.PhoneRows))
-                if ($rows.Count -eq 0) { continue }
+                $allRows += @(Get-CUCMDashboardRows -PhoneRows @($device.PhoneRows))
+            }
 
-                $safeName = ($device.Name -replace '[^A-Za-z0-9._-]', '_')
-                $dashPath = Join-Path $OutputDir "CUCM-$safeName-Dashboard.html"
+            if ($allRows.Count -eq 0) {
+                Write-Warning 'No phone inventory to export.'
+                break
+            }
 
-                if (-not (Get-Command -Name 'Export-DynamicDashboardHtml' -ErrorAction SilentlyContinue)) {
-                    throw 'Export-DynamicDashboardHtml is not available.'
+            # Create summary JSON file in output directory
+            $summaryJsonPath = Join-Path $OutputDir 'CUCM-phone-inventory-summary.json'
+            $allRows | ConvertTo-Json -Depth 20 | Out-File -LiteralPath $summaryJsonPath -Encoding UTF8
+            Write-Host "  Summary JSON: $summaryJsonPath ($($allRows.Count) phones)" -ForegroundColor DarkGray
+
+            # Call dashboard exporter
+            $exporterPath = Join-Path $PSScriptRoot '..\cisco-cucm\Export-CUCM-Dashboard.ps1'
+            if (-not (Test-Path -LiteralPath $exporterPath)) {
+                Write-Warning "Dashboard exporter not found: $exporterPath"
+            }
+            else {
+                & $exporterPath -SummaryDirectory $OutputDir -OutputDirectory $OutputDir
+            }
+
+            $dashboardFiles = @(Get-ChildItem $OutputDir -Filter 'cucm-dashboard-*.html' -ErrorAction SilentlyContinue)
+            Write-Host "Generated $($dashboardFiles.Count) dashboard(s)" -ForegroundColor Green
+
+            # Copy to WUG NmConsole if available
+            $nmConsolePaths = @(
+                "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole"
+                "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole"
+            )
+            $nmConsolePath = $nmConsolePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($nmConsolePath) {
+                $wugDashDir = Join-Path $nmConsolePath 'dashboards'
+                if (-not (Test-Path $wugDashDir)) {
+                    New-Item -ItemType Directory -Path $wugDashDir -Force | Out-Null
                 }
 
-                Export-DynamicDashboardHtml -Data $rows `
-                    -OutputPath $dashPath `
-                    -ReportTitle "CUCM Phone Inventory - $($device.Name)" `
-                    -CardField 'Status','Protocol' `
-                    -StatusField 'Status'
-
-                $dashboardFiles += $dashPath
-                Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
-                Write-Host "  Phones: $($rows.Count)  Registered: $($device.Summary.registered)  Unregistered: $($device.Summary.unregistered)" -ForegroundColor White
-
-                $nmConsolePaths = @(
-                    "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole"
-                    "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole"
-                )
-                $nmConsolePath = $nmConsolePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-                if ($nmConsolePath) {
-                    $wugDashDir = Join-Path $nmConsolePath 'dashboards'
-                    if (-not (Test-Path $wugDashDir)) {
-                        New-Item -ItemType Directory -Path $wugDashDir -Force | Out-Null
-                    }
-                    $destPath = Join-Path $wugDashDir (Split-Path $dashPath -Leaf)
+                foreach ($dashFile in $dashboardFiles) {
+                    $destPath = Join-Path $wugDashDir (Split-Path $dashFile -Leaf)
                     try {
-                        Copy-Item -Path $dashPath -Destination $destPath -Force
-                        Write-Host "Copied to WUG: $destPath" -ForegroundColor Green
-                        Write-Host "  Access via WUG web UI: /NmConsole/dashboards/$([System.IO.Path]::GetFileName($destPath))" -ForegroundColor Cyan
+                        Copy-Item -Path $dashFile -Destination $destPath -Force
+                        Write-Host "  Copied to WUG: $destPath" -ForegroundColor Green
                     }
                     catch {
                         Write-Warning "Could not copy dashboard to NmConsole: $_"
                     }
-                    Deploy-DashboardWebConfig -Path $wugDashDir
                 }
-            }
-
-            if ($dashboardFiles.Count -eq 0) {
-                Write-Warning 'No dashboard files were produced.'
+                Deploy-DashboardWebConfig -Path $wugDashDir
             }
         }
         default {
@@ -873,12 +929,12 @@ foreach ($currentChoice in $actionsToRun) {
     }
 }
 
-# ---- END OF SCRIPT (do not remove this line or the closing braces above) 
+# ---- END OF SCRIPT (do not remove this line or the closing braces above)
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD5CFVFMT1KjKmC
-# /EexwTjo2ULaItdFb96baLpql93PtqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBU6CC27OhXtc9D
+# RHYVliIuJ779GCdVm53ue02Dg+aOJqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1081,33 +1137,33 @@ foreach ($currentChoice in $actionsToRun) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBAXwwEqW9BgRCNxeQZrDX2q1yTNT0HAkMQJAcwbG1eMzANBgkqhkiG9w0BAQEF
-# AASCAgAJFW1z/KXsZjHsPaDLjIIdicr6Cth0ef4eYApLUbm8ddYLXIeo67IXnOQi
-# Vicm+CO+H0djWCq2cKZWdgKYueIqalLl0aMDxo4KlYFoeJbDpGc8wm6BlA5yHbFW
-# VBJ52+JZ1Qy91sYTT4vKxsNi6P6yhNDFHyTF0DPsQ+YPAiyaHJCgdkuwm+A6lrye
-# KbD9rnmTLGNtGSO2WMQ+O1Up5XZd1HwplvtqCC4sI5PZv8hPp+asVntObtLNCTfK
-# +Qv5L362tiJDF9immQ9qGTn2LN4O2eNZJaK39XeFjoHt5EgzZDb7lEXt6Gd1IU0y
-# UMQ2ptwvEpmW32ha7j2+DyVuGLMlyOUI49tE2tz851QWpNyBWRPZKGOSu1I0oV9U
-# 9J2H6fznhCzheAfrswpeuJZPbx5xSAe1oLZreAPXzf8B5v/ev7wg8sLZWN1xivir
-# 1ys3yYFi/ET5L+0JD1YP7szU4lu1zAG3ktEmKRHwx3SAti4sRc3JeNvDtNFOqHbP
-# ulw3LHm2lFcFdWXrqNflZTXBKcWRlVTm21s5KpgZ1tpP91jWqRkSIoj17Fn0ww4i
-# K6vLAoPgshhFWztA2XTpJd6v2Od16IxKlHxmVUILidV9Yug0geK3n1VCCiduOvL3
-# duqz2D+HESvy5fbCUYpFiQibUGTbusZAYz5clg9bb0Yg+OC/kKGCAyYwggMiBgkq
+# BCA3SGNYF/0lV3cOdG0vd2DQ0+iUva3bbDA/F/Dji+duWTANBgkqhkiG9w0BAQEF
+# AASCAgAXnY6eO5Kpu2G17C3kS1A8IUAYrIPeHnECJfOuHCOItuKysgahtN/fMQbs
+# 9nJtHJFNIJlpiRWHi8IyjXsOWktJkQpc3r3D7+eiut4g5xhRXEM6LNG0xN9aew67
+# iSecLMB9z1irn8I7LFkQKertNSbbz6Mdj8vlWhr/UlyB1e+xsJuRr8X5xurf9Jod
+# VOKKGDJjgUSDTZ3tLE7xdsLiAxUTdC/Ltq/iVnccYZKgcZtuDqbEVoHix+mX3oZM
+# NEkQ4Nm+0LYbfWIye5YPmqVI1iDCAF2P193HPFUK9VQLyEGgeNmfCbeWpWLCAxJ9
+# g12NRpwVrnKqQX9BB1wohDKIuD4HIJ5T/Z6rCJEIYLbbKaikDWuvFuvU+WfuJrNG
+# O/uR07ASZkgjyWIpvmjHTPi0l/XZnxj3VUehJ8+dZGrTKZFGZTinYWjCI1ZoVwH6
+# KHQREvgni2bXtwBHDj7vWZWT3Vbx+qMM3O+jvgDLZAC9AJN1GO3bMAUb5JMaxA5O
+# nXqoS0yQmMi652BGeLBAvmefcvbpDUZkdZqKpf12bt3QScq5Ts0BiAPdfFmuKY3x
+# O6j803wWy55alDQH8HaF7Q/IKOvhJKItDkex7DyI0YE8tVtp3IwDMoixy5+k+iUX
+# 1vF+iAplBs88ZpUXo2Ibep6910AOXWNdbBu3dKkHpq372/Th+KGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MTkxMTQxNTVaMC8GCSqGSIb3DQEJBDEiBCBC8gXH
-# LnMHIg7ICdUGCubER/rO2f79GYKeqEEaJfo7KzANBgkqhkiG9w0BAQEFAASCAgCw
-# k4ca3mz26jg8h+TQFKm9mbWboxP9yqobtArsiszCGNM4lEAXfqIj8ewii/7bB3nO
-# 8cn0lBeOy9p63WKwm6BwUPYdP/w81rbazFVM5fGQPZS4WFui9N5SobF7Q38nMC+S
-# sIS7kPc6DQtFyoHHeuEc4+8gfcoh9bHUv6Ztzz7h30TpefZ9E5GiCR0Qr3xnAZBe
-# QlCFgNRHpALpzJRLF+/IspFRlxYxdSdQwTLa5acTVWCoWbbrBY0iNWxXy2pO+MNj
-# G6q2i1bSl4FDLSBq+/DniHR3UP0L3dP07WHGbgF5utT3UP/VxSTiBflkp7P7j2t6
-# kn9r21qTrhvTETDZCSqmwBrX1y/WoGOyZhOasChK6j53/MVyAMHMHMn1jPUMbRph
-# QFTsW9YpFUXxF2IHXbMzF1gmSznTwxyI/iYS5xxbInLt4FGnK68lRbrdO2im2ZhZ
-# WsTlixa0wleJV6LmH1BMEQWDtgE4KCM8RMk07QqftcHZkQfjf9TWcsY69g/MY0HU
-# iWtaK2NleqSn1aG60/TeXqv5Tn4fwYNmZXI8vVWsIjdwkSzrvuZ5Ht1N1B4whGK3
-# sCKbrbUia1yRRGeZ0nWkMH7EmHjae2jj9H54/NeB0fBoh/y4Aqfe/dXhKK1L2vay
-# fVMyPrDUM75Xfigsbh35bqTJ9U0BJcW9FMoGTmpyAg==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjIxOTEzMjhaMC8GCSqGSIb3DQEJBDEiBCDPZ+EQ
+# ZLjTlHiXPTBV23a99WNWx5z1KnTaAko2GYyZPjANBgkqhkiG9w0BAQEFAASCAgBk
+# 2aj1T5yutcnObRpG7/zDe5rAP2PnlzN9tbihvUz3gMSlJ0YNoCWc+0gEJbSZTOgQ
+# myBOe8co0bRCa2J1dI9YX67maWiGnWCpDrDCeknLXE6O4kHnsqKU9bEkq1UHUgi9
+# bUIyRSQRaF9oRGZeHpGStwD26GfdFzjlibPVC4lua56xAvkCZUO2IZFxHcs8r4xs
+# hjfJ3PJ2wE8ZPIvHs/6PsJR2OOKb89JaxUf/DSgr6QZgCcygcEgsik1PpFW1vSb2
+# skLlzbJ3YdCOl/l0KluszNX+nFusRUj9FLg/DgksldhhzhBNlF9DEeIDGB5RtYC2
+# uJzW+JnrxOaz4y9czHf+hHSCeEdAPmY8h50fojBFC2UrXFBTqk6MyhxWoZWcCbLj
+# uIWX54NtNh+0c+yvncwzdZ4BL7RzYXoYGgMIEYOurr2+6qofJoZH6FdYG8eVU6AD
+# Wicpu3r6vdorl0x6sFEhRAFhZdMwrLMZoiXyIaklIKPAuAc/SSRcZo1FlH9Xarbd
+# vBLqh6WuHKYbTDsd4bvjxjcpyu9szj+xILkupi2LQXhlPD4brw57CHWgffgo5Md5
+# PM6ha2ZLOIXdUnrBl5dkT0OGLs3rXKYondePTyArm+PR5Hp3+8AY9dLH9CqrVJj8
+# hJKe6/8m9Wzth0Aj0od2gyi3MZ5dsUJrogJ42vd+Kw==
 # SIG # End signature block

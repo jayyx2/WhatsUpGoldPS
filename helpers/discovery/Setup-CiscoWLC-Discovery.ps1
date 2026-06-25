@@ -13,64 +13,95 @@
       - WLANs (SSIDs, security profiles, radio policy)
       - System information and statistics
 
-    Modes:
-      1. Standalone: Query WLC SNMP directly     export inventory as JSON/CSV
-      2. WUG Integration: Discover from WUG devices     push monitors     generate dashboards
+    Actions:
+      PushToWUG         Create or reuse WUG devices and sync monitors.
+      ExportJSON        Export discovery data as JSON files.
+      ExportCSV         Export discovery data as CSV files.
+      ShowTable         Display results in console table format.
+      Dashboard         Generate interactive HTML dashboards.
+      DashboardAndPush  Generate dashboards and push to WUG.
+      None              Run discovery but skip export/push (useful for testing).
 
-.PARAMETER WLCAddresses
+.PARAMETER Target
     Array of WLC IP addresses or hostnames to discover.
 
-.PARAMETER SNMPCommunity
-    SNMPv2c community string. Default: 'public'
+.PARAMETER Action
+    Action to perform after discovery. Valid values:
+    'PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None'
 
-.PARAMETER SNMPv3SecurityName
-    SNMPv3 username (security name).
+.PARAMETER SnmpVersion
+    SNMP version to use. Valid values: 1, 2, 3. Default: 2
 
-.PARAMETER SNMPv3AuthProtocol
-    SNMPv3 authentication protocol (MD5, SHA, SHA256, SHA512).
+.PARAMETER Community
+    SNMPv1/v2c community string. Default: 'public'
 
-.PARAMETER SNMPv3AuthPassword
-    SNMPv3 authentication password.
+.PARAMETER SnmpUsername
+    SNMP v3 username (security name).
 
-.PARAMETER SNMPv3PrivProtocol
-    SNMPv3 privacy protocol (DES, AES128, AES192, AES256).
+.PARAMETER SnmpContext
+    SNMP v3 context.
 
-.PARAMETER SNMPv3PrivPassword
-    SNMPv3 privacy password.
+.PARAMETER SnmpAuthProtocol
+    SNMP v3 authentication protocol. Valid values: 'None', 'MD5', 'SHA', 'SHA1', 'SHA256', 'SHA384', 'SHA512'.
 
-.PARAMETER SNMPTimeout
+.PARAMETER SnmpAuthPassword
+    SNMP v3 authentication password.
+
+.PARAMETER SnmpPrivacyProtocol
+    SNMP v3 privacy protocol. Valid values: 'None', 'DES', '3DES', 'TripleDES', 'AES', 'AES128', 'AES192', 'AES256'.
+
+.PARAMETER SnmpPrivacyPassword
+    SNMP v3 privacy password.
+
+.PARAMETER SnmpPort
+    SNMP port. Default: 161.
+
+.PARAMETER TimeoutMs
     SNMP query timeout in milliseconds. Default: 10000 (10 seconds).
 
-.PARAMETER OutputDirectory
+.PARAMETER Retries
+    SNMP retry count. Default: 1.
+
+.PARAMETER VaultName
+    Optional DPAPI vault bundle name for SNMP settings. Default: CiscoWLC.Snmp.
+
+.PARAMETER WUGServer
+    WhatsUp Gold server IP or hostname. Default: 192.168.74.74.
+
+.PARAMETER WUGCredential
+    PSCredential for WhatsUp Gold authentication.
+
+.PARAMETER DeviceGroupId
+    Device group ID in WhatsUp Gold for discovered devices. Default: 0 (root group).
+
+.PARAMETER PollingIntervalSeconds
+    Polling interval in seconds for created monitors. Valid range: 60-86400. Default: 300.
+
+.PARAMETER OutputPath
     Directory for exported discovery plans. Default: %LOCALAPPDATA%\WhatsUpGoldPS\DiscoveryHelpers\Output (for non-interactive or WUG push), or %TEMP% for interactive mode.
 
-.PARAMETER ExportFormat
-    Export format: 'JSON', 'CSV', or 'Both'. Default: 'Both'
-
-.PARAMETER PushToWUG
-    If specified, pushes discovery plans to WhatsUp Gold (requires WUG connection).
-
-.PARAMETER GenerateDashboard
-    If specified, generates interactive Bootstrap Table dashboard from inventory.
+.PARAMETER NonInteractive
+    Suppress prompts. Requires direct SNMP parameters or a saved vault bundle.
 
 .EXAMPLE
     # Standalone discovery with SNMPv2c
-    .\Setup-CiscoWLC-Discovery.ps1 -WLCAddresses '192.168.75.33' -SNMPCommunity 'public'
+    .\Setup-CiscoWLC-Discovery.ps1 -Target '192.168.75.33' -SnmpVersion 2 -Community 'public' -Action Dashboard
 
 .EXAMPLE
-    # Discover with SNMPv3 and export dashboard
+    # Discover with SNMPv3
     .\Setup-CiscoWLC-Discovery.ps1 `
-        -WLCAddresses '10.0.0.100' `
-        -SNMPv3SecurityName 'snmpuser' `
-        -SNMPv3AuthProtocol 'SHA' `
-        -SNMPv3AuthPassword 'authpass123' `
-        -SNMPv3PrivProtocol 'AES128' `
-        -SNMPv3PrivPassword 'privpass123' `
-        -GenerateDashboard
+        -Target '10.0.0.100' `
+        -SnmpVersion 3 `
+        -SnmpUsername 'snmpuser' `
+        -SnmpAuthProtocol 'SHA' `
+        -SnmpAuthPassword 'authpass123' `
+        -SnmpPrivacyProtocol 'AES128' `
+        -SnmpPrivacyPassword 'privpass123' `
+        -Action Dashboard
 
 .EXAMPLE
-    # WUG integration mode (auto-discover from WUG devices with DiscoveryHelper.CiscoWLC attribute)
-    .\Setup-CiscoWLC-Discovery.ps1 -PushToWUG -GenerateDashboard
+    # Non-interactive with WUG push
+    .\Setup-CiscoWLC-Discovery.ps1 -Target '192.168.75.33' -SnmpVersion 2 -Community 'public' -Action PushToWUG -NonInteractive
 
 .NOTES
     Author: Jason Alberino
@@ -79,56 +110,52 @@
     Encoding: UTF-8 with BOM
 #>
 
-[CmdletBinding(DefaultParameterSetName = 'Standalone')]
+[CmdletBinding(SupportsShouldProcess)]
 param(
-    [Parameter(ParameterSetName = 'Standalone', Mandatory)]
-    [string[]]$WLCAddresses,
+    [string[]]$Target,
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [string]$SNMPCommunity = 'public',
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
+    [string]$Action,
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [string]$SNMPv3SecurityName,
+    [ValidateSet(1, 2, 3)]
+    [int]$SnmpVersion = 2,
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [ValidateSet('MD5', 'SHA', 'SHA256', 'SHA512')]
-    [string]$SNMPv3AuthProtocol,
+    [string]$Community = 'public',
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [string]$SNMPv3AuthPassword,
+    [string]$SnmpUsername,
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [ValidateSet('DES', 'AES128', 'AES192', 'AES256')]
-    [string]$SNMPv3PrivProtocol,
+    [string]$SnmpContext,
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [string]$SNMPv3PrivPassword,
+    [ValidateSet('None', 'MD5', 'SHA', 'SHA1', 'SHA256', 'SHA384', 'SHA512')]
+    [string]$SnmpAuthProtocol = 'SHA256',
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [int]$SNMPTimeout = 10000,
+    [string]$SnmpAuthPassword,
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [string]$OutputDirectory,
+    [ValidateSet('None', 'DES', '3DES', 'TripleDES', 'AES', 'AES128', 'AES192', 'AES256')]
+    [string]$SnmpPrivacyProtocol = 'AES256',
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [ValidateSet('JSON', 'CSV', 'Both')]
-    [string]$ExportFormat = 'Both',
+    [string]$SnmpPrivacyPassword,
 
-    [Parameter(ParameterSetName = 'WUG')]
-    [switch]$PushToWUG,
+    [int]$SnmpPort = 161,
 
-    [Parameter(ParameterSetName = 'Standalone')]
-    [Parameter(ParameterSetName = 'WUG')]
-    [switch]$GenerateDashboard
+    [int]$TimeoutMs = 10000,
+
+    [int]$Retries = 1,
+
+    [string]$VaultName = 'CiscoWLC.Snmp',
+
+    [string]$WUGServer = '192.168.74.74',
+
+    [PSCredential]$WUGCredential,
+
+    [int]$DeviceGroupId = 0,
+
+    [ValidateRange(60, 86400)]
+    [int]$PollingIntervalSeconds = 300,
+
+    [string]$OutputPath,
+
+    [switch]$NonInteractive
 )
 
 Set-StrictMode -Version Latest
@@ -137,44 +164,45 @@ $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 
 # ============================================================================
-# Set default OutputDirectory if not specified
+# Set default OutputPath if not specified
 # ============================================================================
-if (-not $OutputDirectory) {
-    if ($PSBoundParameters.ContainsKey('NonInteractive') -or $PushToWUG) {
-        $OutputDirectory = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
+if (-not $OutputPath) {
+    if ($NonInteractive -or $Action -in @('PushToWUG', 'DashboardAndPush')) {
+        $OutputPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
     }
     else {
-        $OutputDirectory = $env:TEMP
+        $OutputPath = $env:TEMP
     }
 }
-if (-not (Test-Path -LiteralPath $OutputDirectory)) {
-    New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+if (-not (Test-Path -LiteralPath $OutputPath)) {
+    New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
 }
 
 # ============================================================================
 #  region Load Dependencies
 # ============================================================================
 
-# Only load dashboard generator if needed (for later use)
-# Framework dependencies (DiscoveryHelpers, DiscoveryProvider) not needed for Standalone mode
-# WUG module loaded only if PushToWUG is specified
+# NonInteractive fallback: default to Dashboard if no Action specified
+if ($NonInteractive -and -not $Action) { $Action = 'Dashboard' }
 
-if ($GenerateDashboard) {
+# Load dashboard generator for Dashboard/DashboardAndPush actions
+$generateDashboard = $Action -in @('Dashboard', 'DashboardAndPush')
+if ($generateDashboard) {
     $dynDashPath = Join-Path (Split-Path $scriptDir -Parent) 'reports\Export-DynamicDashboardHtml.ps1'
     if (Test-Path $dynDashPath) {
         . $dynDashPath
     } else {
         Write-Warning "Dashboard generator not found at $dynDashPath"
-        $GenerateDashboard = $false
+        $generateDashboard = $false
     }
 }
 
 Write-Host "`n=== Cisco WLC Discovery ===" -ForegroundColor Cyan
-Write-Host "Output Directory: $OutputDirectory`n" -ForegroundColor Yellow
+Write-Host "Output Directory: $OutputPath`n" -ForegroundColor Yellow
 
 # Create output subdirectories (needed for all modes)
-$fullDir = Join-Path $OutputDirectory 'full'
-$summaryDir = Join-Path $OutputDirectory 'summary'
+$fullDir = Join-Path $OutputPath 'full'
+$summaryDir = Join-Path $OutputPath 'summary'
 $dashboardDir = Join-Path $summaryDir 'dashboards'
 
 foreach ($dir in @($fullDir, $summaryDir, $dashboardDir)) {
@@ -184,18 +212,16 @@ foreach ($dir in @($fullDir, $summaryDir, $dashboardDir)) {
 }
 
 # ============================================================================
-#  region Standalone Mode
-# ============================================================================
-#  region Standalone Mode: Direct SNMP Walks
+#  region Discovery: Direct SNMP Walks
 # ============================================================================
 
-if ($PSCmdlet.ParameterSetName -eq 'Standalone') {
-    Write-Host "Mode: Standalone (direct SNMP bulk walks)" -ForegroundColor Green
-    Write-Host "WLC Addresses: $($WLCAddresses -join ', ')" -ForegroundColor Yellow
+if ($Target) {
+    Write-Host "Mode: Direct SNMP bulk walks" -ForegroundColor Green
+    Write-Host "Target: $($Target -join ', ')" -ForegroundColor Yellow
     
-    # Determine SNMP version
-    $snmpVersion = if ($SNMPv3SecurityName) { 'V3' } else { 'V2' }
-    Write-Host "SNMP Version: $snmpVersion`n" -ForegroundColor Yellow
+    # Map numeric SnmpVersion (1, 2, 3) to version strings used by SNMP module (V1, V2, V3)
+    $snmpVersionStr = @{ 1 = 'V1'; 2 = 'V2'; 3 = 'V3' }[$SnmpVersion]
+    Write-Host "SNMP Version: $snmpVersionStr`n" -ForegroundColor Yellow
 
     # Load SNMP module
     Write-Host "Step 1: Loading SNMP module..." -ForegroundColor Cyan
@@ -219,7 +245,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Standalone') {
 
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
-    foreach ($wlcAddress in $WLCAddresses) {
+    foreach ($wlcAddress in $Target) {
         Write-Host "Step 2: SNMP Bulk Walk for $wlcAddress" -ForegroundColor Cyan
         
         foreach ($tree in $oidTrees) {
@@ -230,21 +256,21 @@ if ($PSCmdlet.ParameterSetName -eq 'Standalone') {
                     Target = $wlcAddress
                     Table = $tree.OID
                     MaxRepetitions = 25
-                    Timeout = $SNMPTimeout
+                    Timeout = $TimeoutMs
                     ErrorAction = 'Stop'
                 }
                 
-                if ($snmpVersion -eq 'V3') {
+                if ($snmpVersionStr -eq 'V3') {
                     $walkParams['Version'] = 'V3'
-                    $walkParams['Username'] = $SNMPv3SecurityName
-                    $walkParams['AuthProtocol'] = $SNMPv3AuthProtocol
-                    $walkParams['AuthPassword'] = $SNMPv3AuthPassword
-                    $walkParams['PrivProtocol'] = $SNMPv3PrivProtocol
-                    $walkParams['PrivPassword'] = $SNMPv3PrivPassword
+                    $walkParams['Username'] = $SnmpUsername
+                    $walkParams['AuthProtocol'] = $SnmpAuthProtocol
+                    $walkParams['AuthPassword'] = $SnmpAuthPassword
+                    $walkParams['PrivProtocol'] = $SnmpPrivacyProtocol
+                    $walkParams['PrivPassword'] = $SnmpPrivacyPassword
                     $walk = Invoke-SNMPBulkWalkFriendly @walkParams
                 } else {
-                    $walkParams['Version'] = $snmpVersion
-                    $walkParams['Community'] = $SNMPCommunity
+                    $walkParams['Version'] = $snmpVersionStr
+                    $walkParams['Community'] = $Community
                     $walk = Invoke-SNMPBulkWalk @walkParams
                 }
                 
@@ -302,7 +328,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Standalone') {
     }
 
     # Step 4: Generate dashboards
-    if ($GenerateDashboard) {
+    if ($generateDashboard) {
         Write-Host "`nStep 4: Generating dashboards..." -ForegroundColor Cyan
         $dashboardScript = Join-Path (Split-Path $scriptDir -Parent) 'cisco-wlc\Export-Wireless-Dashboard-Pack.ps1'
         if (Test-Path $dashboardScript) {
@@ -324,7 +350,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Standalone') {
     Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
     Write-Host "Full data: $fullDir" -ForegroundColor Gray
     Write-Host "Summaries: $summaryDir" -ForegroundColor Gray
-    if ($GenerateDashboard) {
+    if ($generateDashboard) {
         Write-Host "Dashboards: $dashboardDir" -ForegroundColor Gray
     }
 }
@@ -333,9 +359,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Standalone') {
 #  region WUG Integration Mode
 # ============================================================================
 
-if ($PSCmdlet.ParameterSetName -eq 'WUG' -and $PushToWUG) {
+if ($Action -in @('PushToWUG', 'DashboardAndPush')) {
     Write-Host "Mode: WUG Integration (not yet implemented with new architecture)" -ForegroundColor Yellow
-    Write-Host "Use Standalone mode instead: .\Setup-CiscoWLC-Discovery.ps1 -WLCAddresses <ip> -GenerateDashboard" -ForegroundColor Gray
+    Write-Host "Use -Action Dashboard for local discovery: .\Setup-CiscoWLC-Discovery.ps1 -Target <ip> -Action Dashboard" -ForegroundColor Gray
 }
 
 Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
@@ -343,8 +369,8 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB718hlJStfWmjG
-# 1kcAGUm68v09fEKeTIrcOpD0yucYvKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbr7vBOMU68HDM
+# vYT77nm9drGn3yGpTV7iZOA2KEIhj6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -547,33 +573,33 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCdKfpVS/1UK2DkrH0mjcYq7x2ftnQmWDaMlevNdv7njDANBgkqhkiG9w0BAQEF
-# AASCAgC4voyxwWmG0oPVIWu4GdAMVIAP2QXVGo+vplByK1b8Yec3cxSJUjnyKaMC
-# MvxJld/jNLx8J1dGNA55K7ecmRKuZm7vHn75bongZuO3fzS2R8noX3dYKhYI3SxA
-# ecxSv7wlpixFZY38WtVcsTxUkUtyswLuLhtKdgIKAUXMpVsO17UfD+njVWTPZddp
-# zGEKARB9ID5fRg6YzEqqkMVYd1pUq317+2vFgpj3sWuqmbX+Lu73hoa0X0pRa+9Y
-# DJW9GFJrfzhttvAXwZwKpavnOY6k6USF86fAR64EnnS4NevY38/4QeW1VLh3oDLr
-# Usy8SG+rliSoCu0zH6Dq6NPFFQoSHfo7yXGwizCKuRMzDoDqOQupcNlzJ9uT63lo
-# hil/xl8cVfEwYWaJpaQq3hnV1S4TXCwUS3r/mURXXDUAGMDkixSAMbCeOtx7k1cB
-# tPfe3k6EvSmLFCachl908SIsTsPGJo/UkjzHLl/3MZAzQh4yxCuezOGwWygtTkEe
-# tEUWmBMuqliGmawdiVF66MvN3jeQjN9H6cU8X+RkgVa9ctj846F/9PyZAdGjuOE6
-# 6VGQFNj7scorktcRz8hZ4Z+2CrKqNd8b0bbc/qFrvSemGmGHGohKNsZwIx4QZETV
-# f1+g5/IXLKZsDN/GFKqli7eMDEdOo5YrhTRSMlUOG9TrPxAYG6GCAyYwggMiBgkq
+# BCB2RjydOjJh1DDLYivbJwQSddeQU1Qcw2AtqLue30WPgDANBgkqhkiG9w0BAQEF
+# AASCAgB3QfwVVm5D41zt9yeBC8aCRyT1gQDmsHWYDd2qlDZeqG4kRLekb9nomsEh
+# zdnBq11p7BC/jKnVSds7UYyN9yFjq/dqM4ji7XlmUJCj7gZuwyjZB9HI6Fs5Dz5x
+# t+a4Tlg5gfpKeqkEqJafctBN867Cd5frvZDJImYjmL6X0OPRjwmLFG9/twRr8BlP
+# 1orcM0TxYWEtQvCFgY++Vw0ZCD1jFju/vBn8lOMoL20GjTwpWmYEWZ53NBgGrmf0
+# K8gPBBcNvAiFO7KgBBFku4u+zaOd7C2jnCS7+1D2s/x2qnQPBQpVM74ToJWBpfzB
+# RttcvhP/Lm4GPZcz8QWA8Pes8Uyb1Me1oNHQvxDa6hfEf0OK/xAEa4E7J0Ti4Pf3
+# rzCn7hdaWc43wSTn3HMMUQn6qHt2v5f3Mwu4u/o6f0XVPgpAhiS0cXOMzj6WFZMJ
+# 4zpo2/jXaLpIWd7/a9mKC1wK040bOKt70ofoaqMjq1iotJhS3GkqqfDDOw8wjQyC
+# adZ/QRFYTYGjR/g/ofZ+QGmw/4hG5LMxkX4YbxQTGiOPa9vtdVrY1BeS0R+xVPBO
+# rvmYLU9Ogw9H0DIH7xQVS4eGBfcXD2QziDceP/+yLgc++A94R8xvKaQK/92MqtWq
+# XoEi0OClV2rx2GSPWuekcfpcnt2GMJlyRt/2/bNoWLB88Ot5LaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjUxMzA3MTFaMC8GCSqGSIb3DQEJBDEiBCDTfXVv
-# BivQVSzu/8w/DgpmHoJyFBh/WEk5SHICvZBk7zANBgkqhkiG9w0BAQEFAASCAgAk
-# b6z8qyxkgstuKMTZlIgUTCIAOB/UVXFPhKpcyyCS8frre19ajdLv9KstCdwsOwB+
-# CwJpoQgPfEgyguL0Q2Cxl5qrUqQ80ZDURXl3z8ryemrQK60yMwHmbWrT6i+RWMe6
-# cy+9XeG8tBCGFKyvk+9gfR/aoLPg4ny5uG08fMpUyNQzSVBF1SNYg43YfambMeIc
-# yQrh/TT3SIIuVwAy7pbq5eJ/e6lm2O/pAV/Y5S4f3P0jcpnnBzzdQQnIsQP28PuA
-# 6h/sNevjjRHy2crMqbo04F81UIVfuJvR5sQlH4KAnODIvXyFCg9RbTuRJ0jMnoBK
-# 9J1jvKjjcGmxp/ofovEPZ/ztnhmh/UO+Z/qusqGTXfeeOwCTO+nJVRk+5pbluw0J
-# 2WAW84h2JOZQEEK/FtFWAc7XruaQx0noqfWcNcrGrxwbypfK7WLMN/pWgw2YpHmJ
-# J75dYcXYAaAWoyroxk39m2VyXMf8tqP8hIjQNdVvDqf7+tzjCFFh6KZGHKsTLe2p
-# XJTOmZ/f11m1xJyrogMgWbfZ7YNdVcyNgx5XSnRG58tWC6lDrgewC8SBW9AGOI4W
-# oqUFG/VmdAJZqr7vxOIdTTovTUv3ArEeY8TQIwS8jMPPnpGAGS1iCYwQrYMOrmnk
-# EGUcs3Iwh96LHh3J8n2nWX/QNv9SM4lXibxaXp7New==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjUxNjQ2MjZaMC8GCSqGSIb3DQEJBDEiBCDssT4i
+# 6q786bYa6uBJ4biKoQfmET6ambpjR4+6Rlww+jANBgkqhkiG9w0BAQEFAASCAgCd
+# 5C4cxhguNZPnmMp8KkM8oNcJnucMTw5oPdy1R7yLSyhnFC1zBhMQx+5/J7wXMbRn
+# gJ6VLwZ0U0jrNGN6gCE8daGf4KE4H3uWVZWplMMp5kvRlrYURHQ3Xj3XMD9xtrDr
+# lWYiezxguZ7cZQI1aektqDSHXqKwbXmI0mZOhr80tnQxf61jnv2aqLfU+mnSRZxc
+# Ebo1hxAsmXiJnGVjNI6CpD4sh1halyRF0YNYIQ2Lep/MaQa1ETJPmLaK3biFH0UJ
+# J6zvs5gRvdTJ6HYpYe9KnKZI5Gs72mjJ2FjW0YE7soG/SWX+EOQ3oZX/dBrjdtup
+# JnwKOtZLHMBjlncRjhfy+kWSXeVGc6dtEGdwtafhgRj9KQnk+LsqiRmM2W9rfa/G
+# xZPndJ2nef0jhBhqFWdnCnYGrp/WvmCkr17KtQ9fSWNW+tzIW8XJYHlM3V4xP1B+
+# g7uD3u02g98wDxXZcvIx60cuWVMmcEKaviZDJUPmLk5g4eTYqTpVnVZ15S+zGC+V
+# +qNpcZsBznfr+mGP8X8lZKaKte0nq6w/F8Yq4KNeledqyjkAEFZjic952pW4FTrv
+# c4VSuTFP/zJSskE43xiZSIkMXc61yWjVarMG7A9HDx2tNGMa93wxvw2HlucwOSFW
+# VZnqprJmenx9/eEAmYnWIbARXHnErjsITl3K9Ea5fg==
 # SIG # End signature block

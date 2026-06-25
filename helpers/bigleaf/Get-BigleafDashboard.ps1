@@ -80,12 +80,12 @@ if ($UseWUGDevices -and -not $global:WUGBearerHeaders) {
 }
 
 # Output paths
-$outputDir = if ($env:TEMP) { $env:TEMP } else { "C:\temp" }
+$outputDir = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
 $jsonPath  = Join-Path $outputDir "bigleaf_dashboard.json"
 $htmlPath  = Join-Path $outputDir "Bigleaf-Dashboard.html"
 
 # Ensure output directory exists
-if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
+if (-not (Test-Path -LiteralPath $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
 
 # --- Build dashboard data ----------------------------------------------------
 $dashboardData = Get-BigleafDashboard

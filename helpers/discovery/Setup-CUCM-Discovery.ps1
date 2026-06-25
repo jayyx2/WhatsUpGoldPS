@@ -342,12 +342,12 @@ function Get-CUCMResolvedSnmpSettings {
         $resolvedPrivacyProtocol = [int]$saved['PrivacyProtocol']
     }
 
-    $resolvedAuthPassword = ConvertTo-CUCMPlainText -SecureString $SnmpAuthPassword
+    $resolvedAuthPassword = ConvertTo-CUCMPlainText $SnmpAuthPassword
     if ([string]::IsNullOrWhiteSpace($resolvedAuthPassword) -and $saved -and $saved.ContainsKey('AuthPassword')) {
         $resolvedAuthPassword = [string]$saved['AuthPassword']
     }
 
-    $resolvedPrivacyPassword = ConvertTo-CUCMPlainText -SecureString $SnmpPrivacyPassword
+    $resolvedPrivacyPassword = ConvertTo-CUCMPlainText $SnmpPrivacyPassword
     if ([string]::IsNullOrWhiteSpace($resolvedPrivacyPassword) -and $saved -and $saved.ContainsKey('PrivacyPassword')) {
         $resolvedPrivacyPassword = [string]$saved['PrivacyPassword']
     }
@@ -357,7 +357,7 @@ function Get-CUCMResolvedSnmpSettings {
             throw 'SNMP community is required for non-interactive SNMP v1/v2 discovery.'
         }
         $communitySecure = Read-Host -AsSecureString -Prompt 'SNMP read community'
-        $resolvedCommunity = ConvertTo-CUCMPlainText -SecureString $communitySecure
+        $resolvedCommunity = ConvertTo-CUCMPlainText $communitySecure
     }
 
     if ($resolvedVersion -eq 3) {
@@ -372,14 +372,14 @@ function Get-CUCMResolvedSnmpSettings {
             if ($NonInteractive) {
                 throw 'SNMP v3 auth password is required when SnmpAuthProtocol is set.'
             }
-            $resolvedAuthPassword = ConvertTo-CUCMPlainText -SecureString (Read-Host -AsSecureString -Prompt 'SNMP v3 auth password')
+            $resolvedAuthPassword = ConvertTo-CUCMPlainText (Read-Host -AsSecureString -Prompt 'SNMP v3 auth password')
         }
 
         if ($resolvedPrivacyProtocol -gt 0 -and [string]::IsNullOrWhiteSpace($resolvedPrivacyPassword)) {
             if ($NonInteractive) {
                 throw 'SNMP v3 privacy password is required when SnmpPrivacyProtocol is set.'
             }
-            $resolvedPrivacyPassword = ConvertTo-CUCMPlainText -SecureString (Read-Host -AsSecureString -Prompt 'SNMP v3 privacy password')
+            $resolvedPrivacyPassword = ConvertTo-CUCMPlainText (Read-Host -AsSecureString -Prompt 'SNMP v3 privacy password')
         }
     }
     else {
@@ -935,12 +935,12 @@ foreach ($currentChoice in $actionsToRun) {
     }
 }
 
-# ---- END OF SCRIPT (do not remove this line or the closing braces above
+# ---- END OF SCRIPT (do not remove this line or the closing braces abov
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCtYym+cnAouDo
-# yrlE/ftZz3E+Y6y97iI4CuVCMORHfqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9rPdrneB4/JWM
+# 9+SBjGi2USzt7/+5hIvKxpnYc0zOgaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1143,33 +1143,33 @@ foreach ($currentChoice in $actionsToRun) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDPzOSq2som78J3pYqlnJC/xxSbE9A5svPmp9d/pXvn3jANBgkqhkiG9w0BAQEF
-# AASCAgCiVFuIZhjJMqJPN/ao5uA1gPY2SVMLBhW0zIS0OT4BTkEVW0CN+dsUm/9P
-# JcIY1sjY/K7hUgyZ/7icwTG1nQEESdgT8OI4YfXrRtEOp+01oL/h9ILtGg6U9Kjz
-# Sbe1oY7S0ko5KCwjJqwceES3GhlwwnsBwvFBYJ4trjEOtwZt69KJtTe2C9ZtRCc+
-# OTUz1PJ/NMngOPVdeefX/MEpX0GCEj6+Zu0wIW0RXuSUvV71ZnhcEHM/Wk21Ic/b
-# Cl9fkK61BjJT1tQDmnpBO9gePy1yO7uAS5MR1Rx61cKQLu1b1priACdUGj2KnPnb
-# CIJwCiYy7959kSRiMJlbdyw7zVgt3JShH+zDjQ6PL4jjOYJ5OqQrxiEAub0NN7CY
-# SU+otZhN4NXKsBLFxw3rUKbz8KIDAullTx/uB2iYooX6kCRbDxnoV1uAy4oFjjsh
-# U5YiDc4cuzD0r0cqtiSO30hV6hCJ6+Sr7pQ0n2Y10NhD9+AAdLcFZps6McoAczLv
-# k04geGh7namIPZ782sF4dkCj19m5EmIc/RYuIwIaIO/XYFIe5Ozb9NRjiSNcGWMk
-# TBEPvs3XmSQ1SgaYbRhXopTJrNrVF7+IfgAa9WdyzuFEw0jH+02Ozk9hnrNQ7meU
-# pB2OJ/igWMCv0FkEv6vDMsG2AL8BPoUMDdR8VKgj89WwHRAIvqGCAyYwggMiBgkq
+# BCCW4wGliMkRI66wu8Y5VmPOLWD6DeTLEqHk1hkeUSXcHDANBgkqhkiG9w0BAQEF
+# AASCAgBSMgg11GjzIPvg4flljB6rW8r3f8lB36k9yYIbkv/nYb7X1eCw1eURH925
+# ANujCW0hZIMdGbZ01F0tVRrVvDdLPsldXLk/bUivpM+rslLJgL/3Lg1L1Ay0JjQo
+# jEg9njXikmG8qEEyz5twqWv+3CKsoj/KevmZkyZkZctZsyL9PoU0rbwT3YyOBY6L
+# Bb3r3MWRfMwVAuXaSMcnYN1iMf/QI8dE1ZBVr9s7ixpfZk8AtYSVgMk+APGykYb8
+# WkU3F4dzD0hk1WyG+vy1aWdhrmoDXWtmnMEkenqgkGo2gOpm+WweDtRZTOZ5+n+D
+# IDOWzvj2CGONRV5vRgKgLiVToIDtzfI5Iv2LsabelHENwC6pIUQ9e0DPzUzgfKR8
+# JISEKbu8cP9rvn9aPeGjwhQmpvxBQpppMxwUj963D5fGjZKUvk+uERm/QqE1s+MU
+# KnCTESuZhCgzYNbOspcJFzsUyrqAfdI7US3aqYMdsV+DZxYjmrBWD0/X1zCqAIn0
+# 7DkxYqEhTkSIiZx6zCe8YKMSKmYegWim4wflkOU0Bm9djvv96n7VQrMG5YyFyNms
+# doLDsG4/p8JwBqt1wWqoczqWIDWBTwcsww5Tb2553vtZyKCfU4Q05T0kAgFxpQKD
+# 6hH/263C8wu+Hg6kcEGNeqtjQ/hPjixpBaMVfPVNa/eiOyF3RqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjUxMjI5MDZaMC8GCSqGSIb3DQEJBDEiBCDj/ukf
-# sQW4oD8C/Aprc6htiVsJnBXv4vzdF/A79x5hJzANBgkqhkiG9w0BAQEFAASCAgAq
-# erpBpnUuDhFWVc+nkVlGcnp5Rd2Fn1n/GMm1Z0AdzrY5zqAcLJWxqpKOaxhIxsfQ
-# jpjtLnj2X3Ql0om0PK/UNeHYQCd7hbraVJL35VoU+zfmsJrQtEkTwI8FWFbdB3mO
-# KI1rI5Q/r32pWHRrHZ3LWUnzHsYCD5Ee/ASvMkWdSIj/HuQadd6F8oLUuK3zGlB8
-# SmY8z95wYshZHIYvNn9gBG5XkqQR8V0NpoJt14YCRVK6xSa0kE9EuxD3sMVwwjOx
-# 7hkqbpRjR6+r+GDmLrBaJ3xKBYY3jR/WMlQjdiUZskKwsmYVAm0U1eSTeDWVf5Pk
-# PsxFmLeKpwShVwa9oXjYd/VKmt8v5jABz/D86Gd6T/k2+noMbDT5KDMkIiVXKok7
-# DPqf60Eqah5ebIVvK7eS9z8ilf53PP98Xe/fYeuccSAGWWGvo4lrZJadQM7MjIEG
-# NB+OzVPpIkeR20oF3i1UJZqax4Vq3U2KqM+PlKDTEatCkwbA6WqplbdR2thrybEr
-# AQZnxnPLCHtI80zkPnvanFz1dcGFCvPHt6faRtrrYHdZxZM1h4drFD/p/sV8OvxT
-# E7qW2FiYybtrdk/pdOpMJM8ulAvFN6gch1MOK5hn9AJMuQtnPlry4iJqsl9m5OI9
-# uuRNiS1pCPNYO+71/X0K4KwrpaRnIQTpdBt/jS8hsg==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjUxMjMzNTlaMC8GCSqGSIb3DQEJBDEiBCDodWAf
+# uJDjQ2JIyRx5WlrLQiFcSoPnyOw2KS+zNSZkZjANBgkqhkiG9w0BAQEFAASCAgDQ
+# QC8KTZ1JEA+WJ4QbpL9wEz06Pcc2f1SOu7pxn8Nauzd5GVcjl9g7OslMB2RzSHwy
+# p04bdu+gcc7aaGT61pJCXSuYcfqtCabexCoyKElk0IJmT6PkVo6RQXe+CJwCFkto
+# yzfsnMmTXpP+JUXRQcb6Wsko8vlZLkGRXboDlEoswpot6/hmB7VXnhPXxZubyI9E
+# +48taBEWkp9gw30p0H6A8VLnaUk7uL8KDK2Sn1aDz7jdWFwYQE4y67v/+t4vOhaf
+# ZuofKNXnjkcBZIIIf/N8CFXlVR/j/TnpwSlIXkLLTNniS9kUH9UYhmVf4uJYtHWT
+# AXqe30UQWC2bgna2T8fNmRI9nLZS39JuvFmIeVW/ciqqihj1F1/OMa4Cj48xnOzz
+# k4N1hV6IaWAemd8GL2+yiu8jHPlLun++nscXLcBunzZSiqa6vXfH+KQsLM2kw/6p
+# /Q9T3m+Z02i6rHX3Hik/bagpUuBB6Fk8FxEG/PM2edRe7PvxyuSjswkya+SUXLYs
+# /trWuEZlNtOhaQG77Rr7bKfXtQnP6IPYEnTrKMWiCI2l7NnhimAhe3YiW0pvGS+v
+# ZvN/jCjxz3xOb6PvY9Vl37ZEUliViR4fu5p6AY/ye5K6BoL1g/UzcAWvJgb0m6x0
+# 709zk6KoDEtw8UvBbYa6fKVuXYAGPnqgnVRos+wl3g==
 # SIG # End signature block

@@ -109,12 +109,12 @@ param(
     [ValidateSet('None', 'MD5', 'SHA', 'SHA1', 'SHA256', 'SHA384', 'SHA512')]
     [string]$SnmpAuthProtocol = 'SHA256',
 
-    [System.Security.SecureString]$SnmpAuthPassword,
+    [string]$SnmpAuthPassword,
 
     [ValidateSet('None', 'DES', '3DES', 'TripleDES', 'AES', 'AES128', 'AES192', 'AES256')]
     [string]$SnmpPrivacyProtocol = 'AES256',
 
-    [System.Security.SecureString]$SnmpPrivacyPassword,
+    [string]$SnmpPrivacyPassword,
 
     [int]$SnmpPort = 161,
 
@@ -146,17 +146,23 @@ function ConvertTo-CUCMPlainText {
     [CmdletBinding()]
     param(
         [Parameter()]
-        [System.Security.SecureString]$SecureString
+        $Value
     )
 
-    if ($null -eq $SecureString) { return '' }
+    if ($null -eq $Value) { return '' }
 
-    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
-    try {
-        return [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    # Handle both SecureString and plain string inputs
+    if ($Value -is [System.Security.SecureString]) {
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Value)
+        try {
+            return [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+        }
+        finally {
+            [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        }
     }
-    finally {
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    else {
+        return [string]$Value
     }
 }
 
@@ -929,12 +935,12 @@ foreach ($currentChoice in $actionsToRun) {
     }
 }
 
-# ---- END OF SCRIPT (do not remove this line or the closing braces above)
+# ---- END OF SCRIPT (do not remove this line or the closing braces above
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBU6CC27OhXtc9D
-# RHYVliIuJ779GCdVm53ue02Dg+aOJqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCtYym+cnAouDo
+# yrlE/ftZz3E+Y6y97iI4CuVCMORHfqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1137,33 +1143,33 @@ foreach ($currentChoice in $actionsToRun) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCA3SGNYF/0lV3cOdG0vd2DQ0+iUva3bbDA/F/Dji+duWTANBgkqhkiG9w0BAQEF
-# AASCAgAXnY6eO5Kpu2G17C3kS1A8IUAYrIPeHnECJfOuHCOItuKysgahtN/fMQbs
-# 9nJtHJFNIJlpiRWHi8IyjXsOWktJkQpc3r3D7+eiut4g5xhRXEM6LNG0xN9aew67
-# iSecLMB9z1irn8I7LFkQKertNSbbz6Mdj8vlWhr/UlyB1e+xsJuRr8X5xurf9Jod
-# VOKKGDJjgUSDTZ3tLE7xdsLiAxUTdC/Ltq/iVnccYZKgcZtuDqbEVoHix+mX3oZM
-# NEkQ4Nm+0LYbfWIye5YPmqVI1iDCAF2P193HPFUK9VQLyEGgeNmfCbeWpWLCAxJ9
-# g12NRpwVrnKqQX9BB1wohDKIuD4HIJ5T/Z6rCJEIYLbbKaikDWuvFuvU+WfuJrNG
-# O/uR07ASZkgjyWIpvmjHTPi0l/XZnxj3VUehJ8+dZGrTKZFGZTinYWjCI1ZoVwH6
-# KHQREvgni2bXtwBHDj7vWZWT3Vbx+qMM3O+jvgDLZAC9AJN1GO3bMAUb5JMaxA5O
-# nXqoS0yQmMi652BGeLBAvmefcvbpDUZkdZqKpf12bt3QScq5Ts0BiAPdfFmuKY3x
-# O6j803wWy55alDQH8HaF7Q/IKOvhJKItDkex7DyI0YE8tVtp3IwDMoixy5+k+iUX
-# 1vF+iAplBs88ZpUXo2Ibep6910AOXWNdbBu3dKkHpq372/Th+KGCAyYwggMiBgkq
+# BCDPzOSq2som78J3pYqlnJC/xxSbE9A5svPmp9d/pXvn3jANBgkqhkiG9w0BAQEF
+# AASCAgCiVFuIZhjJMqJPN/ao5uA1gPY2SVMLBhW0zIS0OT4BTkEVW0CN+dsUm/9P
+# JcIY1sjY/K7hUgyZ/7icwTG1nQEESdgT8OI4YfXrRtEOp+01oL/h9ILtGg6U9Kjz
+# Sbe1oY7S0ko5KCwjJqwceES3GhlwwnsBwvFBYJ4trjEOtwZt69KJtTe2C9ZtRCc+
+# OTUz1PJ/NMngOPVdeefX/MEpX0GCEj6+Zu0wIW0RXuSUvV71ZnhcEHM/Wk21Ic/b
+# Cl9fkK61BjJT1tQDmnpBO9gePy1yO7uAS5MR1Rx61cKQLu1b1priACdUGj2KnPnb
+# CIJwCiYy7959kSRiMJlbdyw7zVgt3JShH+zDjQ6PL4jjOYJ5OqQrxiEAub0NN7CY
+# SU+otZhN4NXKsBLFxw3rUKbz8KIDAullTx/uB2iYooX6kCRbDxnoV1uAy4oFjjsh
+# U5YiDc4cuzD0r0cqtiSO30hV6hCJ6+Sr7pQ0n2Y10NhD9+AAdLcFZps6McoAczLv
+# k04geGh7namIPZ782sF4dkCj19m5EmIc/RYuIwIaIO/XYFIe5Ozb9NRjiSNcGWMk
+# TBEPvs3XmSQ1SgaYbRhXopTJrNrVF7+IfgAa9WdyzuFEw0jH+02Ozk9hnrNQ7meU
+# pB2OJ/igWMCv0FkEv6vDMsG2AL8BPoUMDdR8VKgj89WwHRAIvqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjIxOTEzMjhaMC8GCSqGSIb3DQEJBDEiBCDPZ+EQ
-# ZLjTlHiXPTBV23a99WNWx5z1KnTaAko2GYyZPjANBgkqhkiG9w0BAQEFAASCAgBk
-# 2aj1T5yutcnObRpG7/zDe5rAP2PnlzN9tbihvUz3gMSlJ0YNoCWc+0gEJbSZTOgQ
-# myBOe8co0bRCa2J1dI9YX67maWiGnWCpDrDCeknLXE6O4kHnsqKU9bEkq1UHUgi9
-# bUIyRSQRaF9oRGZeHpGStwD26GfdFzjlibPVC4lua56xAvkCZUO2IZFxHcs8r4xs
-# hjfJ3PJ2wE8ZPIvHs/6PsJR2OOKb89JaxUf/DSgr6QZgCcygcEgsik1PpFW1vSb2
-# skLlzbJ3YdCOl/l0KluszNX+nFusRUj9FLg/DgksldhhzhBNlF9DEeIDGB5RtYC2
-# uJzW+JnrxOaz4y9czHf+hHSCeEdAPmY8h50fojBFC2UrXFBTqk6MyhxWoZWcCbLj
-# uIWX54NtNh+0c+yvncwzdZ4BL7RzYXoYGgMIEYOurr2+6qofJoZH6FdYG8eVU6AD
-# Wicpu3r6vdorl0x6sFEhRAFhZdMwrLMZoiXyIaklIKPAuAc/SSRcZo1FlH9Xarbd
-# vBLqh6WuHKYbTDsd4bvjxjcpyu9szj+xILkupi2LQXhlPD4brw57CHWgffgo5Md5
-# PM6ha2ZLOIXdUnrBl5dkT0OGLs3rXKYondePTyArm+PR5Hp3+8AY9dLH9CqrVJj8
-# hJKe6/8m9Wzth0Aj0od2gyi3MZ5dsUJrogJ42vd+Kw==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjUxMjI5MDZaMC8GCSqGSIb3DQEJBDEiBCDj/ukf
+# sQW4oD8C/Aprc6htiVsJnBXv4vzdF/A79x5hJzANBgkqhkiG9w0BAQEFAASCAgAq
+# erpBpnUuDhFWVc+nkVlGcnp5Rd2Fn1n/GMm1Z0AdzrY5zqAcLJWxqpKOaxhIxsfQ
+# jpjtLnj2X3Ql0om0PK/UNeHYQCd7hbraVJL35VoU+zfmsJrQtEkTwI8FWFbdB3mO
+# KI1rI5Q/r32pWHRrHZ3LWUnzHsYCD5Ee/ASvMkWdSIj/HuQadd6F8oLUuK3zGlB8
+# SmY8z95wYshZHIYvNn9gBG5XkqQR8V0NpoJt14YCRVK6xSa0kE9EuxD3sMVwwjOx
+# 7hkqbpRjR6+r+GDmLrBaJ3xKBYY3jR/WMlQjdiUZskKwsmYVAm0U1eSTeDWVf5Pk
+# PsxFmLeKpwShVwa9oXjYd/VKmt8v5jABz/D86Gd6T/k2+noMbDT5KDMkIiVXKok7
+# DPqf60Eqah5ebIVvK7eS9z8ilf53PP98Xe/fYeuccSAGWWGvo4lrZJadQM7MjIEG
+# NB+OzVPpIkeR20oF3i1UJZqax4Vq3U2KqM+PlKDTEatCkwbA6WqplbdR2thrybEr
+# AQZnxnPLCHtI80zkPnvanFz1dcGFCvPHt6faRtrrYHdZxZM1h4drFD/p/sV8OvxT
+# E7qW2FiYybtrdk/pdOpMJM8ulAvFN6gch1MOK5hn9AJMuQtnPlry4iJqsl9m5OI9
+# uuRNiS1pCPNYO+71/X0K4KwrpaRnIQTpdBt/jS8hsg==
 # SIG # End signature block

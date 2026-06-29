@@ -51,7 +51,7 @@ Generates interactive HTML dashboards (Bootstrap Table) from summary JSON:
 .\Export-Wireless-Dashboard-Pack.ps1 `
     -SummaryDirectory C:\temp\wireless-summary `
     -OutputDirectory C:\temp\wireless-summary\dashboards `
-    -WhatsUpGoldPsRepoPath T:\OneDrive\GitHub\WhatsUpGoldPS
+    -WhatsUpGoldPsRepoPath (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent)
 ```
 
 ## Integration with WhatsUpGoldPS

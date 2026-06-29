@@ -1,106 +1,311 @@
-function Get-SharpSnmpLibPackageLocal {
-    [CmdletBinding()]
-    param(
-        [string]$DestinationRoot
-    )
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Test the updated Export-CiscoWLCAPDevicesToWUG.ps1 with a small batch of APs.
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+.DESCRIPTION
+    Validates that the corrected discovery script works end-to-end with a small
+    batch (5-10 APs) before scaling to the full 1728 APs.
 
-    $prebuiltZipPath = (Resolve-Path (Join-Path $PSScriptRoot '..\lib\SharpSnmpLib-prebuilt.zip')).Path
-    $expectedZipSha256 = '2A23F5411BCA5608D0D4CE15F95A8DED3DB744A2AF7F17323A213C1A0115EE4D'
+.NOTES
+    - Requires PowerShell 5.1 (Windows PowerShell)
+    - Requires WhatsUpGoldPS module (loaded from local repo)
+    - Requires WhatsUp Gold connection via Connect-WUGServer
+    - Requires WLC AP inventory at C:\Users\jayal\AppData\Local\WhatsUpGoldPS\DiscoveryHelpers\Output\summary\wireless-ap-inventory-summary.json
+#>
 
-    if (-not $DestinationRoot) {
-        $DestinationRoot = Join-Path $env:TEMP 'SharpSnmpLib-local'
-    }
+param(
+    [int]$BatchSize = 5,
+    [switch]$SkipCleanup
+)
 
-    if (-not (Test-Path -LiteralPath $prebuiltZipPath -PathType Leaf)) {
-        throw "Bundled prebuilt package not found at: $prebuiltZipPath"
-    }
+$ErrorActionPreference = 'Stop'
 
-    $actualZipSha256 = (Get-FileHash -LiteralPath $prebuiltZipPath -Algorithm SHA256).Hash.ToUpperInvariant()
-    if ($actualZipSha256 -ne $expectedZipSha256) {
-        throw @"
-Bundled prebuilt package hash mismatch.
-Expected SHA256: $expectedZipSha256
-Actual SHA256:   $actualZipSha256
-Path:            $prebuiltZipPath
-"@
-    }
+# Get repo root and load local WhatsUpGoldPS module
+$repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$localPsm1 = Join-Path $repoRoot 'WhatsUpGoldPS.psm1'
 
-    $zip = $null
-    try {
-        $zip = [System.IO.Compression.ZipFile]::OpenRead($prebuiltZipPath)
-        $entries = @($zip.Entries)
+Write-Host "Batch Test: Cisco WLC AP Discovery" -ForegroundColor Cyan
+Write-Host "=====================================" -ForegroundColor Cyan
+Write-Host ""
 
-        # Security check: no path traversal
-        foreach ($entry in $entries) {
-            $name = $entry.FullName
-            if ($name -match '(^|[/\\])\.\.(?:[/\\]|$)' -or [System.IO.Path]::IsPathRooted($name)) {
-                throw "Unsafe entry path in prebuilt archive: $name"
-            }
+# Load module
+Write-Host "Loading WhatsUpGoldPS module from: $localPsm1" -ForegroundColor Yellow
+if (-not (Test-Path $localPsm1)) {
+    Write-Error "Module file not found: $localPsm1"
+    exit 1
+}
+$moduleName = 'WhatsUpGoldPS'
+Get-Module -Name $moduleName -ErrorAction SilentlyContinue | Remove-Module -Force
+Import-Module $localPsm1 -Force -Scope Global -ErrorAction Stop
+Write-Host "✓ Module loaded" -ForegroundColor Green
+
+# Connect to WUG
+Write-Host "Connecting to WhatsUp Gold server..." -ForegroundColor Yellow
+Connect-WUGServer -serverUri '192.168.74.74' -Port 9644 -IgnoreSSLErrors -ErrorAction Stop
+Write-Host "✓ Connected" -ForegroundColor Green
+
+# Load inventory
+$inventoryPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output\summary\wireless-ap-inventory-summary.json'
+Write-Host "Loading AP inventory from: $inventoryPath" -ForegroundColor Yellow
+if (-not (Test-Path $inventoryPath)) {
+    Write-Error "Inventory file not found: $inventoryPath"
+}
+$inventory = Get-Content -Raw -Path $inventoryPath | ConvertFrom-Json
+Write-Host "✓ Inventory loaded: $($inventory.Count) APs total" -ForegroundColor Green
+
+# Select small batch
+$batch = @($inventory | Select-Object -First $BatchSize)
+Write-Host ""
+Write-Host "Test Batch ($($batch.Count) APs):" -ForegroundColor Cyan
+foreach ($ap in $batch) {
+    Write-Host "  - $($ap.APName) (MAC: $($ap.APMac))"
+}
+
+# Build device plan for batch
+Write-Host ""
+Write-Host "Building device plan for batch..." -ForegroundColor Yellow
+$devicePlan = @{}
+$wlcAddress = '192.168.75.33'
+
+foreach ($ap in $batch) {
+    $apKey = if ($ap.APMac) { "AP-$($ap.APMac)" } else { "AP-$($ap.APName)" }
+    $displayName = if ($ap.APName -and $ap.APName -ne '') { $ap.APName } else { $ap.APMac }
+    
+    $devicePlan[$apKey] = @{
+        Name           = $displayName
+        IP             = $wlcAddress
+        WLCAddress     = $wlcAddress
+        SNMPInstance   = if ($ap.IndexSuffix) { $ap.IndexSuffix } else { '1' }
+        APMac          = $ap.APMac
+        Attrs          = @{
+            'AP_Name'        = $displayName
+            'AP_MAC'         = if ($ap.APMac) { $ap.APMac } else { 'N/A' }
+            'AP_Uptime'      = if ($ap.ApUptime) { $ap.ApUptime } else { '' }
+            'AP_AdminStatus' = if ($ap.AdminStatus) { $ap.AdminStatus } else { '' }
+            'AP_PowerStatus' = if ($ap.PowerStatus) { $ap.PowerStatus } else { '' }
         }
+        Items          = @(
+            @{
+                ItemType = 'ActiveMonitor'
+                Name     = 'Cisco WLC AP Admin Status'
+            }
+        )
+    }
+}
+Write-Host "✓ Device plan built: $($devicePlan.Count) devices" -ForegroundColor Green
 
-        # Find all available framework directories
-        $availableFrameworks = @()
-        foreach ($entry in $entries) {
-            if ($entry.FullName -match '^Release[/\\]([^/\\]+)[/\\]SharpSnmpLib\.dll$') {
-                $tfm = $matches[1]
-                if ($availableFrameworks -notcontains $tfm) {
-                    $availableFrameworks += $tfm
-                    Write-Verbose "Found framework in zip: $tfm"
+# Step 1: Create monitor library entry if needed
+Write-Host ""
+Write-Host "Step 1: Checking/Creating Monitor Library..." -ForegroundColor Cyan
+$monitorName = 'Cisco WLC AP Admin Status'
+
+try {
+    $found = @(Get-WUGActiveMonitor -Search $monitorName -ErrorAction SilentlyContinue)
+    $existing = $found | Where-Object { $_.TemplateName -eq $monitorName } | Select-Object -First 1
+    if (-not $existing) { $existing = $found | Select-Object -First 1 }
+    
+    if ($existing) {
+        $monitorId = if ($existing.PSObject.Properties['TemplateId']) { $existing.TemplateId } else { $existing.id }
+        Write-Host "✓ Monitor exists: $monitorName (TemplateId: $monitorId)" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Creating monitor: $monitorName" -ForegroundColor DarkGray
+        $monResult = Add-WUGActiveMonitor -Type SNMP `
+            -Name $monitorName `
+            -SnmpOID '1.3.6.1.4.1.9.9.513.1.1.1.1' `
+            -SnmpCheckType 'constant' `
+            -SnmpValue '1' `
+            -Timeout 10 `
+            -ErrorAction Stop
+        
+        Start-Sleep -Milliseconds 200
+        $found = @(Get-WUGActiveMonitor -Search $monitorName -ErrorAction SilentlyContinue)
+        $mon = $found | Where-Object { $_.TemplateName -eq $monitorName } | Select-Object -First 1
+        if (-not $mon) { $mon = $found | Select-Object -First 1 }
+        
+        if ($mon -and $mon.TemplateId) {
+            $monitorId = $mon.TemplateId
+            Write-Host "✓ Monitor created: $monitorName (TemplateId: $monitorId)" -ForegroundColor Green
+        }
+        else {
+            Write-Error "Monitor created but ID not found"
+        }
+    }
+}
+catch {
+    Write-Error "Failed to handle monitor: $_"
+}
+
+# Step 2: Check for existing devices
+Write-Host ""
+Write-Host "Step 2: Checking for Existing Devices..." -ForegroundColor Cyan
+$existingDevices = @{}
+$newDevices = @()
+
+foreach ($key in @($devicePlan.Keys)) {
+    $dev = $devicePlan[$key]
+    try {
+        $searchResults = @(Get-WUGDevice -SearchValue $dev.Name -ErrorAction SilentlyContinue)
+        $existingDevice = $searchResults | Where-Object {
+            $_.displayName -eq $dev.Name -or
+            $_.displayName -eq "$($dev.Name) (AP)" -or
+            $_.hostName -eq $dev.Name
+        } | Select-Object -First 1
+        
+        if ($existingDevice) {
+            $existingDevices[$key] = $existingDevice.id
+            Write-Host "  ✓ Found existing: $($dev.Name) (ID: $($existingDevice.id))" -ForegroundColor DarkGray
+        }
+        else {
+            $newDevices += $key
+        }
+    }
+    catch {
+        Write-Host "  ⚠ Search error for $($dev.Name): $_" -ForegroundColor Yellow
+        $newDevices += $key
+    }
+}
+Write-Host "✓ Found $($existingDevices.Count) existing, $($newDevices.Count) new" -ForegroundColor Green
+
+# Step 3: Create new devices
+Write-Host ""
+Write-Host "Step 3: Creating New Devices..." -ForegroundColor Cyan
+$createdDevices = @{}
+
+foreach ($key in $newDevices) {
+    $dev = $devicePlan[$key]
+    $displayName = "$($dev.Name) (AP)"
+    $addIP = if ($dev.IP) { $dev.IP } else { '0.0.0.0' }
+    
+    # Build attributes
+    $devAttrs = @()
+    foreach ($attrName in $dev.Attrs.Keys) {
+        $attrVal = $dev.Attrs[$attrName]
+        if ($attrVal) { $devAttrs += @{ name = $attrName; value = "$attrVal" } }
+    }
+    
+    try {
+        $splat = @{
+            displayName            = $displayName
+            DeviceAddress          = $addIP
+            Hostname               = $dev.Name
+            Brand                  = 'Cisco'
+            Note                   = "Cisco WLC AP (batch test)"
+            NoDefaultActiveMonitor = $true
+        }
+        if ($devAttrs.Count -gt 0) { $splat['Attributes'] = $devAttrs }
+        
+        $devResult = Add-WUGDeviceTemplate @splat
+        
+        # Extract device ID
+        $newDeviceId = $null
+        if ($devResult -is [array] -and $devResult.Count -gt 0) {
+            $firstElem = $devResult[0]
+            if ($firstElem.PSObject.Properties['id']) { $newDeviceId = $firstElem.id }
+        }
+        elseif ($devResult -and $devResult.PSObject.Properties['id']) {
+            $newDeviceId = $devResult.id
+        }
+        
+        if ($newDeviceId) {
+            $createdDevices[$key] = $newDeviceId
+            Write-Host "  ✓ Created: $displayName (ID: $newDeviceId)" -ForegroundColor Green
+            
+            # Add WLC interface
+            try {
+                $wlcAddr = $dev.WLCAddress
+                $ifaceResult = Add-WUGDeviceInterface -DeviceId $newDeviceId -Address $wlcAddr -HostName "WLC (SNMP Monitoring)" -ErrorAction SilentlyContinue
+                Write-Host "    ✓ Added interface: $wlcAddr" -ForegroundColor DarkGray
+            }
+            catch {
+                Write-Host "    ⚠ Could not add interface: $_" -ForegroundColor Yellow
+            }
+            
+            # Assign monitor
+            try {
+                $snmpInstance = $dev.SNMPInstance
+                $monAssignResult = Add-WUGActiveMonitorToDevice -DeviceId $newDeviceId -MonitorId $monitorId -Argument $snmpInstance -ErrorAction Stop
+                Write-Host "    ✓ Assigned monitor (instance: $snmpInstance)" -ForegroundColor DarkGray
+            }
+            catch {
+                if ($_.Exception.Message -notmatch 'already|assigned|exists') {
+                    Write-Host "    ⚠ Monitor assignment error: $_" -ForegroundColor Yellow
                 }
             }
         }
-
-        if ($availableFrameworks.Count -eq 0) {
-            throw "Prebuilt archive is missing expected Release/<tfm>/SharpSnmpLib.dll content."
-        }
-
-        Write-Verbose "Available frameworks in prebuilt zip: $($availableFrameworks -join ', ')"
-    }
-    finally {
-        if ($zip) {
-            $zip.Dispose()
+        else {
+            Write-Host "  ✗ Device created but ID not found" -ForegroundColor Red
         }
     }
-
-    $extractDir = Join-Path $DestinationRoot 'extract'
-
-    # Skip extraction if already extracted (Release folder with DLLs exists)
-    $releaseCheck = Join-Path $extractDir 'Release'
-    if (Test-Path -LiteralPath $releaseCheck -PathType Container) {
-        $existingDll = Get-ChildItem -Path $releaseCheck -Filter 'SharpSnmpLib.dll' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($existingDll) {
-            Write-Verbose "SharpSnmpLib already extracted at $extractDir — reusing cached copy"
-            return [PSCustomObject]@{
-                ReleaseTag   = 'prebuilt'
-                IsPrerelease = $false
-                PackagePath  = $prebuiltZipPath
-                ExtractPath  = $extractDir
-                ReleaseUrl   = "file:///$prebuiltZipPath"
-            }
-        }
-    }
-
-    New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
-
-    Write-Verbose "Extracting bundled SharpSnmpLib prebuilt package from: $prebuiltZipPath"
-    Expand-Archive -LiteralPath $prebuiltZipPath -DestinationPath $extractDir -Force
-
-    [PSCustomObject]@{
-        ReleaseTag   = 'prebuilt'
-        IsPrerelease = $false
-        PackagePath  = $prebuiltZipPath
-        ExtractPath  = $extractDir
-        ReleaseUrl   = "file:///$prebuiltZipPath"
+    catch {
+        Write-Host "  ✗ Failed to create $displayName`: $_" -ForegroundColor Red
     }
 }
+Write-Host "✓ Created $($createdDevices.Count) devices" -ForegroundColor Green
 
+# Step 4: Update existing devices
+Write-Host ""
+Write-Host "Step 4: Updating Existing Devices..." -ForegroundColor Cyan
+foreach ($key in $existingDevices.Keys) {
+    $deviceId = $existingDevices[$key]
+    $dev = $devicePlan[$key]
+    
+    # Add WLC interface if not present
+    try {
+        $wlcAddr = $dev.WLCAddress
+        $existingInterfaces = @(Get-WUGDeviceInterface -DeviceId $deviceId -ErrorAction SilentlyContinue)
+        $wlcIfExists = $existingInterfaces | Where-Object { $_.address -eq $wlcAddr }
+        
+        if (-not $wlcIfExists) {
+            $ifaceResult = Add-WUGDeviceInterface -DeviceId $deviceId -Address $wlcAddr -HostName "WLC (SNMP Monitoring)" -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Added interface to $($dev.Name): $wlcAddr" -ForegroundColor DarkGray
+        }
+    }
+    catch {
+        Write-Host "  ⚠ Interface error for $($dev.Name): $_" -ForegroundColor Yellow
+    }
+    
+    # Assign monitor
+    try {
+        $snmpInstance = $dev.SNMPInstance
+        $monAssignResult = Add-WUGActiveMonitorToDevice -DeviceId $deviceId -MonitorId $monitorId -Argument $snmpInstance -ErrorAction Stop
+        Write-Host "  ✓ Assigned monitor to $($dev.Name) (instance: $snmpInstance)" -ForegroundColor DarkGray
+    }
+    catch {
+        if ($_.Exception.Message -notmatch 'already|assigned|exists') {
+            Write-Host "  ⚠ Monitor error for $($dev.Name): $_" -ForegroundColor Yellow
+        }
+    }
+}
+Write-Host "✓ Updated existing devices" -ForegroundColor Green
+
+# Summary
+Write-Host ""
+Write-Host "=====================================" -ForegroundColor Cyan
+Write-Host "Batch Test Summary" -ForegroundColor Cyan
+Write-Host "=====================================" -ForegroundColor Cyan
+Write-Host "Total APs:      $($batch.Count)" -ForegroundColor White
+Write-Host "Created:        $($createdDevices.Count)" -ForegroundColor Green
+Write-Host "Updated:        $($existingDevices.Count)" -ForegroundColor Green
+Write-Host "Monitor:        $monitorName (TemplateId: $monitorId)" -ForegroundColor White
+Write-Host ""
+
+if (($createdDevices.Count + $existingDevices.Count) -eq $batch.Count) {
+    Write-Host "✓ Batch test PASSED - all devices processed successfully" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Next step: Run Export-CiscoWLCAPDevicesToWUG.ps1 with full 1728 APs" -ForegroundColor Cyan
+}
+else {
+    Write-Host "⚠ Batch test INCOMPLETE - $($batch.Count - $createdDevices.Count - $existingDevices.Count) devices not processed" -ForegroundColor Yellow
+}
+
+Write-Host ""
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCckLeqXL3qP87j
-# sWpjy2Ndo/G37l6SVU1NSdQkEXiksaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwsGVget4JX0ZN
+# lQ3ZzIKLkGYidDl1K9kF7TGD+1pK7KCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -303,33 +508,33 @@ Path:            $prebuiltZipPath
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCK8lVlK24yr+HrniFYZf6F2Nkd+yghedQrF2kqLHDPITANBgkqhkiG9w0BAQEF
-# AASCAgC0PzJ/OafMdRn28yQSLHoZVF0VdOHUKHWJudMbNeFrseobub6WUsUHMrOg
-# sEnpV7hx/foX+TjSvJOLlJQ7wh334L6kOdEM2UPGipFW8ru5dIw7pOY5ffGC1NNL
-# LshNiWJb9+df1L6BvzDNSPRlhMdLvNEEg50NyuOQ3eglr/OoqcZ0tqJU7d4+zGVE
-# YDHtT4Vl5QMM3F2Y467hORBUrBwaE9yKKcWkeiOYbaqXkKDj+K1N7N0d5lfWe9x0
-# DOAuSsAsUHZ5HQbWb76ez6JKCdm3OPna5YeeBKWd6du8xTP+Kf27FJDmG7q+gq5t
-# I8rM/nerlFyoPLwpkLjYeEwPVih3hoU/noFrnzU5r6t9Dokwv1gk/hEbR4pXhVf6
-# z5BXUEoi/JITHOD+OycUHb2crLNS3qC+t82qXbyGQBAjjQH05MZCYRcNwj9W9F/c
-# mq0YGDj403cmtY24YV95boRT6Nomj6iavJNKpLkkp/svs/XblRAybD7IymtXb9PN
-# UBIF9Wm4v1LJ3pVWQvcOqxxonHvYxvLKgivQEoiaZySMugo2h8J5uUUQKyPhfeDw
-# PT9Qn2sVquKVlfTLl/CjQoubB1WQMb1Tv6HodBy0cAKwrsQrIrRt+Ktb/yR97WPR
-# bgVzJxMV0EU22HDgTCOkKsWvrreoce20GHHHyQtM61oEisK3baGCAyYwggMiBgkq
+# BCDc01qVU3Lkyhj9rVR8AXzbsFafN3PNsPNqS0L4KB992DANBgkqhkiG9w0BAQEF
+# AASCAgChmlJJuValpGeCli0Llx5l87U8UtB0DoB+YPzNxQQfnqdf58DsdrgVT2IS
+# RzdxT74atKY9Mig8uEYkfnTvFhTf2K0pMdA46qOdsudycBBfxrHiu0aApblM2eFy
+# vs90V3doaUwupkNyYrJDgehSrbM1qhPF48B4haYhRFQMwFcqWFT3tza/89sQCzxf
+# xHG6O2xCAHbOOrNoO9mID5o4n+jRH0ReOForKrhgAs7bdgzFwxIlnTpcnE0b2Pmc
+# ryYzpwy/tVLk5zUbfv44Rfyc91SyVMPJUL9UpXvMHfhAL+ZTTvz9EtyV/f3gPhgS
+# +VFv04zfbBTSWUCKV7ej5LQuZ+pAmczqx8NGbwu9mV3HJU7BfoE3Q400RZ9iFauF
+# aGwKr7O4HHXKnXsWp3gnEtU+GiZnWWsQuSq24+plGeWRP1TAtkW2jp0uxZbBJCD6
+# 9hb0hGpNiZe6l9TS7dsVi4AeDcg/wEAvN3QZMRpJMMTmUeEEExuciMIr8BbbL3IH
+# OIq0S9RebpK4iKt7n+Vz1FE+8Ua1/Q9IyAyyVvpJbUOjcRdVTOD4TQwck3fd5S9Y
+# Pr+khAhuOMCk8gDItJdzM+w1hRvCWKhH7P0iQcbDuM9U8TnlBXmltp6Ul5UDR2CH
+# a/cr2gCb0U2dWeRYLvcK9Wajprgl2aCP8lrNnGYHfpLSpe4eNaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjkxMjE1MzFaMC8GCSqGSIb3DQEJBDEiBCDkIb4A
-# l3/IvVu+3JcAYdVEFh2GQCNfqW8keF3AmJct6zANBgkqhkiG9w0BAQEFAASCAgDE
-# Fi5LT4FebIaWsor+97v+y3WsFW50FhXI5+qxtrGddqANs/3QqrASHF3Yw0NPhZvc
-# VKkx8+39oiIVBETHrDdZJfvqdiYyRH5cmJm46CT8rW4FDtPGXaMPSGGzhjeTKS1v
-# 6M9PZ8xLroW4NnMlcliNdQYfJwuj87j6XbStyHdeewzhZI6pXIKRWbuEtMxwgLa6
-# WVgmYsl566pU4ErwYjUMk146ZpkQAml8Rkc0rjvbjS+2cTbAmw0Oz0aRgrtqBMoB
-# dYALJMkZAaJvA6cjaPzpV9++A3SZMRW92+nkr6DGtsMbbpKBeJxQXGYtcngtKBB4
-# vGufAbiPsDW/jLdBIFYbegg4CpO8fU8vc4UBwATIctzcr7SAD64+4aGj6xNCwv0w
-# sN/7RENVfPV92BWeDw8LiPqOra6o/VZNF2kKAeRSFu5O8w5y6vgap/zKZut363qB
-# r1wRTGLpecm/us95qrsw1s2DlQFFvuRzuqdQvR4zlovPcwQSgxOyjbuRf/ih54pg
-# 9xL251/DOn2SUJqqoMLJF2+Woy3+n6iYGLFsdPulXNffpu5GMWdmLnuEfvi6aJDX
-# F3AZgIKdipkm0h56nEHnS69Fs62B1Fq+TqJHVumSwO7PFGLE4rZsWLbc8SAt/s9G
-# 8jDFToPRNIkXwx7J9Kvs1TmVClzzZR3wb4ns+GZ6Dg==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxMjQ4MDBaMC8GCSqGSIb3DQEJBDEiBCDyFxEN
+# BezNoLUfy+2sP+X9JVTJvlcS+gaF7zfWaXiQEjANBgkqhkiG9w0BAQEFAASCAgCI
+# 7BmBLHSxqjgFC10sqhgMbqpnC/57zqE8sUFYeIgFua0FZ9u4LSK0JJcCoBlVWT19
+# a4bAstExas0oNLwrtgudW1cec9xXZH79FcCyIM8NoK4Xg7m0N0VduD8EcC4ZX+L/
+# Dk2hRlmu5odHlcJBJ/2VVEC7TKM4v4p/WCNuc9OfQ025SPsi877NUCH+gtuTLruP
+# 2Ht85elBmtJOuFcOGZ8Hy+Ufpip0BMR+0SMqwjLCAlKarJNSsgGZqiuZqtQII9bH
+# H9DT0WsQ0mgiF/KCiMfDGJmZ+THjvkklXZh94eQItmhUlGYRKvUaHyVq1NgiQCbM
+# mnI8YEXrglo/R6qR3LLiszAPy0+GvtCqPXCTSGRFzvRewjxJcWR7w2FIisMom3rX
+# xRpjrRbEF9us13tHvDfvOBHgZDgk6ofwO9/mhOlceVOc/xRWFN4JcgMbzhtfBgFb
+# lDO1IOEqBLaQk3C4b12DATdzJGu6IeJLuD4mkflvSTcBaJemf5UCDfpy05Zjvld0
+# OJS2BIZo/xfcqI3NRxoxptBprpYj/z5AFCYXBrZ5nfyRCCKLLcIlf87jywcp3Oce
+# 5KJcauVuWcNFkXt2Z8bWuxbDWn6vgctXChkNQxsPB1ywdx44+b43zLZ10jnlmu3e
+# PcLOnqfglVWPxO4pjLy6q3J8+3gSX2cpl3Oo6EE3ZQ==
 # SIG # End signature block

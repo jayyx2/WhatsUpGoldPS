@@ -27,7 +27,8 @@
 
 .PARAMETER Action
     Action to perform after discovery. Valid values:
-    'PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None'
+    'PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'ExportToWUG', 'None'
+    ExportToWUG: Export previously discovered data to WUG without running discovery again.
 
 .PARAMETER SnmpVersion
     SNMP version to use. Valid values: 1, 2, 3. Default: 2
@@ -103,6 +104,10 @@
     # Non-interactive with WUG push
     .\Setup-CiscoWLC-Discovery.ps1 -Target '192.168.75.33' -SnmpVersion 2 -Community 'public' -Action PushToWUG -NonInteractive
 
+.EXAMPLE
+    # Export previously discovered data to WUG (no discovery)
+    .\Setup-CiscoWLC-Discovery.ps1 -Target '192.168.75.33' -Action ExportToWUG -WUGServer 192.168.74.74
+
 .NOTES
     Author: Jason Alberino
     Requires: WhatsUpGoldPS.Snmp module, DiscoveryHelpers.ps1, DiscoveryProvider-CiscoWLC.ps1
@@ -114,7 +119,7 @@
 param(
     [string[]]$Target,
 
-    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'ExportToWUG', 'None')]
     [string]$Action,
 
     [ValidateSet(1, 2, 3)]
@@ -240,7 +245,8 @@ if ($Target) {
         @{ Name = 'wireless-rogue'; OID = '1.3.6.1.4.1.9.9.610'; File = 'wireless-rogue.jsonl'; Required = $false },
         @{ Name = 'wireless-rf'; OID = '1.3.6.1.4.1.9.9.778'; File = 'wireless-rf.jsonl'; Required = $false },
         @{ Name = 'wireless-mobility-ext'; OID = '1.3.6.1.4.1.9.9.846'; File = 'wireless-mobility-ext.jsonl'; Required = $false },
-        @{ Name = 'wireless-airespace-client'; OID = '1.3.6.1.4.1.14179.2.1.4'; File = 'wireless-airespace-client.jsonl'; Required = $false }
+        @{ Name = 'wireless-airespace-client'; OID = '1.3.6.1.4.1.14179.2.1.4'; File = 'wireless-airespace-client.jsonl'; Required = $false },
+        @{ Name = 'wireless-airespace-ap'; OID = '1.3.6.1.4.1.14179.2.2.1'; File = 'wireless-airespace-ap.jsonl'; Required = $false }
     )
 
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -332,7 +338,8 @@ if ($Target) {
         Write-Host "`nStep 4: Generating dashboards..." -ForegroundColor Cyan
         $dashboardScript = Join-Path (Split-Path $scriptDir -Parent) 'cisco-wlc\Export-Wireless-Dashboard-Pack.ps1'
         if (Test-Path $dashboardScript) {
-            & $dashboardScript -SummaryDirectory $summaryDir -OutputDirectory $dashboardDir
+            $repoRoot = Split-Path (Split-Path $scriptDir -Parent) -Parent
+            & $dashboardScript -SummaryDirectory $summaryDir -OutputDirectory $dashboardDir -WhatsUpGoldPsRepoPath $repoRoot
             Write-Host "  [+] Dashboards generated" -ForegroundColor Green
             
             $indexPath = Join-Path $dashboardDir 'wireless-dashboard-index.html'
@@ -360,8 +367,86 @@ if ($Target) {
 # ============================================================================
 
 if ($Action -in @('PushToWUG', 'DashboardAndPush')) {
-    Write-Host "Mode: WUG Integration (not yet implemented with new architecture)" -ForegroundColor Yellow
-    Write-Host "Use -Action Dashboard for local discovery: .\Setup-CiscoWLC-Discovery.ps1 -Target <ip> -Action Dashboard" -ForegroundColor Gray
+    Write-Host "`nMode: WUG Integration (Push to WhatsUp Gold)" -ForegroundColor Green
+    
+    # For each WLC target, create AP devices in WUG
+    foreach ($wlcAddress in $Target) {
+        Write-Host "`nStep 5: Creating/updating AP devices in WUG for $wlcAddress..." -ForegroundColor Cyan
+        
+        $apExportScript = Join-Path (Split-Path $scriptDir -Parent) 'cisco-wlc\Export-CiscoWLCAPDevicesToWUG.ps1'
+        if (Test-Path $apExportScript) {
+            $apSplat = @{
+                InputDirectory = $fullDir
+                WLCAddress = $wlcAddress
+                WUGServer = "https://$WUGServer`:9644"
+                DeviceGroupId = $DeviceGroupId
+                PollingIntervalMinutes = [math]::Max(1, [math]::Floor($PollingIntervalSeconds / 60))
+                Verbose = $VerbosePreference -ne 'SilentlyContinue'
+            }
+            
+            if ($WUGCredential) {
+                $apSplat['WUGCredential'] = $WUGCredential
+            }
+            
+            try {
+                & $apExportScript @apSplat
+                Write-Host "  [+] AP device export complete" -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "AP device export failed: $_"
+            }
+        }
+        else {
+            Write-Warning "AP device export script not found at $apExportScript"
+        }
+    }
+}
+
+# ============================================================================
+#  region ExportToWUG Mode (Export Only, No Discovery)
+# ============================================================================
+
+if ($Action -eq 'ExportToWUG') {
+    Write-Host "`nMode: Export to WhatsUp Gold (No Discovery)" -ForegroundColor Green
+    
+    # Verify output directory exists with summary data
+    if (-not (Test-Path $summaryDir)) {
+        Write-Warning "Summary directory not found: $summaryDir"
+        Write-Host "Run discovery first (e.g., with -Action 'Dashboard' or 'PushToWUG')" -ForegroundColor Yellow
+        exit 1
+    }
+    
+    # For each WLC target, create/update AP devices in WUG
+    foreach ($wlcAddress in $Target) {
+        Write-Host "`nExporting AP devices in WUG for $wlcAddress..." -ForegroundColor Cyan
+        
+        $apExportScript = Join-Path (Split-Path $scriptDir -Parent) 'cisco-wlc\Export-CiscoWLCAPDevicesToWUG.ps1'
+        if (Test-Path $apExportScript) {
+            $apSplat = @{
+                InputDirectory = $summaryDir
+                WLCAddress = $wlcAddress
+                WUGServer = "https://$WUGServer`:9644"
+                DeviceGroupId = $DeviceGroupId
+                PollingIntervalMinutes = [math]::Max(1, [math]::Floor($PollingIntervalSeconds / 60))
+                Verbose = $VerbosePreference -ne 'SilentlyContinue'
+            }
+            
+            if ($WUGCredential) {
+                $apSplat['WUGCredential'] = $WUGCredential
+            }
+            
+            try {
+                & $apExportScript @apSplat
+                Write-Host "  [+] AP device export complete" -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "AP device export failed: $_"
+            }
+        }
+        else {
+            Write-Warning "AP device export script not found at $apExportScript"
+        }
+    }
 }
 
 Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
@@ -369,8 +454,8 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbr7vBOMU68HDM
-# vYT77nm9drGn3yGpTV7iZOA2KEIhj6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWuLnDZpB5HZOb
+# Slk2AwHnylYOjufNPfpsYHqNdk86HKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -573,33 +658,33 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCB2RjydOjJh1DDLYivbJwQSddeQU1Qcw2AtqLue30WPgDANBgkqhkiG9w0BAQEF
-# AASCAgB3QfwVVm5D41zt9yeBC8aCRyT1gQDmsHWYDd2qlDZeqG4kRLekb9nomsEh
-# zdnBq11p7BC/jKnVSds7UYyN9yFjq/dqM4ji7XlmUJCj7gZuwyjZB9HI6Fs5Dz5x
-# t+a4Tlg5gfpKeqkEqJafctBN867Cd5frvZDJImYjmL6X0OPRjwmLFG9/twRr8BlP
-# 1orcM0TxYWEtQvCFgY++Vw0ZCD1jFju/vBn8lOMoL20GjTwpWmYEWZ53NBgGrmf0
-# K8gPBBcNvAiFO7KgBBFku4u+zaOd7C2jnCS7+1D2s/x2qnQPBQpVM74ToJWBpfzB
-# RttcvhP/Lm4GPZcz8QWA8Pes8Uyb1Me1oNHQvxDa6hfEf0OK/xAEa4E7J0Ti4Pf3
-# rzCn7hdaWc43wSTn3HMMUQn6qHt2v5f3Mwu4u/o6f0XVPgpAhiS0cXOMzj6WFZMJ
-# 4zpo2/jXaLpIWd7/a9mKC1wK040bOKt70ofoaqMjq1iotJhS3GkqqfDDOw8wjQyC
-# adZ/QRFYTYGjR/g/ofZ+QGmw/4hG5LMxkX4YbxQTGiOPa9vtdVrY1BeS0R+xVPBO
-# rvmYLU9Ogw9H0DIH7xQVS4eGBfcXD2QziDceP/+yLgc++A94R8xvKaQK/92MqtWq
-# XoEi0OClV2rx2GSPWuekcfpcnt2GMJlyRt/2/bNoWLB88Ot5LaGCAyYwggMiBgkq
+# BCC0dInq7oFlGIG3Rbk0HSSRCkD6FBQnlqv+mOUNnrSxDzANBgkqhkiG9w0BAQEF
+# AASCAgDaeuzybh89uAYeHZja3Vg38D38ZfqGoCreOh50J/zvI4/DHIcq66alpesF
+# mUUsXLYPEdkaPhUFbK3jLei7oxm8paVNNpRAa/l1Yx7hgJBeSmigi94ZLKHvuf5f
+# kNuA96Wk1MIhbvJQ24TXM+MJwaYX2HEw2zshVZXUwyWWo3Dw1emepI6eBWE6yxTn
+# 2RZzSDCCUzcufVLHDCXZwEUNqvJkLLwzZoO5fdwGSVJyDOkC4rgClWbj5/jZovxT
+# PlsObJc9yUWsIy9qMHSrC81L9rp94SmqizD7NOp3YI7lBHCf9TOrrGRTurj1t2bj
+# aE7qP9DwMcvpUGcQdyd/DcMeA+SqZLJlJ6he0ryVLBJxinEGtH85+LXP/rX254M9
+# s9kuov07vjuDU9n+bJKlWh65LMJBX2URUvhC5OQcl99mGAUb9slVPuqjllwgIO15
+# S/vNWgXWp3VuH1Xf3JgDNrLcrnDl5AsLHxjIKAig5PYsr69/2BKsjO8vXYFNQaag
+# lFGOSi/IvB3kW5a3wWsWKT7NKeLJpQtAgqp9tsfhsFWO1BJ0HzfIHmAlTVw21LZh
+# KHkAxF3WhR5d9HlnMdwuBpn6CLNCjJvyETNOpzvLw6OVDBQQzkeufPI6c4MBmNd0
+# Ffutl2GqgA7ylrb3J3Ag25wXMt83ou0Xbt4GdiFGKe7mJBDQ+6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjUxNjQ2MjZaMC8GCSqGSIb3DQEJBDEiBCDssT4i
-# 6q786bYa6uBJ4biKoQfmET6ambpjR4+6Rlww+jANBgkqhkiG9w0BAQEFAASCAgCd
-# 5C4cxhguNZPnmMp8KkM8oNcJnucMTw5oPdy1R7yLSyhnFC1zBhMQx+5/J7wXMbRn
-# gJ6VLwZ0U0jrNGN6gCE8daGf4KE4H3uWVZWplMMp5kvRlrYURHQ3Xj3XMD9xtrDr
-# lWYiezxguZ7cZQI1aektqDSHXqKwbXmI0mZOhr80tnQxf61jnv2aqLfU+mnSRZxc
-# Ebo1hxAsmXiJnGVjNI6CpD4sh1halyRF0YNYIQ2Lep/MaQa1ETJPmLaK3biFH0UJ
-# J6zvs5gRvdTJ6HYpYe9KnKZI5Gs72mjJ2FjW0YE7soG/SWX+EOQ3oZX/dBrjdtup
-# JnwKOtZLHMBjlncRjhfy+kWSXeVGc6dtEGdwtafhgRj9KQnk+LsqiRmM2W9rfa/G
-# xZPndJ2nef0jhBhqFWdnCnYGrp/WvmCkr17KtQ9fSWNW+tzIW8XJYHlM3V4xP1B+
-# g7uD3u02g98wDxXZcvIx60cuWVMmcEKaviZDJUPmLk5g4eTYqTpVnVZ15S+zGC+V
-# +qNpcZsBznfr+mGP8X8lZKaKte0nq6w/F8Yq4KNeledqyjkAEFZjic952pW4FTrv
-# c4VSuTFP/zJSskE43xiZSIkMXc61yWjVarMG7A9HDx2tNGMa93wxvw2HlucwOSFW
-# VZnqprJmenx9/eEAmYnWIbARXHnErjsITl3K9Ea5fg==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxMjE1MjZaMC8GCSqGSIb3DQEJBDEiBCCP6F8S
+# hXFavR24sFStce2If9ar+OBPiSqlRuI7iGoL6DANBgkqhkiG9w0BAQEFAASCAgBr
+# oyrexQHdBm/1TSvdi7el8p9RlL7kC5EleXo0uKhTFWqtfbZy5szzFqF7DPYErNxT
+# 1YamhUU4/Mw/WltGtcqolDmWIQZocDHzTiy6FiSE/rQroHmesRM6v4ydQc8JT47L
+# 5EHzwXd33mbCY0Tic9Oo2/9g0zUc0mu/X5MyKeM4ArbwPP8yn+YehlV5a0TD/tY0
+# WJy7hj+sJjN+sk1U/QVb1X0igNG7LaF2Myd1T4yshjD1QKoDqQlB0MFjYiFw1jxE
+# Z+OvJ8Xq/ww1kbqims3towAkU60b+7CmuFG6MD8exP4Fvt9DNNaqcnM+LiAE/Zv6
+# UNpp/G/bwmm5CUwwjPcbiQ0/YV0z5shCHO5CnIbcnp5XUPr2C8FoBuU0/MAqQ8MD
+# eGKNSzBfOxCauU5peSydyk1+Kp5kH5PCnhTPxI4G+VZdxpmVtZwnl8iSY2cxXobc
+# lUoYne7JuaUZ0m0fvum966cJk7IhBffKBcGbBxfS9o1Imjpdmi+c5YA0kDk5dYi1
+# 3Cs3D7aJBzCl6CobAe/5308h8S6XLMeOhh9oybtXlbinXoaP7ivEmCH/OZsVtZbN
+# 5H+EbfZM5X3q0ktKESJ96p25o+cQPTqEOtPq8PiGV0T4wq/yybHsceFH/lw4wsFg
+# 17RReC/rJzGlIuW75bq4WfQ/vdjY3ltW2D9ct0uVDQ==
 # SIG # End signature block

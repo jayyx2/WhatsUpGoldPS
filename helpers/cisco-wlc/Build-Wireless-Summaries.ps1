@@ -445,6 +445,7 @@ $rootFiles = @(
     [PSCustomObject]@{ Root = 'mobility-ext'; BaseOid = '1.3.6.1.4.1.9.9.846'; Path = Join-Path $InputDirectory 'wireless-mobility-ext.jsonl' }
     [PSCustomObject]@{ Root = 'sys'; BaseOid = '1.3.6.1.4.1.9.9.618'; Path = Join-Path $InputDirectory 'wireless-sys.jsonl' }
     [PSCustomObject]@{ Root = 'airespace-client'; BaseOid = '1.3.6.1.4.1.14179.2.1.4'; Path = Join-Path $InputDirectory 'wireless-airespace-client.jsonl' }
+    [PSCustomObject]@{ Root = 'airespace-ap'; BaseOid = '1.3.6.1.4.1.14179.2.2.1'; Path = Join-Path $InputDirectory 'wireless-airespace-ap.jsonl' }
 )
 
 $summaryArtifacts = @()
@@ -523,6 +524,23 @@ foreach ($rf in $rootFiles) {
     Write-Host "Built root summary for $($rf.Root): $(@($stats).Count) table groups" -ForegroundColor Green
 }
 
+# Build AP IP address lookup from bsnAPTable (AIRESPACE-WIRELESS-MIB)
+# bsnAPEntry: 1.3.6.1.4.1.14179.2.2.1.1, Col 19 = bsnAPIpAddress
+$bsnApInput = Join-Path $InputDirectory 'wireless-airespace-ap.jsonl'
+$apIpByIndex = @{}  # OID index suffix -> IP address
+if (Test-Path -LiteralPath $bsnApInput) {
+    $bsnApEntryPrefix = '1.3.6.1.4.1.14179.2.2.1.1'
+    $bsnApRows = Build-TableRows -JsonlPath $bsnApInput -EntryPrefix $bsnApEntryPrefix -ColumnNameMap @{}
+    foreach ($idx in $bsnApRows.Keys) {
+        $bsnRow = $bsnApRows[$idx]
+        $ipVal = if ($bsnRow.ContainsKey('Col19')) { $bsnRow['Col19'] } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($ipVal) -and $ipVal -ne '0.0.0.0') {
+            $apIpByIndex[$idx] = $ipVal
+        }
+    }
+    Write-Host "Built AP IP lookup from bsnAPTable: $($apIpByIndex.Count) entries" -ForegroundColor Green
+}
+
 # AP inventory summary (translated with cLApEntry labels).
 $apInput = Join-Path $InputDirectory 'wireless-ap.jsonl'
 if (Test-Path -LiteralPath $apInput) {
@@ -555,6 +573,7 @@ if (Test-Path -LiteralPath $apInput) {
             APName = if ($row.ContainsKey('cLApName')) { $row['cLApName'] } else { '' }
             APMac = Convert-IndexToMac -Index $idx
             IndexSuffix = $idx
+            APIPAddress = if ($apIpByIndex.ContainsKey($idx)) { $apIpByIndex[$idx] } else { '' }
             Dot11Slots = if ($row.ContainsKey('cLApMaxNumberOfDot11Slots')) { $row['cLApMaxNumberOfDot11Slots'] } else { '' }
             ApUptime = if ($row.ContainsKey('cLApUpTime')) { $row['cLApUpTime'] } else { '' }
             ControllerUptimeSeen = if ($row.ContainsKey('cLLwappUpTime')) { $row['cLLwappUpTime'] } else { '' }
@@ -1013,8 +1032,8 @@ $summaryArtifacts | Select-Object Name, Root, Count, Csv, Json | Format-Table -A
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+hlK57fG4/aOv
-# N3XArWRkCINgtE+cZHiOkhPZJGif/qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCu/kUHPeF7s3pj
+# JzORGQb4d9XYpUpIu+62oVcjjm+SmqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1217,33 +1236,33 @@ $summaryArtifacts | Select-Object Name, Root, Count, Csv, Json | Format-Table -A
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCD1YWML9+vc38VQshTbdMA7zDGex1183VlXUQz2By7OIDANBgkqhkiG9w0BAQEF
-# AASCAgAtabRiRHzBMdMSOESGbb817f8o3duSTZDCIC1v9zZhZi6FborfqDHd6JYw
-# Rd0SHqFcAiSJE7pmJyrGeiFQ69tys0ZUVKLuoLbEhWUrWQqGWZyz0u0kc2J4IwRJ
-# 86WFEeoV0NoA/vRS6DwFc4X3DTkPQJbp8wcgmZoDZwnSCfZE/svR+6JsGKmum9tX
-# W+xN8jMwAFJp2h6jDyaGnWtMnz13ol1bZwaPHvoVoR0wuFW14X6Cpy83FDFOG2nW
-# BkaI8KgfLAJEOZ5BqID4AZxe6XrBsUZZ4NHwopvhIs8Bq1KceDwnDLbyFdOJglmx
-# +6ivTSowWrOjsBdyNkUy/90LWyl2XKGX5QB57YRqWfSa17wx/OXerxxDrGM/7s+i
-# dhucAWfO6MNg/5d+mOZADASHBbitL28uMKx/U/vCeAZ8afA6MnCVZHJuucxzCSqE
-# E6NRKTvdUPgPYMKofs7qgAb8W7dSU16wxUfbSakW9HWQQquurWBZu0Bs572z++xI
-# JHFNg/JNoYxHMx5xuYvQB3zZ+HOZOMQM8dbq7sYgO4kSzfdwdLbn2w54hpbRma7X
-# RIWxNgbtvNPNX0TMXlmL8I4TxsfBC+DpyfBqisImyHQsMBIb8VvLQcE+6X1vTCGd
-# aOE6r6EqT50g4P5Rjtzfc/rqcxDiy7rCoxLeW/iQJj6uoTW9z6GCAyYwggMiBgkq
+# BCBeEUAAFNpoFw73Gs/1ST7VnPFtPBfhzj31STCF7QPPxDANBgkqhkiG9w0BAQEF
+# AASCAgC/x3ioaK51x1T9qJLevQ4NOQzY81U4+RJDxtbweTUAKWSyowJOZgqP76mg
+# ZJuE0wXYyL0MkG8nYY2eyjg3LvVV5PMQDKHYjzqHBV4vZQifeW3dartCcFD6lIu0
+# 1F4mu1jmoLn42/nHS4+9vTw1eD7j6aYz+z9PdnzuWp8qWMBdT4Rvc5oWCDHsPIoO
+# T4vm+DGa8OYUK6GYZii49Vj7JomZsVctXk6jN5TSl1NKYZgvMh0/0jxWbHyAEj1C
+# F9sYu/RigbXqhftPtU7F7MF0nGUEF5d1+i3FPml1I3jo/XbcjN/IasIF2VmaTiyN
+# eAivuyWFEUYYrpgNOMw7hoHktAKhVdEAIKUeER/uATpbTIuW5PbnO/K1M6RVCZAx
+# WI0uzQkqL6HfIKOo7cV2QhLZ5pqYVGnRkWg1eldrAl8Y3DItczefZbEJlzolHjka
+# CV1LVBO8z6Z1UNtxm2+jaXLdfAceFRcUw7tnKYd2E24vpnKergEJDFgKYr8B6+5I
+# gAQ1TorfHts7VV/2Ix/TKknoTyON37nk37w8u42CThcHpFOeaEl6B0xGc9NFIziV
+# c0eg/d+Y7QkGiNkEp/l9CO7/U1dpO40UkbDhxKr9X++dp89dF30884gwRYZYWtLF
+# L3W/r8cMQ0D8+wMChTANXPFqR5yexn7vQnTFDiX6xZ+9B2kRM6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjUxNjA1MzhaMC8GCSqGSIb3DQEJBDEiBCDJNEb7
-# QMQHRdf7+9oASVxZMWdGYOpV1zznQ4iKhOU74TANBgkqhkiG9w0BAQEFAASCAgBg
-# vCdllN7Zn/ZHr/nEPPY7YSrd97PMltWFH8pApL4YxdCXTojsijuq7BrSu8AnJM2a
-# hh+F2Z97dMRQ4cQ6mlW1WU+sRZ3bUOiOHe4/IPm+1PUq6JdrOChvCBINxdKBWfPt
-# k2umXqymKwjyzmUswCzgAovTnfuw76phspeu6w9XGS6+2dUCm0Dw+Xpm0BaQ/SER
-# VMVIgaXVFg/ojW+k1KmaRpBBZsmWWIcq0f4/xyA+rQGsU4jDVR6A9BtP+M67pvvD
-# oZ0RfKsx/O8CewK3hyZ/mUzvUzSwk+jSrndLvuDZZ6G2K6bE4d8r4nWCFmBQFYU5
-# lqbpg+e6goHCY7h1jNeiJqsm5Y0aDt8J/hXj3o8EZ/m0HgOhmSh6G3UKqlOZ1hH/
-# N7MAtx2ud7I3DNs65lHmKEREJNI3BHt6yz/M00rJLF9kpPbPibgcJc2cTmzAd1QF
-# /rNHVrvIE2k9f+cmooYTfEcJl6ODMaOHFeT7cI4dB4hB585RCyeaJPeb6JXBsobJ
-# zSLTAE4vb1Uhn1Hwn6je7XnuZEjFfQggrKY+SxmlQnL154xkqISRP2+RjPB6rGSn
-# S5+PVlMnun+1yWsV3omSj3dXjVfZ1vzXsL3Qn9ySRb1wD4CU0TQR2t/UQ3oMo4A/
-# TjocSbJb9hAVSL373NSqaqE3iVbJJuu2/8Ms30wMfQ==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxMjE1MjlaMC8GCSqGSIb3DQEJBDEiBCClOJ02
+# glvv3bveLoizEiLJajf02/cFMLIvC3bU8a5KXTANBgkqhkiG9w0BAQEFAASCAgC2
+# 9jrU/KJhYKKfLXPPVqcMhpOLLBYrT586+EtqyG4J7xzfZUT2yUpDt1I3oax0FPRR
+# nD5SGzbWCbVqazUNCRqxyZCUiWmUtyABUu6Y1ZDF07dIwyAH6yYmAxv7t1XiMddy
+# I5GvzdVTGfom80ZVVPN5FVbkswSVJzIHZc5x9z84CLIj/Ro6RA6LTeC2Kr7itm1p
+# 4kVNz+QRgmM4l7VPvsVUsfa20A9VDE1YBCNLcmvajfA8zciydJ3KbnF+5muZ92FE
+# sorw+/yek3FleGaVaax4lxIVsunkC4puFF7n9+FgqAW1W6X215TVfeqgrIgZACXK
+# uxco9yrpCv9YKDfZ1AZ4nPJl7wz97uJvHcQDRJ9Q2srQEy0nodnw4hynRvhVg9eL
+# BWEJOC/n/mgaKidr32O+L77/a/ZVEr9inrA4LNBoO2ysgI8fA4PHpH4ZyWMbY2Ya
+# KcXrVliGwHCHv6Hd0LzqYl1W41+IFhlKBPSXX+YiVcvc2e0rbIt4KavoGW/B6U6e
+# s8wNA6uZWMsgDwnQT0P3KCSSz3ii51g+J7BIJwagcmN7x7DFHpiJA2olIWMtuQgB
+# q1cOd6txA79YS7vXBB6nshlB/LKSRUnqD4fEB5bauMKuiNYe6YkxZmIBhgcXRkz4
+# EHPpIYBCo/uGapvu3XOU+hwstGAD3iLnXjlpEJoRJw==
 # SIG # End signature block

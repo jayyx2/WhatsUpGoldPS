@@ -1,106 +1,166 @@
-function Get-SharpSnmpLibPackageLocal {
-    [CmdletBinding()]
-    param(
-        [string]$DestinationRoot
-    )
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Validate the full workflow with a single Cisco WLC AP device.
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+.DESCRIPTION
+    Creates exactly 1 device from the AP inventory to test the complete workflow:
+    - Monitor library setup
+    - Device creation
+    - Interface addition
+    - Monitor assignment
+    Before scaling to 1728 APs.
+#>
 
-    $prebuiltZipPath = (Resolve-Path (Join-Path $PSScriptRoot '..\lib\SharpSnmpLib-prebuilt.zip')).Path
-    $expectedZipSha256 = '2A23F5411BCA5608D0D4CE15F95A8DED3DB744A2AF7F17323A213C1A0115EE4D'
+param(
+    [string]$APName = 'AA-DOR-L0-D1R-S3-P25-AP21'  # First AP in inventory
+)
 
-    if (-not $DestinationRoot) {
-        $DestinationRoot = Join-Path $env:TEMP 'SharpSnmpLib-local'
+$ErrorActionPreference = 'Stop'
+
+# Setup
+$repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$localPsm1 = Join-Path $repoRoot 'WhatsUpGoldPS.psm1'
+$wlcAddress = '192.168.75.33'
+$monitorName = 'Cisco WLC AP Admin Status'
+
+Write-Host ""
+Write-Host "Single Device Validation Test" -ForegroundColor Cyan
+Write-Host "===============================" -ForegroundColor Cyan
+Write-Host "Target AP: $APName" -ForegroundColor Yellow
+Write-Host ""
+
+# Step 1: Load module
+Write-Host "[1/6] Loading WhatsUpGoldPS module..." -ForegroundColor Cyan
+Get-Module -Name 'WhatsUpGoldPS' -ErrorAction SilentlyContinue | Remove-Module -Force
+Import-Module $localPsm1 -Force -Scope Global -ErrorAction Stop
+Write-Host "✓ Module loaded" -ForegroundColor Green
+
+# Step 2: Connect to WUG
+Write-Host "[2/6] Connecting to WhatsUp Gold..." -ForegroundColor Cyan
+Connect-WUGServer -serverUri '192.168.74.74' -Port 9644 -IgnoreSSLErrors -ErrorAction Stop | Out-Null
+Write-Host "✓ Connected" -ForegroundColor Green
+
+# Step 3: Get monitor from library
+Write-Host "[3/6] Checking monitor library..." -ForegroundColor Cyan
+try {
+    $monitors = @(Get-WUGActiveMonitor -Search $monitorName -ErrorAction SilentlyContinue)
+    $monitor = $monitors | Where-Object { $_.TemplateName -eq $monitorName } | Select-Object -First 1
+    if (-not $monitor) { $monitor = $monitors | Select-Object -First 1 }
+    
+    if ($monitor -and $monitor.TemplateId) {
+        $monitorId = $monitor.TemplateId
+        Write-Host "✓ Monitor found: $monitorName (TemplateId: $monitorId)" -ForegroundColor Green
     }
-
-    if (-not (Test-Path -LiteralPath $prebuiltZipPath -PathType Leaf)) {
-        throw "Bundled prebuilt package not found at: $prebuiltZipPath"
-    }
-
-    $actualZipSha256 = (Get-FileHash -LiteralPath $prebuiltZipPath -Algorithm SHA256).Hash.ToUpperInvariant()
-    if ($actualZipSha256 -ne $expectedZipSha256) {
-        throw @"
-Bundled prebuilt package hash mismatch.
-Expected SHA256: $expectedZipSha256
-Actual SHA256:   $actualZipSha256
-Path:            $prebuiltZipPath
-"@
-    }
-
-    $zip = $null
-    try {
-        $zip = [System.IO.Compression.ZipFile]::OpenRead($prebuiltZipPath)
-        $entries = @($zip.Entries)
-
-        # Security check: no path traversal
-        foreach ($entry in $entries) {
-            $name = $entry.FullName
-            if ($name -match '(^|[/\\])\.\.(?:[/\\]|$)' -or [System.IO.Path]::IsPathRooted($name)) {
-                throw "Unsafe entry path in prebuilt archive: $name"
-            }
-        }
-
-        # Find all available framework directories
-        $availableFrameworks = @()
-        foreach ($entry in $entries) {
-            if ($entry.FullName -match '^Release[/\\]([^/\\]+)[/\\]SharpSnmpLib\.dll$') {
-                $tfm = $matches[1]
-                if ($availableFrameworks -notcontains $tfm) {
-                    $availableFrameworks += $tfm
-                    Write-Verbose "Found framework in zip: $tfm"
-                }
-            }
-        }
-
-        if ($availableFrameworks.Count -eq 0) {
-            throw "Prebuilt archive is missing expected Release/<tfm>/SharpSnmpLib.dll content."
-        }
-
-        Write-Verbose "Available frameworks in prebuilt zip: $($availableFrameworks -join ', ')"
-    }
-    finally {
-        if ($zip) {
-            $zip.Dispose()
-        }
-    }
-
-    $extractDir = Join-Path $DestinationRoot 'extract'
-
-    # Skip extraction if already extracted (Release folder with DLLs exists)
-    $releaseCheck = Join-Path $extractDir 'Release'
-    if (Test-Path -LiteralPath $releaseCheck -PathType Container) {
-        $existingDll = Get-ChildItem -Path $releaseCheck -Filter 'SharpSnmpLib.dll' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($existingDll) {
-            Write-Verbose "SharpSnmpLib already extracted at $extractDir — reusing cached copy"
-            return [PSCustomObject]@{
-                ReleaseTag   = 'prebuilt'
-                IsPrerelease = $false
-                PackagePath  = $prebuiltZipPath
-                ExtractPath  = $extractDir
-                ReleaseUrl   = "file:///$prebuiltZipPath"
-            }
-        }
-    }
-
-    New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
-
-    Write-Verbose "Extracting bundled SharpSnmpLib prebuilt package from: $prebuiltZipPath"
-    Expand-Archive -LiteralPath $prebuiltZipPath -DestinationPath $extractDir -Force
-
-    [PSCustomObject]@{
-        ReleaseTag   = 'prebuilt'
-        IsPrerelease = $false
-        PackagePath  = $prebuiltZipPath
-        ExtractPath  = $extractDir
-        ReleaseUrl   = "file:///$prebuiltZipPath"
+    else {
+        Write-Error "Monitor not found in library"
     }
 }
+catch {
+    Write-Error "Failed to retrieve monitor: $_"
+}
+
+# Step 4: Load inventory and find target AP
+Write-Host "[4/6] Loading AP inventory..." -ForegroundColor Cyan
+$inventoryPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output\summary\wireless-ap-inventory-summary.json'
+if (-not (Test-Path $inventoryPath)) {
+    Write-Error "Inventory not found: $inventoryPath"
+}
+
+$inventory = @(Get-Content -Raw -Path $inventoryPath | ConvertFrom-Json)
+$ap = $inventory | Where-Object { $_.APName -eq $APName } | Select-Object -First 1
+
+if (-not $ap) {
+    Write-Error "AP '$APName' not found in inventory"
+}
+Write-Host "✓ Found AP: $($ap.APName) (MAC: $($ap.APMac))" -ForegroundColor Green
+
+# Step 5: Create device
+Write-Host "[5/6] Creating device in WhatsUp Gold..." -ForegroundColor Cyan
+$deviceDisplayName = "$($ap.APName) (AP)"
+$snmpInstance = if ($ap.IndexSuffix) { $ap.IndexSuffix } else { '1' }
+
+try {
+    $devResult = Add-WUGDevice `
+        -displayName $deviceDisplayName `
+        -DeviceAddress $wlcAddress `
+        -Hostname $ap.APName `
+        -Brand 'Cisco' `
+        -Note "Cisco WLC AP (validation test)" `
+        -ErrorAction Stop
+    
+    # Extract device ID first
+    $deviceId = $null
+    if ($devResult -is [array] -and $devResult.Count -gt 0) {
+        if ($devResult[0].PSObject.Properties['id']) { $deviceId = $devResult[0].id }
+    }
+    elseif ($devResult -and $devResult.PSObject.Properties['id']) {
+        $deviceId = $devResult.id
+    }
+    
+    if (-not $deviceId) {
+        Write-Error "Cannot continue without device ID"
+    }
+    
+    Write-Host "✓ Device created (ID: $deviceId) - $deviceDisplayName" -ForegroundColor Green
+}
+catch {
+    Write-Error "Failed to create device: $_"
+}
+
+# Step 6: Add interface and monitor
+Write-Host "[6/6] Adding interface and monitor assignment..." -ForegroundColor Cyan
+
+# Add WLC interface
+try {
+    $ifaceResult = Add-WUGDeviceInterface `
+        -DeviceId $deviceId `
+        -Address $wlcAddress `
+        -HostName "WLC (SNMP)" `
+        -ErrorAction Stop
+    Write-Host "✓ WLC interface added: $wlcAddress" -ForegroundColor Green
+}
+catch {
+    Write-Host "⚠ Interface add failed (may already exist): $_" -ForegroundColor Yellow
+}
+
+# Assign monitor
+try {
+    $monAssignResult = Add-WUGActiveMonitorToDevice `
+        -DeviceId $deviceId `
+        -MonitorId $monitorId `
+        -Argument $snmpInstance `
+        -ErrorAction Stop
+    Write-Host "✓ Monitor assigned: $monitorName (instance: $snmpInstance)" -ForegroundColor Green
+}
+catch {
+    if ($_.Exception.Message -notmatch 'already|assigned|exists') {
+        Write-Error "Failed to assign monitor: $_"
+    }
+    else {
+        Write-Host "✓ Monitor already assigned" -ForegroundColor Green
+    }
+}
+
+# Summary
+Write-Host ""
+Write-Host "===============================" -ForegroundColor Cyan
+Write-Host "✓ VALIDATION COMPLETE" -ForegroundColor Green
+Write-Host "===============================" -ForegroundColor Cyan
+Write-Host "Device:      $deviceDisplayName" -ForegroundColor White
+Write-Host "Device ID:   $deviceId" -ForegroundColor White
+Write-Host "Monitor:     $monitorName (TemplateId: $monitorId)" -ForegroundColor White
+Write-Host "Instance:    $snmpInstance" -ForegroundColor White
+Write-Host "WLC IP:      $wlcAddress" -ForegroundColor White
+Write-Host ""
+Write-Host "✓ Ready to run full Export-CiscoWLCAPDevicesToWUG.ps1 for all 1728 APs" -ForegroundColor Cyan
+Write-Host ""
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCckLeqXL3qP87j
-# sWpjy2Ndo/G37l6SVU1NSdQkEXiksaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEijFzILQJm5HU
+# ONFFMNuZxOLLCc6o5Fen5TBpasrq0KCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -303,33 +363,33 @@ Path:            $prebuiltZipPath
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCK8lVlK24yr+HrniFYZf6F2Nkd+yghedQrF2kqLHDPITANBgkqhkiG9w0BAQEF
-# AASCAgC0PzJ/OafMdRn28yQSLHoZVF0VdOHUKHWJudMbNeFrseobub6WUsUHMrOg
-# sEnpV7hx/foX+TjSvJOLlJQ7wh334L6kOdEM2UPGipFW8ru5dIw7pOY5ffGC1NNL
-# LshNiWJb9+df1L6BvzDNSPRlhMdLvNEEg50NyuOQ3eglr/OoqcZ0tqJU7d4+zGVE
-# YDHtT4Vl5QMM3F2Y467hORBUrBwaE9yKKcWkeiOYbaqXkKDj+K1N7N0d5lfWe9x0
-# DOAuSsAsUHZ5HQbWb76ez6JKCdm3OPna5YeeBKWd6du8xTP+Kf27FJDmG7q+gq5t
-# I8rM/nerlFyoPLwpkLjYeEwPVih3hoU/noFrnzU5r6t9Dokwv1gk/hEbR4pXhVf6
-# z5BXUEoi/JITHOD+OycUHb2crLNS3qC+t82qXbyGQBAjjQH05MZCYRcNwj9W9F/c
-# mq0YGDj403cmtY24YV95boRT6Nomj6iavJNKpLkkp/svs/XblRAybD7IymtXb9PN
-# UBIF9Wm4v1LJ3pVWQvcOqxxonHvYxvLKgivQEoiaZySMugo2h8J5uUUQKyPhfeDw
-# PT9Qn2sVquKVlfTLl/CjQoubB1WQMb1Tv6HodBy0cAKwrsQrIrRt+Ktb/yR97WPR
-# bgVzJxMV0EU22HDgTCOkKsWvrreoce20GHHHyQtM61oEisK3baGCAyYwggMiBgkq
+# BCAgmGgqk0IILYkujyL0KM3qAyBZUme04E1YmjJnS/WwmjANBgkqhkiG9w0BAQEF
+# AASCAgDr7F13nbnjW9JpipDe/xJktKLZXESQKtEqfWSNywNBO1yLbrb4Uwx5nkI8
+# sGRRhLzIoqLOv30vFKUsLRalsE3tW7FFR99zXFKpwsB1GLH6fQwy7KuWQdQez15q
+# q5Xlv4MlX+xTOd7OS/YNcoDZGIK4ONQpIfR/CQBm7S6w+32mVu2Rp4Cjse2eXnBE
+# DAYxktWgz+18CzNkH8Uz2qe5oYqI678PVQeX5qjoAQT0zQIxG4uNGQM+sVEkjYaz
+# WkYqeVWBMte54uCcCKP6vLfzOcoMwk3hgHqYrfrbdPPcSXPYFEJAEhkidRUpSqcS
+# WP7w2pOCYdszYPiek6ihhIJhQHqWz+BoxG3drPEYtrx+mG1/MAOiRa3qB8jTMYjH
+# 4T3D6AphE14qWVl6u70KBRRNFULzjO8gDCAPTRSfPJaWyfulALksmodvNsUey4nw
+# RzejnA+tWXHsgQr9bffUNl3X9BcIuQafXAiW5Q3HinxDdAF0PWHOXMXE9qwjVi+U
+# hqsyB88HSIVOqb69YQBDvwCW3SXo/fyyS++g9Meyvg+pp9+TBYB1ucq7IkuJncWV
+# wzVEOOQNJ9bgDjxeQCZ/KcD1vzSU5m53m9elh0Axwe+fFNeg8Q/sLYNOe9t2Nw8d
+# L9XtzpGKDy/aU9HjLIbjYep0C9dl3WVBgr23u1JK8Uww8cdlwaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjkxMjE1MzFaMC8GCSqGSIb3DQEJBDEiBCDkIb4A
-# l3/IvVu+3JcAYdVEFh2GQCNfqW8keF3AmJct6zANBgkqhkiG9w0BAQEFAASCAgDE
-# Fi5LT4FebIaWsor+97v+y3WsFW50FhXI5+qxtrGddqANs/3QqrASHF3Yw0NPhZvc
-# VKkx8+39oiIVBETHrDdZJfvqdiYyRH5cmJm46CT8rW4FDtPGXaMPSGGzhjeTKS1v
-# 6M9PZ8xLroW4NnMlcliNdQYfJwuj87j6XbStyHdeewzhZI6pXIKRWbuEtMxwgLa6
-# WVgmYsl566pU4ErwYjUMk146ZpkQAml8Rkc0rjvbjS+2cTbAmw0Oz0aRgrtqBMoB
-# dYALJMkZAaJvA6cjaPzpV9++A3SZMRW92+nkr6DGtsMbbpKBeJxQXGYtcngtKBB4
-# vGufAbiPsDW/jLdBIFYbegg4CpO8fU8vc4UBwATIctzcr7SAD64+4aGj6xNCwv0w
-# sN/7RENVfPV92BWeDw8LiPqOra6o/VZNF2kKAeRSFu5O8w5y6vgap/zKZut363qB
-# r1wRTGLpecm/us95qrsw1s2DlQFFvuRzuqdQvR4zlovPcwQSgxOyjbuRf/ih54pg
-# 9xL251/DOn2SUJqqoMLJF2+Woy3+n6iYGLFsdPulXNffpu5GMWdmLnuEfvi6aJDX
-# F3AZgIKdipkm0h56nEHnS69Fs62B1Fq+TqJHVumSwO7PFGLE4rZsWLbc8SAt/s9G
-# 8jDFToPRNIkXwx7J9Kvs1TmVClzzZR3wb4ns+GZ6Dg==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxMjQ4MDNaMC8GCSqGSIb3DQEJBDEiBCD6wicN
+# NLZI9GbJfJ0j6wUalx3IgHgfyfDQGYsfLkOOyDANBgkqhkiG9w0BAQEFAASCAgDI
+# GjLFL2Hwyl68v7htcN5RhuA4KO6SH1k6eJpWs1EgMbuiMfV1Q54d8GGD+QtfebxY
+# Mwqd20cxbOUC4Dn/Q2Dyvy2taCe0zf7S7KXmF7FeVal0BOlKiueN3Rqg4v8+RoXJ
+# +DBL5eEr/GKIX8ecTPIocwOf1AaNsPQ4Sdu0qB8E4r+rv2s95B3UoBgPq6kHaLy8
+# QXZvX7eR+TNfxYNIiFWym3vJlFa3Bmat0m2cFuDsKrmkjhNy2RGaapb8n8GRKaRq
+# kX+XohmQSbRj0Xr3v70XXnTjUP/+rp+0q5qpuUcaXFAdcfzWN1HZJlP81Y1hC+tY
+# sD8QKIxDA1WmBRHzgnLE4tAgMQBpgNYIL50j/z+vJ4KrzRdvRjqDyM1D9G6WlHib
+# b0DGFXUUzXGcaIuHpcOzylUBuvMORD0c3GtkNp9YvhjBI1o261xarhFNWY3/V+Ut
+# uueHs2VJgYBG68GyUE9bA/yhh3CEE688rl30ZSagahb4VASRRHiQCZyizBK/jIyG
+# c7CBCZ2CGX4rNz+lxVXUM8fIIlVmMxzcMHZftE8c2bmWE46BRIOAlYsw25nMJ05d
+# YIgTsdHDpA8+4cvzJidZefumSV/HcfcVfuyOH8dQipK9YTyvAZq86A7jNfiAexpx
+# R9ZtCG2Olgs/HwzSix28GGtzp/L88J7w0mXUCxTTVQ==
 # SIG # End signature block

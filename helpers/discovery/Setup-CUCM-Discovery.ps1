@@ -917,9 +917,9 @@ foreach ($currentChoice in $actionsToRun) {
                 }
 
                 foreach ($dashFile in $dashboardFiles) {
-                    $destPath = Join-Path $wugDashDir (Split-Path $dashFile -Leaf)
+                    $destPath = Join-Path $wugDashDir $dashFile.Name
                     try {
-                        Copy-Item -Path $dashFile -Destination $destPath -Force
+                        Copy-Item -LiteralPath $dashFile.FullName -Destination $destPath -Force
                         Write-Host "  Copied to WUG: $destPath" -ForegroundColor Green
                     }
                     catch {
@@ -935,12 +935,12 @@ foreach ($currentChoice in $actionsToRun) {
     }
 }
 
-# ---- END OF SCRIPT (do not remove this line or the closing braces abo
+# ---- END OF SCRIPT (do not remove this line or the closing braces ab
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7YBV66ts6EjKp
-# xlv/m6zP2G2HNHtfM7DJD2qH16SqRKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBkt5mB+uI+yGBd
+# uwomCVmJrppSyy0z4EUVUwm/tAan6qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1143,33 +1143,33 @@ foreach ($currentChoice in $actionsToRun) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBhcfgJxtnc0N/SmUeFhK8TUWkzwDX8Ipa0YZp7iV9cUjANBgkqhkiG9w0BAQEF
-# AASCAgDHW3PuIYqeZULXnc7CzZMnE3pD6ufRmvSemFCnECl0WKnzpcR4QcmSDhMM
-# VNtrkSaekm6jhOs7FMGy1m+keMJwUWUtC7HQJJ80LCkXxPOb/r8CIm6VDcz45CIt
-# FepRjkbjUr1DyjorpOEhGa9Xy25I9itQ4d0pZgOlYhEe05ev/NkK9Hj8uCtsW2YI
-# 97f46ILaEU8HpHgznbg5uBkd0dLrebl4nXjuoRKE8qtL3IM+rqEMJMyUtmArUxKH
-# M3JLIlL4SQRoU5dFz4tHf40OI6bnqaNY9qSnYKmDxaGHgTkJt3V4ZUDsJHlq9zPx
-# RBqLFCEy+eFTKYEm3nQ0irDsqH1UPbHRljG4Mmb4XyF98K3fIc2hivZ1NWY7f3B6
-# bLHQw5xHuGMJh+fbZ2Lsa7SKpnSHaDOE36COozKLKuibyRt2doUfDfdyQu9pTfJc
-# sSWhr9pJk/DLyq46JsD9VTIwTvIiuaJbTuioA3Bq09G8KgcFo5J1/AQ7uWzquoxj
-# co1nomss8VwFFeLZjnImODdeHfWFTP24DiQC6B8zuAW9trQUH4IOHiD2KwmWRone
-# ViFZtIzKKl9lsSkLbbY3LsqVXBdpNM4afZYtCUP3N5C07bmrLUrFx56TXsUWgkix
-# AsRQmFM+tR9+guahOZA70xvGue3aqhfDRuj85L2F5aEjJ+XiBqGCAyYwggMiBgkq
+# BCDze9H5+vFaIIeqE0zYcsWDespBuEwxHqb5jh2y539DJzANBgkqhkiG9w0BAQEF
+# AASCAgDrT7DYPq2k1Q3Rvs9BtsRvfkbsUuWRF/9kAbfPYRRnuaI4BQJUx0HJAxyl
+# mXquTSTM6dDSnKpJatlrBQXVV0UtE6CBQ+g7DVz660ju20OFw7oHPkPVuWkHnVgc
+# IQkAx3CrvF5yP6MGI5Pl1pvC/oNAHV09LNbwNcgY6z/FRGigE4Dyd2lp9XuBT0RD
+# 2lrkqSCjuSHsMpMnR42FrUVo7ZleLjTWkEHUfXL6jQ9/W5cZAaP4O1hvv+d0oKde
+# XJEKqeLxGPjpkbHtrmKgTnEg5Q9QazDk+bn28Cr5bkyrH6Y1QkSVQT4iGISbtXG3
+# 0e9SS0FGmDHUL1/Uk2bILIhQdtQJpJXCU0cJ5gQCMnB0Cq3SBZH6eB8gUwSI8FzU
+# +4uX9S2zRS1ysjSc2Vitsubt3K7p+anN7Ig8TXbY9jHHoR7j+7jvUPTsp8ZtevjD
+# 5qPjPKZP0+Vqjc9oCuo7QlD5HzIRSaQLlQ1CCQoP0AORKC49Tq71WXLNudpncSyL
+# 0jefckNo1ShWVn32BU39905xi479kap10RW8o1PTIEOpqUOMEG0AaMd0SX1axDL/
+# jIGQ3Iv1zL/2Ezmf0XuK0WHXsbAeiD4UdOBULQ2x2R/SrRSudE5XbT/SThaeHYNu
+# 5MW+/cbs1oflvbWUPPSngN8jBIKhLtq+wKI7UDoXywOi/nrMrKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjUxMzExMjFaMC8GCSqGSIb3DQEJBDEiBCDsjtUK
-# xUmengDNech//3G/PXWIUY090yGKgi76Wx5fJzANBgkqhkiG9w0BAQEFAASCAgCO
-# /1nYFOosIbBMMB5cGhS8xsJyHupKFFmqOaNqa4w6eNnW+0sKux8CYM0Xa6LoC6zx
-# cAoOn4+axIC8x57LmnSIqGVD3ZnovJmbjOj93cAMI4jP1tsRcKbLEvWE9NsMJDQi
-# ZCwzV9O09HKRZcDNF3rQIBDB+UI8oOOM08V97Ea9CrVeixaXCCg2PvMezBa2ltsQ
-# VCgeG5USCmLGJDffZgDp1VxoyvVx63BBcVvAPGizEsTI/kwYX6QfAFN1bVVm8IY8
-# NYyUV7Xgrk+n9C7VmG865ry8ECVyP87K3nP7Ojq1p6jglxabmaUeddtjZHf1oeiR
-# 7AdEXd//LcLzwRJNkGp3Sn2/P6DOv0FhnYmoZeYxklxw0lNOQgDDR95GXG27Rbji
-# My5FLKXrLiOTX7k4AfKmmphNNPjWL8a75ATSTEUCzV+6qHk4Oc8V7/u9whSXt9Rb
-# FIU8tPULJVhUbY4vci6z/gUgQTN59vPB6h8x9QU+y/ZWDioe2R+VXoc62LdtaEfc
-# QGGocRX/VmEkbarLKFEC7wS7bA+khZToE9LmbeFvlfNEWlEvhU3xaWmbtZ2Ok8Nu
-# F8G3ysOPeYT1t7BO3BsFIVv6zc+F+xq1VOpoSVc5UO30ksUHAsK0aIabytyiHLxL
-# pw0ibR3NU9pbfUdJt9KI17VFc754HVx8e1Kxzs+PXw==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxNDM3MDZaMC8GCSqGSIb3DQEJBDEiBCBiCQ0s
+# wk59IukOIHXH8SBb0Q+F8+Imy4VBrRYC269k+TANBgkqhkiG9w0BAQEFAASCAgBr
+# dQadShU01EAdl5POPJVj/hCb/cvFZAJC08xEZceojGRbpC3z5N7ilPg9uFEHsnzl
+# MbeIW97oTsmhKW/P0s/2/7BfNB1oGE2S+PkOzpywMy3In6TlmMLtxNpc61JNTV4V
+# hbLxbNGfAdc+icauyJw0qPAvfz3C87U9/sv6zI7t19RPAZrRGOeu16pJwMUCk9m5
+# nW0hWOPqoain9nNQQ/V3urQ5Urg9C/EnXVR6+ornNbKfz5SMTUL2GjM8ca56mCoR
+# c87N5KYdHvK27gb4OwmNbDPk/xmXhKT3cL03kIncaeikqi3JhjIGMRwa5EMedjOp
+# iF3vikagaP66Dqb2eLdZ6Y4Z2D9HqedAmYOudNRe/1IpqCMz0aq/LejKPKPPqHuf
+# 0iR4gcddpPRHWRHJGsm0dDac/J1mK9d63P+F4Gxt+VvhHGlc9X3hAPcZ/E0TTb2W
+# /yF3ovoCus/nyTw4umeE3hqJBFHkYLfGx9f3NWYy2cCXDNZUCGs9ZL4fzZ6uU5SQ
+# wdlBTfHfpkpf1F9e7Z/JsWGvpJt01ZjZTjkSEk+wt/tq1tJqqWB8AYIuluGBrDUJ
+# 3A/wXnrJrmUxTZjzJPDuq0H7Fdjoe1cK2rz1S+b62JNkMYhTeIr7iJFVM0/NgaVe
+# 7ryXxdLashm/k5bqQcV0PdWdNSUxl02/oxeMLizR2A==
 # SIG # End signature block

@@ -333,11 +333,35 @@ if ($Target) {
         Write-Warning "Build-Wireless-Summaries.ps1 not found"
     }
 
-    # Step 4: Generate dashboards
+    # Step 4: Post-discovery action
+    # If no -Action was specified and not NonInteractive, show an interactive menu
+    if (-not $Action -and -not $NonInteractive) {
+        Write-Host ''
+        Write-Host 'What would you like to do?' -ForegroundColor Cyan
+        Write-Host '  [1] Generate HTML dashboards'
+        Write-Host '  [2] Push AP devices to WhatsUp Gold'
+        Write-Host '  [3] Dashboard + Push to WUG'
+        Write-Host '  [4] Export inventory to JSON file'
+        Write-Host '  [5] Exit (do nothing)'
+        Write-Host ''
+        $menuChoice = Read-Host -Prompt 'Choice [1-5]'
+        switch ($menuChoice) {
+            '1' { $Action = 'Dashboard' }
+            '2' { $Action = 'PushToWUG' }
+            '3' { $Action = 'DashboardAndPush' }
+            '4' { $Action = 'ExportJSON' }
+            '5' { $Action = 'None' }
+            default { $Action = 'None' }
+        }
+        # Re-evaluate dashboard flag after menu selection
+        $generateDashboard = $Action -in @('Dashboard', 'DashboardAndPush')
+    }
+
     if ($generateDashboard) {
         Write-Host "`nStep 4: Generating dashboards..." -ForegroundColor Cyan
         $dashboardScript = Join-Path (Split-Path $scriptDir -Parent) 'cisco-wlc\Export-Wireless-Dashboard-Pack.ps1'
         if (Test-Path $dashboardScript) {
+            # Resolve repo root: scriptDir is helpers/discovery, go up to repo root
             $repoRoot = Split-Path (Split-Path $scriptDir -Parent) -Parent
             & $dashboardScript -SummaryDirectory $summaryDir -OutputDirectory $dashboardDir -WhatsUpGoldPsRepoPath $repoRoot
             Write-Host "  [+] Dashboards generated" -ForegroundColor Green
@@ -454,8 +478,8 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWuLnDZpB5HZOb
-# Slk2AwHnylYOjufNPfpsYHqNdk86HKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2q9bdaAbKKavD
+# fvUC3mZwV/xwkZ1i9RSNDchMejRw1aCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -658,33 +682,33 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCC0dInq7oFlGIG3Rbk0HSSRCkD6FBQnlqv+mOUNnrSxDzANBgkqhkiG9w0BAQEF
-# AASCAgDaeuzybh89uAYeHZja3Vg38D38ZfqGoCreOh50J/zvI4/DHIcq66alpesF
-# mUUsXLYPEdkaPhUFbK3jLei7oxm8paVNNpRAa/l1Yx7hgJBeSmigi94ZLKHvuf5f
-# kNuA96Wk1MIhbvJQ24TXM+MJwaYX2HEw2zshVZXUwyWWo3Dw1emepI6eBWE6yxTn
-# 2RZzSDCCUzcufVLHDCXZwEUNqvJkLLwzZoO5fdwGSVJyDOkC4rgClWbj5/jZovxT
-# PlsObJc9yUWsIy9qMHSrC81L9rp94SmqizD7NOp3YI7lBHCf9TOrrGRTurj1t2bj
-# aE7qP9DwMcvpUGcQdyd/DcMeA+SqZLJlJ6he0ryVLBJxinEGtH85+LXP/rX254M9
-# s9kuov07vjuDU9n+bJKlWh65LMJBX2URUvhC5OQcl99mGAUb9slVPuqjllwgIO15
-# S/vNWgXWp3VuH1Xf3JgDNrLcrnDl5AsLHxjIKAig5PYsr69/2BKsjO8vXYFNQaag
-# lFGOSi/IvB3kW5a3wWsWKT7NKeLJpQtAgqp9tsfhsFWO1BJ0HzfIHmAlTVw21LZh
-# KHkAxF3WhR5d9HlnMdwuBpn6CLNCjJvyETNOpzvLw6OVDBQQzkeufPI6c4MBmNd0
-# Ffutl2GqgA7ylrb3J3Ag25wXMt83ou0Xbt4GdiFGKe7mJBDQ+6GCAyYwggMiBgkq
+# BCBzdNqtfCHwt/WY2aP8QXPsu0K9w0tN2dlcldu0ADJy6zANBgkqhkiG9w0BAQEF
+# AASCAgCrS9i5r6LQv0GEhDVWRp1ue1s5RX0C7pNH7acSScNkU+WLo+0eafnbFn6M
+# R/s4jh+GeW1iEBzmmbPp3qBkXmcMRfnDVTxl3y6g2gw1ZLRB8f/iLuIwGgAR5iXl
+# JkObFY6dYsVbfgyr7Oxzp9Zg2wo/xQSYUwuQf7fh0XAt81bIG/nn9XciGqG6T8P9
+# hXHcL5aK5lSKu38/H6qk0xI2ROO7wbMkoVHcjyHAKu1dUzqwcJWLhEG0Bu7eWYfl
+# 5iSaOMRIwQYB2vDEZii8xnlAqdaF4hr+InUe86GBw8gxDRUIQm3e/7duFP5cFyHc
+# xWeghRMBKz0tBQrgWduS2Ho7BgegXtEDuYzGE6X723cOc1qdyIFrizexYMhIQobX
+# qFeivvUzGZBIz13+WD3qBho38zV4X6YImzANLf+2kMV9Wt9yJm2kJtdnoyvxtlYs
+# cnGee+MAxK/s9J7P9EYvHaCn7aNXkUt/gyVfxJOPoxABkHFThl2e+lvuVJRev5e1
+# gaj58jK5zBbDRCD4pJdCLoKsrszOPKXBbP88vKgnoHWuzaIkl7LTnGmElNYu7J5Y
+# E//zXoFE+AHVmPvDWMIhkEfgPT5BPoqAVTslY7MI5+vqMN6ImxV8xVEWeBrwkzSL
+# g3VaEAaTJZ4rZ+bD8D/TXrRyP9zu5v7zbhWA79//jFuU+NhIL6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjkxMjE1MjZaMC8GCSqGSIb3DQEJBDEiBCCP6F8S
-# hXFavR24sFStce2If9ar+OBPiSqlRuI7iGoL6DANBgkqhkiG9w0BAQEFAASCAgBr
-# oyrexQHdBm/1TSvdi7el8p9RlL7kC5EleXo0uKhTFWqtfbZy5szzFqF7DPYErNxT
-# 1YamhUU4/Mw/WltGtcqolDmWIQZocDHzTiy6FiSE/rQroHmesRM6v4ydQc8JT47L
-# 5EHzwXd33mbCY0Tic9Oo2/9g0zUc0mu/X5MyKeM4ArbwPP8yn+YehlV5a0TD/tY0
-# WJy7hj+sJjN+sk1U/QVb1X0igNG7LaF2Myd1T4yshjD1QKoDqQlB0MFjYiFw1jxE
-# Z+OvJ8Xq/ww1kbqims3towAkU60b+7CmuFG6MD8exP4Fvt9DNNaqcnM+LiAE/Zv6
-# UNpp/G/bwmm5CUwwjPcbiQ0/YV0z5shCHO5CnIbcnp5XUPr2C8FoBuU0/MAqQ8MD
-# eGKNSzBfOxCauU5peSydyk1+Kp5kH5PCnhTPxI4G+VZdxpmVtZwnl8iSY2cxXobc
-# lUoYne7JuaUZ0m0fvum966cJk7IhBffKBcGbBxfS9o1Imjpdmi+c5YA0kDk5dYi1
-# 3Cs3D7aJBzCl6CobAe/5308h8S6XLMeOhh9oybtXlbinXoaP7ivEmCH/OZsVtZbN
-# 5H+EbfZM5X3q0ktKESJ96p25o+cQPTqEOtPq8PiGV0T4wq/yybHsceFH/lw4wsFg
-# 17RReC/rJzGlIuW75bq4WfQ/vdjY3ltW2D9ct0uVDQ==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxNDM3MDlaMC8GCSqGSIb3DQEJBDEiBCAJUC/2
+# 5Xdxu8KSQJkgR2USiOiXvjYM0fqB3bA/Cdq3JTANBgkqhkiG9w0BAQEFAASCAgB7
+# etF1onSu5kb/4aiOCwK+ENlPBxiZQ+MTM2VmckqqmqWcNrrp0LJNmhSuu06V/FKL
+# gLxDTpVQhaM3L0AiqZl9UH1nQmC6YtW7isXt9RtR4PEt0uGPdnIjVSUjdn/ZOKoM
+# 8O9HumdC2hrZEBZYz/x7gNOiGx8iUySO+rOoFtihbIsF9yROIWwoLbkiLiDIIC6e
+# 70Z7atTW+m61LCz5IGUA7tCt036rZLM9L0cXeyfDJug5zLPLWZxkPF0WeIS+xmmJ
+# iBqY0wLaex7QSGwT/uaFciu69bzyB669jXUAB2/GRMj0qIGP9obl3E9SDHj9sDWD
+# 1HFq4yPRJkv2u6chDGTfn2phjss1DXd7s2aIOCMfJJw9FMpRjslBBQ5Rl+vShWjr
+# zqJaNZ4qmvbA4wN2mH+OjmHdM1+If7c7JUu0bNxn9F/xANe74H3Derr4ZHLcJf42
+# Zg5+N7EwqJSEZWS2rY1yH5OLCSgotP8xQMnnrxKQZi9XocnZKn71PBsAlKfhDPgK
+# RTm+6J2PlBRrUkpV5JMXKAU6WfYrhFMIOjyhHi/G98g5+tEbM3Hzn4NxYccqE7rf
+# sBPZHL+TRn1oafoN8quJkx7IhBh7TXKi8vrOBxZEjILGgCD6GgcLGRx1CM1kDq/K
+# GUj+ypKsFRTxqE45WTP73logeylXGGIYJqTvh1e4dw==
 # SIG # End signature block

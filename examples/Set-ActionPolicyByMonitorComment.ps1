@@ -1,108 +1,322 @@
-﻿function Get-SNMPMibSearchPath {
-    [CmdletBinding()]
-    param()
+<#
+.SYNOPSIS
+    Finds active monitors on devices whose comment matches a pattern, then applies an action policy.
 
-    return Get-SnmpMibSearchPathInternal
+.DESCRIPTION
+    This script searches for devices (by name, group, or all), retrieves their active monitor
+    assignments, filters by the monitor comment field, and applies a specified action policy
+    to each matching assignment using Set-WUGActiveMonitor.
+
+    Useful for bulk-updating action policies on SNMP monitors where the comment identifies
+    the monitored resource (e.g., AP MAC address, interface name).
+
+.PARAMETER CommentPattern
+    Regex pattern to match against the monitor comment field.
+    Examples: '24:81:3B:A7:FC:40', 'GigabitEthernet0/0/.*', '.*'
+    Use '.*' with -IncludeNoComment to match ALL monitors (including those with no comment).
+
+.PARAMETER IncludeNoComment
+    Also match monitors that have no comment (null or empty). Without this switch,
+    only monitors with a non-empty comment are evaluated against -CommentPattern.
+
+.PARAMETER ActionPolicyId
+    The action policy ID (GUID) to assign to matching monitor assignments.
+    Supply either -ActionPolicyId or -ActionPolicyName (not both).
+
+.PARAMETER ActionPolicyName
+    The action policy name to assign to matching monitor assignments.
+    Supply either -ActionPolicyId or -ActionPolicyName (not both).
+
+.PARAMETER DeviceSearchValue
+    Optional. Search for devices by displayName/hostName/networkAddress.
+    If omitted, uses -DeviceId or -GroupId.
+
+.PARAMETER DeviceId
+    Optional. One or more device IDs to check.
+
+.PARAMETER GroupId
+    Optional. Device group ID. All devices in the group will be checked.
+
+.PARAMETER MonitorNameFilter
+    Optional. Only match monitors whose name contains this string.
+    Example: 'SNMP AP Admin Status'
+
+.PARAMETER WhatIf
+    Shows what would be changed without making any modifications.
+
+.PARAMETER Confirm
+    Prompts for confirmation before each update.
+
+.EXAMPLE
+    # Find all monitors with comment matching an AP MAC and apply an action policy by name
+    .\Set-ActionPolicyByMonitorComment.ps1 -DeviceSearchValue 'AP' `
+        -CommentPattern '24:81:3B:A7:FC:40' `
+        -ActionPolicyName 'Email on AP Down'
+
+.EXAMPLE
+    # Apply action policy to ALL active monitors with any comment on devices in group 3
+    .\Set-ActionPolicyByMonitorComment.ps1 -GroupId 3 `
+        -CommentPattern '.*' `
+        -ActionPolicyId 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+
+.EXAMPLE
+    # Preview changes for a specific device without applying
+    .\Set-ActionPolicyByMonitorComment.ps1 -DeviceId 42 `
+        -CommentPattern 'Gig.*' `
+        -MonitorNameFilter 'SNMP' `
+        -ActionPolicyName 'Alert Admins' `
+        -WhatIf
+
+.EXAMPLE
+    # Bulk update across all devices matching a search, filtering by monitor name
+    .\Set-ActionPolicyByMonitorComment.ps1 -DeviceSearchValue '(AP)' `
+        -MonitorNameFilter 'SNMP AP Admin Status' `
+        -CommentPattern '.*' `
+        -ActionPolicyName 'Wireless AP Alert Policy'
+
+.NOTES
+    Requires: WhatsUpGoldPS module
+    Compatible with PowerShell 5.1+
+    Author:   jayyx2 + Copilot
+#>
+
+[CmdletBinding(SupportsShouldProcess = $true)]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$CommentPattern,
+
+    [Parameter()]
+    [string]$ActionPolicyId,
+
+    [Parameter()]
+    [string]$ActionPolicyName,
+
+    [Parameter()]
+    [string]$DeviceSearchValue,
+
+    [Parameter()]
+    [int[]]$DeviceId,
+
+    [Parameter()]
+    [int]$GroupId,
+
+    [Parameter()]
+    [string]$MonitorNameFilter,
+
+    [Parameter(HelpMessage = 'Match monitors with null/empty comments too.')]
+    [switch]$IncludeNoComment,
+
+    [Parameter(HelpMessage = 'WUG server hostname or IP. If omitted, assumes already connected.')]
+    [string]$WUGServer,
+
+    [Parameter()]
+    [int]$WUGPort = 9644,
+
+    [Parameter()]
+    [switch]$IgnoreSSLErrors
+)
+
+#region Module import
+if (-not (Get-Module -Name WhatsUpGoldPS)) {
+    Import-Module WhatsUpGoldPS -ErrorAction Stop
 }
+#endregion
 
-function Set-SNMPMibSearchPath {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string[]]$Path,
+#region Validation
+if (-not $ActionPolicyId -and -not $ActionPolicyName) {
+    Write-Error "You must specify either -ActionPolicyId or -ActionPolicyName."
+    return
+}
+if ($ActionPolicyId -and $ActionPolicyName) {
+    Write-Error "Specify only one of -ActionPolicyId or -ActionPolicyName, not both."
+    return
+}
+if (-not $DeviceSearchValue -and -not $DeviceId -and -not $GroupId) {
+    Write-Error "You must specify at least one of -DeviceSearchValue, -DeviceId, or -GroupId."
+    return
+}
+#endregion
 
-        [switch]$Append,
-        [switch]$PassThru
-    )
+#region Connection
+if ($WUGServer) {
+    $connectParams = @{
+        serverUri = $WUGServer
+        Port      = $WUGPort
+    }
+    if ($IgnoreSSLErrors) { $connectParams['IgnoreSSLErrors'] = $true }
+    Connect-WUGServer @connectParams -ErrorAction Stop
+}
+elseif (-not $global:WUGBearerHeaders) {
+    Write-Error "Not connected to WhatsUp Gold. Supply -WUGServer or run Connect-WUGServer first."
+    return
+}
+#endregion
 
-    Set-SnmpMibSearchPathInternal -Path $Path -Append:$Append
+#region Resolve devices
+$devices = [System.Collections.Generic.List[object]]::new()
 
-    if ($PassThru) {
-        return Get-SnmpMibSearchPathInternal
+if ($DeviceId) {
+    foreach ($id in $DeviceId) {
+        try {
+            $dev = Get-WUGDevice -DeviceId $id -ErrorAction Stop
+            if ($dev) { $devices.Add($dev) }
+        }
+        catch {
+            Write-Warning "Device ID ${id}: $_"
+        }
     }
 }
 
-function Import-SNMPMib {
-    [CmdletBinding()]
-    param(
-        [string[]]$Path,
-        [bool]$Recurse
-    )
-
-    $shouldRecurse =
-        if ($PSBoundParameters.ContainsKey('Recurse')) { $Recurse }
-        else { $true }
-
-    $loaded = Import-SnmpMibFilesInternal -Path $Path -Recurse:$shouldRecurse
-
-    $loadedArray = @($loaded)
-
-    return [PSCustomObject]@{
-        LoadedFileCount = $loadedArray.Count
-        LoadedFiles     = $loadedArray
+if ($DeviceSearchValue) {
+    try {
+        $found = @(Get-WUGDevice -SearchValue $DeviceSearchValue -ErrorAction Stop)
+        foreach ($d in $found) { $devices.Add($d) }
+        Write-Verbose "Search '$DeviceSearchValue' returned $($found.Count) device(s)."
+    }
+    catch {
+        Write-Error "Device search failed: $_"
+        return
     }
 }
 
-function Resolve-SNMPOidName {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$Name,
+if ($GroupId) {
+    try {
+        $members = @(Get-WUGDeviceGroupMembership -GroupId $GroupId -ErrorAction Stop)
+        foreach ($m in $members) {
+            try {
+                $dev = Get-WUGDevice -DeviceId $m.deviceId -ErrorAction Stop
+                if ($dev) { $devices.Add($dev) }
+            }
+            catch {
+                Write-Warning "Group member $($m.deviceId): $_"
+            }
+        }
+        Write-Verbose "Group $GroupId has $($members.Count) member(s)."
+    }
+    catch {
+        Write-Error "Group lookup failed: $_"
+        return
+    }
+}
 
-        [bool]$SkipAutoLoad,
-        [switch]$AsObjectIdentifier
-    )
+if ($devices.Count -eq 0) {
+    Write-Warning "No devices found. Nothing to do."
+    return
+}
 
-    $skipAutoLoadValue =
-        if ($PSBoundParameters.ContainsKey('SkipAutoLoad')) { $SkipAutoLoad }
-        else { $false }
+# Deduplicate by device ID
+$seen = @{}
+$uniqueDevices = [System.Collections.Generic.List[object]]::new()
+foreach ($d in $devices) {
+    $did = [string]$d.id
+    if (-not $seen.ContainsKey($did)) {
+        $seen[$did] = $true
+        $uniqueDevices.Add($d)
+    }
+}
+Write-Host "Processing $($uniqueDevices.Count) device(s)..." -ForegroundColor Cyan
+#endregion
 
-    $autoLoad = -not $skipAutoLoadValue
-    $oid = Resolve-SnmpOidFromNameInternal -Name $Name -AutoLoad:$autoLoad
-    if ($AsObjectIdentifier) {
-        return [Lextm.SharpSnmpLib.ObjectIdentifier]::new($oid)
+#region Scan monitors and apply action policy
+$totalMatched  = 0
+$totalUpdated  = 0
+$totalFailed   = 0
+
+foreach ($device in $uniqueDevices) {
+    $devId   = [int]$device.id
+    if ($device.displayName) { $devName = $device.displayName } else { $devName = $device.hostName }
+
+    # Get all active monitors assigned to this device
+    try {
+        $monitors = @(Get-WUGActiveMonitor -DeviceId $devId -AssignmentView 'status' -ErrorAction Stop)
+    }
+    catch {
+        Write-Warning "  [$devName] Failed to get monitors: $_"
+        continue
     }
 
-    return $oid
+    if ($monitors.Count -eq 0) {
+        Write-Verbose "  [$devName] No active monitors assigned."
+        continue
+    }
+
+    # Filter by monitor name if specified (check both Name and MonitorTypeName)
+    if ($MonitorNameFilter) {
+        $monitors = @($monitors | Where-Object {
+            $_.Name -like "*$MonitorNameFilter*" -or $_.MonitorTypeName -like "*$MonitorNameFilter*"
+        })
+    }
+
+    # Filter by comment pattern
+    if ($IncludeNoComment) {
+        $matched = @($monitors | Where-Object {
+            -not $_.comment -or $_.comment -match $CommentPattern
+        })
+    }
+    else {
+        $matched = @($monitors | Where-Object {
+            $_.comment -and $_.comment -match $CommentPattern
+        })
+    }
+
+    if ($matched.Count -eq 0) {
+        Write-Verbose "  [$devName] $($monitors.Count) monitor(s), 0 matched comment pattern."
+        continue
+    }
+
+    Write-Host "  [$devName] (ID: $devId) - $($matched.Count) monitor(s) match:" -ForegroundColor Yellow
+
+    foreach ($mon in $matched) {
+        $assignId = [int]$mon.DeviceMonitorAssignmentId
+        if ($mon.MonitorTypeName) { $monName = $mon.MonitorTypeName } else { $monName = $mon.Name }
+        $comment  = $mon.comment
+        if ($comment) { $commentDisp = $comment } else { $commentDisp = '(none)' }
+        if ($mon.actionPolicyName) { $currentPolicy = $mon.actionPolicyName } else { $currentPolicy = '(none)' }
+
+        if ($ActionPolicyName) { $targetPolicy = $ActionPolicyName } else { $targetPolicy = $ActionPolicyId }
+        Write-Host "    Monitor: $monName | Comment: $commentDisp | Current Policy: $currentPolicy -> $targetPolicy"
+        $totalMatched++
+
+        # Build Set-WUGActiveMonitor params
+        $setParams = @{
+            Mode         = 'Device'
+            DeviceId     = $devId
+            AssignmentId = $assignId
+        }
+        if ($ActionPolicyId)   { $setParams['ActionPolicyId']   = $ActionPolicyId }
+        if ($ActionPolicyName) { $setParams['ActionPolicyName'] = $ActionPolicyName }
+
+        if ($PSCmdlet.ShouldProcess("$devName / $monName (Assignment $assignId)", "Set action policy to '$targetPolicy'")) {
+            try {
+                Set-WUGActiveMonitor @setParams -ErrorAction Stop
+                $totalUpdated++
+                Write-Host "      Updated." -ForegroundColor Green
+            }
+            catch {
+                $totalFailed++
+                Write-Warning "      Failed: $_"
+            }
+        }
+    }
 }
+#endregion
 
-function Resolve-SNMPOidNumber {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$Oid,
-
-        [bool]$SkipAutoLoad
-    )
-
-    $skipAutoLoadValue =
-        if ($PSBoundParameters.ContainsKey('SkipAutoLoad')) { $SkipAutoLoad }
-        else { $false }
-
-    $autoLoad = -not $skipAutoLoadValue
-    return Resolve-SnmpNameFromOidInternal -Oid $Oid -AutoLoad:$autoLoad
+#region Summary
+Write-Host ""
+Write-Host "=== Summary ===" -ForegroundColor Cyan
+Write-Host "  Devices scanned : $($uniqueDevices.Count)"
+Write-Host "  Monitors matched: $totalMatched"
+Write-Host "  Updated         : $totalUpdated" -ForegroundColor Green
+if ($totalFailed -gt 0) {
+    Write-Host "  Failed          : $totalFailed" -ForegroundColor Red
 }
-
-function Get-SNMPMibSymbol {
-    [CmdletBinding()]
-    param(
-        [string]$NameLike,
-        [bool]$SkipAutoLoad
-    )
-
-    $skipAutoLoadValue =
-        if ($PSBoundParameters.ContainsKey('SkipAutoLoad')) { $SkipAutoLoad }
-        else { $false }
-
-    $autoLoad = -not $skipAutoLoadValue
-    return Get-SnmpMibSymbolInternal -NameLike $NameLike -AutoLoad:$autoLoad
-}
+#endregion
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDb85809mtjYCgj
-# 6FoT6X1OCo5BYQVUFkktdPGC8wqlVqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDOZB35lo2VWF3T
+# jAeB6w9IAS9O58hYqcSV/IqHgahumKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -305,33 +519,33 @@ function Get-SNMPMibSymbol {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCGZ6jjpK45ASeUVAecKsX3q9AxsM0WXT2xXdtjlOysozANBgkqhkiG9w0BAQEF
-# AASCAgAeBFVNLZy9s5qyAhYeCAlPFRpKfXdDZnM3onTmsUhl4UKpIR89ku8B1ybu
-# QCcEtU1MLE1Nwf6FwFWUp0Zl4b1ZMPcI/ehHN1bDcFPfGUjKYU+xPJUIVkDt58w8
-# pSDnbbbkuksUQPlzmGzCdaCD6MTR5Co6LIWJ0tCsE0LMLaN48rdVWMRG1LrsY8Av
-# 5cUtoZ8nPFuyVS3hAnSRDGngs3nYLdXBhrhlaUYQNzIyrPxGGNySr7DXy5sLPKdi
-# JTZdBUwgZOZ+YA9A8nxR+gq8TYa4N59TKq+SVMA9Vt5QND9AEvjeS/HJHzqYJe0o
-# Eir1d3KVa7qghnxBtLFb3/DUKzqwwRlD78SUHdESOwlYtDTcv0ZrfdG7EAsHzEiI
-# 4LGJjFAnz0K3oxMH/119xHUglgtVbh+be5VeejvGb+tHsHxH1USrbaCOofJsDcjh
-# TJ7/YERWxzFgEy6mUB8go93tf9PacxsbHmIJiTMl+6vv+tEWKDeyQoQNyr+EACS8
-# X+oYtsAc6h2UqZD7YMVAmV6HR2+AcDRlPnBNNGpigfUxQ2sWj7LP3N2MaKli2RbV
-# yyQEwnw97VEwcXkYmw+TcJyb+qktuXezhlbZ59w7OvPmoLrZIC5DIZ/MY4OPNY5k
-# VCFJGbOZMZ9p7kNCjZMm3nwMAFVbhZoMDkFscScd4f3/fzglS6GCAyYwggMiBgkq
+# BCBId0rEidjU7tDc+lW73mkQsyZX+SQUdmXEBnmPqivbkTANBgkqhkiG9w0BAQEF
+# AASCAgCzzeMfueqOPAtjh3qF/P2rmAV+luN+DIk69Yppn7ytun5aXZQSxmez8kPt
+# jTcy3Hgk4cYTxzqspfVljOew60yu/Sb6mJSWl/2zYlbdTx2VmsPtyW78Wehtoo9h
+# CwwRMLHvCPL8WDHitQ9RRhEuL1VmtnOqDKrYUIDT7xarkH4v0bD/LRJejzz87XE0
+# gzdlxe0KNwSm7LPNN0WO62zt0MlxhCKj0d6WRZiyxlOXp+OqqQSwf6vdGtQEKVWC
+# hr4/mlzmQOJHM0pMUzGck6Vu7w/tONhf/DwQ7ttFxyupD6kV/M2cAigIIEKkihy4
+# yg3XpBnjqUi5gsbc/z1QCAXS0cr3zOv/In4+e2Bl07//AGf7uJSvK8kxvfuHsbnR
+# rin4yGopK8iUE/snXqEactLp5AoWqSKkZehhass2ZO2G+pSz8dnbEjMVsleKxIES
+# K1CmavZT67yn2tivFO/Mfky237LuaU4uuyi5dElDtmy9BvFKh9WkwN2oycFfgAYX
+# +CP+F1BHfxMfxQZDtVk4tkzTxDxb+gCYyOd3//AwiDXpIxqice7PZT6coqjy8u9z
+# XsH5MxsaEscYSsNXsiBZTHjzf+dObWPQlxwaQgpzjiwnqEp/h8Fbbc3XJMQZ6pH5
+# 8jdlpb1bwpKTJwL1drzDZ7QTUElIgTqpburAkCePLlK+T+O4lKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjkxNDAxMTdaMC8GCSqGSIb3DQEJBDEiBCAszwu5
-# Q2KZvfRs7/SBdb/vmz7Bzd+lsVTPgthks+UWcTANBgkqhkiG9w0BAQEFAASCAgCJ
-# QjYYwWlQ7mZQXkIt8boYt4LZoZz3QAI3acOqtO/QJpc9F4lf0Y8zZI/LvKwHr0K3
-# kv/gYGJ1T6RccUTMJtmBn9bl1N6rpl+DjIiAbTyK2f74Lr4d4/GjA5Z+OKIu3X6B
-# 61FgFgitJnH4KgZa8y0OxLwRun1PX+LCQRdFqj7d1zJBAPU6kI1HFLnkMY23M+44
-# 77gAr/bPa63cpKf6CFTd19fw02B/PIPHVeKhItfz1UXr36RPmlNLVCRL9iXDmc3J
-# 8azkGaLdCZbbCxwdzi9dCrXKbWtK4RrQENY5lrYe/W8bWgQq/k47fGSbGS+euBPc
-# J4LIW4JjEFP2KwRVTIRnTySUGezIOTm3wdlBVJB5LF3x6wzVgibB1I/PMspzPGeq
-# va9QWGpoxvAkjo6BTtco+i/Y6i5cQwkzVbHlrBRCpVmlKhVumfMG4AA0M+RL8DFR
-# umOxLd5wTdnVTFxOwzuz/sgGQey47l2ohbxrKuBedN4ZgdpS48CKScVpgJtnqzoq
-# mHoMq0NqwXzrBPsHYA6uTDVOOpSRikeyC0/DtJeN8SzxwIUz5I1UUX/Gzguxm8vn
-# ahmOmfscCb5NPeKaZORyy/BlzNBQrq+ZFkR2dFJt4568YtrzT8wrb/WRvPsQTviG
-# 5/tYv1MFQC5/7z6BsAy236HqiVk08R5ykJJLJyCYbA==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxMzQzMjhaMC8GCSqGSIb3DQEJBDEiBCDVDxsb
+# cSUgUdyGVxh2PK2tfg6cuGD/f+3WemobhwqiLTANBgkqhkiG9w0BAQEFAASCAgBU
+# AbgTp2XZ/QCMJDd3oZ5QLevleoz19Ea9MtFN8ypm97keNekAKv0CBpzPUzvLjTSf
+# 58Rwub6vK9qytFLW4//fc/4ez6I1F6ES+GEyQHPKFPuW/Rzq+IKDTaKnrSpL0H2r
+# 647XG80cbi/l4CmIzz7si2//5KIJdAaUfJxaVSHBOlI865pdQWIecQ37IAZq7qwo
+# XRKHdJavBevLh0Wchs8GfXmF1Gi15Pl0kp6K/VAIH+dmMFn+qE4RO60LrbCE+Mf+
+# TVQb+edDxyjsarxbtUFUapToyDsyG8tf2hrsRVSn/7rXuAn9p/14mAzuvEBJzRbb
+# ekf+FPhcWAbzShRERog6TYH9fYtn16ZBeZEzK51pJsH5N6zp7JozVoUAyTl4iNcT
+# qOvQcNEZGQk2XsLmW/jUZ7dXkMo5L5AjbsK9H336ZDozpwBMzvjb4u0qXTROXEBn
+# gScOFctQFqSTowGPY24qDQfxSo0KPNox1qMOfer1EjwfdJRYa5j5L8Y7s2qRq+zc
+# LljuSzwLS4hz1uf8PNUkldfy0Vmkg+9CasXljneedglfE5couPXn1F04ICoQddaD
+# Jg1z1w2R8BjHSm7FSvyTU8Vl5vfSkmHbmv6OEVlKR9lN+GWKrzbteiuIlcao5SGq
+# EN8BXo0JjThBzGo1D2tOcp01jmspvP30QYMuHTEgOA==
 # SIG # End signature block

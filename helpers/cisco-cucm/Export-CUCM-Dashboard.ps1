@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 
 [CmdletBinding()]
 param(
@@ -20,12 +20,12 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($WhatsUpGoldPsRepoPath)) {
-    # Try to find the WhatsUpGoldPS module location
+    # Try to find the WhatsUpGoldPS module root (contains helpers/ folder)
     $mod = Get-Module -Name WhatsUpGoldPS -ErrorAction SilentlyContinue
-    if ($mod -and $mod.ModuleBase) {
-        $WhatsUpGoldPsRepoPath = Split-Path (Split-Path $mod.ModuleBase -Parent) -Parent
+    if ($mod -and $mod.ModuleBase -and (Test-Path (Join-Path $mod.ModuleBase 'helpers'))) {
+        $WhatsUpGoldPsRepoPath = $mod.ModuleBase
     } else {
-        # Fallback: assume it's in the workspace or standard location
+        # Fallback: resolve relative to this script (helpers/cisco-cucm -> repo root)
         $WhatsUpGoldPsRepoPath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     }
 }
@@ -112,8 +112,8 @@ if (Test-Path $outputHtml) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAL0vbUPmhbxXT
-# MrNeB2cR6xVR3yF+PPi8mEGuo8UTcqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDlxX6aD4GBIysk
+# SHq4SQ8lOfg1q3rbuTvNKr9dsVQw3aCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -316,33 +316,33 @@ if (Test-Path $outputHtml) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCqMKXUIgQYPnZD/hY0NA1MWmKD+ubzbreQE/5mSNWDXzANBgkqhkiG9w0BAQEF
-# AASCAgBapYQzwsosbH5hbqbrylTfyRaOo+XiRwS6dDJ/a+jIluDcdFI6oWHpOt3h
-# iHVKj6I+Sq09aLw6yAdF1XeXCxnZRih+TGx6zaVJFv2c5WGA7Tn0YycxvelfQeBs
-# MrGXJhjK4Z9O7eBBlR04JHq0sKb5dA7R/vdlCbJPjAMSE0tBK1fmBoDyacyYl4gj
-# ZZdTWrr9zV/hEf+K1yWSaNDDPmgz3wSqDVH/ldBHEgdps/JiMzZikfQ6fOjLe1np
-# 9G2oW/4pF5apGfhQoIF04pp2aQ+jjdL0L058RhHNWJzz66crgd0/tPXjP9KzENul
-# ifMNMlNO8qVtOScnqQQ6uYGl6tWFhHpCQoHpTp1wx3szhUI7f2sXOogjR02g6Roo
-# mZwm4gyZorj5LoSgBhZW9e5XPSC3ghnVvvQ6BtoCB3U7FsxtLehNkgh8ERxgnHkA
-# Q8nrPdd1Odwkks5a+Vtz4uuL1xUXa4OxvD3mf2DeEcQU8wpIfrfejZzAFjXb8ulv
-# +hNkbXysg/u9dT4LLE37TGAyqHxregZyedcIH+cJXR6BQGK5e4jjbt3O7eTqt71U
-# K8T2RwJLCOXhbtWwdpTGKH89VBu6RZXTbm9G5K4ij/Eh3YJ10SOhHooC+EFzEvIb
-# XjGvlXVRcseGMWxkW9NZXxi3Wusb0ZdWhL9JHWwrhzI7GFEIx6GCAyYwggMiBgkq
+# BCCoUj5jr3vXScD90ZOeyxAdbZoM+oEGIj6Xyh2o5RkBmzANBgkqhkiG9w0BAQEF
+# AASCAgColYuivYC7DkzK946DJsriX2MmcBMxpo5L3fOghOBYlylvQjOsCQOMp2fy
+# +0oQ2ImMfD6CBkODpLE/pjNL9hduWQnaYkHVyFLeelkVRmq8RGh6Nzz//SJbJg+1
+# F3N81TJJafJ0aAhsqiqHp2mEeZIqEju+NOCGTD+4Sm7W2he+iijCfpO66KtjSFnY
+# BPndDqhb85ZwJvJ1J48rCs18ivhAjccrhHnf6hzBEs4Abny7tRaXBpPfzt9UM579
+# oN0dtppYG5996LVWgWh+aqedwfUlTrMzbbc04rCu+4CtvhVKEyFoTQo3QGy8649y
+# U0dkzVQ2KPuPTVC05uMbfqqP7T71ytdbEHr/FumodAF6AuiMCPsEvwdvUobUqAlq
+# /XCpvSkYAO8dIE3avCx5pjTjo2wGTmWtzWWzfSE2v9NtrJOAqX/z5NH+jjPg/OLF
+# J8B17ZU4Y3ekUB1oCVvchkHRhHz/iKZVcCu1z4p2b1a3e2/VITHupsKZqnSl7TWW
+# NVmRgsdrWEm1z1bQj4PDIlI1Wotyi5RoUVq+5SL+xPoxxqxrzdhNiqZMI0vwlkKc
+# 8f1NMgGUyeuL+28Ar0w7VwyvesUb39lMoMFnnNoFQd3a+nCFZ1/MOYEvGy37ctmU
+# 4YjmfgUjgpfRGfICs2m/OWdM/t/jQjyvN+R+CA/UIIpGaCi726GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjUxNjA1NDlaMC8GCSqGSIb3DQEJBDEiBCAziVga
-# dbEdHSL7xRI5EJbvF3knCB4Mh3SLOr6WH18C5jANBgkqhkiG9w0BAQEFAASCAgBm
-# 4YyeVnMqx3ERM/p6PSlng1/XVpdHlRKd0HCrFCzJlPClWksC71toy8KE6JI7786Y
-# 4JPHdsm+lBHXKBN8NVcqN+OQ3K6f7r44yeSpwl/ThhV6mu1XoWerzrP6M3gLJPSA
-# weJSYbOXZUtMI4nuoYu82jBoaBcc9f/Zhw+A96lIFHC1J3b21UIs3cUErl8P4nQv
-# Wm8Q0BngIDTFRVSe7LeMWT0sHxI/z0+DKlhP2KmFvnXhXY/n4PIQBRHcAoS1dPSS
-# C8ktkY/f/ELR8GyhfTEfTvBS52IKBm/0Gs5jzbcbXMw2sjk7HvReK4dNoNpzEury
-# DTZg1TAFmiiQxIni/pFM1+S3XXxbA75/TwCwUO2QbLnj4tNkzq55cthbr3uUJmtx
-# XUwHu7UBnBk1zTsHpyPk2nhC/3s2a1bQf20/mqd331FGAiuZVaMxzMuI+3TpOmEZ
-# Mm+/KVqVxz9R6BNIH+2Ka43iTNtfdmQI70ikOO/v3/QfrjrfhebAgAPCCu/Tmd+m
-# C3dt+Cv4VELhv+lP1LcxL4IxlsTQw0o2SCUbqHdaTCbSODwgYW3szdMxC13rzf1n
-# gVJe/2IDQG19ZrBOPGmmmzPOka1Th/wKttM1Bioj7JRBn9TJi1gGmqGA5jPrCJSJ
-# oG6xMJnOAwg0MQC7cO6f+lorwIY38QVzdXKkgLby5g==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxNDEzMzhaMC8GCSqGSIb3DQEJBDEiBCB6IQu9
+# 7u3FwfVvOIx8lLC18sTlcVA+F7cv7j2N6Oot+jANBgkqhkiG9w0BAQEFAASCAgBA
+# LModjwcVJnxn+AWPL/Tq7wDZ4Talv0GOOLp5pye//xAOen10j4envXLXaRB9adds
+# tllX8zDsUPLd5CHWBCGPh7UGw+WAIKoQdBhTtaXkUADGErFE5ds66rOwbUm5dyDZ
+# ukNI6YWh/JLZecSQIF6aq0MhF97ctDWP0asMSJF9KdUYry0KgoGNI1WvnsVzCYKZ
+# InWxOUJjYtjRp4/Z64pGiwHOkGoI0fArOIhRsP0MITQU9D2Bqpu3HfRq7YX6o51a
+# 7WR3xj0Zz1uEnI0B9l2uCsr3QwAEyjJJiOwKoxLH6QZRsw6t39RbGTUe6XQVGMSE
+# sWoYwof6bLZIqJQJW5DZBzrFN9pZ/GBNgq49uu5JpVi+kgIWjeBgKi8zlJJwcxGn
+# 8HVP3IMQqsg8ggrwo0jSNfL8r31jHsP5yrkIlIPrgcXBrG+B4y0BzbM3M8D3asMa
+# vyUgkuAMRtpXjZ1U0yyc1hkYnm1s3C1IBw1HcFa5aQDj0yob4V2KavNYoN6tLcVw
+# tKYJuj51UHP56aITySIr10dydu1CSa5mShP6P1uTLYCCBFwhsHwEGJl0duifxojo
+# 6/2Syuja7ImA1N2nX8VE5z+odu81KPjgDWYXbWCnnQIa8piv2CnrXFxlHDXdEZ3C
+# z26oHl22s1u2YznNfuoEY0bdOBqjFAaVxSsmM1AEWQ==
 # SIG # End signature block

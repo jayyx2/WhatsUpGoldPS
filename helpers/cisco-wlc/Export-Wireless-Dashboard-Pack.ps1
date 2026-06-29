@@ -26,12 +26,12 @@ if (-not $OutputDirectory) {
     $OutputDirectory = Join-Path $discoveryOutputBase 'summary\dashboards'
 }
 if (-not $WhatsUpGoldPsRepoPath) {
-    # Try to find the WhatsUpGoldPS module location
+    # Try to find the WhatsUpGoldPS module root (contains helpers/ folder)
     $mod = Get-Module -Name WhatsUpGoldPS -ErrorAction SilentlyContinue
-    if ($mod -and $mod.ModuleBase) {
-        $WhatsUpGoldPsRepoPath = Split-Path (Split-Path $mod.ModuleBase -Parent) -Parent
+    if ($mod -and $mod.ModuleBase -and (Test-Path (Join-Path $mod.ModuleBase 'helpers'))) {
+        $WhatsUpGoldPsRepoPath = $mod.ModuleBase
     } else {
-        # Fallback: assume it's in the workspace or standard location
+        # Fallback: resolve relative to this script (helpers/cisco-wlc -> repo root)
         $WhatsUpGoldPsRepoPath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     }
 }
@@ -839,8 +839,8 @@ Write-Host "Manifest: $manifestPath" -ForegroundColor Green
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmE8OPeWphxzmP
-# hmEPlJd78ZofUbLYYHQArcRxu+bRIqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFxzYU7ut8uvcS
+# OsLDkWb2UzLJX6H/kpK2Iv6IjY+5sKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1043,33 +1043,33 @@ Write-Host "Manifest: $manifestPath" -ForegroundColor Green
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDLqFZTczclIap1aEtJNxfDLyZeVJGullye+YKYJclgGTANBgkqhkiG9w0BAQEF
-# AASCAgBikKjw98WcoHzWRFWlJNGfgyYSNPXRpcBHuPLHa31CQw240NPBVroekixT
-# uSR/3IxaoG7idhfl+6yRm0FUm7wyl4STHObuIn49KcEw+i1sF69yX6oA9EVRw8Ws
-# 8PNhOcOic8MbE9cgGxp7IpvPC3+gOE8XkB8rISsbXXWWdiIgEBZh46siuwvxvp18
-# FrvGrv2nvXlU+2iv8QLxDV7SK7bTDw+GE5Irto/HPJ8gvHtnS2RXS6D/HOZpAaeC
-# RvESN3WxLQTTvmgx4NNFHNSCbIbMWzNJfmALWiMNWXwygdtdcQx5mDfykEEXjJlA
-# OOBhbR5/Smj0R0O/4nP/SsRDq3mFDun7e1i/DfASwo7KTetVCZwzdkWe/xzYJibj
-# w9yQTf4W8NNC00CIDiecgFWAYrGrMHqEGuryuVNVdjqxLvhu/LK3gYrJWMpS3YSm
-# FCkkwKhk2mI5Owa6IE+ue6hvCOz+0LOyKYofnMSC+xx/sRrndNOFi/ediS0vVUj/
-# ftUZumEcLM7AAU2ZPuiei31surTkVVX2zQ2Pv/x7AUdZvOjKkMA7sF1RLo+CgaN7
-# 8+1HupE5tBbW7rJQWcxSxZmbUC7g+JsdVrDoac0/lNK+IWzRSC9OyHuWgWEL5vHv
-# 2vdFuR6S7LeK48YzWcWhevHLCx2QE2T3M7/bmZjDMLhcHYl53aGCAyYwggMiBgkq
+# BCCtF1UJTm3dpXEarbCXCida/8+CNp1dzFZ0wfy6rlXZkTANBgkqhkiG9w0BAQEF
+# AASCAgBYBzuwXSOSh7ZHzptofoSPrBL4BqgGcAxRJ08GNGGzQHntgSGhuZrEkvbQ
+# tqfiPRfGPs8MWDJUNe0uM+1OGaeOL6g1YltfhONnOJ5DLTJkw3KlVUrAKTYEfUkg
+# UoFSgrng7zBCGsKXFVqNvJF1C3hn9rK1IHdtAO6pVe8UxE053XTQGZY1b/be/2Im
+# 0oxwigy/Pp+w+ND5RE2ktiEq0OJh7wI43GsJBK8O8d1xMw1eLcZz86Dlc2HZy7Jf
+# PKJqplZrzhoQEJkSVlScJMqJU0uwwWDwxiHna1/Nzx22+PQOVbyTsy4+qKgZoCcZ
+# ND3Q+0FbtTDdOfBfFdzQM8oiCTPdVvw8AbZyFkegAJHK823JNtyDWeqvr3n9Ugvj
+# nhDLrM1ZH7nTbdZLw/5N31QiCw2Y6++jUJaj7RcvpMTu9ETfl8HovbeFdeRpG8Cq
+# 9oIw48PRHGSVQf68aUHww0jMb16epn+hxjSwXkZXv2xKb+21ju92JMIVH2sbq8kD
+# Kgn6J2k4CnioLQiNzD/ImwsueVoU/WTQEBXNqlTQyfuu7AO+LCWWJKSqTXP7bTnj
+# QU7Ls7K7TT7b5sy2mFcNAcZCmnx5RIE+oWOzrCIBBVV6CYBwXLmeArqqgH9qUBmp
+# QaDoJBDCxnEtalq77WuJkoXiMiqrm7HW/Su8gGs2wV9z3Vbla6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjUxNjA1NDZaMC8GCSqGSIb3DQEJBDEiBCCqeLGb
-# tRxfnZdxeazYBUM6RtVzke0GL/BYGNqFCkW6+jANBgkqhkiG9w0BAQEFAASCAgBI
-# x8ufdLT/qlzcmm6Alxdw4EOl2FGSMYy/2fLbgCVzfM887hwGUHOFIZBikQdSsg6J
-# y47HOmfb+eVE47JwwV0ax3RmPgqamIwCZltoFJHtDulB7As2OIycCeL9b0MYabI+
-# pNAxgib9oqxTpwX0o9yNOykUgxHXDiRaE1oduyS9LHCdVEqGi0tJo0ul6T3EKO4p
-# EkL+lyUYoNGHmRc3wXlCKch4eY5t7Ff3sF29sPkLm2N7ifmcdZgd2kP49Rt4nVLJ
-# rKnAhmIaPf6T3Rv4cuVfoXay684LSgkn/DE6vYC8Pf0poJTxn4eyf8jH/eIAv1wn
-# QGRNhr7WXe4zE52eala/yqeMTLznrTHTjxuHu6s4hR7VbW6ep7mOmN1976hhtFZN
-# BlCdWJxUsV/sinJsswTmoNjw03phLfw7ZaNB7iCckhtT/ncmAwneAbACiiDwh6aM
-# IM8dCGI03Vn6JkhfyZeX+0QY2C6uI4Xd3QbLyBC7wVZ/m9Gu2iXHRneVsgoU3DeF
-# xtFcHBF+KF/ZPKiBjISJuHOFr1QyZVZOp4p2NQN5FLgDduwu10G0OPwFjtD3NGA5
-# G8MqO6wQlIvBQXd7mQOCaRI0D5mgiZYyVY67LHT1CZ0NkVCr0SxwXfSK23Og5X5a
-# ceH6VXPVP3GWX8WQcbdvBpHg6hsD2zz0/+SBAB0xxQ==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxNDEzMjFaMC8GCSqGSIb3DQEJBDEiBCDZmP8A
+# 6JYTzh8XAjmnjPGAzjk3tX5+mUlwS4r/wAT1XTANBgkqhkiG9w0BAQEFAASCAgB7
+# c1uQFK4XbB7G9Ju+acJBVTrxVl0R7aiinFjZNd2t2oz1Osx0kxJmpYVlNl21aNRh
+# BRT+Pa/eMHA6VVZbY/mkg1fukCdEUg00DWUj5cZIginsH2OOAtwQNbfT+/EF0m5Z
+# cC83Z5Qq/mdPjfrlh6hmMQezwuCbz+J61BTXIDdY/qmle+nRT42bwsnTB5fSehqQ
+# XsPIU1n+I5fwo+oGA28sdggc7eQsX2sNJLVCYGPYN8w4pZwOrp07DNq31s+Iek6w
+# ZYAwmQamZq5nruNGaeW7S4VmuZiEo5sbmHHmU9gajAozKF5c0aYynDGbV8in8fuN
+# A20XjVBX/ZFtv5mBV3q5kU4mTcwYHJ+8halqkSMiRkn7SOA4BIaT8xFQQu8dfOOT
+# mf9Ttnsx3d5rILD00aaS+NpDtV8blnHbBKCrTDevrJN7ZsODR3Y9ofcCI7js51N1
+# Y9ZPlriF3tsiBO0YeQWSdo3ohxV7LpuW+LDWClnahfsNh2KOBvQD2CLKoEoqaNVp
+# G2G2o+6r6auMM6KjVnKrwji7J94fe0DUp6zg9HK1pmi84QFhLLHRS8JJ1dGia1dZ
+# U3wZR6nuXg0ERrOmTz3GvqOQXzRxHw5HGRf1V00ALOEYqToEwMj2U8euL4K45xA3
+# fsmez3caRYavoW31BU5AQBneIINa60DNJwnNp7WuGw==
 # SIG # End signature block

@@ -13,7 +13,10 @@
         [string]$SnmpVersion = 'V2',
 
         [int]$Port = 161,
-        [int]$Timeout = 5000
+        [int]$Timeout = 5000,
+        [int]$MaxRepetitions = 10,
+
+        [switch]$UseWalk
     )
 
     if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
@@ -33,15 +36,33 @@
             'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
         }
 
-    [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-        $versionCode,
-        $endpoint,
-        $communityObj,
-        $rootOid,
-        $results,
-        $Timeout,
-        [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-    )
+    if ($UseWalk -or $SnmpVersion -eq 'V1') {
+        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
+        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
+            $versionCode,
+            $endpoint,
+            $communityObj,
+            $rootOid,
+            $results,
+            $Timeout,
+            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
+        )
+    } else {
+        # BulkWalk is faster and less chatty -- preferred for V2c
+        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
+            $versionCode,
+            $endpoint,
+            $communityObj,
+            ([Lextm.SharpSnmpLib.OctetString]::new('')),
+            $rootOid,
+            $results,
+            $Timeout,
+            $MaxRepetitions,
+            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
+            $null,
+            $null
+        )
+    }
 
     foreach ($item in $results) {
         [PSCustomObject]@{

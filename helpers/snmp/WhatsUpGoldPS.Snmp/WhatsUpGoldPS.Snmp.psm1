@@ -9,6 +9,7 @@ $privateScripts = @(
     'Get-PreferredSharpSnmpTargetFramework.ps1'
     'Get-SharpSnmpLibPackageLocal.ps1'
     'SNMPMibTools.ps1'
+    'SNMPv3EngineCache.ps1'
 )
 
 $publicScripts = @(
@@ -80,7 +81,9 @@ Export-ModuleMember -Function @(
     'Import-SNMPMib',
     'Resolve-SNMPOidName',
     'Resolve-SNMPOidNumber',
-    'Get-SNMPMibSymbol'
+    'Get-SNMPMibSymbol',
+    'Clear-SNMPv3EngineCache',
+    'Get-SNMPv3EngineCacheStatus'
 )
 
 # SIG # Begin signature block

@@ -23,10 +23,19 @@
         SNMP port. Default: 161.
     
     .PARAMETER Timeout
-        SNMP timeout in milliseconds. Default: 10000 (10 seconds).
+        SNMP timeout in milliseconds. Default: 5000 (5 seconds).
+        Kept tight to avoid long hangs on unresponsive or slow devices.
+    
+    .PARAMETER MaxRetries
+        Maximum number of retry attempts on timeout. Default: 1.
+        SNMPv3 crypto handshakes are expensive -- fewer retries avoids
+        piling up on slow devices like old Cisco Call Managers.
     
     .PARAMETER MaxRepetitions
         Maximum number of variables per SNMP message. Default: 10.
+    
+    .PARAMETER NoCache
+        Bypass the SNMPv3 engine discovery cache and force a fresh handshake.
     
     .PARAMETER Username
         SNMPv3 username (security name). Required for SNMPv3.
@@ -65,8 +74,10 @@
         [string]$Version = 'V2',
 
         [int]$Port = 161,
-        [int]$Timeout = 10000,
+        [int]$Timeout = 5000,
+        [int]$MaxRetries = 1,
         [int]$MaxRepetitions = 10,
+        [switch]$NoCache,
 
         [string]$Username,
 
@@ -105,15 +116,39 @@
         $privProvider = ConvertTo-SNMPv3PrivProtocol -Protocol $PrivProtocol -Password $privPasswordStr -AuthenticationProvider $authProvider
 
         # SNMPv3 requires a discovery handshake to get engine ID/time before bulk operations
-        $discovery = [Lextm.SharpSnmpLib.Messaging.Messenger]::GetNextDiscovery([Lextm.SharpSnmpLib.SnmpType]::GetRequestPdu)
-        $endpoint = New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Parse($Target)), $Port
-        $reportMsg = $discovery.GetResponse($Timeout, $endpoint)
+        # Use cached discovery when available to avoid hammering slow devices
+        if ($NoCache) {
+            $discovery = [Lextm.SharpSnmpLib.Messaging.Messenger]::GetNextDiscovery([Lextm.SharpSnmpLib.SnmpType]::GetRequestPdu)
+            $endpoint = New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Parse($Target)), $Port
+            $reportMsg = $discovery.GetResponse($Timeout, $endpoint)
+        } else {
+            $reportMsg = Get-SNMPv3CachedDiscovery -Target $Target -Port $Port -Timeout $Timeout
+        }
 
-        # Call Invoke-SNMPBulkWalk with SNMPv3 parameters including the discovery report
-        Invoke-SNMPBulkWalk -Target $Target -Table $Table -Version $Version `
-            -Community $Username -ContextName '' -Port $Port -Timeout $Timeout `
-            -MaxRepetitions $MaxRepetitions -WalkMode 'WithinSubtree' `
-            -Privacy $privProvider -Report $reportMsg
+        # Retry loop -- SNMPv3 crypto overhead makes retries expensive on slow hardware
+        $lastError = $null
+        for ($attempt = 0; $attempt -le $MaxRetries; $attempt++) {
+            if ($attempt -gt 0) {
+                Write-Verbose "SNMPv3 BulkWalk retry $attempt of $MaxRetries for $Target"
+                # On retry, force a fresh discovery in case engine time drifted
+                Clear-SNMPv3EngineCache -Target $Target -Port $Port
+                $reportMsg = Get-SNMPv3CachedDiscovery -Target $Target -Port $Port -Timeout $Timeout
+            }
+            try {
+                $result = Invoke-SNMPBulkWalk -Target $Target -Table $Table -Version $Version `
+                    -Community $Username -ContextName '' -Port $Port -Timeout $Timeout `
+                    -MaxRepetitions $MaxRepetitions -WalkMode 'WithinSubtree' `
+                    -Privacy $privProvider -Report $reportMsg
+                return $result
+            }
+            catch {
+                $lastError = $_
+                Write-Warning "SNMPv3 BulkWalk attempt $($attempt + 1) failed for ${Target}: $($_.Exception.Message)"
+                # Invalidate cache on error so next attempt re-discovers
+                Clear-SNMPv3EngineCache -Target $Target -Port $Port
+            }
+        }
+        throw $lastError
     } else {
         # SNMPv1/v2c
         return Invoke-SNMPBulkWalk -Target $Target -Table $Table -Version $Version `

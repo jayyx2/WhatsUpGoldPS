@@ -372,6 +372,30 @@ if ($Target) {
                 Write-Host "Opening in browser..." -ForegroundColor Gray
                 Start-Process $indexPath
             }
+
+            # Copy dashboards to WUG NmConsole if installed locally
+            $nmConsolePaths = @(
+                "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole"
+                "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole"
+            )
+            $nmConsolePath = $nmConsolePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($nmConsolePath) {
+                $wugDashDir = Join-Path $nmConsolePath 'dashboards'
+                if (-not (Test-Path $wugDashDir)) { New-Item -ItemType Directory -Path $wugDashDir -Force | Out-Null }
+                $dashboardFiles = @(Get-ChildItem $dashboardDir -Filter '*.html' -ErrorAction SilentlyContinue)
+                foreach ($dashFile in $dashboardFiles) {
+                    $destPath = Join-Path $wugDashDir $dashFile.Name
+                    try {
+                        Copy-Item -LiteralPath $dashFile.FullName -Destination $destPath -Force
+                        Write-Host "  Copied to WUG: $destPath" -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Warning "Could not copy dashboard to NmConsole (run as admin?): $_"
+                    }
+                }
+                Deploy-DashboardWebConfig -Path $wugDashDir
+                Write-Host "  Access via WUG web UI: /NmConsole/dashboards/" -ForegroundColor Cyan
+            }
         }
         else {
             Write-Warning "Export-Wireless-Dashboard-Pack.ps1 not found"
@@ -478,8 +502,8 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2q9bdaAbKKavD
-# fvUC3mZwV/xwkZ1i9RSNDchMejRw1aCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBckw7TmoSueHSC
+# OnosdtNWBuzZB2LIbqPWh40meUNelqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -682,33 +706,33 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBzdNqtfCHwt/WY2aP8QXPsu0K9w0tN2dlcldu0ADJy6zANBgkqhkiG9w0BAQEF
-# AASCAgCrS9i5r6LQv0GEhDVWRp1ue1s5RX0C7pNH7acSScNkU+WLo+0eafnbFn6M
-# R/s4jh+GeW1iEBzmmbPp3qBkXmcMRfnDVTxl3y6g2gw1ZLRB8f/iLuIwGgAR5iXl
-# JkObFY6dYsVbfgyr7Oxzp9Zg2wo/xQSYUwuQf7fh0XAt81bIG/nn9XciGqG6T8P9
-# hXHcL5aK5lSKu38/H6qk0xI2ROO7wbMkoVHcjyHAKu1dUzqwcJWLhEG0Bu7eWYfl
-# 5iSaOMRIwQYB2vDEZii8xnlAqdaF4hr+InUe86GBw8gxDRUIQm3e/7duFP5cFyHc
-# xWeghRMBKz0tBQrgWduS2Ho7BgegXtEDuYzGE6X723cOc1qdyIFrizexYMhIQobX
-# qFeivvUzGZBIz13+WD3qBho38zV4X6YImzANLf+2kMV9Wt9yJm2kJtdnoyvxtlYs
-# cnGee+MAxK/s9J7P9EYvHaCn7aNXkUt/gyVfxJOPoxABkHFThl2e+lvuVJRev5e1
-# gaj58jK5zBbDRCD4pJdCLoKsrszOPKXBbP88vKgnoHWuzaIkl7LTnGmElNYu7J5Y
-# E//zXoFE+AHVmPvDWMIhkEfgPT5BPoqAVTslY7MI5+vqMN6ImxV8xVEWeBrwkzSL
-# g3VaEAaTJZ4rZ+bD8D/TXrRyP9zu5v7zbhWA79//jFuU+NhIL6GCAyYwggMiBgkq
+# BCA0NUu8tS0aCkbtY3B23DqujG/WIUCozJ/2/KJBnIpE3TANBgkqhkiG9w0BAQEF
+# AASCAgAgsym6GqsUxr3GNN4y0iwkphk4zl2AXP7y2zFfeXLGgcN0d/AnxQMg0SLl
+# MfDq5biyLhZXGvdiPJ+wHbsXt7Xa5SBGJxOwdgvp0oTBd9O73xy58lbHtr4T1RO+
+# fMPL2/E/tKwdzklJCmiElk7AgFlFWvr5TW66wjGkI1r1h8FRPd5moMd9b93lhw7z
+# 6tvr2XJ2ggVGHoM1a1hFi04pxBm6nvBGf5TN72xiNpgdbEal6IIGxg/clKYhrMFd
+# l6jqgU2qRErFZlUfPipdRZvjQ+aMLjdYEKFbe/PvbPLHkjhzaBbA6kUi9DbnoQX1
+# ZwUvPViz4JehKyUMIEJb7Eb8YJlxGhXQQWaHC3gZaY4T93C0pbxehhsws4TPGvGB
+# 1xXBRbnfPMGsVrnUk0uDjkpFT4k0my/UAcoa0kduLRW9KZH3LEJt8rRlwuDFA0Sj
+# nq0Gt5wYTncmKvRo7CCn+p68zfhmSxk3YOjW++N/tewBXF9bJgjfNHBpt3nIDMAm
+# qsFSypkiETJ0eWbG2SCWnO5ajwVbtu2DxAaxEoc7QwXl+q/LuwZ64jfT26lr+FUP
+# M/v98ul61pypYwwte19fsYXghi5pXfeGJHIvv1vqiOzAheeTfSSDbmod1WXGahZZ
+# Xeir6KkL2rIsZ7wEwv7jansVprsoYj6TxwPM/TE1dkhe2IZHUqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjkxNDM3MDlaMC8GCSqGSIb3DQEJBDEiBCAJUC/2
-# 5Xdxu8KSQJkgR2USiOiXvjYM0fqB3bA/Cdq3JTANBgkqhkiG9w0BAQEFAASCAgB7
-# etF1onSu5kb/4aiOCwK+ENlPBxiZQ+MTM2VmckqqmqWcNrrp0LJNmhSuu06V/FKL
-# gLxDTpVQhaM3L0AiqZl9UH1nQmC6YtW7isXt9RtR4PEt0uGPdnIjVSUjdn/ZOKoM
-# 8O9HumdC2hrZEBZYz/x7gNOiGx8iUySO+rOoFtihbIsF9yROIWwoLbkiLiDIIC6e
-# 70Z7atTW+m61LCz5IGUA7tCt036rZLM9L0cXeyfDJug5zLPLWZxkPF0WeIS+xmmJ
-# iBqY0wLaex7QSGwT/uaFciu69bzyB669jXUAB2/GRMj0qIGP9obl3E9SDHj9sDWD
-# 1HFq4yPRJkv2u6chDGTfn2phjss1DXd7s2aIOCMfJJw9FMpRjslBBQ5Rl+vShWjr
-# zqJaNZ4qmvbA4wN2mH+OjmHdM1+If7c7JUu0bNxn9F/xANe74H3Derr4ZHLcJf42
-# Zg5+N7EwqJSEZWS2rY1yH5OLCSgotP8xQMnnrxKQZi9XocnZKn71PBsAlKfhDPgK
-# RTm+6J2PlBRrUkpV5JMXKAU6WfYrhFMIOjyhHi/G98g5+tEbM3Hzn4NxYccqE7rf
-# sBPZHL+TRn1oafoN8quJkx7IhBh7TXKi8vrOBxZEjILGgCD6GgcLGRx1CM1kDq/K
-# GUj+ypKsFRTxqE45WTP73logeylXGGIYJqTvh1e4dw==
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkxNzQ0NDhaMC8GCSqGSIb3DQEJBDEiBCAAWyFO
+# juXMZXilpD1IqghakMIJ2+q1Wtra8lUgMm/RozANBgkqhkiG9w0BAQEFAASCAgAt
+# fJ67cMk+M50Xs2rYwlMJUEmthnucHqopTWGWKiP0J+skc3rz8E42hoVttRIHkPPs
+# gudDQujGCx0SJ5QVDQms/OENjI4NA8ao9rN17x9CBIfyJqj0CpLitf8QueZ7AXT3
+# otSaE41Aa/EJhpCZmRngIxKzFcf/dzfEzOkMJAOw9PMO/Rb7nU/xVXsmvYYRphiK
+# 0bQcjNPYVKD0AZiec6cIv4pSX7kghSHoskLMaC6AYJ8QN0udbriaCz1XUmDhu4hh
+# WJuk/8pzNoTeeYNGaCidut3lhn7KmSbSvr25BrcxKiQLEJD/1GMBHInLHnnLFMfY
+# Y5SwkiWRM7raLeLCScNWDoecSR4j6/pK3dgfCoGexskp7mbngzn9+MgsaJopul0i
+# HJCAFHldMLlHoOZsuvmwBrK6E4oLlCYtxs4o5HgNllQk09dxV/Vge8QndGKepXNI
+# q+ey6eHYzkMyvSTNmRjXHfhae0gXAy8KoBJf332JZYoDPaSUjkjF5CVFX+kQ70sn
+# KjxFIyyA91sD1aG+ekVcmX5b5kh+IozpAf5VJ7rkm6o4BokhkKsQArB9sb+BnLJT
+# fLVwsfeHoqYdBodbqC4CilB3HW8dONy+Ak5ZwmQvdiq4wazY06FziqTRYCIZQ+U5
+# kHrcAujR31uV2djkpohr/loOndA6EEyacnv6YX+uoA==
 # SIG # End signature block

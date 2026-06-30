@@ -1,0 +1,1274 @@
+﻿#requires -Version 5.1
+
+<#
+.SYNOPSIS
+    Discovers Microsoft SQL Server instances and databases via WMI, then creates
+    database-specific WMI Formatted performance monitors in WhatsUp Gold.
+
+.DESCRIPTION
+    This helper connects to Windows servers via WMI to:
+      1. Enumerate SQL Server services (Win32_Service) to discover instance names
+      2. Query the SQL Server Databases WMI performance class per instance to
+         discover all databases hosted on each instance
+      3. Create WmiFormatted performance monitors in the WUG library for each
+         database+counter combination
+      4. Assign those monitors to the applicable WUG devices
+
+    For each database discovered, the following monitors can be created:
+      - Transactions/sec
+      - Log Bytes Flushed/sec
+      - Log Flush Waits/sec
+      - Active Transactions
+      - Data File(s) Size (KB)
+      - Log File(s) Size (KB)
+      - Log File(s) Used Size (KB)
+      - Percent Log Used
+
+    The script automatically handles both default (MSSQLSERVER) and named instances
+    by building the correct WMI class path:
+      - Default: Win32_PerfFormattedData_MSSQLSERVER_SQLServerDatabases
+      - Named:   Win32_PerfFormattedData_MSSQL$INSTANCENAME_SQLServerDatabases
+
+    Prerequisites:
+      1. WhatsUpGoldPS module loaded and connected (Connect-WUGServer)
+      2. WMI/DCOM or WinRM access to target Windows servers
+      3. Credentials with admin access on target servers
+      4. SQL Server must be running on the target
+
+.PARAMETER DeviceId
+    One or more WUG device IDs to scan. When omitted, devices are resolved
+    automatically from a device group (see DeviceGroupSearch).
+
+.PARAMETER Credential
+    One or more PSCredentials for WMI access to the target servers.
+    Multiple credentials are tried in order per device. If omitted, credentials
+    are resolved from the DPAPI discovery vault.
+
+.PARAMETER DeviceGroupSearch
+    Search string used to find a WUG device group containing SQL servers.
+    Default: 'SQL Servers'. Set to '' to skip group-based filtering.
+
+.PARAMETER DeviceGroupId
+    Explicit WUG device group ID. Overrides DeviceGroupSearch.
+
+.PARAMETER ExcludeDatabase
+    Array of database name patterns to skip. Default: @('_Total', 'tempdb').
+    Use @() to include all databases.
+
+.PARAMETER ExcludeInstance
+    Array of SQL instance name patterns to skip. Default: @().
+
+.PARAMETER IncludeCounter
+    Array of counter names to create monitors for. Default: TransactionsPersec,
+    PercentLogUsed. Use 'All' to include all 8 counters.
+    Valid values: All, TransactionsPersec, LogBytesFlushedPersec,
+    LogFlushWaitsPersec, ActiveTransactions, DataFilesSizeKB, LogFileSizeKB,
+    LogFileUsedSizeKB, PercentLogUsed.
+
+.PARAMETER PollingIntervalMinutes
+    Polling interval for assigned monitors. Default: 5.
+
+.PARAMETER WmiTimeout
+    WMI query timeout in seconds. Default: 10.
+
+.PARAMETER NamePrefix
+    Prefix for monitor display names. Default: 'MSSQL'.
+
+.PARAMETER Action
+    What to do with discovery results. When specified, skips the interactive menu.
+    Valid values: PushToWUG, ExportJSON, ExportCSV, ShowTable, Dashboard, DashboardAndPush, None.
+
+.PARAMETER Target
+    Windows host(s) to scan via WMI -- IP address or FQDN. Accepts multiple values.
+    Enables standalone mode (no WhatsUp Gold connection needed for device resolution).
+
+.PARAMETER DryRun
+    Show what would be created/assigned without making changes.
+
+.PARAMETER WUGServer
+    WhatsUp Gold server address. Default: resolved from vault.
+
+.PARAMETER WUGCredential
+    PSCredential for authenticating to WhatsUp Gold.
+
+.PARAMETER NonInteractive
+    Suppress interactive prompts. Uses cached vault credentials.
+
+.PARAMETER OutputPath
+    Directory for exported data. Default: %LOCALAPPDATA%\WhatsUpGoldPS\DiscoveryHelpers\Output.
+
+.EXAMPLE
+    .\Setup-MSSQL-Discovery.ps1 -Target '192.168.74.74' -Action Dashboard
+
+    Standalone mode: scan SQL Server on 192.168.74.74, generate dashboard.
+
+.EXAMPLE
+    .\Setup-MSSQL-Discovery.ps1 -Target '192.168.74.74' -Action PushToWUG -NonInteractive
+
+    Scan and push monitors to WUG non-interactively using vault credentials.
+
+.EXAMPLE
+    .\Setup-MSSQL-Discovery.ps1 -Target '192.168.74.74' -IncludeCounter All -Action Dashboard
+
+    Discover all counters for all databases and generate a dashboard.
+
+.EXAMPLE
+    .\Setup-MSSQL-Discovery.ps1 -DeviceGroupSearch 'SQL Servers' -Action PushToWUG
+
+    Scan all devices in the 'SQL Servers' group and push monitors.
+
+.EXAMPLE
+    .\Setup-MSSQL-Discovery.ps1 -Target '192.168.74.74' -DryRun
+
+    Show what monitors would be created without making changes.
+
+.NOTES
+    Author: Jason Alberino (jason@wug.ninja)
+    Requires: WhatsUpGoldPS module, PowerShell 5.1+
+    Encoding: UTF-8 with BOM
+#>
+[CmdletBinding(SupportsShouldProcess = $true)]
+param(
+    [int[]]$DeviceId,
+
+    [PSCredential[]]$Credential,
+
+    [string]$DeviceGroupSearch = 'SQL Servers',
+
+    [string]$DeviceGroupId,
+
+    [string[]]$ExcludeDatabase = @('_Total', 'tempdb'),
+
+    [string[]]$ExcludeInstance = @(),
+
+    [ValidateSet('All', 'TransactionsPersec', 'WriteTransactionsPersec', 'LogBytesFlushedPersec',
+                 'LogFlushesPersec', 'LogFlushWaitsPersec', 'LogFlushWaitTime',
+                 'ActiveTransactions', 'DataFilesSizeKB', 'LogFilesSizeKB',
+                 'LogFilesUsedSizeKB', 'PercentLogUsed', 'LogGrowths',
+                 'LogTruncations', 'LogCacheHitRatio', 'LogShrinks')]
+    [string[]]$IncludeCounter,
+
+    [ValidateRange(1, 1440)]
+    [int]$PollingIntervalMinutes = 5,
+
+    [int]$WmiTimeout = 10,
+
+    [string]$NamePrefix = 'MSSQL',
+
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
+    [string]$Action,
+
+    [string[]]$Target,
+
+    [string]$WUGServer,
+
+    [PSCredential]$WUGCredential,
+
+    [switch]$DryRun,
+
+    [switch]$NonInteractive,
+
+    [string]$OutputPath
+)
+
+# --- Load discovery helpers (vault, credential resolver) ----------------------
+$scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
+$discoveryHelpersPath = Join-Path $scriptDir 'DiscoveryHelpers.ps1'
+if (Test-Path $discoveryHelpersPath) {
+    . $discoveryHelpersPath
+}
+else {
+    Write-Error "DiscoveryHelpers.ps1 not found at '$discoveryHelpersPath'. Cannot continue."
+    return
+}
+
+# Load dynamic dashboard generator
+$dynDashPath = Join-Path (Split-Path $scriptDir -Parent) 'reports\Export-DynamicDashboardHtml.ps1'
+if (Test-Path $dynDashPath) { . $dynDashPath }
+
+# =============================================================================
+# Configuration: Counter definitions
+# =============================================================================
+# Property  = WMI property name (used for discovery query results)
+# PerfCounter = Windows Performance Counter name (used in WUG monitor creation)
+# Label     = Human-readable label for display/dashboards
+$script:CounterDefinitions = [ordered]@{
+    TransactionsPersec      = @{ Property = 'TransactionsPersec';      PerfCounter = 'Transactions/sec';              Label = 'Transactions/sec' }
+    WriteTransactionsPersec = @{ Property = 'WriteTransactionsPersec'; PerfCounter = 'Write Transactions/sec';        Label = 'Write Transactions/sec' }
+    LogBytesFlushedPersec   = @{ Property = 'LogBytesFlushedPersec';   PerfCounter = 'Log Bytes Flushed/sec';         Label = 'Log Bytes Flushed/sec' }
+    LogFlushesPersec        = @{ Property = 'LogFlushesPersec';        PerfCounter = 'Log Flushes/sec';               Label = 'Log Flushes/sec' }
+    LogFlushWaitsPersec     = @{ Property = 'LogFlushWaitsPersec';     PerfCounter = 'Log Flush Waits/sec';           Label = 'Log Flush Waits/sec' }
+    LogFlushWaitTime        = @{ Property = 'LogFlushWaitTime';        PerfCounter = 'Log Flush Wait Time';           Label = 'Log Flush Wait Time (ms)' }
+    ActiveTransactions      = @{ Property = 'ActiveTransactions';      PerfCounter = 'Active Transactions';           Label = 'Active Transactions' }
+    DataFilesSizeKB         = @{ Property = 'DataFilesSizeKB';         PerfCounter = 'Data File(s) Size (KB)';        Label = 'Data File(s) Size (KB)' }
+    LogFilesSizeKB          = @{ Property = 'LogFilesSizeKB';          PerfCounter = 'Log File(s) Size (KB)';         Label = 'Log File(s) Size (KB)' }
+    LogFilesUsedSizeKB      = @{ Property = 'LogFilesUsedSizeKB';      PerfCounter = 'Log File(s) Used Size (KB)';    Label = 'Log File(s) Used Size (KB)' }
+    PercentLogUsed          = @{ Property = 'PercentLogUsed';          PerfCounter = 'Percent Log Used';              Label = 'Percent Log Used' }
+    LogGrowths              = @{ Property = 'LogGrowths';              PerfCounter = 'Log Growths';                   Label = 'Log Growths' }
+    LogTruncations          = @{ Property = 'LogTruncations';          PerfCounter = 'Log Truncations';               Label = 'Log Truncations' }
+    LogCacheHitRatio        = @{ Property = 'LogCacheHitRatio';        PerfCounter = 'Log Cache Hit Ratio';           Label = 'Log Cache Hit Ratio' }
+    LogShrinks              = @{ Property = 'LogShrinks';              PerfCounter = 'Log Shrinks';                   Label = 'Log Shrinks' }
+}
+
+# Default counters when -IncludeCounter is not specified
+$script:DefaultCounters = @('TransactionsPersec', 'PercentLogUsed')
+
+# Filter to requested counters only
+if ($IncludeCounter -and $IncludeCounter -contains 'All') {
+    $activeCounters = $script:CounterDefinitions
+}
+elseif ($IncludeCounter) {
+    $activeCounters = [ordered]@{}
+    foreach ($key in $IncludeCounter) {
+        if ($script:CounterDefinitions.Contains($key)) {
+            $activeCounters[$key] = $script:CounterDefinitions[$key]
+        }
+    }
+}
+else {
+    $activeCounters = [ordered]@{}
+    foreach ($key in $script:DefaultCounters) {
+        $activeCounters[$key] = $script:CounterDefinitions[$key]
+    }
+}
+
+if ($activeCounters.Count -eq 0) {
+    Write-Error "No valid counters selected. Exiting."
+    return
+}
+
+# =============================================================================
+# Preflight: WUG connection (only needed when resolving devices from WUG or pushing)
+# =============================================================================
+$needsWUG = (-not $Target) -or ($Action -eq 'PushToWUG') -or ($Action -eq 'DashboardAndPush')
+if ($needsWUG) {
+    if (-not $global:WUGBearerHeaders -or -not $global:WhatsUpServerBaseURI) {
+        if ($WUGCredential) {
+            $wugUri = if ($WUGServer) { $WUGServer } else { 'https://localhost:9644' }
+            try {
+                Connect-WUGServer -serverUri $wugUri -Credential $WUGCredential -IgnoreSSLErrors
+                Write-Host "Connected to WhatsUp Gold." -ForegroundColor Green
+            }
+            catch {
+                Write-Error "Failed to connect to WhatsUp Gold: $_"
+                return
+            }
+        }
+        else {
+            Write-Host "Not connected to WhatsUp Gold. Resolving from vault..." -ForegroundColor Yellow
+            $wugSplat = @{ Name = 'WUG.Server'; CredType = 'WUGServer'; ProviderLabel = 'WhatsUp Gold' }
+            if ($NonInteractive) { $wugSplat.NonInteractive = $true }
+            $wugResolved = Resolve-DiscoveryCredential @wugSplat
+            if (-not $wugResolved) {
+                Write-Error "No WhatsUp Gold server credentials available. Run Connect-WUGServer or configure the vault."
+                return
+            }
+            $wugConnSplat = @{}
+            if ($wugResolved -is [hashtable]) {
+                $wugConnSplat.Server = $wugResolved.Server
+                if ($wugResolved.Port)       { $wugConnSplat.Port = $wugResolved.Port }
+                if ($wugResolved.Protocol)   { $wugConnSplat.Protocol = $wugResolved.Protocol }
+                if ($wugResolved.Credential) { $wugConnSplat.Credential = $wugResolved.Credential }
+                if ($wugResolved.IgnoreSSL)  { $wugConnSplat.IgnoreSSL = $true }
+            }
+            elseif ($WUGServer) {
+                $wugConnSplat.Server = $WUGServer
+            }
+            try {
+                Connect-WUGServer @wugConnSplat
+                Write-Host "Connected to WhatsUp Gold." -ForegroundColor Green
+            }
+            catch {
+                Write-Error "Failed to connect to WhatsUp Gold: $_"
+                return
+            }
+        }
+    }
+}
+
+# =============================================================================
+# Resolve WMI credentials (vault-backed, multi-credential support)
+# =============================================================================
+$credentialList = [System.Collections.Generic.List[PSCredential]]::new()
+
+if ($Credential) {
+    foreach ($c in $Credential) { $credentialList.Add($c) }
+}
+else {
+    $credIndex = 1
+    $wmiVaultName = "Windows.WMI.Credential.$credIndex"
+    $credSplat = @{ Name = $wmiVaultName; CredType = 'PSCredential'; ProviderLabel = "Windows WMI #$credIndex" }
+    if ($NonInteractive) { $credSplat.NonInteractive = $true }
+    $firstCred = Resolve-DiscoveryCredential @credSplat
+    if (-not $firstCred) {
+        Write-Error "No WMI credentials available. Provide -Credential or configure the vault."
+        return
+    }
+    $credentialList.Add($firstCred)
+
+    if (-not $NonInteractive) {
+        while ($true) {
+            Write-Host ""
+            Write-Host "  Credential #$($credentialList.Count) loaded: $($credentialList[-1].UserName)" -ForegroundColor Gray
+            Write-Host "  Add another credential to try if this one fails on some servers?" -ForegroundColor Cyan
+            $addMore = Read-Host -Prompt "  [Y]es / [N]o (default: N)"
+            if ($addMore -notmatch '^[Yy]') { break }
+            $credIndex++
+            $wmiVaultName = "Windows.WMI.Credential.$credIndex"
+            $credSplat = @{ Name = $wmiVaultName; CredType = 'PSCredential'; ProviderLabel = "Windows WMI #$credIndex" }
+            $nextCred = Resolve-DiscoveryCredential @credSplat
+            if ($nextCred) { $credentialList.Add($nextCred) } else { break }
+        }
+    }
+    else {
+        while ($true) {
+            $credIndex++
+            $wmiVaultName = "Windows.WMI.Credential.$credIndex"
+            $credSplat = @{ Name = $wmiVaultName; CredType = 'PSCredential'; NonInteractive = $true }
+            $nextCred = Resolve-DiscoveryCredential @credSplat
+            if ($nextCred) { $credentialList.Add($nextCred) } else { break }
+        }
+    }
+}
+
+Write-Host ""
+Write-Host "  Credentials to try ($($credentialList.Count)):" -ForegroundColor Cyan
+for ($ci = 0; $ci -lt $credentialList.Count; $ci++) {
+    Write-Host "    [$($ci + 1)] $($credentialList[$ci].UserName)" -ForegroundColor Gray
+}
+
+# =============================================================================
+# STEP 1: Resolve target devices
+# =============================================================================
+Write-Host ""
+Write-Host "=== Microsoft SQL Server Discovery ===" -ForegroundColor Cyan
+Write-Host ""
+
+$standaloneMode = $false
+if ($Target) {
+    $standaloneMode = $true
+    Write-Host "Standalone mode: scanning $($Target.Count) specified host(s)..." -ForegroundColor Cyan
+    $devices = @()
+    $targetId = 0
+    foreach ($t in $Target) {
+        $targetId++
+        $devices += [PSCustomObject]@{
+            id             = "target-$targetId"
+            displayName    = $t
+            hostName       = $t
+            networkAddress = $t
+            role           = 'Windows'
+        }
+    }
+}
+elseif ($DeviceId) {
+    Write-Host "Fetching $($DeviceId.Count) specified device(s) from WhatsUp Gold..." -ForegroundColor Cyan
+    $devices = @()
+    foreach ($dId in $DeviceId) {
+        try {
+            $dev = Get-WUGDevice -DeviceId $dId
+            if ($dev) { $devices += $dev }
+        }
+        catch {
+            Write-Warning "Could not retrieve device ID ${dId}: $_"
+        }
+    }
+}
+else {
+    # Auto-resolve device group
+    $resolvedGroupId = $null
+
+    if ($DeviceGroupId) {
+        $resolvedGroupId = $DeviceGroupId
+        Write-Host "Using explicit device group ID: $resolvedGroupId" -ForegroundColor Cyan
+    }
+    elseif ($DeviceGroupSearch) {
+        Write-Host "Searching for device group matching '$DeviceGroupSearch'..." -ForegroundColor Cyan
+        try {
+            $matchingGroups = @(Get-WUGDeviceGroup -SearchValue $DeviceGroupSearch)
+            if ($matchingGroups.Count -eq 1) {
+                $resolvedGroupId = $matchingGroups[0].id
+                Write-Host "  Found group: '$($matchingGroups[0].name)' (ID: $resolvedGroupId)" -ForegroundColor Green
+            }
+            elseif ($matchingGroups.Count -gt 1) {
+                Write-Host "  Found $($matchingGroups.Count) matching groups:" -ForegroundColor Cyan
+                for ($gi = 0; $gi -lt $matchingGroups.Count; $gi++) {
+                    $g = $matchingGroups[$gi]
+                    $devCount = if ($g.deviceCount) { $g.deviceCount } else { '?' }
+                    Write-Host "    [$($gi + 1)] $($g.name) (ID: $($g.id), Devices: $devCount)" -ForegroundColor White
+                }
+                if (-not $NonInteractive) {
+                    Write-Host ""
+                    $groupChoice = Read-Host -Prompt "  Select group number [default: 1]"
+                    if (-not $groupChoice) { $groupChoice = '1' }
+                    $groupIdx = [int]$groupChoice - 1
+                    if ($groupIdx -ge 0 -and $groupIdx -lt $matchingGroups.Count) {
+                        $resolvedGroupId = $matchingGroups[$groupIdx].id
+                        Write-Host "  Selected: '$($matchingGroups[$groupIdx].name)' (ID: $resolvedGroupId)" -ForegroundColor Green
+                    }
+                    else {
+                        Write-Warning "Invalid selection. Using first match."
+                        $resolvedGroupId = $matchingGroups[0].id
+                    }
+                }
+                else {
+                    $resolvedGroupId = $matchingGroups[0].id
+                    Write-Host "  Auto-selected: '$($matchingGroups[0].name)' (ID: $resolvedGroupId)" -ForegroundColor Gray
+                }
+            }
+            else {
+                Write-Host "  No groups matching '$DeviceGroupSearch'. Falling back to all devices." -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Warning "Failed to search device groups: $_. Falling back to all devices."
+        }
+    }
+
+    if (-not $resolvedGroupId) { $resolvedGroupId = '-1' }
+    Write-Host "Fetching devices from group $resolvedGroupId..." -ForegroundColor Cyan
+    $devices = @(Get-WUGDevice -DeviceGroupID $resolvedGroupId)
+}
+
+if (-not $devices -or $devices.Count -eq 0) {
+    Write-Error "No devices found. Exiting."
+    return
+}
+
+Write-Host "Found $($devices.Count) device(s)." -ForegroundColor Green
+Write-Host ""
+
+# =============================================================================
+# STEP 2: Scan each device via WMI to discover SQL instances and databases
+# =============================================================================
+# Structure: $deviceDatabases[deviceId] = @( @{ Instance='MSSQLSERVER'; Database='master'; WmiClass='...' }, ... )
+$deviceDatabases = @{}
+$allDbKeys = @{}          # "InstanceName\DatabaseName" -> $true (dedup)
+$deviceInfo = @{}         # deviceId -> @{ Name; IP }
+$deviceDbStats = @{}      # deviceId -> @{ "Instance\DB" -> @{ CounterKey = value; ... } }
+$instanceWmiClassMap = @{} # "InstanceName" -> WMI class name (for monitor creation)
+
+$scanIndex = 0
+foreach ($dev in $devices) {
+    $scanIndex++
+    $devId   = $dev.id
+    $devName = if ($dev.displayName) { $dev.displayName } else { $dev.hostName }
+    $devIP   = $dev.networkAddress
+
+    if (-not $devIP) {
+        Write-Warning "Device '$devName' (ID: $devId) has no network address. Skipping."
+        continue
+    }
+
+    $deviceInfo[$devId] = @{ Name = $devName; IP = $devIP }
+
+    $pct = [Math]::Round(($scanIndex / $devices.Count) * 100)
+    Write-Progress -Activity "Scanning SQL Server instances via WMI" `
+        -Status "$devName ($devIP) [$scanIndex of $($devices.Count)]" `
+        -PercentComplete $pct
+
+    Write-Host "  [$scanIndex/$($devices.Count)] Scanning $devName ($devIP)..." -ForegroundColor Gray
+
+    # Try each credential in order
+    $scanSuccess = $false
+    for ($ci = 0; $ci -lt $credentialList.Count; $ci++) {
+        $tryCred = $credentialList[$ci]
+        if ($credentialList.Count -gt 1 -and $ci -gt 0) {
+            Write-Host "    Retrying with credential #$($ci + 1) ($($tryCred.UserName))..." -ForegroundColor DarkGray
+        }
+
+        try {
+            $isLocal = ($devIP -eq 'localhost' -or $devIP -eq '127.0.0.1' -or $devIP -eq '::1' -or $devIP -eq $env:COMPUTERNAME -or $devIP -eq '.')
+            $wmiSplat = @{ ErrorAction = 'Stop' }
+            if (-not $isLocal) { $wmiSplat.ComputerName = $devIP; $wmiSplat.Credential = $tryCred }
+
+            # --- Step 2a: Discover SQL Server services ---
+            $sqlServices = @(Get-WmiObject -Class Win32_Service @wmiSplat |
+                Where-Object { $_.Name -match '^MSSQL(\$|SERVER)' -and $_.State -eq 'Running' })
+
+            if (-not $sqlServices -or $sqlServices.Count -eq 0) {
+                Write-Host "    No running SQL Server services found." -ForegroundColor Yellow
+                $scanSuccess = $true
+                break
+            }
+
+            # Parse instance names from service names
+            $instanceNames = @()
+            foreach ($svc in $sqlServices) {
+                if ($svc.Name -eq 'MSSQLSERVER') {
+                    $instanceNames += 'MSSQLSERVER'
+                }
+                elseif ($svc.Name -match '^MSSQL\$(.+)$') {
+                    $instanceNames += $Matches[1]
+                }
+            }
+
+            # Apply instance exclusion filter
+            $filteredInstances = @()
+            foreach ($inst in $instanceNames) {
+                $excluded = $false
+                foreach ($pattern in $ExcludeInstance) {
+                    if ($inst -like "*$pattern*") { $excluded = $true; break }
+                }
+                if (-not $excluded) { $filteredInstances += $inst }
+            }
+
+            if ($filteredInstances.Count -eq 0) {
+                Write-Host "    All SQL instances excluded by filter." -ForegroundColor Yellow
+                $scanSuccess = $true
+                break
+            }
+
+            Write-Host "    SQL instances found: $($filteredInstances -join ', ')" -ForegroundColor Green
+
+            # --- Step 2b: Query databases per instance ---
+            $deviceDbs = @()
+            foreach ($instanceName in $filteredInstances) {
+                # Build the WMI class name based on instance
+                # Default instance: Win32_PerfFormattedData_MSSQLSERVER_SQLServerDatabases
+                # Named instance:   Win32_PerfFormattedData_MSSQL<NAME>_MSSQL<NAME>Databases
+                if ($instanceName -eq 'MSSQLSERVER') {
+                    $wmiClass = 'Win32_PerfFormattedData_MSSQLSERVER_SQLServerDatabases'
+                }
+                else {
+                    $wmiClass = "Win32_PerfFormattedData_MSSQL${instanceName}_MSSQL${instanceName}Databases"
+                }
+
+                $instanceWmiClassMap[$instanceName] = $wmiClass
+
+                # Build the perfmon object path for WUG monitor creation
+                # (different from WMI class -- this is what WUG expects)
+                if ($instanceName -eq 'MSSQLSERVER') {
+                    $instancePerfObjectMap = 'SQLServer:Databases'
+                }
+                else {
+                    $instancePerfObjectMap = 'MSSQL$' + $instanceName + ':Databases'
+                }
+
+                try {
+                    $wmiQuery = "Select * from $wmiClass"
+                    $dbData = @(Get-WmiObject -Query $wmiQuery @wmiSplat |
+                        Where-Object { $_.Name -and $_.Name -ne '' })
+
+                    foreach ($db in $dbData) {
+                        $dbName = $db.Name
+
+                        # Apply database exclusion filter
+                        $excluded = $false
+                        foreach ($pattern in $ExcludeDatabase) {
+                            if ($dbName -like "*$pattern*") { $excluded = $true; break }
+                        }
+                        if ($excluded) { continue }
+
+                        $dbKey = "$instanceName\$dbName"
+                        $allDbKeys[$dbKey] = $true
+
+                        $deviceDbs += @{
+                            Instance   = $instanceName
+                            Database   = $dbName
+                            WmiClass   = $wmiClass
+                            PerfObject = $instancePerfObjectMap
+                            DbKey      = $dbKey
+                        }
+
+                        # Capture counter values for dashboard/export
+                        if (-not $deviceDbStats.ContainsKey($devId)) {
+                            $deviceDbStats[$devId] = @{}
+                        }
+                        $snap = [ordered]@{}
+                        foreach ($ck in $activeCounters.Keys) {
+                            $prop = $activeCounters[$ck].Property
+                            $val  = $db.$prop
+                            if ($null -ne $val) { $snap[$ck] = [double]$val }
+                        }
+                        $deviceDbStats[$devId][$dbKey] = $snap
+                    }
+                }
+                catch {
+                    Write-Warning "    Could not query $wmiClass on ${devIP}: $($_.Exception.Message)"
+                }
+            }
+
+            if ($deviceDbs.Count -gt 0) {
+                $deviceDatabases[$devId] = $deviceDbs
+                $dbNames = ($deviceDbs | ForEach-Object { $_.Database }) | Sort-Object -Unique
+                Write-Host "    Databases: $($dbNames -join ', ')" -ForegroundColor Green
+            }
+            else {
+                Write-Host "    No databases found after filtering." -ForegroundColor Yellow
+            }
+
+            $scanSuccess = $true
+            break
+        }
+        catch [System.UnauthorizedAccessException] {
+            if ($ci -lt ($credentialList.Count - 1)) { continue }
+            Write-Host "    Access denied (all $($credentialList.Count) credential(s) failed)." -ForegroundColor Red
+        }
+        catch [System.Runtime.InteropServices.COMException] {
+            $comMsg = $_.Exception.Message
+            if ($comMsg -match 'Access is denied|0x80070005') {
+                if ($ci -lt ($credentialList.Count - 1)) { continue }
+                Write-Host "    Access denied (all $($credentialList.Count) credential(s) failed)." -ForegroundColor Red
+            }
+            else {
+                Write-Host "    WMI/RPC unavailable: $comMsg" -ForegroundColor Red
+                break
+            }
+        }
+        catch {
+            Write-Host "    Failed: $($_.Exception.Message)" -ForegroundColor Red
+            break
+        }
+    }
+}
+
+Write-Progress -Activity "Scanning SQL Server instances via WMI" -Completed
+
+if ($deviceDatabases.Count -eq 0) {
+    Write-Warning "No SQL Server databases discovered on any device. Nothing to do."
+    return
+}
+
+$sortedDbKeys = @($allDbKeys.Keys | Sort-Object)
+
+Write-Host ""
+Write-Host "--- Discovery Summary ---" -ForegroundColor Cyan
+Write-Host "  Devices scanned:        $($devices.Count)" -ForegroundColor White
+Write-Host "  Devices with SQL:       $($deviceDatabases.Count)" -ForegroundColor White
+Write-Host "  Unique instance\db:     $($sortedDbKeys.Count)" -ForegroundColor White
+Write-Host "  Counters per database:  $($activeCounters.Count)" -ForegroundColor White
+Write-Host ""
+
+# Show per-device breakdown
+Write-Host "  Per-device database map:" -ForegroundColor White
+foreach ($devId in ($deviceDatabases.Keys | Sort-Object)) {
+    $info = $deviceInfo[$devId]
+    $dbs = ($deviceDatabases[$devId] | ForEach-Object { "$($_.Instance)\$($_.Database)" }) -join ', '
+    Write-Host "    $($info.Name) ($($info.IP)): $dbs" -ForegroundColor Gray
+}
+Write-Host ""
+
+$totalMonitors = $sortedDbKeys.Count * $activeCounters.Count
+$totalAssignments = 0
+foreach ($devId in $deviceDatabases.Keys) {
+    $totalAssignments += $deviceDatabases[$devId].Count * $activeCounters.Count
+}
+
+Write-Host "  Monitors to create (library):  up to $totalMonitors" -ForegroundColor White
+Write-Host "  Assignments to make (devices): up to $totalAssignments" -ForegroundColor White
+Write-Host ""
+
+if ($DryRun) {
+    Write-Host "[DRY RUN] Listing planned monitors:" -ForegroundColor Yellow
+    Write-Host ""
+    foreach ($dbKey in $sortedDbKeys) {
+        foreach ($counterKey in $activeCounters.Keys) {
+            $def = $activeCounters[$counterKey]
+            $monName = "${NamePrefix} - ${dbKey} - $($def.Label)"
+            $assignTo = @()
+            foreach ($devId in $deviceDatabases.Keys) {
+                $match = $deviceDatabases[$devId] | Where-Object { $_.DbKey -eq $dbKey }
+                if ($match) { $assignTo += "$($deviceInfo[$devId].Name)(#$devId)" }
+            }
+            Write-Host "  [CREATE] $monName" -ForegroundColor Gray
+            Write-Host "           Assign to: $($assignTo -join ', ')" -ForegroundColor DarkGray
+        }
+    }
+    Write-Host ""
+    Write-Host "[DRY RUN] No changes made." -ForegroundColor Yellow
+    return
+}
+
+# =============================================================================
+# STEP 3: Action routing (menu or -Action parameter)
+# =============================================================================
+if ($OutputPath) {
+    $OutputDir = $OutputPath
+}
+else {
+    $OutputDir = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
+}
+if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null }
+
+$choice = $null
+if ($Action) {
+    switch ($Action) {
+        'PushToWUG'        { $choice = '1' }
+        'ExportJSON'       { $choice = '2' }
+        'ExportCSV'        { $choice = '3' }
+        'ShowTable'        { $choice = '4' }
+        'Dashboard'        { $choice = '5' }
+        'None'             { $choice = '6' }
+        'DashboardAndPush' { $choice = '7' }
+    }
+}
+
+if (-not $choice -and $NonInteractive) { $choice = '5' }
+
+if (-not $choice) {
+    Write-Host "What would you like to do with the discovered databases?" -ForegroundColor Cyan
+    if ($standaloneMode) {
+        Write-Host "  [1] Push monitors to WhatsUp Gold (not available in standalone mode)" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "  [1] Push monitors to WhatsUp Gold (creates library monitors + assigns)"
+    }
+    Write-Host "  [2] Export to JSON file"
+    Write-Host "  [3] Export to CSV file"
+    Write-Host "  [4] Show full table in console"
+    Write-Host "  [5] Generate HTML dashboard (SQL database inventory)"
+    Write-Host "  [6] Exit (do nothing)"
+    if (-not $standaloneMode) {
+        Write-Host "  [7] Dashboard + Push to WUG"
+    }
+    Write-Host ""
+    $choice = Read-Host -Prompt "Choice [1-7]"
+}
+
+# Handle DashboardAndPush: run Dashboard then PushToWUG sequentially
+if ($choice -eq '7') {
+    $actionsToRun = @('5', '1')
+}
+else {
+    $actionsToRun = @($choice)
+}
+
+# Build export-friendly data for JSON/CSV/Table/Dashboard
+$exportData = @()
+foreach ($devId in ($deviceDatabases.Keys | Sort-Object)) {
+    $info = $deviceInfo[$devId]
+    foreach ($dbEntry in $deviceDatabases[$devId]) {
+        $row = [ordered]@{
+            DeviceId = $devId
+            Host     = $info.Name
+            IP       = $info.IP
+            Instance = $dbEntry.Instance
+            Database = $dbEntry.Database
+            WmiClass = $dbEntry.WmiClass
+        }
+        # Add counter values
+        $dbKey = $dbEntry.DbKey
+        $snap = $null
+        if ($deviceDbStats.ContainsKey($devId) -and $deviceDbStats[$devId].ContainsKey($dbKey)) {
+            $snap = $deviceDbStats[$devId][$dbKey]
+        }
+        foreach ($ck in $activeCounters.Keys) {
+            $label = $activeCounters[$ck].Label
+            if ($snap -and $snap.Contains($ck)) {
+                $row[$label] = $snap[$ck]
+            }
+            else {
+                $row[$label] = $null
+            }
+        }
+        $exportData += [PSCustomObject]$row
+    }
+}
+
+foreach ($currentChoice in $actionsToRun) {
+switch ($currentChoice) {
+    '1' {
+        # PushToWUG
+        if ($standaloneMode) {
+            Write-Warning "Push to WUG requires devices resolved from WhatsUp Gold. Omit -Target or use -DeviceId."
+            continue
+        }
+
+        Write-Host "Checking existing performance monitors in WUG library..." -ForegroundColor Cyan
+
+        $existingMonitors = @(Get-WUGPerformanceMonitor -Search $NamePrefix -View 'info')
+        $existingLookup = @{}
+        foreach ($mon in $existingMonitors) {
+            $existingLookup[$mon.Name] = $mon
+        }
+
+        Write-Host "  Found $($existingMonitors.Count) existing monitor(s) matching prefix '$NamePrefix'." -ForegroundColor Gray
+
+        # Pre-fetch existing monitor assignments per device
+        Write-Host "Checking existing device monitor assignments..." -ForegroundColor Cyan
+        $deviceExistingMonitors = @{}
+        foreach ($devId in $deviceDatabases.Keys) {
+            $deviceExistingMonitors[$devId] = @{}
+            try {
+                $assigned = @(Get-WUGPerformanceMonitor -DeviceId $devId -Search $NamePrefix -View 'basic')
+                foreach ($a in $assigned) {
+                    $typeId = if ($a.MonitorTypeId) { $a.MonitorTypeId } elseif ($a.monitorTypeId) { $a.monitorTypeId } else { $null }
+                    if ($typeId) { $deviceExistingMonitors[$devId]["$typeId"] = $true }
+                }
+            }
+            catch {
+                Write-Verbose "  Could not check existing monitors for device ${devId}: $_"
+            }
+        }
+        Write-Host "  Done." -ForegroundColor Gray
+        Write-Host ""
+
+        # --- Create library monitors and assign to devices --------------------
+        $createdCount         = 0
+        $skippedCount         = 0
+        $assignedCount        = 0
+        $alreadyAssignedCount = 0
+        $failedCount          = 0
+
+        $monitorIdCache = @{}
+        foreach ($mon in $existingMonitors) {
+            $monitorIdCache[$mon.Name] = if ($mon.MonitorId) { $mon.MonitorId } else { $mon.Id }
+        }
+
+        $totalSteps = $sortedDbKeys.Count * $activeCounters.Count
+        $stepIndex  = 0
+
+        foreach ($dbKey in $sortedDbKeys) {
+            # Resolve perfmon object path and instance (database name) for this dbKey
+            $parts = $dbKey -split '\\', 2
+            $instanceName = $parts[0]
+            $databaseName = $parts[1]
+
+            # Get perfmon object from first matching device entry
+            $perfObject = $null
+            foreach ($devId2 in $deviceDatabases.Keys) {
+                $matchEntry = $deviceDatabases[$devId2] | Where-Object { $_.DbKey -eq $dbKey } | Select-Object -First 1
+                if ($matchEntry) { $perfObject = $matchEntry.PerfObject; break }
+            }
+
+            foreach ($counterKey in $activeCounters.Keys) {
+                $stepIndex++
+                $def     = $activeCounters[$counterKey]
+                $monName = "${NamePrefix} - ${dbKey} - $($def.Label)"
+
+                $pct = [Math]::Round(($stepIndex / $totalSteps) * 100)
+                Write-Progress -Activity "Creating SQL Server monitors" `
+                    -Status "$monName [$stepIndex of $totalSteps]" `
+                    -PercentComplete $pct
+
+                if ($monitorIdCache.ContainsKey($monName)) {
+                    $libId = $monitorIdCache[$monName]
+                    Write-Verbose "Monitor '$monName' already exists (ID: $libId). Skipping creation."
+                    $skippedCount++
+                }
+                else {
+                    Write-Host "  Creating: $monName" -ForegroundColor White
+                    try {
+                        $result = Add-WUGPerformanceMonitor `
+                            -Type WmiFormatted `
+                            -Name $monName `
+                            -WmiFormattedRelativePath $perfObject `
+                            -WmiFormattedPropertyName $def.PerfCounter `
+                            -WmiFormattedDisplayname "$($def.PerfCounter) ($databaseName)" `
+                            -WmiFormattedInstanceName $databaseName `
+                            -WmiFormattedTimeout $WmiTimeout
+
+                        if ($result -and $result.data -and $result.data.idMap) {
+                            $libId = $result.data.idMap.resultId
+                        }
+                        elseif ($result -match 'library ID:\s*(\d+)') {
+                            $libId = $Matches[1]
+                        }
+                        else {
+                            $refetch = @(Get-WUGPerformanceMonitor -Search $monName -View 'info')
+                            $match = $refetch | Where-Object { $_.Name -eq $monName } | Select-Object -First 1
+                            if ($match) {
+                                $libId = if ($match.MonitorId) { $match.MonitorId } else { $match.Id }
+                            }
+                            else {
+                                Write-Warning "    Could not determine library ID for '$monName'. Skipping."
+                                $failedCount++
+                                continue
+                            }
+                        }
+
+                        $monitorIdCache[$monName] = $libId
+                        $createdCount++
+                        Write-Host "    Created (ID: $libId)" -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Error "    Failed to create '$monName': $_"
+                        $failedCount++
+                        continue
+                    }
+                }
+
+                # Assign to devices that have this database
+                $libId = $monitorIdCache[$monName]
+                foreach ($devId in $deviceDatabases.Keys) {
+                    $match = $deviceDatabases[$devId] | Where-Object { $_.DbKey -eq $dbKey }
+                    if ($match) {
+                        $info = $deviceInfo[$devId]
+
+                        if ($deviceExistingMonitors.ContainsKey($devId) -and $deviceExistingMonitors[$devId].ContainsKey("$libId")) {
+                            Write-Verbose "  '$monName' already assigned to $($info.Name). Skipping."
+                            $alreadyAssignedCount++
+                            continue
+                        }
+
+                        Write-Verbose "  Assigning '$monName' to $($info.Name) (ID: $devId)"
+                        try {
+                            Add-WUGPerformanceMonitorToDevice `
+                                -DeviceId $devId `
+                                -MonitorId $libId `
+                                -PollingIntervalMinutes $PollingIntervalMinutes `
+                                -Enabled "true"
+                            $assignedCount++
+                            if ($deviceExistingMonitors.ContainsKey($devId)) {
+                                $deviceExistingMonitors[$devId]["$libId"] = $true
+                            }
+                        }
+                        catch {
+                            $errMsg = $_.Exception.Message
+                            if ($errMsg -match '409|already assigned|already exists|duplicate') {
+                                Write-Host "    Already assigned: $monName -> $($info.Name)" -ForegroundColor DarkGray
+                                $alreadyAssignedCount++
+                            }
+                            else {
+                                Write-Warning "    Failed to assign '$monName' to $($info.Name): $errMsg"
+                                $failedCount++
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Write-Progress -Activity "Creating SQL Server monitors" -Completed
+
+        Write-Host ""
+        Write-Host "=== SQL Server Push Complete ===" -ForegroundColor Cyan
+        Write-Host "  Monitors created:      $createdCount" -ForegroundColor Green
+        Write-Host "  Monitors reused:       $skippedCount" -ForegroundColor Gray
+        Write-Host "  Assignments made:      $assignedCount" -ForegroundColor Green
+        Write-Host "  Already assigned:      $alreadyAssignedCount" -ForegroundColor Gray
+        Write-Host "  Failures:              $failedCount" -ForegroundColor $(if ($failedCount -gt 0) { 'Red' } else { 'Gray' })
+        Write-Host ""
+    }
+    '2' {
+        # ExportJSON
+        $jsonPath = Join-Path $OutputDir "MSSQL-Discovery-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+        $exportData | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonPath -Encoding UTF8
+        Write-Host "Exported to: $jsonPath" -ForegroundColor Green
+    }
+    '3' {
+        # ExportCSV
+        $csvPath = Join-Path $OutputDir "MSSQL-Discovery-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+        $exportData | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+        Write-Host "Exported to: $csvPath" -ForegroundColor Green
+    }
+    '4' {
+        # ShowTable
+        $exportData | Format-Table -AutoSize
+    }
+    '5' {
+        # Dashboard
+        $dashPath = Join-Path $OutputDir 'MSSQL-Dashboard.html'
+
+        if (Get-Command -Name 'Export-DynamicDashboardHtml' -ErrorAction SilentlyContinue) {
+            $thresholds = @()
+            if ($activeCounters.Contains('PercentLogUsed')) {
+                $thresholds += @{ Field = 'Percent Log Used'; Warning = 70; Critical = 90 }
+            }
+            if ($activeCounters.Contains('ActiveTransactions')) {
+                $thresholds += @{ Field = 'Active Transactions'; Warning = 50; Critical = 100 }
+            }
+            if ($activeCounters.Contains('LogFlushWaitTime')) {
+                $thresholds += @{ Field = 'Log Flush Wait Time (ms)'; Warning = 50; Critical = 200 }
+            }
+            if ($activeCounters.Contains('LogGrowths')) {
+                $thresholds += @{ Field = 'Log Growths'; Warning = 1; Critical = 5 }
+            }
+            if ($activeCounters.Contains('LogCacheHitRatio')) {
+                $thresholds += @{ Field = 'Log Cache Hit Ratio'; Warning = 90; Critical = 80; Invert = $true }
+            }
+
+            $dashSplat = @{
+                Data         = $exportData
+                OutputPath   = $dashPath
+                ReportTitle  = 'MS SQL Server Database Inventory'
+                CardField    = @('Host', 'Instance')
+                ExportPrefix = 'MSSQL'
+            }
+            if ($thresholds.Count -gt 0) { $dashSplat.ThresholdField = $thresholds }
+
+            Export-DynamicDashboardHtml @dashSplat
+        }
+        else {
+            Write-Warning "No dashboard function available. Exporting as JSON instead."
+            $jsonPath = Join-Path $OutputDir "MSSQL-Discovery-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+            $exportData | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonPath -Encoding UTF8
+            Write-Host "JSON exported: $jsonPath" -ForegroundColor Green
+            break
+        }
+
+        Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
+        Write-Host "  Devices: $($deviceDatabases.Count) | Databases: $($sortedDbKeys.Count) | Counters: $($activeCounters.Count)" -ForegroundColor Gray
+
+        # Copy to WUG NmConsole if available
+        $nmConsolePaths = @(
+            "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole"
+            "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole"
+        )
+        $nmConsolePath = $nmConsolePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($nmConsolePath) {
+            $wugDashDir = Join-Path $nmConsolePath 'dashboards'
+            if (-not (Test-Path $wugDashDir)) { New-Item -ItemType Directory -Path $wugDashDir -Force | Out-Null }
+            $wugDashPath = Join-Path $wugDashDir 'MSSQL-Dashboard.html'
+            try {
+                Copy-Item -Path $dashPath -Destination $wugDashPath -Force
+                Write-Host "Copied to WUG: $wugDashPath" -ForegroundColor Green
+                Write-Host "  Access via WUG web UI: /NmConsole/dashboards/MSSQL-Dashboard.html" -ForegroundColor Cyan
+            }
+            catch {
+                Write-Warning "Could not copy to NmConsole (run as admin?): $_"
+            }
+            Deploy-DashboardWebConfig -Path $wugDashDir
+        }
+    }
+    '6' {
+        Write-Host "No action taken." -ForegroundColor Gray
+    }
+    default {
+        Write-Warning "Invalid choice '$currentChoice'."
+    }
+}
+} # end foreach actionsToRun
+
+Write-Host ""
+Write-Host "=== SQL Server Discovery Complete ===" -ForegroundColor Cyan
+Write-Host ""
+
+# SIG # Begin signature block
+# MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD13hOnq5WTq2mO
+# sdHDJckd8rCTrN4HxlVy60NCnkHejaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
+# DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
+# EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
+# dmljZXMwHhcNMjEwNTI1MDAwMDAwWhcNMjgxMjMxMjM1OTU5WjBWMQswCQYDVQQG
+# EwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMS0wKwYDVQQDEyRTZWN0aWdv
+# IFB1YmxpYyBDb2RlIFNpZ25pbmcgUm9vdCBSNDYwggIiMA0GCSqGSIb3DQEBAQUA
+# A4ICDwAwggIKAoICAQCN55QSIgQkdC7/FiMCkoq2rjaFrEfUI5ErPtx94jGgUW+s
+# hJHjUoq14pbe0IdjJImK/+8Skzt9u7aKvb0Ffyeba2XTpQxpsbxJOZrxbW6q5KCD
+# J9qaDStQ6Utbs7hkNqR+Sj2pcaths3OzPAsM79szV+W+NDfjlxtd/R8SPYIDdub7
+# P2bSlDFp+m2zNKzBenjcklDyZMeqLQSrw2rq4C+np9xu1+j/2iGrQL+57g2extme
+# me/G3h+pDHazJyCh1rr9gOcB0u/rgimVcI3/uxXP/tEPNqIuTzKQdEZrRzUTdwUz
+# T2MuuC3hv2WnBGsY2HH6zAjybYmZELGt2z4s5KoYsMYHAXVn3m3pY2MeNn9pib6q
+# RT5uWl+PoVvLnTCGMOgDs0DGDQ84zWeoU4j6uDBl+m/H5x2xg3RpPqzEaDux5mcz
+# mrYI4IAFSEDu9oJkRqj1c7AGlfJsZZ+/VVscnFcax3hGfHCqlBuCF6yH6bbJDoEc
+# QNYWFyn8XJwYK+pF9e+91WdPKF4F7pBMeufG9ND8+s0+MkYTIDaKBOq3qgdGnA2T
+# OglmmVhcKaO5DKYwODzQRjY1fJy67sPV+Qp2+n4FG0DKkjXp1XrRtX8ArqmQqsV/
+# AZwQsRb8zG4Y3G9i/qZQp7h7uJ0VP/4gDHXIIloTlRmQAOka1cKG8eOO7F/05QID
+# AQABo4IBEjCCAQ4wHwYDVR0jBBgwFoAUoBEKIz6W8Qfs4q8p74Klf9AwpLQwHQYD
+# VR0OBBYEFDLrkpr/NZZILyhAQnAgNpFcF4XmMA4GA1UdDwEB/wQEAwIBhjAPBgNV
+# HRMBAf8EBTADAQH/MBMGA1UdJQQMMAoGCCsGAQUFBwMDMBsGA1UdIAQUMBIwBgYE
+# VR0gADAIBgZngQwBBAEwQwYDVR0fBDwwOjA4oDagNIYyaHR0cDovL2NybC5jb21v
+# ZG9jYS5jb20vQUFBQ2VydGlmaWNhdGVTZXJ2aWNlcy5jcmwwNAYIKwYBBQUHAQEE
+# KDAmMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5jb21vZG9jYS5jb20wDQYJKoZI
+# hvcNAQEMBQADggEBABK/oe+LdJqYRLhpRrWrJAoMpIpnuDqBv0WKfVIHqI0fTiGF
+# OaNrXi0ghr8QuK55O1PNtPvYRL4G2VxjZ9RAFodEhnIq1jIV9RKDwvnhXRFAZ/ZC
+# J3LFI+ICOBpMIOLbAffNRk8monxmwFE2tokCVMf8WPtsAO7+mKYulaEMUykfb9gZ
+# pk+e96wJ6l2CxouvgKe9gUhShDHaMuwV5KZMPWw5c9QLhTkg4IUaaOGnSDip0TYl
+# d8GNGRbFiExmfS9jzpjoad+sPKhdnckcW67Y8y90z7h+9teDnRGWYpquRRPaf9xH
+# +9/DUp/mBlXpnYzyOmJRvOwkDynUWICE5EV7WtgwggWNMIIEdaADAgECAhAOmxiO
+# +dAt5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYD
+# VQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAi
+# BgNVBAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAw
+# MDBaFw0zMTExMDkyMzU5NTlaMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdp
+# Q2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNVBAMTGERp
+# Z2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCC
+# AgoCggIBAL/mkHNo3rvkXUo8MCIwaTPswqclLskhPfKK2FnC4SmnPVirdprNrnsb
+# hA3EMB/zG6Q4FutWxpdtHauyefLKEdLkX9YFPFIPUh/GnhWlfr6fqVcWWVVyr2iT
+# cMKyunWZanMylNEQRBAu34LzB4TmdDttceItDBvuINXJIB1jKS3O7F5OyJP4IWGb
+# NOsFxl7sWxq868nPzaw0QF+xembud8hIqGZXV59UWI4MK7dPpzDZVu7Ke13jrclP
+# XuU15zHL2pNe3I6PgNq2kZhAkHnDeMe2scS1ahg4AxCN2NQ3pC4FfYj1gj4QkXCr
+# VYJBMtfbBHMqbpEBfCFM1LyuGwN1XXhm2ToxRJozQL8I11pJpMLmqaBn3aQnvKFP
+# ObURWBf3JFxGj2T3wWmIdph2PVldQnaHiZdpekjw4KISG2aadMreSx7nDmOu5tTv
+# kpI6nj3cAORFJYm2mkQZK37AlLTSYW3rM9nF30sEAMx9HJXDj/chsrIRt7t/8tWM
+# cCxBYKqxYxhElRp2Yn72gLD76GSmM9GJB+G9t+ZDpBi4pncB4Q+UDCEdslQpJYls
+# 5Q5SUUd0viastkF13nqsX40/ybzTQRESW+UQUOsxxcpyFiIJ33xMdT9j7CFfxCBR
+# a2+xq4aLT8LWRV+dIPyhHsXAj6KxfgommfXkaS+YHS312amyHeUbAgMBAAGjggE6
+# MIIBNjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTs1+OC0nFdZEzfLmc/57qY
+# rhwPTzAfBgNVHSMEGDAWgBRF66Kv9JLLgjEtUYunpyGd823IDzAOBgNVHQ8BAf8E
+# BAMCAYYweQYIKwYBBQUHAQEEbTBrMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5k
+# aWdpY2VydC5jb20wQwYIKwYBBQUHMAKGN2h0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydEFzc3VyZWRJRFJvb3RDQS5jcnQwRQYDVR0fBD4wPDA6oDig
+# NoY0aHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9v
+# dENBLmNybDARBgNVHSAECjAIMAYGBFUdIAAwDQYJKoZIhvcNAQEMBQADggEBAHCg
+# v0NcVec4X6CjdBs9thbX979XB72arKGHLOyFXqkauyL4hxppVCLtpIh3bb0aFPQT
+# SnovLbc47/T/gLn4offyct4kvFIDyE7QKt76LVbP+fT3rDB6mouyXtTP0UNEm0Mh
+# 65ZyoUi0mcudT6cGAxN3J0TU53/oWajwvy8LpunyNDzs9wPHh6jSTEAZNUZqaVSw
+# uKFWjuyk1T3osdz9HNj0d1pcVIxv76FQPfx2CWiEn2/K2yCNNWAcAgPLILCsWKAO
+# QGPFmCLBsln1VWvPJ6tsds5vIy30fnFqI2si/xK4VC0nftg62fC2h5b9W9FcrBjD
+# TZ9ztwGpn1eqXijiuZQwggYaMIIEAqADAgECAhBiHW0MUgGeO5B5FSCJIRwKMA0G
+# CSqGSIb3DQEBDAUAMFYxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExp
+# bWl0ZWQxLTArBgNVBAMTJFNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBSb290
+# IFI0NjAeFw0yMTAzMjIwMDAwMDBaFw0zNjAzMjEyMzU5NTlaMFQxCzAJBgNVBAYT
+# AkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNlY3RpZ28g
+# UHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYwggGiMA0GCSqGSIb3DQEBAQUAA4IB
+# jwAwggGKAoIBgQCbK51T+jU/jmAGQ2rAz/V/9shTUxjIztNsfvxYB5UXeWUzCxEe
+# AEZGbEN4QMgCsJLZUKhWThj/yPqy0iSZhXkZ6Pg2A2NVDgFigOMYzB2OKhdqfWGV
+# oYW3haT29PSTahYkwmMv0b/83nbeECbiMXhSOtbam+/36F09fy1tsB8je/RV0mIk
+# 8XL/tfCK6cPuYHE215wzrK0h1SWHTxPbPuYkRdkP05ZwmRmTnAO5/arnY83jeNzh
+# P06ShdnRqtZlV59+8yv+KIhE5ILMqgOZYAENHNX9SJDm+qxp4VqpB3MV/h53yl41
+# aHU5pledi9lCBbH9JeIkNFICiVHNkRmq4TpxtwfvjsUedyz8rNyfQJy/aOs5b4s+
+# ac7IH60B+Ja7TVM+EKv1WuTGwcLmoU3FpOFMbmPj8pz44MPZ1f9+YEQIQty/NQd/
+# 2yGgW+ufflcZ/ZE9o1M7a5Jnqf2i2/uMSWymR8r2oQBMdlyh2n5HirY4jKnFH/9g
+# Rvd+QOfdRrJZb1sCAwEAAaOCAWQwggFgMB8GA1UdIwQYMBaAFDLrkpr/NZZILyhA
+# QnAgNpFcF4XmMB0GA1UdDgQWBBQPKssghyi47G9IritUpimqF6TNDDAOBgNVHQ8B
+# Af8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggrBgEFBQcD
+# AzAbBgNVHSAEFDASMAYGBFUdIAAwCAYGZ4EMAQQBMEsGA1UdHwREMEIwQKA+oDyG
+# Omh0dHA6Ly9jcmwuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY0NvZGVTaWduaW5n
+# Um9vdFI0Ni5jcmwwewYIKwYBBQUHAQEEbzBtMEYGCCsGAQUFBzAChjpodHRwOi8v
+# Y3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNDb2RlU2lnbmluZ1Jvb3RSNDYu
+# cDdjMCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTANBgkqhkiG
+# 9w0BAQwFAAOCAgEABv+C4XdjNm57oRUgmxP/BP6YdURhw1aVcdGRP4Wh60BAscjW
+# 4HL9hcpkOTz5jUug2oeunbYAowbFC2AKK+cMcXIBD0ZdOaWTsyNyBBsMLHqafvIh
+# rCymlaS98+QpoBCyKppP0OcxYEdU0hpsaqBBIZOtBajjcw5+w/KeFvPYfLF/ldYp
+# mlG+vd0xqlqd099iChnyIMvY5HexjO2AmtsbpVn0OhNcWbWDRF/3sBp6fWXhz7Dc
+# ML4iTAWS+MVXeNLj1lJziVKEoroGs9Mlizg0bUMbOalOhOfCipnx8CaLZeVme5yE
+# Lg09Jlo8BMe80jO37PU8ejfkP9/uPak7VLwELKxAMcJszkyeiaerlphwoKx1uHRz
+# NyE6bxuSKcutisqmKL5OTunAvtONEoteSiabkPVSZ2z76mKnzAfZxCl/3dq3dUNw
+# 4rg3sTCggkHSRqTqlLMS7gjrhTqBmzu1L90Y1KWN/Y5JKdGvspbOrTfOXyXvmPL6
+# E52z1NZJ6ctuMFBQZH3pwWvqURR8AgQdULUvrxjUYbHHj95Ejza63zdrEcxWLDX6
+# xWls/GDnVNueKjWUH3fTv1Y8Wdho698YADR7TNx8X8z2Bev6SivBBOHY+uqiirZt
+# g0y9ShQoPzmCcn63Syatatvx157YK9hlcPmVoa1oDE5/L9Uo2bC5a4CH2RwwggY+
+# MIIEpqADAgECAhAHnODk0RR/hc05c892LTfrMA0GCSqGSIb3DQEBDAUAMFQxCzAJ
+# BgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxKzApBgNVBAMTIlNl
+# Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYwHhcNMjYwMjA5MDAwMDAw
+# WhcNMjkwNDIxMjM1OTU5WjBVMQswCQYDVQQGEwJVUzEUMBIGA1UECAwLQ29ubmVj
+# dGljdXQxFzAVBgNVBAoMDkphc29uIEFsYmVyaW5vMRcwFQYDVQQDDA5KYXNvbiBB
+# bGJlcmlubzCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAPN6aN4B1yYW
+# kI5b5TBj3I0VV/peETrHb6EY4BHGxt8Ap+eT+WpEpJyEtRYPxEmNJL3A38Bkg7mw
+# zPE3/1NK570ZBCuBjSAn4mSDIgIuXZnvyBO9W1OQs5d67MlJLUAEufl18tOr3ST1
+# DeO9gSjQSAE5Nql0QDxPnm93OZBon+Fz3CmE+z3MwAe2h4KdtRAnCqwM+/V7iBdb
+# w+JOxolpx+7RVjGyProTENIG3pe/hKvPb501lf8uBAADLdjZr5ip8vIWbf857Yw1
+# Bu10nVI7HW3eE8Cl5//d1ribHlzTzQLfttW+k+DaFsKZBBL56l4YAlIVRsrOiE1k
+# dHYYx6IGrEA809R7+TZA9DzGqyFiv9qmJAbL4fDwetDeyIq+Oztz1LvEdy8Rcd0J
+# BY+J4S0eDEFIA3X0N8VcLeAwabKb9AjulKXwUeqCJLvN79CJ90UTZb2+I+tamj0d
+# n+IKMEsJ4v4Ggx72sxFr9+6XziodtTg5Luf2xd6+PhhamOxF2px9LObhBLLEMyRs
+# CHZIzVZOFKu9BpHQH7ufGB+Sa80Tli0/6LEyn9+bMYWi2ttn6lLOPThXMiQaooRU
+# q6q2u3+F4SaPlxVFLI7OJVMhar6nW6joBvELTJPmANSMjDSRFDfHRCdGbZsL/keE
+# LJNy+jZctF6VvxQEjFM8/bazu6qYhrA7AgMBAAGjggGJMIIBhTAfBgNVHSMEGDAW
+# gBQPKssghyi47G9IritUpimqF6TNDDAdBgNVHQ4EFgQU6YF0o0D5AVhKHbVocr8G
+# aSIBibAwDgYDVR0PAQH/BAQDAgeAMAwGA1UdEwEB/wQCMAAwEwYDVR0lBAwwCgYI
+# KwYBBQUHAwMwSgYDVR0gBEMwQTA1BgwrBgEEAbIxAQIBAwIwJTAjBggrBgEFBQcC
+# ARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwCAYGZ4EMAQQBMEkGA1UdHwRCMEAw
+# PqA8oDqGOGh0dHA6Ly9jcmwuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY0NvZGVT
+# aWduaW5nQ0FSMzYuY3JsMHkGCCsGAQUFBwEBBG0wazBEBggrBgEFBQcwAoY4aHR0
+# cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljQ29kZVNpZ25pbmdDQVIz
+# Ni5jcnQwIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNlY3RpZ28uY29tMA0GCSqG
+# SIb3DQEBDAUAA4IBgQAEIsm4xnOd/tZMVrKwi3doAXvCwOA/RYQnFJD7R/bSQRu3
+# wXEK4o9SIefye18B/q4fhBkhNAJuEvTQAGfqbbpxow03J5PrDTp1WPCWbXKX8Oz9
+# vGWJFyJxRGftkdzZ57JE00synEMS8XCwLO9P32MyR9Z9URrpiLPJ9rQjfHMb1BUd
+# vaNayomm7aWLAnD+X7jm6o8sNT5An1cwEAob7obWDM6sX93wphwJNBJAstH9Ozs6
+# LwISOX6sKS7CKm9N3Kp8hOUue0ZHAtZdFl6o5u12wy+zzieGEI50fKnN77FfNKFO
+# WKlS6OJwlArcbFegB5K89LcE5iNSmaM3VMB2ADV1FEcjGSHw4lTg1Wx+WMAMdl/7
+# nbvfFxJ9uu5tNiT54B0s+lZO/HztwXYQUczdsFon3pjsNrsk9ZlalBi5SHkIu+F6
+# g7tWiEv3rtVApmJRnLkUr2Xq2a4nbslUCt4jKs5UX4V1nSX8OM++AXoyVGO+iTj7
+# z+pl6XE9Gw/Td6WKKKswgga0MIIEnKADAgECAhANx6xXBf8hmS5AQyIMOkmGMA0G
+# CSqGSIb3DQEBCwUAMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJ
+# bmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNVBAMTGERpZ2lDZXJ0
+# IFRydXN0ZWQgUm9vdCBHNDAeFw0yNTA1MDcwMDAwMDBaFw0zODAxMTQyMzU5NTla
+# MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UE
+# AxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEy
+# NTYgMjAyNSBDQTEwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQC0eDHT
+# CphBcr48RsAcrHXbo0ZodLRRF51NrY0NlLWZloMsVO1DahGPNRcybEKq+RuwOnPh
+# of6pvF4uGjwjqNjfEvUi6wuim5bap+0lgloM2zX4kftn5B1IpYzTqpyFQ/4Bt0mA
+# xAHeHYNnQxqXmRinvuNgxVBdJkf77S2uPoCj7GH8BLuxBG5AvftBdsOECS1UkxBv
+# MgEdgkFiDNYiOTx4OtiFcMSkqTtF2hfQz3zQSku2Ws3IfDReb6e3mmdglTcaarps
+# 0wjUjsZvkgFkriK9tUKJm/s80FiocSk1VYLZlDwFt+cVFBURJg6zMUjZa/zbCclF
+# 83bRVFLeGkuAhHiGPMvSGmhgaTzVyhYn4p0+8y9oHRaQT/aofEnS5xLrfxnGpTXi
+# UOeSLsJygoLPp66bkDX1ZlAeSpQl92QOMeRxykvq6gbylsXQskBBBnGy3tW/AMOM
+# CZIVNSaz7BX8VtYGqLt9MmeOreGPRdtBx3yGOP+rx3rKWDEJlIqLXvJWnY0v5ydP
+# pOjL6s36czwzsucuoKs7Yk/ehb//Wx+5kMqIMRvUBDx6z1ev+7psNOdgJMoiwOrU
+# G2ZdSoQbU2rMkpLiQ6bGRinZbI4OLu9BMIFm1UUl9VnePs6BaaeEWvjJSjNm2qA+
+# sdFUeEY0qVjPKOWug/G6X5uAiynM7Bu2ayBjUwIDAQABo4IBXTCCAVkwEgYDVR0T
+# AQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU729TSunkBnx6yuKQVvYv1Ensy04wHwYD
+# VR0jBBgwFoAU7NfjgtJxXWRM3y5nP+e6mK4cD08wDgYDVR0PAQH/BAQDAgGGMBMG
+# A1UdJQQMMAoGCCsGAQUFBwMIMHcGCCsGAQUFBwEBBGswaTAkBggrBgEFBQcwAYYY
+# aHR0cDovL29jc3AuZGlnaWNlcnQuY29tMEEGCCsGAQUFBzAChjVodHRwOi8vY2Fj
+# ZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNydDBDBgNV
+# HR8EPDA6MDigNqA0hjJodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRU
+# cnVzdGVkUm9vdEc0LmNybDAgBgNVHSAEGTAXMAgGBmeBDAEEAjALBglghkgBhv1s
+# BwEwDQYJKoZIhvcNAQELBQADggIBABfO+xaAHP4HPRF2cTC9vgvItTSmf83Qh8WI
+# GjB/T8ObXAZz8OjuhUxjaaFdleMM0lBryPTQM2qEJPe36zwbSI/mS83afsl3YTj+
+# IQhQE7jU/kXjjytJgnn0hvrV6hqWGd3rLAUt6vJy9lMDPjTLxLgXf9r5nWMQwr8M
+# yb9rEVKChHyfpzee5kH0F8HABBgr0UdqirZ7bowe9Vj2AIMD8liyrukZ2iA/wdG2
+# th9y1IsA0QF8dTXqvcnTmpfeQh35k5zOCPmSNq1UH410ANVko43+Cdmu4y81hjaj
+# V/gxdEkMx1NKU4uHQcKfZxAvBAKqMVuqte69M9J6A47OvgRaPs+2ykgcGV00TYr2
+# Lr3ty9qIijanrUR3anzEwlvzZiiyfTPjLbnFRsjsYg39OlV8cipDoq7+qNNjqFze
+# GxcytL5TTLL4ZaoBdqbhOhZ3ZRDUphPvSRmMThi0vw9vODRzW6AxnJll38F0cuJG
+# 7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+N
+# Jpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckT
+# etiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszW
+# kPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDANBgkqhkiG9w0B
+# AQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/
+# BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYg
+# U0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkwMzIzNTk1OVow
+# YzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQD
+# EzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIw
+# MjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBGrC0Sxp7Q6q5g
+# VrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwBSOeLpvPnZ8ZN
+# +vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/4QhguSssp3qo
+# me7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3K3E0zz09ldQ/
+# /nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROUINDT98oksouT
+# MYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3w6ySSSu+3qU8
+# DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46YceNA0LfNsnqcnp
+# JeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d2sC26/PQPdP5
+# 1ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8xymLnjCbSLZ49
+# kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+AliL7ojTdS5P
+# WPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2bQhpp0IoKRR7Y
+# ufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
+# MB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSMEGDAWgBTvb1NK
+# 6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYI
+# KwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8v
+# b2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRp
+# Z2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVTdGFtcGluZ1JTQTQwOTZT
+# SEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5k
+# aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2
+# U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9
+# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESeY0ByIfjk9iJP
+# 2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FUFqNh+tshgb4O
+# 6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7YMTmqPO9mzskg
+# iC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0ziTN6R3ygQBHMU
+# BaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/QqvXnNb+YkDF
+# kxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlqAcuEVT0cKsb+
+# zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3Y50OHgaY7T/l
+# wd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roancJIFcbojBcxl
+# RcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/ndUlQ05oxYy2
+# zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7IRE2lskKPIJg
+# baP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdCvHlshtjdNXOC
+# IUjsarfNZzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# Y3RpZ28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWdu
+# aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
+# BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
+# AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
+# BCBI/XnoJbUpeCdGzDx/uTeRr/YdkjtZiMgoLA0pWXbC1jANBgkqhkiG9w0BAQEF
+# AASCAgARWYlQRiZIgITSdmvieftcQC+T3YWxzHey/du+k1rNIK+hLU+u3dCz1cW1
+# owifP6TFc3/Yyp9/PmNI/0d3SAooHJ8AQ7OZ7TlzvmawH5LfqkV/5N9pTR0+AzJ5
+# Hh9YbFki7zuxWlcRQf4nW5BTzzcNDZqgjv2WB4wcRe3geG3hNdb4JNcbI0wEsnVf
+# T15DJ/qgQGGYpswJHljIj2glNjedzDF5XfHQi5fifv+sIvqIspQhv7p2AqGmlaQe
+# UA7knHAtTNB8gUrNWTYibxpndHrD/DYDK60d7a9ETV23D9gKRdewJRwpVmdUcxPC
+# QE7ck+plttQXshU3+n0KZWHiWrZPI2PQdkgTUenQ8RjSO0yN6u8fDFrIAXuxFR4H
+# sW4Bg5Yl4w5/8gFMyre6A38anph+vuKJaxkCwKirU5xzDFzM2ww6fexVT1qLUpzk
+# dnmrdOJxpLvABlKmoxnaOTW4oYc/79UEBZJuVjAbCszSt7KU1PhmYUzY4px7Riv+
+# lYif7Sjw5mjaXwKD9nKv9nHEH4eedDc68TnhQCMiCl+Xo+Vbjj+sNhX7PE08paLD
+# jmrhwCb+2TXUan4+2pYQ+fZJPJDKTpDusrU65ZjSdIkRVYjr2aQyncLA1vySctVH
+# 2ci8bB1LOI42uzlkoQcWbRk6HVJByqIY4t63VJ2p/TFYlWN22aGCAyYwggMiBgkq
+# hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
+# aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
+# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
+# dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
+# CSqGSIb3DQEJBTEPFw0yNjA2MjkyMjExMzNaMC8GCSqGSIb3DQEJBDEiBCAuegSA
+# 9+YoAYLm8meCLi3UCgbXmW+R9f04k3DGcu76hTANBgkqhkiG9w0BAQEFAASCAgBW
+# AtOaDuLASFe5eCF0nbSKlOcuS9Dxa6Bi9nW0MpvGX4zBCC1rCfS9DjaO1kKg44rw
+# mGj5YJAYghj9eVg4HSR2/m21sJhfYU1r1GGedOZp+fr4OvHzc5pB7TiJXSjZYuNW
+# EmXK67zUjWNuJ63ZsE/CDUErKnZtOj2zvzkFBIEnD6v8kQpJ57rTbmlidUo5mnKW
+# 9jhu48QCJjU6wdXeGcork18D4374AxqF5OxvBpH5p8zktZDe9qkKqxjGWPkoYVFV
+# kgTvl8tzC+Lf/Tedk55EYqOus1U+j5tzbxinRUz6QlqzWcYPA2FK7NzicQTJRT5J
+# bF1OUkDDf02U5rLCSSRVr9AXh4l7iGqNf2kdIliNj2vaLBwBFwcS2LS7i6jQt9HX
+# O1C109XXppeQ4h29RS5mBicwOPvmozjdcdRNDXWg3l6reuOsV8FOyctfU50l1Wp7
+# /s/rQLMYikfmYBxmeur+4pqvby5pwBV2Z+dvt3kE0nXcwBbRRl0c0cYRiMIPUSQH
+# lthdlGwnBhA+PutF310SP1HrSp46huvGl0N5b7SnzCnKC9N8p/1JaSeysF7JUSL7
+# C+HoTEJ9RFau2E9yovNj14MB0n5HrHTGcARMRmkMISplthdCY3dDJjtairrCykAX
+# msinYxSm0QJ7oV+iC3WsmH/jrxwyPzjEAIctNRz3Iw==
+# SIG # End signature block

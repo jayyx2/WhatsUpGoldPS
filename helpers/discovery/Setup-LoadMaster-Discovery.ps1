@@ -928,18 +928,27 @@ switch ($currentChoice) {
 
         Export-LoadMasterDashboardHtml @dashSplat
 
+        Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
+
         # Copy to WUG NmConsole if available
-        $wugHtmlDir = "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole\dashboards"
-        if (Test-Path $wugHtmlDir) {
-            $wugDashPath = Join-Path $wugHtmlDir 'LoadMaster-Dashboard.html'
-            Copy-Item -Path $dashPath -Destination $wugDashPath -Force
-            Write-Host "  Copied to WUG: $wugDashPath" -ForegroundColor Green
-        }
-        $wugHtmlDir86 = "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole\dashboards"
-        if (Test-Path $wugHtmlDir86) {
-            $wugDashPath = Join-Path $wugHtmlDir86 'LoadMaster-Dashboard.html'
-            Copy-Item -Path $dashPath -Destination $wugDashPath -Force
-            Write-Host "  Copied to WUG: $wugDashPath" -ForegroundColor Green
+        $nmConsolePaths = @(
+            "${env:ProgramFiles(x86)}\Ipswitch\WhatsUp\Html\NmConsole"
+            "${env:ProgramFiles}\Ipswitch\WhatsUp\Html\NmConsole"
+        )
+        $nmConsolePath = $nmConsolePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($nmConsolePath) {
+            $wugDashDir = Join-Path $nmConsolePath 'dashboards'
+            if (-not (Test-Path $wugDashDir)) { New-Item -ItemType Directory -Path $wugDashDir -Force | Out-Null }
+            $wugDashPath = Join-Path $wugDashDir 'LoadMaster-Dashboard.html'
+            try {
+                Copy-Item -Path $dashPath -Destination $wugDashPath -Force
+                Write-Host "  Copied to WUG: $wugDashPath" -ForegroundColor Green
+                Write-Host "  Access via WUG web UI: /NmConsole/dashboards/LoadMaster-Dashboard.html" -ForegroundColor Cyan
+            }
+            catch {
+                Write-Warning "Could not copy to NmConsole (run as admin?): $_"
+            }
+            Deploy-DashboardWebConfig -Path $wugDashDir
         }
     }
 
@@ -955,8 +964,8 @@ Write-Host "Done." -ForegroundColor Green
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBV6Ogy0V19NAdn
-# QSGPjcIxd3zCzPfarnotD3XMl3bF3aCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3Xakk6eECS67Z
+# H7yVjOy7l6sFtO48TYkSSmNGwENn16CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1159,33 +1168,33 @@ Write-Host "Done." -ForegroundColor Green
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAGhXbf48zp8pisRvZeIzH0M07sUHOvzklsLnLBVeq9pTANBgkqhkiG9w0BAQEF
-# AASCAgASaGu7mcBDKDOAqJIMIMCO+ahZHqHhFkfy955u5GUkKOTogLTCAg/Fn9np
-# /X89bCZfjegyghS54OqB64NA+aQaV24utTqWFBwU+TXgGWDlGqffsckXqkMdiFij
-# 0lCSqDKsAIN1C7rVquGynFg4RbovtQv/ZkGJj89RbDetGjWJEqSoqbGBjrlUyAdS
-# NWah/a1QHXnb1FcbH9/fsl4bRu9KUE3kEdQ3NZlhKhG6fyXob7ZTgxcJQ+W7I0pH
-# ycxzGPrAS+ZFJ/8fNHpELRQPzhbJ7C5ld8PlAJriN2YJm7haiNQZ9+ttLK9/cu/m
-# hB97dZx91J1effGU2URvL9RHaiZmgC+/o45NEpXVlgP6jH51U6rJY7W6mbvhjYAK
-# NzAm4YqtRMfOBM6r2iiixqHBv+gW9qMMXyspAx1lYLbF5SxKQ110fqUUpZ0md5U1
-# PBB0By1OITvCKPWMkMabI1igh2uOiiv1NdXsW7neP13e4Xc8umsu39wH8cZ8fA3B
-# 5WfHDaEr+dFmtFowhOiq46PNb2NpWVqG05k1W6i4aINLHllSd6jvtPcUa0N08nWT
-# mduNRiEcNy2qjqrA2NXZciBB6laKwTzs0QOLb2B5zPURMdthFfvC4l5DL6f5GJ0s
-# 4fmyPVvhmD0tOqDSwBVNZT7znb81myZFL6HI9JuUGDYp5YNhG6GCAyYwggMiBgkq
+# BCALTz+6CL+YbWrDK5d0PLU0FZWo9mtxUFwzej7Su9r2wTANBgkqhkiG9w0BAQEF
+# AASCAgAa5TP1u3jNJINkwj1v2QCmhoeMwfuI/LGbSO+feotWLI8u3cLorqUxWBuO
+# 4bKzslv4WC+WTFB0ohd2z95pjXa35UXIicYS8LDLoYjc0vXWNzG0L/ATQedd9Nfs
+# wYmWb3VuPKc8JOiqSalopMbdMx1mR63yu3h1x7uLm0OnczZaxwg2DPahAVRvty85
+# t9y4s3/MMmNhZS+bHg05/QIeMcA0L+YVF8uXYTIrNFwnOcocgx/a2ckJxIh1I/xL
+# NpRmEm3w870tEuO+Ub/ilErfm7gX19j9lUFNWTr3H5EvmDhngX2aiHfGJY3tMeAO
+# rJJTBy1Y4lOcv/85LHq4Qd262h6mY1nLm6LnlAOyHNZQy3b1tOSeLm1k6m/Wl6qX
+# gEX1Ur22s2O2j34XRHieWQg3QfHjmihGc0tS6Ykdlb+WgFTGZVFqzJvlXA0v364O
+# NlpHh5PkUqf9n27zAVXnMu2CTmYTFRPHuNvZYVH7ASj+BubDGe6WEaAfQp8aiMy6
+# e5zkKCSOTSteAWnSm9SRQU9P3N2wKYqryBV4VsE6N+8QQO/W4KVXpuWchFotMm+i
+# FcM4ACL9QPoaVztQT13QTHhn6sKJK2ezcXDBMXkAdnkmlfSnOqGZ09Zhp+cvdRpt
+# yXQMiPgfwmrb2FaTDZDiLTH4JIhLZu5iQPf2YsU8cAaJua0Tk6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjgyMDE2MjhaMC8GCSqGSIb3DQEJBDEiBCBrviiL
-# 1/41ux8UbYVjqHj7Vi1dM80wEQyh993Xg7f0BTANBgkqhkiG9w0BAQEFAASCAgAm
-# GTWuP+Q1VQ3+xmqw08FRPk7llAN47xKJmSd6peA/Mo9+s+lkB6lZJ33hl55XFSn9
-# 5IEiKgsCkr7/+3ZZWYM5uHIGtWU47KrfPBfx0DbIaqpzgb72NAwp8k3YspGdt1Gl
-# ie0TaRCBatRw/2qSOSJK5gZHEmJ1r7lSnG3DAoOCHI/mVs+DsqEqyvtW6VNwFeQu
-# rRKlMw6bxaCDyaWjl9QHBfiaAyEfqNolxAd0r8N2LFQn+N8a6l0oo0c2Up9P/xhP
-# /NCoTorLCUurofDW3KIcP3HmWPEsHAWEoeAe10aQQiRLO/WkK0IEXxdyTc/jvNjL
-# 1kKbhnclau4KTjxU8t3FcNnoDXlR5Bz6te+p/X25Nzvzkgx83zLx+a92S3dUQjaf
-# 6Eh3dfMEnXPBYB1IVEehS35KKBnR8kc1oYsUdWp2RlFsJ6GMqIN4tw0cJcDOXnZG
-# aUwBhzuHHNMf1TkE/xqCVBvFJT07YVBju/Xj/u+Px1rwnOp7d3GATTPyF8qmPMJh
-# tdL+yJrdHuBD4N69Vo0axVBDTiIWpkjeHsy01RDM1oFHOVrNlbBBsyUCUfFJ/e4I
-# /LbCBic2rpEXh5U3aaH06siWy2GrzGI1rQXR+4M6BmocnsY2XWYw0hg5i3wMbhMV
-# PkF2qtZTuvtRGfq3WOGtd3C7ZTybp0VD1KHLInRNag==
+# CSqGSIb3DQEJBTEPFw0yNjA2MzAxMjA1NDNaMC8GCSqGSIb3DQEJBDEiBCAOfctP
+# CjD+GCLHwd+sM9Ng1D4NHwC3iaCAfP77MjxNUDANBgkqhkiG9w0BAQEFAASCAgCx
+# 6Jl6s0UeVjy9N4go3epHN2cT9QgvDmv84i1RmpLyfHcEU1cN/hqdQXW50vQsquHS
+# B6udYnR7NE/EGd45gkeBOiurepzOb0b1/asrvQhpp6osYTg86H6pHJvC+CYqD8h4
+# Xu4qpW26kzyRtRcWfxUen0DNSsiI1qqlNpgI6/jwAdya9rgoC8/QszDw1EdV9NG9
+# wZvurFSGGFktEi51hJzihTWr9EKo1mLX34A3XQlKVMHkIsA9ofm6N1Sh7GK/6Jz/
+# Co8YAV42scoCrDPF37A8OHKVI8zDt++SeeLY8MFVn/QVa4LQLVGJzX6a+PrskqSa
+# BxnlhhStngNHRsXUFD92pFgFK6lZUiefIUT3/O1J3ZMtP3yMTfDl2O65nwPFrxeL
+# SvobwM3VwHKES3vDQFx8FP2dFwqSfa3lO85/Ee+c45u6R7Uox26GbX3WkEMedpUm
+# QsBpHRWaVRrNDa1k01c/A+3GvBkLPVuv3n46XpclGeTeQc8MlnUpOSFvC/UzHjQv
+# YloPovHnqW098Rm+/GdWuOhlrXmA/tCw2x7PFpUYfq/R/L8CZt3G510ugupco0BA
+# twuBJJa9YJkDMeS29KOeAaUVi0XYZAlDfaL6KMkYm+kS1NTaVLihaWc6eJKQWhvW
+# xGkr1rF6loG9r0QJGGNV2gsjAR1+u+pihDxv30QPKg==
 # SIG # End signature block

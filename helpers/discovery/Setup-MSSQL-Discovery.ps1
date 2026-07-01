@@ -65,6 +65,16 @@
     LogFlushWaitsPersec, ActiveTransactions, DataFilesSizeKB, LogFileSizeKB,
     LogFileUsedSizeKB, PercentLogUsed.
 
+.PARAMETER IncludeInstanceCounter
+    Array of instance-level (non per-database) counter names or category names.
+    These monitor SQL Server engine health at the instance level via additional
+    WMI performance classes (Buffer Manager, SQL Statistics, Locks, etc.).
+    Specify individual counter names, category names to include all counters in
+    that category, or 'All' for everything.
+    Categories: BufferManager, SQLStatistics, GeneralStatistics, MemoryManager,
+    AccessMethods, Locks, Latches.
+    Example counters: PageLifeExpectancy, BatchRequestsPersec, NumberOfDeadlocksPersec.
+
 .PARAMETER PollingIntervalMinutes
     Polling interval for assigned monitors. Default: 5.
 
@@ -122,6 +132,23 @@
 
     Show what monitors would be created without making changes.
 
+.EXAMPLE
+    .\Setup-MSSQL-Discovery.ps1 -DeviceGroupSearch 'Windows' -IncludeInstanceCounter All -Action Dashboard
+
+    Discover all instance-level counters (Buffer Manager, SQL Statistics, Locks, etc.)
+    across devices in the 'Windows' group and generate a performance dashboard.
+
+.EXAMPLE
+    .\Setup-MSSQL-Discovery.ps1 -Target '192.168.74.74' -IncludeCounter All -IncludeInstanceCounter BufferManager,Locks -Action DashboardAndPush
+
+    Discover all database counters plus Buffer Manager and Locks instance counters,
+    generate dashboards, and push all monitors to WUG.
+
+.EXAMPLE
+    .\Setup-MSSQL-Discovery.ps1 -DeviceGroupSearch 'SQL Servers' -IncludeInstanceCounter PageLifeExpectancy,ProcessesBlocked,NumberOfDeadlocksPersec -Action PushToWUG
+
+    Push only specific high-value instance counters as WUG monitors.
+
 .NOTES
     Author: Jason Alberino (jason@wug.ninja)
     Requires: WhatsUpGoldPS module, PowerShell 5.1+
@@ -147,6 +174,20 @@ param(
                  'LogFilesUsedSizeKB', 'PercentLogUsed', 'LogGrowths',
                  'LogTruncations', 'LogCacheHitRatio', 'LogShrinks')]
     [string[]]$IncludeCounter,
+
+    [ValidateSet('All',
+                 'BufferManager', 'SQLStatistics', 'GeneralStatistics', 'MemoryManager',
+                 'AccessMethods', 'Locks', 'Latches',
+                 'BufferCacheHitRatio', 'PageLifeExpectancy', 'LazyWritesPersec',
+                 'CheckpointPagesPersec', 'PageReadsPersec', 'PageWritesPersec', 'DatabasePages',
+                 'BatchRequestsPersec', 'SQLCompilationsPersec', 'SQLReCompilationsPersec',
+                 'UserConnections', 'ProcessesBlocked', 'LoginsPersec', 'LogoutsPersec',
+                 'TotalServerMemoryKB', 'TargetServerMemoryKB', 'MemoryGrantsPending',
+                 'FullScansPersec', 'IndexSearchesPersec', 'PageSplitsPersec', 'ForwardedRecordsPersec',
+                 'NumberOfDeadlocksPersec', 'LockWaitsPersec', 'LockTimeoutsPersec',
+                 'LockRequestsPersec', 'AverageLockWaitTimeMs',
+                 'LatchWaitsPersec', 'AverageLatchWaitTimeMs')]
+    [string[]]$IncludeInstanceCounter,
 
     [ValidateRange(1, 1440)]
     [int]$PollingIntervalMinutes = 5,
@@ -232,7 +273,93 @@ else {
     }
 }
 
-if ($activeCounters.Count -eq 0) {
+# =============================================================================
+# Configuration: Instance-level counter definitions (not per-database)
+# =============================================================================
+# Category maps to a WMI performance class (e.g. SQLServerBufferManager)
+# Each counter belongs to a category and specifies the WMI property,
+# the Windows Performance Counter name (for WUG), and a display label.
+$script:InstanceCounterCategories = [ordered]@{
+    BufferManager     = @{ WmiClassSuffix = 'BufferManager';     PerfObjectName = 'Buffer Manager';     HasInstances = $false }
+    SQLStatistics     = @{ WmiClassSuffix = 'SQLStatistics';     PerfObjectName = 'SQL Statistics';     HasInstances = $false }
+    GeneralStatistics = @{ WmiClassSuffix = 'GeneralStatistics'; PerfObjectName = 'General Statistics'; HasInstances = $false }
+    MemoryManager     = @{ WmiClassSuffix = 'MemoryManager';     PerfObjectName = 'Memory Manager';     HasInstances = $false }
+    AccessMethods     = @{ WmiClassSuffix = 'AccessMethods';     PerfObjectName = 'Access Methods';     HasInstances = $false }
+    Locks             = @{ WmiClassSuffix = 'Locks';             PerfObjectName = 'Locks';              HasInstances = $true; DefaultInstance = '_Total' }
+    Latches           = @{ WmiClassSuffix = 'Latches';           PerfObjectName = 'Latches';            HasInstances = $false }
+}
+
+$script:InstanceCounterDefinitions = [ordered]@{
+    # Buffer Manager -- memory pressure indicators
+    BufferCacheHitRatio   = @{ Category = 'BufferManager'; Property = 'Buffercachehitratio';    PerfCounter = 'Buffer cache hit ratio';    Label = 'Buffer Cache Hit Ratio (%)' }
+    PageLifeExpectancy    = @{ Category = 'BufferManager'; Property = 'Pagelifeexpectancy';     PerfCounter = 'Page life expectancy';      Label = 'Page Life Expectancy (s)' }
+    LazyWritesPersec      = @{ Category = 'BufferManager'; Property = 'LazywritesPersec';       PerfCounter = 'Lazy writes/sec';           Label = 'Lazy Writes/sec' }
+    CheckpointPagesPersec = @{ Category = 'BufferManager'; Property = 'CheckpointpagesPersec';  PerfCounter = 'Checkpoint pages/sec';      Label = 'Checkpoint Pages/sec' }
+    PageReadsPersec       = @{ Category = 'BufferManager'; Property = 'PagereadsPersec';        PerfCounter = 'Page reads/sec';            Label = 'Page Reads/sec' }
+    PageWritesPersec      = @{ Category = 'BufferManager'; Property = 'PagewritesPersec';       PerfCounter = 'Page writes/sec';           Label = 'Page Writes/sec' }
+    DatabasePages         = @{ Category = 'BufferManager'; Property = 'Databasepages';          PerfCounter = 'Database pages';            Label = 'Database Pages' }
+    # SQL Statistics -- workload volume
+    BatchRequestsPersec     = @{ Category = 'SQLStatistics'; Property = 'BatchRequestsPersec';    PerfCounter = 'Batch Requests/sec';        Label = 'Batch Requests/sec' }
+    SQLCompilationsPersec   = @{ Category = 'SQLStatistics'; Property = 'SQLCompilationsPersec';  PerfCounter = 'SQL Compilations/sec';      Label = 'SQL Compilations/sec' }
+    SQLReCompilationsPersec = @{ Category = 'SQLStatistics'; Property = 'SQLReCompilationsPersec'; PerfCounter = 'SQL Re-Compilations/sec';  Label = 'SQL Re-Compilations/sec' }
+    # General Statistics -- connections and blocking
+    UserConnections  = @{ Category = 'GeneralStatistics'; Property = 'UserConnections';  PerfCounter = 'User Connections';  Label = 'User Connections' }
+    ProcessesBlocked = @{ Category = 'GeneralStatistics'; Property = 'ProcessesBlocked'; PerfCounter = 'Processes blocked'; Label = 'Processes Blocked' }
+    LoginsPersec     = @{ Category = 'GeneralStatistics'; Property = 'LoginsPersec';     PerfCounter = 'Logins/sec';        Label = 'Logins/sec' }
+    LogoutsPersec    = @{ Category = 'GeneralStatistics'; Property = 'LogoutsPersec';    PerfCounter = 'Logouts/sec';       Label = 'Logouts/sec' }
+    # Memory Manager -- SQL Server memory allocation
+    TotalServerMemoryKB  = @{ Category = 'MemoryManager'; Property = 'TotalServerMemoryKB';   PerfCounter = 'Total Server Memory (KB)';  Label = 'Total Server Memory (KB)' }
+    TargetServerMemoryKB = @{ Category = 'MemoryManager'; Property = 'TargetServerMemoryKB';  PerfCounter = 'Target Server Memory (KB)'; Label = 'Target Server Memory (KB)' }
+    MemoryGrantsPending  = @{ Category = 'MemoryManager'; Property = 'MemoryGrantsPending';   PerfCounter = 'Memory Grants Pending';     Label = 'Memory Grants Pending' }
+    # Access Methods -- index and scan efficiency
+    FullScansPersec        = @{ Category = 'AccessMethods'; Property = 'FullScansPersec';        PerfCounter = 'Full Scans/sec';        Label = 'Full Scans/sec' }
+    IndexSearchesPersec    = @{ Category = 'AccessMethods'; Property = 'IndexSearchesPersec';    PerfCounter = 'Index Searches/sec';    Label = 'Index Searches/sec' }
+    PageSplitsPersec       = @{ Category = 'AccessMethods'; Property = 'PageSplitsPersec';       PerfCounter = 'Page Splits/sec';       Label = 'Page Splits/sec' }
+    ForwardedRecordsPersec = @{ Category = 'AccessMethods'; Property = 'ForwardedRecordsPersec'; PerfCounter = 'Forwarded Records/sec'; Label = 'Forwarded Records/sec' }
+    # Locks -- concurrency and deadlocks (_Total instance)
+    NumberOfDeadlocksPersec = @{ Category = 'Locks'; Property = 'NumberofDeadlocksPersec'; PerfCounter = 'Number of Deadlocks/sec'; Label = 'Deadlocks/sec' }
+    LockWaitsPersec         = @{ Category = 'Locks'; Property = 'LockWaitsPersec';         PerfCounter = 'Lock Waits/sec';          Label = 'Lock Waits/sec' }
+    LockTimeoutsPersec      = @{ Category = 'Locks'; Property = 'LockTimeoutsPersec';      PerfCounter = 'Lock Timeouts/sec';       Label = 'Lock Timeouts/sec' }
+    LockRequestsPersec      = @{ Category = 'Locks'; Property = 'LockRequestsPersec';      PerfCounter = 'Lock Requests/sec';       Label = 'Lock Requests/sec' }
+    AverageLockWaitTimeMs   = @{ Category = 'Locks'; Property = 'AverageWaitTimems';       PerfCounter = 'Average Wait Time (ms)';  Label = 'Avg Lock Wait Time (ms)' }
+    # Latches -- internal contention
+    LatchWaitsPersec       = @{ Category = 'Latches'; Property = 'LatchWaitsPersec';       PerfCounter = 'Latch Waits/sec';               Label = 'Latch Waits/sec' }
+    AverageLatchWaitTimeMs = @{ Category = 'Latches'; Property = 'AverageLatchWaitTimems'; PerfCounter = 'Average Latch Wait Time (ms)';  Label = 'Avg Latch Wait Time (ms)' }
+}
+
+# Resolve active instance counters from -IncludeInstanceCounter parameter
+$activeInstanceCounters = [ordered]@{}
+if ($IncludeInstanceCounter) {
+    if ($IncludeInstanceCounter -contains 'All') {
+        $activeInstanceCounters = $script:InstanceCounterDefinitions
+    }
+    else {
+        foreach ($key in $IncludeInstanceCounter) {
+            # Check if it is a category name -- expand to all counters in that category
+            if ($script:InstanceCounterCategories.Contains($key)) {
+                foreach ($ck in $script:InstanceCounterDefinitions.Keys) {
+                    if ($script:InstanceCounterDefinitions[$ck].Category -eq $key) {
+                        $activeInstanceCounters[$ck] = $script:InstanceCounterDefinitions[$ck]
+                    }
+                }
+            }
+            elseif ($script:InstanceCounterDefinitions.Contains($key)) {
+                $activeInstanceCounters[$key] = $script:InstanceCounterDefinitions[$key]
+            }
+        }
+    }
+}
+
+# Determine which WMI categories we actually need to query
+$activeInstanceCategories = [ordered]@{}
+foreach ($ck in $activeInstanceCounters.Keys) {
+    $cat = $activeInstanceCounters[$ck].Category
+    if (-not $activeInstanceCategories.Contains($cat)) {
+        $activeInstanceCategories[$cat] = $script:InstanceCounterCategories[$cat]
+    }
+}
+
+if ($activeCounters.Count -eq 0 -and $activeInstanceCounters.Count -eq 0) {
     Write-Error "No valid counters selected. Exiting."
     return
 }
@@ -448,6 +575,11 @@ $deviceInfo = @{}         # deviceId -> @{ Name; IP }
 $deviceDbStats = @{}      # deviceId -> @{ "Instance\DB" -> @{ CounterKey = value; ... } }
 $instanceWmiClassMap = @{} # "InstanceName" -> WMI class name (for monitor creation)
 
+# Instance-level counter data structures
+$deviceInstances = @{}     # deviceId -> @( @{ Instance='MSSQLSERVER' }, ... )
+$allInstanceKeys = @{}     # "InstanceName" -> $true (dedup)
+$deviceInstanceStats = @{} # deviceId -> @{ "InstanceName" -> @{ Category -> @{ CounterKey = value } } }
+
 $scanIndex = 0
 foreach ($dev in $devices) {
     $scanIndex++
@@ -598,6 +730,72 @@ foreach ($dev in $devices) {
                 Write-Host "    No databases found after filtering." -ForegroundColor Yellow
             }
 
+            # --- Step 2c: Query instance-level performance counters ---
+            if ($activeInstanceCounters.Count -gt 0) {
+                $devInstanceEntries = @()
+                foreach ($instanceName in $filteredInstances) {
+                    $allInstanceKeys[$instanceName] = $true
+                    $devInstanceEntries += @{ Instance = $instanceName }
+
+                    if (-not $deviceInstanceStats.ContainsKey($devId)) {
+                        $deviceInstanceStats[$devId] = @{}
+                    }
+                    if (-not $deviceInstanceStats[$devId].ContainsKey($instanceName)) {
+                        $deviceInstanceStats[$devId][$instanceName] = [ordered]@{}
+                    }
+
+                    foreach ($catName in $activeInstanceCategories.Keys) {
+                        $catDef = $activeInstanceCategories[$catName]
+                        $suffix = $catDef.WmiClassSuffix
+
+                        # Build WMI class name for this category
+                        if ($instanceName -eq 'MSSQLSERVER') {
+                            $catWmiClass = "Win32_PerfFormattedData_MSSQLSERVER_SQLServer$suffix"
+                        }
+                        else {
+                            $catWmiClass = "Win32_PerfFormattedData_MSSQL${instanceName}_MSSQL${instanceName}$suffix"
+                        }
+
+                        try {
+                            $catQuery = "Select * from $catWmiClass"
+                            if ($catDef.HasInstances) {
+                                $defInst = $catDef.DefaultInstance
+                                $catResult = Get-WmiObject -Query $catQuery @wmiSplat |
+                                    Where-Object { $_.Name -eq $defInst } | Select-Object -First 1
+                            }
+                            else {
+                                $catResult = Get-WmiObject -Query $catQuery @wmiSplat | Select-Object -First 1
+                            }
+
+                            if ($catResult) {
+                                foreach ($ck in $activeInstanceCounters.Keys) {
+                                    $cDef = $activeInstanceCounters[$ck]
+                                    if ($cDef.Category -ne $catName) { continue }
+                                    $val = $catResult.($cDef.Property)
+                                    if ($null -ne $val) {
+                                        $deviceInstanceStats[$devId][$instanceName][$ck] = [double]$val
+                                    }
+                                }
+                            }
+                        }
+                        catch {
+                            Write-Verbose "    Could not query $catWmiClass on ${devIP}: $($_.Exception.Message)"
+                        }
+                    }
+                }
+
+                if ($devInstanceEntries.Count -gt 0) {
+                    $deviceInstances[$devId] = $devInstanceEntries
+                    $instCounterCount = 0
+                    if ($deviceInstanceStats.ContainsKey($devId)) {
+                        foreach ($iKey in $deviceInstanceStats[$devId].Keys) {
+                            $instCounterCount += $deviceInstanceStats[$devId][$iKey].Count
+                        }
+                    }
+                    Write-Host "    Instance counters collected: $instCounterCount value(s)" -ForegroundColor Green
+                }
+            }
+
             $scanSuccess = $true
             break
         }
@@ -625,29 +823,39 @@ foreach ($dev in $devices) {
 
 Write-Progress -Activity "Scanning SQL Server instances via WMI" -Completed
 
-if ($deviceDatabases.Count -eq 0) {
-    Write-Warning "No SQL Server databases discovered on any device. Nothing to do."
+if ($deviceDatabases.Count -eq 0 -and $deviceInstances.Count -eq 0) {
+    Write-Warning "No SQL Server databases or instances discovered on any device. Nothing to do."
     return
 }
 
 $sortedDbKeys = @($allDbKeys.Keys | Sort-Object)
+$sortedInstanceKeys = @($allInstanceKeys.Keys | Sort-Object)
 
 Write-Host ""
 Write-Host "--- Discovery Summary ---" -ForegroundColor Cyan
 Write-Host "  Devices scanned:        $($devices.Count)" -ForegroundColor White
-Write-Host "  Devices with SQL:       $($deviceDatabases.Count)" -ForegroundColor White
-Write-Host "  Unique instance\db:     $($sortedDbKeys.Count)" -ForegroundColor White
-Write-Host "  Counters per database:  $($activeCounters.Count)" -ForegroundColor White
+$sqlDeviceCount = ($deviceDatabases.Keys + $deviceInstances.Keys) | Sort-Object -Unique
+Write-Host "  Devices with SQL:       $(@($sqlDeviceCount).Count)" -ForegroundColor White
+if ($activeCounters.Count -gt 0) {
+    Write-Host "  Unique instance\db:     $($sortedDbKeys.Count)" -ForegroundColor White
+    Write-Host "  Counters per database:  $($activeCounters.Count)" -ForegroundColor White
+}
+if ($activeInstanceCounters.Count -gt 0) {
+    Write-Host "  SQL instances found:    $($sortedInstanceKeys.Count)" -ForegroundColor White
+    Write-Host "  Instance-level counters: $($activeInstanceCounters.Count)" -ForegroundColor White
+}
 Write-Host ""
 
 # Show per-device breakdown
-Write-Host "  Per-device database map:" -ForegroundColor White
-foreach ($devId in ($deviceDatabases.Keys | Sort-Object)) {
-    $info = $deviceInfo[$devId]
-    $dbs = ($deviceDatabases[$devId] | ForEach-Object { "$($_.Instance)\$($_.Database)" }) -join ', '
-    Write-Host "    $($info.Name) ($($info.IP)): $dbs" -ForegroundColor Gray
+if ($deviceDatabases.Count -gt 0) {
+    Write-Host "  Per-device database map:" -ForegroundColor White
+    foreach ($devId in ($deviceDatabases.Keys | Sort-Object)) {
+        $info = $deviceInfo[$devId]
+        $dbs = ($deviceDatabases[$devId] | ForEach-Object { "$($_.Instance)\$($_.Database)" }) -join ', '
+        Write-Host "    $($info.Name) ($($info.IP)): $dbs" -ForegroundColor Gray
+    }
+    Write-Host ""
 }
-Write-Host ""
 
 $totalMonitors = $sortedDbKeys.Count * $activeCounters.Count
 $totalAssignments = 0
@@ -655,24 +863,57 @@ foreach ($devId in $deviceDatabases.Keys) {
     $totalAssignments += $deviceDatabases[$devId].Count * $activeCounters.Count
 }
 
+# Instance-level monitor totals
+$totalInstanceMonitors = $sortedInstanceKeys.Count * $activeInstanceCounters.Count
+$totalInstanceAssignments = 0
+foreach ($devId in $deviceInstances.Keys) {
+    $totalInstanceAssignments += $deviceInstances[$devId].Count * $activeInstanceCounters.Count
+}
+
+$totalMonitors += $totalInstanceMonitors
+$totalAssignments += $totalInstanceAssignments
+
 Write-Host "  Monitors to create (library):  up to $totalMonitors" -ForegroundColor White
 Write-Host "  Assignments to make (devices): up to $totalAssignments" -ForegroundColor White
+if ($activeInstanceCounters.Count -gt 0) {
+    Write-Host "    (database-level: $($sortedDbKeys.Count * $activeCounters.Count) monitors, instance-level: $totalInstanceMonitors monitors)" -ForegroundColor Gray
+}
 Write-Host ""
 
 if ($DryRun) {
     Write-Host "[DRY RUN] Listing planned monitors:" -ForegroundColor Yellow
     Write-Host ""
-    foreach ($dbKey in $sortedDbKeys) {
-        foreach ($counterKey in $activeCounters.Keys) {
-            $def = $activeCounters[$counterKey]
-            $monName = "${NamePrefix} - ${dbKey} - $($def.Label)"
-            $assignTo = @()
-            foreach ($devId in $deviceDatabases.Keys) {
-                $match = $deviceDatabases[$devId] | Where-Object { $_.DbKey -eq $dbKey }
-                if ($match) { $assignTo += "$($deviceInfo[$devId].Name)(#$devId)" }
+    if ($activeCounters.Count -gt 0) {
+        Write-Host "  --- Database-level monitors ---" -ForegroundColor Cyan
+        foreach ($dbKey in $sortedDbKeys) {
+            foreach ($counterKey in $activeCounters.Keys) {
+                $def = $activeCounters[$counterKey]
+                $monName = "${NamePrefix} - ${dbKey} - $($def.Label)"
+                $assignTo = @()
+                foreach ($devId in $deviceDatabases.Keys) {
+                    $match = $deviceDatabases[$devId] | Where-Object { $_.DbKey -eq $dbKey }
+                    if ($match) { $assignTo += "$($deviceInfo[$devId].Name)(#$devId)" }
+                }
+                Write-Host "  [CREATE] $monName" -ForegroundColor Gray
+                Write-Host "           Assign to: $($assignTo -join ', ')" -ForegroundColor DarkGray
             }
-            Write-Host "  [CREATE] $monName" -ForegroundColor Gray
-            Write-Host "           Assign to: $($assignTo -join ', ')" -ForegroundColor DarkGray
+        }
+    }
+    if ($activeInstanceCounters.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  --- Instance-level monitors ---" -ForegroundColor Cyan
+        foreach ($instKey in $sortedInstanceKeys) {
+            foreach ($counterKey in $activeInstanceCounters.Keys) {
+                $def = $activeInstanceCounters[$counterKey]
+                $monName = "${NamePrefix} - ${instKey} - $($def.Label)"
+                $assignTo = @()
+                foreach ($devId in $deviceInstances.Keys) {
+                    $match = $deviceInstances[$devId] | Where-Object { $_.Instance -eq $instKey }
+                    if ($match) { $assignTo += "$($deviceInfo[$devId].Name)(#$devId)" }
+                }
+                Write-Host "  [CREATE] $monName" -ForegroundColor Gray
+                Write-Host "           Assign to: $($assignTo -join ', ')" -ForegroundColor DarkGray
+            }
         }
     }
     Write-Host ""
@@ -766,6 +1007,36 @@ foreach ($devId in ($deviceDatabases.Keys | Sort-Object)) {
     }
 }
 
+# Build instance-level export data
+$instanceExportData = @()
+foreach ($devId in ($deviceInstances.Keys | Sort-Object)) {
+    $info = $deviceInfo[$devId]
+    foreach ($instEntry in $deviceInstances[$devId]) {
+        $instName = $instEntry.Instance
+        $row = [ordered]@{
+            DeviceId = $devId
+            Host     = $info.Name
+            IP       = $info.IP
+            Instance = $instName
+            Type     = 'Instance'
+        }
+        $snap = $null
+        if ($deviceInstanceStats.ContainsKey($devId) -and $deviceInstanceStats[$devId].ContainsKey($instName)) {
+            $snap = $deviceInstanceStats[$devId][$instName]
+        }
+        foreach ($ck in $activeInstanceCounters.Keys) {
+            $label = $activeInstanceCounters[$ck].Label
+            if ($snap -and $snap.Contains($ck)) {
+                $row[$label] = $snap[$ck]
+            }
+            else {
+                $row[$label] = $null
+            }
+        }
+        $instanceExportData += [PSCustomObject]$row
+    }
+}
+
 foreach ($currentChoice in $actionsToRun) {
 switch ($currentChoice) {
     '1' {
@@ -816,7 +1087,7 @@ switch ($currentChoice) {
             $monitorIdCache[$mon.Name] = if ($mon.MonitorId) { $mon.MonitorId } else { $mon.Id }
         }
 
-        $totalSteps = $sortedDbKeys.Count * $activeCounters.Count
+        $totalSteps = ($sortedDbKeys.Count * $activeCounters.Count) + ($sortedInstanceKeys.Count * $activeInstanceCounters.Count)
         $stepIndex  = 0
 
         foreach ($dbKey in $sortedDbKeys) {
@@ -930,6 +1201,125 @@ switch ($currentChoice) {
             }
         }
 
+        # --- Create and assign instance-level monitors ---
+        foreach ($instKey in $sortedInstanceKeys) {
+            foreach ($counterKey in $activeInstanceCounters.Keys) {
+                $stepIndex++
+                $def     = $activeInstanceCounters[$counterKey]
+                $catName = $def.Category
+                $catDef  = $script:InstanceCounterCategories[$catName]
+                $monName = "${NamePrefix} - ${instKey} - $($def.Label)"
+
+                # Build the PerfObject path for WUG
+                if ($instKey -eq 'MSSQLSERVER') {
+                    $instPerfObject = "SQLServer:$($catDef.PerfObjectName)"
+                }
+                else {
+                    $instPerfObject = 'MSSQL$' + $instKey + ':' + $catDef.PerfObjectName
+                }
+
+                # Determine WUG instance name (empty for non-instanced objects)
+                if ($catDef.HasInstances) {
+                    $wugInstanceName = $catDef.DefaultInstance
+                }
+                else {
+                    $wugInstanceName = ''
+                }
+
+                $pct = [Math]::Round(($stepIndex / $totalSteps) * 100)
+                Write-Progress -Activity "Creating SQL Server monitors" `
+                    -Status "$monName [$stepIndex of $totalSteps]" `
+                    -PercentComplete $pct
+
+                if ($monitorIdCache.ContainsKey($monName)) {
+                    $libId = $monitorIdCache[$monName]
+                    Write-Verbose "Monitor '$monName' already exists (ID: $libId). Skipping creation."
+                    $skippedCount++
+                }
+                else {
+                    Write-Host "  Creating: $monName" -ForegroundColor White
+                    $displayLabel = if ($wugInstanceName) { "$($def.PerfCounter) ($wugInstanceName)" } else { $def.PerfCounter }
+                    try {
+                        $result = Add-WUGPerformanceMonitor `
+                            -Type WmiFormatted `
+                            -Name $monName `
+                            -WmiFormattedRelativePath $instPerfObject `
+                            -WmiFormattedPropertyName $def.PerfCounter `
+                            -WmiFormattedDisplayname $displayLabel `
+                            -WmiFormattedInstanceName $wugInstanceName `
+                            -WmiFormattedTimeout $WmiTimeout
+
+                        if ($result -and $result.data -and $result.data.idMap) {
+                            $libId = $result.data.idMap.resultId
+                        }
+                        elseif ($result -match 'library ID:\s*(\d+)') {
+                            $libId = $Matches[1]
+                        }
+                        else {
+                            $refetch = @(Get-WUGPerformanceMonitor -Search $monName -View 'info')
+                            $matchMon = $refetch | Where-Object { $_.Name -eq $monName } | Select-Object -First 1
+                            if ($matchMon) {
+                                $libId = if ($matchMon.MonitorId) { $matchMon.MonitorId } else { $matchMon.Id }
+                            }
+                            else {
+                                Write-Warning "    Could not determine library ID for '$monName'. Skipping."
+                                $failedCount++
+                                continue
+                            }
+                        }
+
+                        $monitorIdCache[$monName] = $libId
+                        $createdCount++
+                        Write-Host "    Created (ID: $libId)" -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Error "    Failed to create '$monName': $_"
+                        $failedCount++
+                        continue
+                    }
+                }
+
+                # Assign to devices that have this SQL instance
+                $libId = $monitorIdCache[$monName]
+                foreach ($devId in $deviceInstances.Keys) {
+                    $instMatch = $deviceInstances[$devId] | Where-Object { $_.Instance -eq $instKey }
+                    if ($instMatch) {
+                        $info = $deviceInfo[$devId]
+
+                        if ($deviceExistingMonitors.ContainsKey($devId) -and $deviceExistingMonitors[$devId].ContainsKey("$libId")) {
+                            Write-Verbose "  '$monName' already assigned to $($info.Name). Skipping."
+                            $alreadyAssignedCount++
+                            continue
+                        }
+
+                        Write-Verbose "  Assigning '$monName' to $($info.Name) (ID: $devId)"
+                        try {
+                            Add-WUGPerformanceMonitorToDevice `
+                                -DeviceId $devId `
+                                -MonitorId $libId `
+                                -PollingIntervalMinutes $PollingIntervalMinutes `
+                                -Enabled "true"
+                            $assignedCount++
+                            if ($deviceExistingMonitors.ContainsKey($devId)) {
+                                $deviceExistingMonitors[$devId]["$libId"] = $true
+                            }
+                        }
+                        catch {
+                            $errMsg = $_.Exception.Message
+                            if ($errMsg -match '409|already assigned|already exists|duplicate') {
+                                Write-Host "    Already assigned: $monName -> $($info.Name)" -ForegroundColor DarkGray
+                                $alreadyAssignedCount++
+                            }
+                            else {
+                                Write-Warning "    Failed to assign '$monName' to $($info.Name): $errMsg"
+                                $failedCount++
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Write-Progress -Activity "Creating SQL Server monitors" -Completed
 
         Write-Host ""
@@ -944,7 +1334,8 @@ switch ($currentChoice) {
     '2' {
         # ExportJSON
         $jsonPath = Join-Path $OutputDir "MSSQL-Discovery-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
-        $exportData | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonPath -Encoding UTF8
+        $allExport = @{ Databases = $exportData; Instances = $instanceExportData }
+        $allExport | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonPath -Encoding UTF8
         Write-Host "Exported to: $jsonPath" -ForegroundColor Green
     }
     '3' {
@@ -952,10 +1343,22 @@ switch ($currentChoice) {
         $csvPath = Join-Path $OutputDir "MSSQL-Discovery-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
         $exportData | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
         Write-Host "Exported to: $csvPath" -ForegroundColor Green
+        if ($instanceExportData.Count -gt 0) {
+            $instCsvPath = Join-Path $OutputDir "MSSQL-InstanceCounters-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+            $instanceExportData | Export-Csv -Path $instCsvPath -NoTypeInformation -Encoding UTF8
+            Write-Host "Instance counters exported to: $instCsvPath" -ForegroundColor Green
+        }
     }
     '4' {
         # ShowTable
-        $exportData | Format-Table -AutoSize
+        if ($exportData.Count -gt 0) {
+            Write-Host "--- Database Counters ---" -ForegroundColor Cyan
+            $exportData | Format-Table -AutoSize
+        }
+        if ($instanceExportData.Count -gt 0) {
+            Write-Host "--- Instance Counters ---" -ForegroundColor Cyan
+            $instanceExportData | Format-Table -AutoSize
+        }
     }
     '5' {
         # Dashboard
@@ -989,6 +1392,42 @@ switch ($currentChoice) {
             if ($thresholds.Count -gt 0) { $dashSplat.ThresholdField = $thresholds }
 
             Export-DynamicDashboardHtml @dashSplat
+
+            # Generate instance-level dashboard if we have instance counters
+            if ($instanceExportData.Count -gt 0) {
+                $instDashPath = Join-Path $OutputDir 'MSSQL-Instance-Dashboard.html'
+                $instThresholds = @()
+                if ($activeInstanceCounters.Contains('PageLifeExpectancy')) {
+                    $instThresholds += @{ Field = 'Page Life Expectancy (s)'; Warning = 300; Critical = 120; Invert = $true }
+                }
+                if ($activeInstanceCounters.Contains('BufferCacheHitRatio')) {
+                    $instThresholds += @{ Field = 'Buffer Cache Hit Ratio (%)'; Warning = 95; Critical = 90; Invert = $true }
+                }
+                if ($activeInstanceCounters.Contains('MemoryGrantsPending')) {
+                    $instThresholds += @{ Field = 'Memory Grants Pending'; Warning = 1; Critical = 3 }
+                }
+                if ($activeInstanceCounters.Contains('ProcessesBlocked')) {
+                    $instThresholds += @{ Field = 'Processes Blocked'; Warning = 1; Critical = 5 }
+                }
+                if ($activeInstanceCounters.Contains('NumberOfDeadlocksPersec')) {
+                    $instThresholds += @{ Field = 'Deadlocks/sec'; Warning = 1; Critical = 5 }
+                }
+                if ($activeInstanceCounters.Contains('LazyWritesPersec')) {
+                    $instThresholds += @{ Field = 'Lazy Writes/sec'; Warning = 20; Critical = 50 }
+                }
+
+                $instDashSplat = @{
+                    Data         = $instanceExportData
+                    OutputPath   = $instDashPath
+                    ReportTitle  = 'MS SQL Server Instance Performance'
+                    CardField    = @('Host', 'Instance')
+                    ExportPrefix = 'MSSQL-Instance'
+                }
+                if ($instThresholds.Count -gt 0) { $instDashSplat.ThresholdField = $instThresholds }
+
+                Export-DynamicDashboardHtml @instDashSplat
+                Write-Host "Instance dashboard generated: $instDashPath" -ForegroundColor Green
+            }
         }
         else {
             Write-Warning "No dashboard function available. Exporting as JSON instead."
@@ -999,7 +1438,11 @@ switch ($currentChoice) {
         }
 
         Write-Host "Dashboard generated: $dashPath" -ForegroundColor Green
-        Write-Host "  Devices: $($deviceDatabases.Count) | Databases: $($sortedDbKeys.Count) | Counters: $($activeCounters.Count)" -ForegroundColor Gray
+        $dashSummary = "  Devices: $($deviceDatabases.Count) | Databases: $($sortedDbKeys.Count) | DB Counters: $($activeCounters.Count)"
+        if ($activeInstanceCounters.Count -gt 0) {
+            $dashSummary += " | Instance Counters: $($activeInstanceCounters.Count)"
+        }
+        Write-Host $dashSummary -ForegroundColor Gray
 
         # Copy to WUG NmConsole if available
         $nmConsolePaths = @(
@@ -1015,6 +1458,15 @@ switch ($currentChoice) {
                 Copy-Item -Path $dashPath -Destination $wugDashPath -Force
                 Write-Host "Copied to WUG: $wugDashPath" -ForegroundColor Green
                 Write-Host "  Access via WUG web UI: /NmConsole/dashboards/MSSQL-Dashboard.html" -ForegroundColor Cyan
+                if ($instanceExportData.Count -gt 0) {
+                    $instDashPath2 = Join-Path $OutputDir 'MSSQL-Instance-Dashboard.html'
+                    if (Test-Path $instDashPath2) {
+                        $wugInstDashPath = Join-Path $wugDashDir 'MSSQL-Instance-Dashboard.html'
+                        Copy-Item -Path $instDashPath2 -Destination $wugInstDashPath -Force
+                        Write-Host "Copied to WUG: $wugInstDashPath" -ForegroundColor Green
+                        Write-Host "  Access via WUG web UI: /NmConsole/dashboards/MSSQL-Instance-Dashboard.html" -ForegroundColor Cyan
+                    }
+                }
             }
             catch {
                 Write-Warning "Could not copy to NmConsole (run as admin?): $_"

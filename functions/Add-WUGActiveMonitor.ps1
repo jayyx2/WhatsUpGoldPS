@@ -298,9 +298,10 @@ function Add-WUGActiveMonitor {
         [Parameter(Mandatory = $true, ParameterSetName = 'PowerShell')]
         [Parameter(Mandatory = $true, ParameterSetName = 'RestApi')]
         [Parameter(Mandatory = $true, ParameterSetName = 'Ssh')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'SqlQuery')]
         [ValidateSet('Ping', 'TcpIp', 'SNMP', 'SNMPTable', 'Process', 'Certificate', 'Service', 'WMIFormatted',
                      'Dns', 'FileContent', 'FileProperties', 'Folder', 'Ftp', 'HttpContent',
-                     'NetworkStatistics', 'PingJitter', 'PowerShell', 'RestApi', 'Ssh')]
+                     'NetworkStatistics', 'PingJitter', 'PowerShell', 'RestApi', 'Ssh', 'SqlQuery')]
         [string]$Type,
 
         [Parameter(Mandatory = $true)]
@@ -703,7 +704,31 @@ function Add-WUGActiveMonitor {
         [Parameter(ParameterSetName = 'Ssh')]
         [ValidateSet('None', 'Linefeed', 'Carriage return', 'Carriage return linefeed')][string]$SshEOLChars = 'None',
         [Parameter(ParameterSetName = 'Ssh')]
-        [int]$SshCredentialID = -1
+        [int]$SshCredentialID = -1,
+
+        # SqlQuery Monitor Parameters
+        [Parameter(Mandatory = $true, ParameterSetName = 'SqlQuery')]
+        [string]$SqlQueryText,
+        [Parameter(Mandatory = $true, ParameterSetName = 'SqlQuery')]
+        [string]$SqlServerAddress,
+        [Parameter(ParameterSetName = 'SqlQuery')]
+        [ValidateSet('Microsoft SQL Server', 'Oracle', 'MySQL', 'PostgreSQL', 'ODBC')]
+        [string]$SqlServerType = 'Microsoft SQL Server',
+        [Parameter(ParameterSetName = 'SqlQuery')]
+        [int]$SqlServerPort = -1,
+        [Parameter(ParameterSetName = 'SqlQuery')]
+        [int]$SqlConnectionTimeout = 15,
+        [Parameter(ParameterSetName = 'SqlQuery')]
+        [ValidateSet('True', 'False')][string]$SqlCheckNumRows = 'True',
+        [Parameter(ParameterSetName = 'SqlQuery')]
+        [ValidateSet('less than', 'less than or equal to', 'greater than', 'greater than or equal to', 'equal to', 'not equal to')]
+        [string]$SqlNumRowsOperator = 'greater than or equal to',
+        [Parameter(ParameterSetName = 'SqlQuery')]
+        [int]$SqlNumRowsThreshold = 1,
+        [Parameter(ParameterSetName = 'SqlQuery')]
+        [ValidateSet('True', 'False')][string]$SqlCheckRowContent = 'False',
+        [Parameter(ParameterSetName = 'SqlQuery')]
+        [string]$SqlRowContentThresholdsXml = ''
     )
 
     begin {
@@ -1162,6 +1187,35 @@ function Add-WUGActiveMonitor {
                     @{ "name" = "MonSSH:CredentialID"; "value" = "$SshCredentialID" },
                     @{ "name" = "Cred:Type"; "value" = "64" }
                 )
+            }
+
+            'SqlQuery' {
+                $ClassId = '9ddc22a0-3bc7-467c-ac29-c5492f9a66d7'
+
+                # Build RowContentThresholds XML if not provided but content check is enabled
+                if ($SqlCheckRowContent -eq 'True' -and -not $SqlRowContentThresholdsXml) {
+                    $SqlRowContentThresholdsXml = @'
+<?xml version="1.0" encoding="utf-16"?>
+<ArrayOfContentThreshold xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" />
+'@
+                }
+
+                $PropertyBags = @(
+                    @{ "name" = "MonSQLQuery:CheckNumRows"; "value" = "$SqlCheckNumRows" },
+                    @{ "name" = "MonSQLQuery:CheckRowContent"; "value" = "$SqlCheckRowContent" },
+                    @{ "name" = "MonSQLQuery:NumRowsOperator"; "value" = "$SqlNumRowsOperator" },
+                    @{ "name" = "MonSQLQuery:NumRowsThreshold"; "value" = "$SqlNumRowsThreshold" },
+                    @{ "name" = "MonSQLQuery:SQLQuery"; "value" = "$SqlQueryText" },
+                    @{ "name" = "MonSQLQuery:ServerAddress"; "value" = "$SqlServerAddress" },
+                    @{ "name" = "MonSQLQuery:ServerPort"; "value" = "$SqlServerPort" },
+                    @{ "name" = "MonSQLQuery:ServerType"; "value" = "$SqlServerType" },
+                    @{ "name" = "MonSQLQuery:ConnectionTimeout"; "value" = "$SqlConnectionTimeout" },
+                    @{ "name" = "Cred:Type"; "value" = "16,8" }
+                )
+
+                if ($SqlCheckRowContent -eq 'True' -and $SqlRowContentThresholdsXml) {
+                    $PropertyBags += @{ "name" = "MonSQLQuery:RowContentThresholds"; "value" = $SqlRowContentThresholdsXml }
+                }
             }
         }
 

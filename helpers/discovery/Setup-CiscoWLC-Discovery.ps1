@@ -167,6 +167,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
+. (Join-Path $scriptDir 'DiscoveryHelpers.ps1')
+. (Join-Path $scriptDir 'DiscoveryProvider-CiscoWLC.ps1')
 
 # ============================================================================
 # Set default OutputPath if not specified

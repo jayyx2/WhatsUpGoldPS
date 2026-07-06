@@ -45,6 +45,127 @@ if (Get-Command -Name 'Import-SharpSnmpLib' -ErrorAction SilentlyContinue) {
     Write-Verbose "[CUCM] SharpSnmpLib initialized"
 }
 
+# ============================================================================
+# Protocol code converters for WUG COM API (CoreAsp.SnmpRqst Initialize4)
+# ============================================================================
+function ConvertTo-CUCMComApiAuthCode {
+    param([string]$Protocol)
+    $map = @{
+        'None'   = 0; 'MD5'    = 1; 'SHA'    = 3; 'SHA1'   = 3
+        'SHA256' = 5; 'SHA384' = 6; 'SHA512' = 7
+    }
+    if ($map.ContainsKey($Protocol)) { return $map[$Protocol] }
+    Write-Verbose "[COM] Unknown auth protocol '$Protocol', defaulting to None (0)"
+    return 0
+}
+
+function ConvertTo-CUCMComApiPrivCode {
+    param([string]$Protocol)
+    $map = @{
+        'None'      = 0; 'DES'    = 1; '3DES'  = 2; 'TripleDES' = 2
+        'AES'       = 3; 'AES128' = 3; 'AES192' = 4; 'AES256'    = 5
+    }
+    if ($map.ContainsKey($Protocol)) { return $map[$Protocol] }
+    Write-Verbose "[COM] Unknown priv protocol '$Protocol', defaulting to None (0)"
+    return 0
+}
+
+# ============================================================================
+# WUG COM API walk (CoreAsp.SnmpRqst) -- fallback when SharpSnmpLib fails.
+# Returns the same walkData ordered hashtable consumed by Get-CUCMPhoneInventory
+# Phase 2 (instance -> column -> string value, no binary decoding needed).
+# ============================================================================
+function Invoke-CUCMPhoneWalkComApi {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TargetAddress,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Credential
+    )
+
+    $snmpVersion   = if ($Credential.SnmpVersion)      { [int]$Credential.SnmpVersion }        else { 2 }
+    $community     = if ($Credential.Community)         { [string]$Credential.Community }       else { '' }
+    $username      = if ($Credential.Username)          { [string]$Credential.Username }        else { '' }
+    $context       = if ($Credential.Context)           { [string]$Credential.Context }         else { '' }
+    $authProtoName = if ($Credential.AuthProtocol)      { [string]$Credential.AuthProtocol }    else { 'None' }
+    $privProtoName = if ($Credential.PrivacyProtocol)   { [string]$Credential.PrivacyProtocol } else { 'None' }
+    $authPassword  = if ($Credential.AuthPassword)      { [string]$Credential.AuthPassword }    else { '' }
+    $privPassword  = if ($Credential.PrivacyPassword)   { [string]$Credential.PrivacyPassword } else { '' }
+    $snmpPort      = if ($Credential.Port)              { [int]$Credential.Port }               else { 161 }
+    $timeoutMs     = if ($Credential.TimeoutMs)         { [int]$Credential.TimeoutMs }          else { 5000 }
+    $retries       = if ($null -ne $Credential.Retries) { [int]$Credential.Retries }            else { 1 }
+
+    $authCode = ConvertTo-CUCMComApiAuthCode -Protocol $authProtoName
+    $privCode = ConvertTo-CUCMComApiPrivCode -Protocol $privProtoName
+
+    $tableBaseOid = '1.3.6.1.4.1.9.9.156.1.2.1.1'
+
+    Write-Host "    [COM API] Connecting via CoreAsp.SnmpRqst to ${TargetAddress}..." -ForegroundColor DarkGray
+    Write-Verbose "[COM] Initialize4: Target=$TargetAddress  v=$snmpVersion  Port=$snmpPort  Timeout=${timeoutMs}ms"
+    if ($snmpVersion -eq 3) {
+        Write-Verbose "[COM] v3: Username=$username  AuthProto=$authProtoName ($authCode)  PrivProto=$privProtoName ($privCode)"
+    }
+
+    $snmpRequest = New-Object -ComObject 'CoreAsp.SnmpRqst'
+    $initResult  = $snmpRequest.Initialize4(
+        $TargetAddress, $snmpVersion, $community,
+        $username, $context,
+        $authCode, $authPassword,
+        $privCode, $privPassword
+    )
+    if ($initResult.Failed) {
+        throw "COM API Initialize4 failed for ${TargetAddress}: $($initResult.GetErrorMsg())"
+    }
+
+    if ($snmpRequest.SetTimeoutMs($timeoutMs).Failed) { Write-Warning 'COM API: SetTimeoutMs failed (non-fatal)' }
+    if ($snmpRequest.SetNumRetries($retries).Failed)  { Write-Warning 'COM API: SetNumRetries failed (non-fatal)' }
+    if ($snmpRequest.SetPort($snmpPort).Failed)        { Write-Warning 'COM API: SetPort failed (non-fatal)' }
+
+    Write-Host "    [COM API] Walking ccmPhoneEntry subtree (GetNext loop)..." -ForegroundColor DarkGray
+    $walkResponse = $snmpRequest.GetNext($tableBaseOid)
+    if ($walkResponse.Failed) {
+        throw "COM API: Initial GetNext failed for ${TargetAddress}: $($walkResponse.GetErrorMsg())"
+    }
+
+    $walkData  = [ordered]@{}
+    $walkCount = 0
+
+    while (-not $walkResponse.Failed) {
+        $currentOid = ([string]$walkResponse.GetOid()).TrimStart('.')
+        if (-not $currentOid.StartsWith("$tableBaseOid.")) {
+            Write-Verbose "[COM] OID outside subtree -- walk complete: $currentOid"
+            break
+        }
+
+        $suffix = $currentOid.Substring($tableBaseOid.Length + 1)
+        $dotPos = $suffix.IndexOf('.')
+        if ($dotPos -ge 0) {
+            $colNum   = $suffix.Substring(0, $dotPos)
+            $instance = $suffix.Substring($dotPos + 1)
+            $value    = ''
+            try { $value = [string]$walkResponse.GetValue() } catch { $value = '' }
+
+            if (-not $walkData.Contains($instance)) { $walkData[$instance] = @{} }
+            $walkData[$instance][$colNum] = $value
+
+            $walkCount++
+            if ($walkCount % 200 -eq 0) {
+                Write-Host "    [COM API] $walkCount OIDs collected ($($walkData.Count) phones)..." -ForegroundColor DarkGray
+            }
+            Write-Verbose "[COM] OID $walkCount : col=$colNum instance=$instance"
+        }
+
+        $walkResponse = $snmpRequest.GetNext($currentOid)
+    }
+
+    Write-Host "    [COM API] Walk complete: $walkCount OIDs, $($walkData.Count) phone instance(s)" -ForegroundColor Green
+    Write-Verbose "[COM] Walk finished. OIDs=$walkCount  Instances=$($walkData.Count)"
+
+    return $walkData
+}
+
 function Get-CUCMPhoneColumnMap {
     [CmdletBinding()]
     param()
@@ -206,7 +327,7 @@ function Get-CUCMPhoneInventory {
     $privacyPassword = if ($Credential.PrivacyPassword) { [string]$Credential.PrivacyPassword } else { '' }
     $snmpPort = if ($Credential.Port) { [int]$Credential.Port } else { 161 }
     $timeoutMs = if ($Credential.TimeoutMs) { [int]$Credential.TimeoutMs } else { 5000 }
-    $retries = if ($Credential.Retries -ne $null) { [int]$Credential.Retries } else { 1 }
+    $retries = if ($null -ne $Credential.Retries) { [int]$Credential.Retries } else { 1 }
 
     $statusMap = @{
         '1' = 'unknown'
@@ -313,6 +434,16 @@ function Get-CUCMPhoneInventory {
 
     $phoneRows = [System.Collections.ArrayList]@()
 
+    # Binary decode column sets -- used only by the SharpSnmpLib walk path
+    $macColumns  = @('2')              # PhysicalAddress (6-byte MAC)
+    $dateColumns = @('8','12','17')    # DateAndTime (8 or 11 bytes)
+    $inetColumns = @('15','21','22')   # InetAddress (4-byte IPv4 or 16-byte IPv6)
+
+    Write-Host "  Initiating SNMP walk: $TargetAddress (v$snmpVersion, port $snmpPort, timeout ${timeoutMs}ms)" -ForegroundColor Cyan
+
+    # ---- Phase 1: Walk ccmPhoneEntry -- SharpSnmpLib, with WUG COM API fallback ----
+    $walkData   = $null
+    $walkMethod = 'SharpSnmpLib'
     try {
         Write-Verbose "[SNMP] Using SharpSnmpLib for CUCM table walk"
         Write-Verbose "[SNMP] Target=$TargetAddress  Version=$snmpVersion  Port=$snmpPort  Timeout=${timeoutMs}ms"
@@ -320,74 +451,59 @@ function Get-CUCMPhoneInventory {
             Write-Verbose "[SNMP] v3 params: Username=$username  AuthProto=$authProtocol  PrivProto=$privacyProtocol"
         }
 
-        # ---- Phase 1: Walk the entire ccmPhoneEntry subtree using SharpSnmpLib ----
-        Write-Verbose "[SNMP] Walking table base OID: $tableBaseOid"
-        
+        Write-Host "    Bulk walking ccmPhoneEntry OID tree (SharpSnmpLib)..." -ForegroundColor DarkGray
+
         $walkParams = @{
-            Target = $TargetAddress
-            Table = $tableBaseOid
-            Port = $snmpPort
+            Target  = $TargetAddress
+            Table   = $tableBaseOid
+            Port    = $snmpPort
             Timeout = $timeoutMs
         }
 
         if ($snmpVersion -in @(1, 2)) {
-            $walkParams['Version'] = "V$snmpVersion"
+            $walkParams['Version']   = "V$snmpVersion"
             $walkParams['Community'] = $community
-            
-            # Perform the SNMP bulk walk (v1/v2)
             $walkResult = Invoke-SNMPBulkWalk @walkParams -ErrorAction Stop
         }
         else {
-            # SNMPv3 - use friendly wrapper
-            $walkParams['Version'] = 'V3'
-            $walkParams['Username'] = $username
+            $walkParams['Version']      = 'V3'
+            $walkParams['Username']     = $username
             $walkParams['AuthProtocol'] = $authProtocol
             $walkParams['PrivProtocol'] = $privacyProtocol
-            
-            # Convert friendly protocol names to SecureString if needed
+
             if ($authPassword -is [string] -and -not [string]::IsNullOrWhiteSpace($authPassword)) {
                 $walkParams['AuthPassword'] = ConvertTo-SecureString -String $authPassword -AsPlainText -Force
             }
             elseif ($authPassword -is [System.Security.SecureString]) {
                 $walkParams['AuthPassword'] = $authPassword
             }
-            
+
             if ($privacyPassword -is [string] -and -not [string]::IsNullOrWhiteSpace($privacyPassword)) {
                 $walkParams['PrivPassword'] = ConvertTo-SecureString -String $privacyPassword -AsPlainText -Force
             }
             elseif ($privacyPassword -is [System.Security.SecureString]) {
                 $walkParams['PrivPassword'] = $privacyPassword
             }
-            
-            # Perform the SNMP bulk walk using friendly wrapper (v3)
+
             $walkResult = Invoke-SNMPBulkWalkFriendly @walkParams -ErrorAction Stop
         }
-        
+
         Write-Verbose "[SNMP] Bulk walk completed. Variables retrieved: $($walkResult.Variables.Count)"
+        Write-Host "    Walk response: $($walkResult.Variables.Count) variables -- processing..." -ForegroundColor DarkGray
 
-        # Process walk results into walkData structure (same format as COM API version)
-        $walkData = [ordered]@{}
-        # Columns that contain binary octet strings needing special decoding
-        $macColumns = @('2')              # PhysicalAddress (6-byte MAC)
-        $dateColumns = @('8','12','17')   # DateAndTime (8 or 11 bytes)
-        $inetColumns = @('15','21','22')  # InetAddress (4-byte IPv4 or 16-byte IPv6)
-
+        # Normalise into walkData (instance -> colNum -> value)
+        $walkData  = [ordered]@{}
         $walkCount = 0
-        
+
         foreach ($var in $walkResult.Variables) {
             $currentOid = $var.Id.ToString().TrimStart('.')
-            
-            if (-not $currentOid.StartsWith("$tableBaseOid.")) {
-                continue
-            }
+            if (-not $currentOid.StartsWith("$tableBaseOid.")) { continue }
 
             $suffix = $currentOid.Substring($tableBaseOid.Length + 1)
             $dotPos = $suffix.IndexOf('.')
-            if ($dotPos -lt 0) {
-                continue
-            }
-            
-            $colNum = $suffix.Substring(0, $dotPos)
+            if ($dotPos -lt 0) { continue }
+
+            $colNum   = $suffix.Substring(0, $dotPos)
             $instance = $suffix.Substring($dotPos + 1)
 
             # Decode binary octet strings for specific column types
@@ -397,9 +513,9 @@ function Get-CUCMPhoneInventory {
                     $value = ($raw | ForEach-Object { '{0:X2}' -f $_ }) -join ':'
                 }
                 elseif ($colNum -in $dateColumns -and $raw.Count -ge 8) {
-                    $year = ([int]$raw[0] -shl 8) + [int]$raw[1]
+                    $year  = ([int]$raw[0] -shl 8) + [int]$raw[1]
                     $month = [int]$raw[2]; $day = [int]$raw[3]
-                    $hour = [int]$raw[4]; $min = [int]$raw[5]; $sec = [int]$raw[6]
+                    $hour  = [int]$raw[4]; $min = [int]$raw[5]; $sec = [int]$raw[6]
                     $value = '{0}-{1:D2}-{2:D2} {3:D2}:{4:D2}:{5:D2}' -f $year,$month,$day,$hour,$min,$sec
                 }
                 elseif ($colNum -in $inetColumns -and $raw.Count -eq 4) {
@@ -416,28 +532,45 @@ function Get-CUCMPhoneInventory {
                 $value = [string]$var.Data
             }
 
-            if (-not $walkData.Contains($instance)) {
-                $walkData[$instance] = @{}
-            }
+            if (-not $walkData.Contains($instance)) { $walkData[$instance] = @{} }
             $walkData[$instance][$colNum] = $value
 
             $walkCount++
             if ($walkCount -le 3 -or $walkCount % 500 -eq 0) {
-                Write-Verbose "[SNMP] Walk progress: $walkCount OIDs processed (column=$colNum instance=$instance)"
+                Write-Verbose "[SNMP] Walk progress: $walkCount OIDs (col=$colNum instance=$instance)"
             }
         }
 
+        Write-Host "    SharpSnmpLib walk done: $walkCount OIDs, $($walkData.Count) phone instance(s)" -ForegroundColor Green
         Write-Verbose "[SNMP] Walk finished. OIDs processed: $walkCount  Unique instances: $($walkData.Count)"
+    }
+    catch {
+        Write-Warning "SharpSnmpLib walk failed for ${TargetAddress}: $_ -- trying WUG COM API fallback"
+        Write-Verbose "[SNMP] SharpSnmpLib error: $($_.Exception.GetType().FullName): $($_.Exception.Message)"
+        $walkData = $null
+        try {
+            $walkData   = Invoke-CUCMPhoneWalkComApi -TargetAddress $TargetAddress -Credential $Credential
+            $walkMethod = 'WUG COM API'
+        }
+        catch {
+            Write-Warning "COM API fallback also failed for ${TargetAddress}: $_"
+            Write-Verbose "[COM] Exception: $($_.Exception.GetType().FullName): $($_.Exception.Message)"
+            Write-Verbose "[COM] Stack: $($_.ScriptStackTrace)"
+        }
+    }
 
-        # ---- Phase 2: Assemble phone rows from collected walk data ----
+    # ---- Phase 2: Assemble phone rows (runs regardless of which walk method succeeded) ----
+    if ($null -ne $walkData -and $walkData.Count -gt 0) {
+        Write-Host "  Assembling phone rows from $($walkData.Count) instance(s) [$walkMethod]..." -ForegroundColor DarkGray
+
         $rowCount = 0
         foreach ($instance in $walkData.Keys) {
             $instanceData = $walkData[$instance]
-            $attributes = [ordered]@{
+            $attributes   = [ordered]@{
                 'DiscoveryHelper.CUCM' = 'true'
-                'CUCM.CallManager' = $DeviceName
-                'CUCM.Target' = $TargetAddress
-                'CUCM.PhoneIndex' = $instance
+                'CUCM.CallManager'     = $DeviceName
+                'CUCM.Target'          = $TargetAddress
+                'CUCM.PhoneIndex'      = $instance
             }
 
             foreach ($colNum in $instanceData.Keys) {
@@ -447,45 +580,23 @@ function Get-CUCMPhoneInventory {
                 $value = $instanceData[$colNum]
 
                 switch ($attrName) {
-                    'CUCM.PhoneStatus' {
-                        $value = ConvertFrom-CUCMEnumValue -Value $value -Map $statusMap
-                    }
-                    'CUCM.PhoneType' {
-                        $value = ConvertFrom-CUCMEnumValue -Value $value -Map $phoneTypeMap
-                    }
-                    'CUCM.PhoneProtocol' {
-                        $value = ConvertFrom-CUCMEnumValue -Value $value -Map $protocolMap
-                    }
-                    'CUCM.PhoneIPv4Attribute' {
-                        $value = ConvertFrom-CUCMEnumValue -Value $value -Map $addressScopeMap
-                    }
-                    'CUCM.PhoneIPv6Attribute' {
-                        $value = ConvertFrom-CUCMEnumValue -Value $value -Map $addressScopeMap
-                    }
-                    'CUCM.PhoneStatusReason' {
-                        $value = ConvertFrom-CUCMEnumValue -Value $value -Map $causeCodeMap
-                    }
-                    'CUCM.PhoneUnregReason' {
-                        $value = ConvertFrom-CUCMEnumValue -Value $value -Map $causeCodeMap
-                    }
-                    'CUCM.PhoneRegFailReason' {
-                        $value = ConvertFrom-CUCMEnumValue -Value $value -Map $causeCodeMap
-                    }
-                    'CUCM.PhoneTimeLastRegistered' {
-                        $value = ConvertFrom-CUCMDateValue -Value $value
-                    }
-                    'CUCM.PhoneTimeLastError' {
-                        $value = ConvertFrom-CUCMDateValue -Value $value
-                    }
-                    'CUCM.PhoneTimeLastStatusUpdt' {
-                        $value = ConvertFrom-CUCMDateValue -Value $value
-                    }
+                    'CUCM.PhoneStatus'             { $value = ConvertFrom-CUCMEnumValue -Value $value -Map $statusMap }
+                    'CUCM.PhoneType'               { $value = ConvertFrom-CUCMEnumValue -Value $value -Map $phoneTypeMap }
+                    'CUCM.PhoneProtocol'           { $value = ConvertFrom-CUCMEnumValue -Value $value -Map $protocolMap }
+                    'CUCM.PhoneIPv4Attribute'      { $value = ConvertFrom-CUCMEnumValue -Value $value -Map $addressScopeMap }
+                    'CUCM.PhoneIPv6Attribute'      { $value = ConvertFrom-CUCMEnumValue -Value $value -Map $addressScopeMap }
+                    'CUCM.PhoneStatusReason'       { $value = ConvertFrom-CUCMEnumValue -Value $value -Map $causeCodeMap }
+                    'CUCM.PhoneUnregReason'        { $value = ConvertFrom-CUCMEnumValue -Value $value -Map $causeCodeMap }
+                    'CUCM.PhoneRegFailReason'      { $value = ConvertFrom-CUCMEnumValue -Value $value -Map $causeCodeMap }
+                    'CUCM.PhoneTimeLastRegistered' { $value = ConvertFrom-CUCMDateValue -Value $value }
+                    'CUCM.PhoneTimeLastError'      { $value = ConvertFrom-CUCMDateValue -Value $value }
+                    'CUCM.PhoneTimeLastStatusUpdt' { $value = ConvertFrom-CUCMDateValue -Value $value }
                 }
 
                 $attributes[$attrName] = $value
             }
 
-            $phoneName = [string]$attributes['CUCM.PhoneName']
+            $phoneName        = [string]$attributes['CUCM.PhoneName']
             $phoneDescription = [string]$attributes['CUCM.PhoneDescription']
             if ([string]::IsNullOrWhiteSpace($phoneName)) {
                 $phoneName = "Phone-$instance"
@@ -504,28 +615,31 @@ function Get-CUCMPhoneInventory {
             }
 
             [void]$phoneRows.Add([PSCustomObject]@{
-                DeviceName = $DeviceName
-                Target = $TargetAddress
-                PhoneIndex = $instance
-                PhoneName = $phoneName
+                DeviceName  = $DeviceName
+                Target      = $TargetAddress
+                PhoneIndex  = $instance
+                PhoneName   = $phoneName
                 Description = $phoneDescription
                 DisplayName = $displayName
-                Status = $statusName
-                Attributes = $attributes
+                Status      = $statusName
+                Attributes  = $attributes
             })
 
             $rowCount++
+            if ($rowCount % 50 -eq 0) {
+                Write-Host "    $rowCount phones assembled..." -ForegroundColor DarkGray
+            }
             if ($rowCount -le 3 -or $rowCount % 100 -eq 0) {
                 Write-Verbose "[SNMP] Row $rowCount : $phoneName  Status=$statusName  IP=$($attributes['CUCM.PhoneIpAddress'])"
             }
         }
 
+        $phoneColor = if ($rowCount -gt 0) { 'Green' } else { 'Yellow' }
+        Write-Host "  Done: $rowCount phone row(s) assembled" -ForegroundColor $phoneColor
         Write-Verbose "[SNMP] Total phone rows built: $rowCount"
     }
-    catch {
-        Write-Warning "CUCM SNMP walk error for ${TargetAddress}: $_"
-        Write-Verbose "[SNMP] Exception details: $($_.Exception.GetType().FullName): $($_.Exception.Message)"
-        Write-Verbose "[SNMP] Stack: $($_.ScriptStackTrace)"
+    else {
+        Write-Warning "No phone data returned from SNMP walk for ${TargetAddress}"
     }
 
     return @($phoneRows)

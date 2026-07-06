@@ -610,11 +610,82 @@ function Export-DiscoveryPlan {
 # region  DPAPI Credential Vault (Standalone   Windows only, no WUG dependency)
 # ============================================================================
 
-# Default vault directory: per-user, under the user's profile
-$script:DiscoveryVaultPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Vault'
+# Vault scope: 'CurrentUser' (default) or 'LocalMachine' (any admin/SYSTEM can decrypt).
+# Reads $env:WUG_VAULT_SCOPE so re-dot-sourcing this file does not reset a scope
+# that was already established by the caller or the task wrapper.
+if ($env:WUG_VAULT_SCOPE -eq 'LocalMachine') {
+    $script:VaultDpapiScope    = 'LocalMachine'
+    $script:DiscoveryVaultPath = Join-Path $env:ProgramData 'WhatsUpGoldPS\Vault'
+}
+else {
+    $script:VaultDpapiScope    = 'CurrentUser'
+    $script:DiscoveryVaultPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Vault'
+}
 
 # Optional AES vault password (set via Set-DiscoveryVaultPassword)
 $script:VaultAESKey = $null
+
+# DPAPI scope: 'CurrentUser' (default, tied to user+machine) or
+# 'LocalMachine' (any admin/SYSTEM process on this machine can decrypt).
+# Change with Set-DiscoveryVaultScope before Save/Get operations.
+$script:VaultDpapiScope = 'CurrentUser'
+
+# Required for ProtectedData (LocalMachine DPAPI scope) -- no-op if already loaded.
+Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+
+# ============================================================================
+# Internal vault encrypt/decrypt -- respects $script:VaultDpapiScope.
+# All Save-DiscoveryCredential and Get-DiscoveryCredential calls route through
+# these so scope changes affect the entire vault uniformly.
+# ============================================================================
+function Invoke-VaultEncrypt {
+    <#
+        Internal. Encrypts a SecureString for vault storage.
+        CurrentUser  -- ConvertFrom-SecureString (DPAPI CurrentUser, existing behaviour).
+        LocalMachine -- ProtectedData::Protect with LocalMachine scope; stored as 'LM:<base64>'.
+    #>
+    param([Parameter(Mandatory)][System.Security.SecureString]$SecureString)
+
+    if ($script:VaultDpapiScope -eq 'LocalMachine') {
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
+        try { $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+        finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        $bytes = [System.Text.Encoding]::Unicode.GetBytes($plain)
+        $plain = $null
+        try {
+            $protected = [System.Security.Cryptography.ProtectedData]::Protect(
+                $bytes, $null, [System.Security.Cryptography.DataProtectionScope]::LocalMachine)
+        }
+        finally {
+            for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = 0 }
+        }
+        return 'LM:' + [Convert]::ToBase64String($protected)
+    }
+    else {
+        return ConvertFrom-SecureString -SecureString $SecureString
+    }
+}
+
+function Invoke-VaultDecrypt {
+    <#
+        Internal. Decrypts a vault-stored encrypted string back to a SecureString.
+        Detects scope automatically from the 'LM:' prefix -- no caller change needed
+        when reading vaults created under either scope.
+    #>
+    param([Parameter(Mandatory)][string]$EncryptedString)
+
+    if ($EncryptedString.StartsWith('LM:')) {
+        $protected = [Convert]::FromBase64String($EncryptedString.Substring(3))
+        $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
+            $protected, $null, [System.Security.Cryptography.DataProtectionScope]::LocalMachine)
+        $plain = [System.Text.Encoding]::Unicode.GetString($bytes)
+        for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = 0 }
+        return ConvertTo-SecureString -String $plain -AsPlainText -Force
+    }
+    else {
+        return ConvertTo-SecureString -String $EncryptedString
+    }
+}
 
 function Set-DiscoveryVaultPath {
     <#
@@ -636,6 +707,54 @@ function Set-DiscoveryVaultPath {
     )
     $script:DiscoveryVaultPath = $Path
     Write-Verbose "Discovery vault path set to '$Path'"
+}
+
+function Set-DiscoveryVaultScope {
+    <#
+    .SYNOPSIS
+        Switches the vault between CurrentUser and LocalMachine DPAPI scope.
+    .DESCRIPTION
+        CurrentUser  (default): credentials encrypted to the specific Windows user
+          account + machine. Only that user on that machine can decrypt them.
+          Vault path: %LOCALAPPDATA%\WhatsUpGoldPS\DiscoveryHelpers\Vault
+
+        LocalMachine: credentials encrypted to the machine key. Any admin-level
+          process or SYSTEM on this machine can decrypt them -- including scheduled
+          tasks running as SYSTEM or a different service account.
+          Vault path: %ProgramData%\WhatsUpGoldPS\Vault
+
+        IMPORTANT: existing credentials saved under CurrentUser cannot be read
+        after switching to LocalMachine (different key). Re-run the interactive
+        setup (Setup-*-Discovery.ps1) after switching to repopulate the vault.
+
+        Call this BEFORE Save-DiscoveryCredential or Resolve-DiscoveryCredential.
+    .PARAMETER Scope
+        'CurrentUser' or 'LocalMachine'.
+    .EXAMPLE
+        # Allow scheduled tasks running as SYSTEM to read vault credentials
+        Set-DiscoveryVaultScope -Scope LocalMachine
+        .\Setup-CUCM-Discovery.ps1 -Target 192.168.75.33 -Action None
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('CurrentUser', 'LocalMachine')]
+        [string]$Scope
+    )
+
+    $script:VaultDpapiScope = $Scope
+
+    if ($Scope -eq 'LocalMachine') {
+        $script:DiscoveryVaultPath = Join-Path $env:ProgramData 'WhatsUpGoldPS\Vault'
+        $env:WUG_VAULT_SCOPE       = 'LocalMachine'
+        Write-Host "Vault scope: LocalMachine  Path: $($script:DiscoveryVaultPath)" -ForegroundColor Cyan
+        Write-Warning "LocalMachine scope -- any administrator or SYSTEM process on this machine can decrypt these credentials."
+    }
+    else {
+        $script:DiscoveryVaultPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Vault'
+        $env:WUG_VAULT_SCOPE       = 'CurrentUser'
+        Write-Verbose "Vault scope: CurrentUser  Path: $($script:DiscoveryVaultPath)"
+    }
 }
 
 function Set-DiscoveryVaultPassword {
@@ -784,7 +903,7 @@ function Get-VaultHmacKey {
     if (Test-Path $keyFile) {
         try {
             $encrypted = [System.IO.File]::ReadAllText($keyFile).Trim()
-            $ss = ConvertTo-SecureString -String $encrypted
+            $ss = Invoke-VaultDecrypt -EncryptedString $encrypted
             $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss)
             try {
                 $b64 = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
@@ -806,7 +925,7 @@ function Get-VaultHmacKey {
     # DPAPI-protect and save
     $b64 = [Convert]::ToBase64String($keyBytes)
     $ss = ConvertTo-SecureString $b64 -AsPlainText -Force
-    $encrypted = ConvertFrom-SecureString -SecureString $ss
+    $encrypted = Invoke-VaultEncrypt -SecureString $ss
     $Utf8Bom = New-Object System.Text.UTF8Encoding($true)
     [System.IO.File]::WriteAllText($keyFile, $encrypted, $Utf8Bom)
     $b64 = $null
@@ -1130,7 +1249,7 @@ Or use: Request-DiscoveryCredential -Name '$Name'
                 Write-Error "Field '$fieldName' must be a SecureString. Use Read-Host -AsSecureString or Request-DiscoveryCredential."
                 return
             }
-            $fieldEncrypted = ConvertFrom-SecureString -SecureString $fieldSS
+            $fieldEncrypted = Invoke-VaultEncrypt -SecureString $fieldSS
             $encryptedFields[$fieldName] = Protect-VaultData -Data $fieldEncrypted
         }
     }
@@ -1146,7 +1265,7 @@ Or use: Request-DiscoveryCredential -Name '$Name'
         else {
             $ss = $SecureSecret
         }
-        $dpapi = ConvertFrom-SecureString -SecureString $ss
+        $dpapi = Invoke-VaultEncrypt -SecureString $ss
         $encryptedData = Protect-VaultData -Data $dpapi
     }
 
@@ -1358,7 +1477,7 @@ function Get-DiscoveryCredential {
             $rawEncrypted = $obj.Fields.$Field
             try {
                 $dpapiData = Unprotect-VaultData -Data $rawEncrypted
-                $fieldSS = ConvertTo-SecureString -String $dpapiData
+                $fieldSS = Invoke-VaultDecrypt -EncryptedString $dpapiData
             }
             catch {
                 Write-Error "Failed to decrypt field '$Field' from credential '$Name': $_"
@@ -1376,7 +1495,7 @@ function Get-DiscoveryCredential {
                 $rawEncrypted = $obj.Fields.$fn
                 try {
                     $dpapiData = Unprotect-VaultData -Data $rawEncrypted
-                    $fieldSS = ConvertTo-SecureString -String $dpapiData
+                    $fieldSS = Invoke-VaultDecrypt -EncryptedString $dpapiData
                 }
                 catch {
                     Write-Error "Failed to decrypt field '$fn' from credential '$Name': $_"
@@ -1398,7 +1517,7 @@ function Get-DiscoveryCredential {
         # Single secret (backward compatible)
         try {
             $dpapiData = Unprotect-VaultData -Data $obj.Encrypted
-            $ss = ConvertTo-SecureString -String $dpapiData
+            $ss = Invoke-VaultDecrypt -EncryptedString $dpapiData
         }
         catch {
             Write-Error "Failed to decrypt credential '$Name'. This credential can only be decrypted by $($obj.User) on $($obj.Machine). Error: $_"

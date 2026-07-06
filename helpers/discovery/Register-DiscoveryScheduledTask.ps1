@@ -183,6 +183,11 @@ param(
     [Parameter(ParameterSetName = 'Register')]
     [switch]$RunNow,
 
+    # Populate and use the LocalMachine DPAPI vault so the task can run as
+    # SYSTEM with no user logged in. Walks you through credential entry first.
+    [Parameter(ParameterSetName = 'Register')]
+    [switch]$UseSystemVault,
+
     [Parameter(ParameterSetName = 'Show')]
     [switch]$Show,
 
@@ -419,6 +424,37 @@ if ($Mode -eq 'Provider') {
     if (-not $TaskName) {
         $TaskName = "DiscoverySync-$Provider"
     }
+
+    # ---- UseSystemVault: populate LocalMachine vault interactively now ----
+    if ($UseSystemVault) {
+        Write-Host ''
+        Write-Host '  =================================================================' -ForegroundColor DarkCyan
+        Write-Host '   System Vault Setup (-UseSystemVault)' -ForegroundColor Cyan
+        Write-Host '  =================================================================' -ForegroundColor DarkCyan
+        Write-Host '  Credentials will be saved to the LocalMachine vault.' -ForegroundColor Yellow
+        Write-Host '  The scheduled task will run as SYSTEM and decrypt them.' -ForegroundColor Yellow
+        Write-Host "  Vault path: $(Join-Path $env:ProgramData 'WhatsUpGoldPS\Vault')" -ForegroundColor DarkGray
+        Write-Host ''
+        Write-Host '  Loading DiscoveryHelpers and switching to LocalMachine scope...' -ForegroundColor DarkGray
+
+        . (Join-Path $discoveryDir 'DiscoveryHelpers.ps1')
+        Set-DiscoveryVaultScope -Scope LocalMachine
+
+        Write-Host ''
+        Write-Host "  Running $Provider setup interactively to collect and store credentials..." -ForegroundColor Cyan
+        Write-Host '  Answer the prompts -- credentials go into the LocalMachine vault.' -ForegroundColor Yellow
+        Write-Host ''
+
+        $vaultArgs = @{ Action = 'None' }
+        if ($Target)     { $vaultArgs['Target']     = $Target }
+        if ($WUGServer)  { $vaultArgs['WUGServer']  = $WUGServer }
+        if ($AuthMethod) { $vaultArgs['AuthMethod'] = $AuthMethod }
+        & $providerScripts[$Provider] @vaultArgs
+
+        Write-Host ''
+        Write-Host '  Vault populated. Registering task as SYSTEM...' -ForegroundColor Green
+        Write-Host ''
+    }
 }
 elseif ($Mode -eq 'Runner') {
     # --- Resolve output path ---
@@ -528,11 +564,13 @@ try {
     } catch {}
 }
 
+$(if ($UseSystemVault) { "`$env:WUG_VAULT_SCOPE = 'LocalMachine'" })
 Write-Host ''
 Write-Host '=== Discovery Scheduled Task ==='
 Write-Host 'Task     : ${TaskName}'
 Write-Host 'Script   : $scriptPath'
 Write-Host 'Args     :$scriptArgs'
+Write-Host "Vault    : $(if ($UseSystemVault) { 'LocalMachine (SYSTEM-accessible)' } else { 'CurrentUser' })"
 Write-Host "DateTime : `$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 Write-Host "User     : `$env:USERDOMAIN\`$env:USERNAME"
 Write-Host "Machine  : `$env:COMPUTERNAME"
@@ -570,11 +608,17 @@ $taskAction = New-ScheduledTaskAction `
 # S4U (run without password) is preferred -- runs whether user is logged on or not
 # and does not store credentials. Falls back to Password logon if S4U is rejected
 # (common with domain service accounts or restrictive Group Policy).
+# When -UseSystemVault is set, run as SYSTEM -- no logon issues, always available.
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$principal = New-ScheduledTaskPrincipal `
-    -UserId $currentUser `
-    -LogonType S4U `
-    -RunLevel Limited
+if ($UseSystemVault) {
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+}
+else {
+    $principal = New-ScheduledTaskPrincipal `
+        -UserId $currentUser `
+        -LogonType S4U `
+        -RunLevel Limited
+}
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `

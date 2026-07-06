@@ -166,13 +166,203 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$script:InputSnmpVersionSpecified         = $PSBoundParameters.ContainsKey('SnmpVersion')
+$script:InputSnmpAuthProtocolSpecified    = $PSBoundParameters.ContainsKey('SnmpAuthProtocol')
+$script:InputSnmpPrivacyProtocolSpecified = $PSBoundParameters.ContainsKey('SnmpPrivacyProtocol')
+
 $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 . (Join-Path $scriptDir 'DiscoveryHelpers.ps1')
 . (Join-Path $scriptDir 'DiscoveryProvider-CiscoWLC.ps1')
 
 # ============================================================================
-# Set default OutputPath if not specified
+# Helper: SecureString <-> plaintext (vault field I/O)
 # ============================================================================
+function ConvertTo-WLCPlainText {
+    param($Value)
+    if ($null -eq $Value) { return '' }
+    if ($Value -is [System.Security.SecureString]) {
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Value)
+        try { return [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+        finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+    }
+    return [string]$Value
+}
+
+function ConvertTo-WLCSecureString {
+    param([string]$Value)
+    if ([string]::IsNullOrEmpty($Value)) {
+        $ss = New-Object System.Security.SecureString
+        $ss.MakeReadOnly()
+        return $ss
+    }
+    return (ConvertTo-SecureString -String $Value -AsPlainText -Force)
+}
+
+# ============================================================================
+# Vault credential resolver for SNMP settings
+# ============================================================================
+function Get-WLCResolvedSnmpSettings {
+    [CmdletBinding()]
+    param()
+
+    $saved = $null
+    if ($VaultName) {
+        try {
+            $saved = Get-DiscoveryCredential -Name $VaultName -ErrorAction SilentlyContinue
+        }
+        catch { $saved = $null }
+    }
+
+    if ($saved) {
+        $savedVersion = if ($saved.ContainsKey('SnmpVersion')) { [string]$saved['SnmpVersion'] } else { '2' }
+        $savedLabel   = if ($savedVersion -eq '3') { 'SNMP v3' } else { "SNMP v$savedVersion" }
+        Write-Host "  Vault: $VaultName" -ForegroundColor DarkGray
+        Write-Host "  Found: $savedLabel settings" -ForegroundColor Green
+
+        if ($NonInteractive -or $Action) {
+            Write-Host '  Using existing credential.' -ForegroundColor Green
+        }
+        else {
+            $choice = Read-Host -Prompt '  Use existing? [Y]es / [R]eset / [N]o skip'
+            switch -Regex ($choice) {
+                '^[Rr]' {
+                    Write-Host '  Removing old credential...' -ForegroundColor Yellow
+                    Remove-DiscoveryCredential -Name $VaultName -Confirm:$false -ErrorAction SilentlyContinue
+                    $saved = $null
+                }
+                '^[Nn]' {
+                    Write-Host '  Skipped.' -ForegroundColor DarkGray
+                    return $null
+                }
+                default { Write-Host '  Using existing credential.' -ForegroundColor Green }
+            }
+        }
+    }
+
+    # ---- Resolve each setting (explicit param wins over vault) ----
+    $resolvedVersion = $SnmpVersion
+    if ($saved -and $saved.ContainsKey('SnmpVersion') -and -not $script:InputSnmpVersionSpecified) {
+        $resolvedVersion = [int]$saved['SnmpVersion']
+    }
+
+    $resolvedCommunity = $Community
+    if ([string]::IsNullOrWhiteSpace($resolvedCommunity) -and $saved -and $saved.ContainsKey('Community')) {
+        $resolvedCommunity = [string]$saved['Community']
+    }
+
+    $resolvedUsername = $SnmpUsername
+    if ([string]::IsNullOrWhiteSpace($resolvedUsername) -and $saved -and $saved.ContainsKey('Username')) {
+        $resolvedUsername = [string]$saved['Username']
+    }
+
+    $resolvedContext = $SnmpContext
+    if ([string]::IsNullOrWhiteSpace($resolvedContext) -and $saved -and $saved.ContainsKey('Context')) {
+        $resolvedContext = [string]$saved['Context']
+    }
+
+    $resolvedAuthProtocol = $SnmpAuthProtocol
+    if ($saved -and $saved.ContainsKey('AuthProtocol') -and -not $script:InputSnmpAuthProtocolSpecified) {
+        $resolvedAuthProtocol = [string]$saved['AuthProtocol']
+    }
+
+    $resolvedPrivacyProtocol = $SnmpPrivacyProtocol
+    if ($saved -and $saved.ContainsKey('PrivacyProtocol') -and -not $script:InputSnmpPrivacyProtocolSpecified) {
+        $resolvedPrivacyProtocol = [string]$saved['PrivacyProtocol']
+    }
+
+    $resolvedAuthPassword = ConvertTo-WLCPlainText $SnmpAuthPassword
+    if ([string]::IsNullOrWhiteSpace($resolvedAuthPassword) -and $saved -and $saved.ContainsKey('AuthPassword')) {
+        $resolvedAuthPassword = [string]$saved['AuthPassword']
+    }
+
+    $resolvedPrivacyPassword = ConvertTo-WLCPlainText $SnmpPrivacyPassword
+    if ([string]::IsNullOrWhiteSpace($resolvedPrivacyPassword) -and $saved -and $saved.ContainsKey('PrivacyPassword')) {
+        $resolvedPrivacyPassword = [string]$saved['PrivacyPassword']
+    }
+
+    # ---- Prompt for any missing required values ----
+    if ($resolvedVersion -in @(1, 2) -and [string]::IsNullOrWhiteSpace($resolvedCommunity)) {
+        if ($NonInteractive) {
+            throw 'SNMP community is required for non-interactive SNMP v1/v2 discovery.'
+        }
+        $resolvedCommunity = ConvertTo-WLCPlainText (Read-Host -AsSecureString -Prompt 'SNMP read community')
+    }
+
+    if ($resolvedVersion -eq 3) {
+        if ([string]::IsNullOrWhiteSpace($resolvedUsername)) {
+            if ($NonInteractive) { throw 'SNMP v3 username is required for non-interactive discovery.' }
+            $resolvedUsername = Read-Host -Prompt 'SNMP v3 username'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($resolvedAuthProtocol) -and
+            $resolvedAuthProtocol -ne 'None' -and
+            [string]::IsNullOrWhiteSpace($resolvedAuthPassword)) {
+            if ($NonInteractive) { throw 'SNMP v3 auth password is required when SnmpAuthProtocol is set.' }
+            $resolvedAuthPassword = ConvertTo-WLCPlainText (Read-Host -AsSecureString -Prompt 'SNMP v3 auth password')
+        }
+        if (-not [string]::IsNullOrWhiteSpace($resolvedPrivacyProtocol) -and
+            $resolvedPrivacyProtocol -ne 'None' -and
+            [string]::IsNullOrWhiteSpace($resolvedPrivacyPassword)) {
+            if ($NonInteractive) { throw 'SNMP v3 privacy password is required when SnmpPrivacyProtocol is set.' }
+            $resolvedPrivacyPassword = ConvertTo-WLCPlainText (Read-Host -AsSecureString -Prompt 'SNMP v3 privacy password')
+        }
+    }
+    else {
+        # v1/v2 -- clear v3-only fields
+        $resolvedUsername        = ''
+        $resolvedContext         = ''
+        $resolvedAuthProtocol    = 'None'
+        $resolvedAuthPassword    = ''
+        $resolvedPrivacyProtocol = 'None'
+        $resolvedPrivacyPassword = ''
+    }
+
+    $settings = [ordered]@{
+        SnmpVersion      = $resolvedVersion
+        Community        = $resolvedCommunity
+        Username         = $resolvedUsername
+        Context          = $resolvedContext
+        AuthProtocol     = $resolvedAuthProtocol
+        AuthPassword     = $resolvedAuthPassword
+        PrivacyProtocol  = $resolvedPrivacyProtocol
+        PrivacyPassword  = $resolvedPrivacyPassword
+        Port             = $SnmpPort
+        TimeoutMs        = $TimeoutMs
+        Retries          = $Retries
+    }
+
+    # ---- Persist to vault (interactive mode only) ----
+    if (-not $NonInteractive -and $VaultName) {
+        $fields = [ordered]@{
+            SnmpVersion = ConvertTo-WLCSecureString -Value ([string]$settings.SnmpVersion)
+        }
+        if ([int]$settings.SnmpVersion -in @(1, 2)) {
+            if (-not [string]::IsNullOrWhiteSpace($settings.Community)) {
+                $fields['Community'] = ConvertTo-WLCSecureString -Value $settings.Community
+            }
+        }
+        else {
+            if (-not [string]::IsNullOrWhiteSpace($settings.Username)) {
+                $fields['Username'] = ConvertTo-WLCSecureString -Value $settings.Username
+            }
+            if (-not [string]::IsNullOrWhiteSpace($settings.Context)) {
+                $fields['Context'] = ConvertTo-WLCSecureString -Value $settings.Context
+            }
+            $fields['AuthProtocol']    = ConvertTo-WLCSecureString -Value ([string]$settings.AuthProtocol)
+            $fields['PrivacyProtocol'] = ConvertTo-WLCSecureString -Value ([string]$settings.PrivacyProtocol)
+            if (-not [string]::IsNullOrWhiteSpace($settings.AuthPassword)) {
+                $fields['AuthPassword'] = ConvertTo-WLCSecureString -Value $settings.AuthPassword
+            }
+            if (-not [string]::IsNullOrWhiteSpace($settings.PrivacyPassword)) {
+                $fields['PrivacyPassword'] = ConvertTo-WLCSecureString -Value $settings.PrivacyPassword
+            }
+        }
+        Save-DiscoveryCredential -Name $VaultName -Fields $fields -Description 'CiscoWLC SNMP settings' -Force | Out-Null
+    }
+
+    return $settings
+}
+
+
 if (-not $OutputPath) {
     if ($NonInteractive -or $Action -in @('PushToWUG', 'DashboardAndPush')) {
         $OutputPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
@@ -225,9 +415,17 @@ foreach ($dir in @($fullDir, $summaryDir, $dashboardDir)) {
 if ($Target) {
     Write-Host "Mode: Direct SNMP bulk walks" -ForegroundColor Green
     Write-Host "Target: $($Target -join ', ')" -ForegroundColor Yellow
-    
+
+    # ---- Resolve SNMP credentials (vault or direct params) ----
+    Write-Host "`nStep 0: Resolving SNMP credentials (vault: $VaultName)..." -ForegroundColor Cyan
+    $snmpSettings = Get-WLCResolvedSnmpSettings
+    if (-not $snmpSettings) {
+        Write-Warning 'No SNMP credentials available. Exiting.'
+        return
+    }
+
     # Map numeric SnmpVersion (1, 2, 3) to version strings used by SNMP module (V1, V2, V3)
-    $snmpVersionStr = @{ 1 = 'V1'; 2 = 'V2'; 3 = 'V3' }[$SnmpVersion]
+    $snmpVersionStr = @{ 1 = 'V1'; 2 = 'V2'; 3 = 'V3' }[[int]$snmpSettings.SnmpVersion]
     Write-Host "SNMP Version: $snmpVersionStr`n" -ForegroundColor Yellow
 
     # Load SNMP module
@@ -261,24 +459,24 @@ if ($Target) {
             
             try {
                 $walkParams = @{
-                    Target = $wlcAddress
-                    Table = $tree.OID
+                    Target         = $wlcAddress
+                    Table          = $tree.OID
                     MaxRepetitions = 25
-                    Timeout = $TimeoutMs
-                    ErrorAction = 'Stop'
+                    Timeout        = $snmpSettings.TimeoutMs
+                    ErrorAction    = 'Stop'
                 }
-                
+
                 if ($snmpVersionStr -eq 'V3') {
-                    $walkParams['Version'] = 'V3'
-                    $walkParams['Username'] = $SnmpUsername
-                    $walkParams['AuthProtocol'] = $SnmpAuthProtocol
-                    $walkParams['AuthPassword'] = $SnmpAuthPassword
-                    $walkParams['PrivProtocol'] = $SnmpPrivacyProtocol
-                    $walkParams['PrivPassword'] = $SnmpPrivacyPassword
+                    $walkParams['Version']      = 'V3'
+                    $walkParams['Username']     = $snmpSettings.Username
+                    $walkParams['AuthProtocol'] = $snmpSettings.AuthProtocol
+                    $walkParams['AuthPassword'] = $snmpSettings.AuthPassword
+                    $walkParams['PrivProtocol'] = $snmpSettings.PrivacyProtocol
+                    $walkParams['PrivPassword'] = $snmpSettings.PrivacyPassword
                     $walk = Invoke-SNMPBulkWalkFriendly @walkParams
                 } else {
-                    $walkParams['Version'] = $snmpVersionStr
-                    $walkParams['Community'] = $Community
+                    $walkParams['Version']   = $snmpVersionStr
+                    $walkParams['Community'] = $snmpSettings.Community
                     $walk = Invoke-SNMPBulkWalk @walkParams
                 }
                 

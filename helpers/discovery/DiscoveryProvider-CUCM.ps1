@@ -46,6 +46,71 @@ if (Get-Command -Name 'Import-SharpSnmpLib' -ErrorAction SilentlyContinue) {
 }
 
 # ============================================================================
+# Shared OctetString decoder -- used by BOTH walk paths (SharpSnmpLib + COM API)
+# so that binary SNMP columns produce identical output regardless of library.
+#
+# Column type map (script-scope so both functions can reference it):
+#   MAC  -- 6-byte OctetString -> AA:BB:CC:DD:EE:FF
+#   Date -- 8/11-byte DateAndTime -> YYYY-MM-DD HH:MM:SS
+#   Inet -- 4-byte IPv4 or 16-byte IPv6 OctetString -> dotted / colon notation
+# ============================================================================
+$script:CUCMColumnDecodeType = @{
+    '2'  = 'MAC'    # PhonePhysicalAddress
+    '8'  = 'Date'   # PhoneTimeLastRegistered
+    '12' = 'Date'   # PhoneTimeLastError
+    '15' = 'Inet'   # PhoneInetAddress
+    '17' = 'Date'   # PhoneTimeLastStatusUpdt
+    '21' = 'Inet'   # PhoneInetAddressIPv4
+    '22' = 'Inet'   # PhoneInetAddressIPv6
+}
+
+function ConvertFrom-CUCMSnmpOctetString {
+    <#
+    .SYNOPSIS
+        Decodes a raw byte array from a binary SNMP OctetString column into a
+        human-readable string. Returns $null if the byte count is not expected
+        (caller should fall back to the raw string value).
+    .PARAMETER Bytes
+        Raw byte array extracted from the SNMP response.
+    .PARAMETER ColumnType
+        One of 'MAC', 'Date', or 'Inet' (from $script:CUCMColumnDecodeType).
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('MAC','Date','Inet')]
+        [string]$ColumnType
+    )
+
+    switch ($ColumnType) {
+        'MAC' {
+            if ($Bytes.Count -eq 6) {
+                return ($Bytes | ForEach-Object { '{0:X2}' -f $_ }) -join ':'
+            }
+        }
+        'Date' {
+            if ($Bytes.Count -ge 8) {
+                $year  = ([int]$Bytes[0] -shl 8) + [int]$Bytes[1]
+                $month = [int]$Bytes[2]; $day  = [int]$Bytes[3]
+                $hour  = [int]$Bytes[4]; $min  = [int]$Bytes[5]; $sec = [int]$Bytes[6]
+                return ('{0}-{1:D2}-{2:D2} {3:D2}:{4:D2}:{5:D2}' -f $year,$month,$day,$hour,$min,$sec)
+            }
+        }
+        'Inet' {
+            if ($Bytes.Count -eq 4) {
+                return "$($Bytes[0]).$($Bytes[1]).$($Bytes[2]).$($Bytes[3])"
+            }
+            if ($Bytes.Count -eq 16) {
+                return ([System.Net.IPAddress]::new($Bytes)).ToString()
+            }
+        }
+    }
+    return $null   # unexpected byte count -- caller uses raw string
+}
+
+# ============================================================================
 # Protocol code converters for WUG COM API (CoreAsp.SnmpRqst Initialize4)
 # ============================================================================
 function ConvertTo-CUCMComApiAuthCode {
@@ -132,6 +197,9 @@ function Invoke-CUCMPhoneWalkComApi {
     $walkData  = [ordered]@{}
     $walkCount = 0
 
+    # COM API GetValue() returns binary OctetStrings as raw byte strings (Latin1-encoded).
+    # Use ConvertFrom-CUCMSnmpOctetString (shared decoder) with Latin1 byte extraction.
+
     while (-not $walkResponse.Failed) {
         $currentOid = ([string]$walkResponse.GetOid()).TrimStart('.')
         if (-not $currentOid.StartsWith("$tableBaseOid.")) {
@@ -147,6 +215,14 @@ function Invoke-CUCMPhoneWalkComApi {
             $value    = ''
             try { $value = [string]$walkResponse.GetValue() } catch { $value = '' }
 
+            # Decode binary OctetString columns using shared decoder
+            $decodeType = $script:CUCMColumnDecodeType[$colNum]
+            if ($decodeType) {
+                $raw     = [System.Text.Encoding]::Latin1.GetBytes($value)
+                $decoded = ConvertFrom-CUCMSnmpOctetString -Bytes $raw -ColumnType $decodeType
+                if ($null -ne $decoded) { $value = $decoded }
+            }
+
             if (-not $walkData.Contains($instance)) { $walkData[$instance] = @{} }
             $walkData[$instance][$colNum] = $value
 
@@ -154,7 +230,7 @@ function Invoke-CUCMPhoneWalkComApi {
             if ($walkCount % 200 -eq 0) {
                 Write-Host "    [COM API] $walkCount OIDs collected ($($walkData.Count) phones)..." -ForegroundColor DarkGray
             }
-            Write-Verbose "[COM] OID $walkCount : col=$colNum instance=$instance"
+            Write-Verbose "[COM] OID $walkCount : col=$colNum instance=$instance value='$value'"
         }
 
         $walkResponse = $snmpRequest.GetNext($currentOid)
@@ -434,11 +510,6 @@ function Get-CUCMPhoneInventory {
 
     $phoneRows = [System.Collections.ArrayList]@()
 
-    # Binary decode column sets -- used only by the SharpSnmpLib walk path
-    $macColumns  = @('2')              # PhysicalAddress (6-byte MAC)
-    $dateColumns = @('8','12','17')    # DateAndTime (8 or 11 bytes)
-    $inetColumns = @('15','21','22')   # InetAddress (4-byte IPv4 or 16-byte IPv6)
-
     Write-Host "  Initiating SNMP walk: $TargetAddress (v$snmpVersion, port $snmpPort, timeout ${timeoutMs}ms)" -ForegroundColor Cyan
 
     # ---- Phase 1: Walk ccmPhoneEntry -- SharpSnmpLib, with WUG COM API fallback ----
@@ -506,23 +577,13 @@ function Get-CUCMPhoneInventory {
             $colNum   = $suffix.Substring(0, $dotPos)
             $instance = $suffix.Substring($dotPos + 1)
 
-            # Decode binary octet strings for specific column types
+            # Decode binary OctetString columns using shared decoder
             if ($var.Data -is [Lextm.SharpSnmpLib.OctetString]) {
-                $raw = $var.Data.GetRaw()
-                if ($colNum -in $macColumns -and $raw.Count -eq 6) {
-                    $value = ($raw | ForEach-Object { '{0:X2}' -f $_ }) -join ':'
-                }
-                elseif ($colNum -in $dateColumns -and $raw.Count -ge 8) {
-                    $year  = ([int]$raw[0] -shl 8) + [int]$raw[1]
-                    $month = [int]$raw[2]; $day = [int]$raw[3]
-                    $hour  = [int]$raw[4]; $min = [int]$raw[5]; $sec = [int]$raw[6]
-                    $value = '{0}-{1:D2}-{2:D2} {3:D2}:{4:D2}:{5:D2}' -f $year,$month,$day,$hour,$min,$sec
-                }
-                elseif ($colNum -in $inetColumns -and $raw.Count -eq 4) {
-                    $value = "$($raw[0]).$($raw[1]).$($raw[2]).$($raw[3])"
-                }
-                elseif ($colNum -in $inetColumns -and $raw.Count -eq 16) {
-                    $value = ([System.Net.IPAddress]::new($raw)).ToString()
+                $decodeType = $script:CUCMColumnDecodeType[$colNum]
+                if ($decodeType) {
+                    $raw     = $var.Data.GetRaw()
+                    $decoded = ConvertFrom-CUCMSnmpOctetString -Bytes $raw -ColumnType $decodeType
+                    $value   = if ($null -ne $decoded) { $decoded } else { [string]$var.Data }
                 }
                 else {
                     $value = [string]$var.Data

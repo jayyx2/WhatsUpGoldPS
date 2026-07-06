@@ -490,18 +490,72 @@ switch ($TriggerType) {
 # ============================================================================
 # region  Build Task Action + Settings
 # ============================================================================
+# Validate the script exists before encoding -- catches wrong path early.
+if (-not (Test-Path -LiteralPath $scriptPath)) {
+    Write-Error "Script not found at: $scriptPath -- task NOT registered."
+    return
+}
+
 # Build the full command as a proper multi-line script, then encode as Base64
-# for -EncodedCommand. This avoids ALL quoting issues with Task Scheduler
-# (nested quotes, try/finally semicolons, paths with spaces, etc.).
+# for -EncodedCommand. This avoids ALL quoting issues with Task Scheduler.
+#
+# Wrapper design goals:
+#   1. Always produce a log -- even if the main script crashes immediately.
+#   2. Recreate the log directory if deleted since registration.
+#   3. Log startup context (user, machine, PID, datetime, script+args) BEFORE
+#      calling the script so there is always evidence the task actually fired.
+#   4. Fall back to plain Out-File if Start-Transcript itself fails.
+#   5. Report the script exit code explicitly at the bottom of every log.
 $fullCommand = @"
-`$logFile = Join-Path '$logDir' ('${TaskName}_' + (Get-Date -Format yyyyMMdd_HHmmss) + '.log')
-Start-Transcript -Path `$logFile -Force
+`$ErrorActionPreference = 'Continue'
+`$logDir  = '$logDir'
+`$logBase = '${TaskName}_'
+
+if (-not (Test-Path `$logDir)) {
+    try { New-Item -ItemType Directory -Path `$logDir -Force | Out-Null } catch {}
+}
+`$logFile = Join-Path `$logDir (`$logBase + (Get-Date -Format 'yyyyMMdd_HHmmss') + '.log')
+
+`$transcriptStarted = `$false
+try {
+    Start-Transcript -Path `$logFile -Force | Out-Null
+    `$transcriptStarted = `$true
+} catch {
+    try {
+        `$msg = "[`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Start-Transcript FAILED: `$_``n" +
+                "User=`$env:USERDOMAIN\`$env:USERNAME  Machine=`$env:COMPUTERNAME  PID=`$PID"
+        `$msg | Out-File -FilePath `$logFile -Encoding UTF8 -Force
+    } catch {}
+}
+
+Write-Host ''
+Write-Host '=== Discovery Scheduled Task ==='
+Write-Host 'Task     : ${TaskName}'
+Write-Host 'Script   : $scriptPath'
+Write-Host 'Args     :$scriptArgs'
+Write-Host "DateTime : `$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+Write-Host "User     : `$env:USERDOMAIN\`$env:USERNAME"
+Write-Host "Machine  : `$env:COMPUTERNAME"
+Write-Host "PID      : `$PID"
+Write-Host "WorkDir  : `$(Get-Location)"
+Write-Host ''
+
+`$exitCode = 0
 try {
     & '$scriptPath'$scriptArgs
+    if (`$LASTEXITCODE) { `$exitCode = `$LASTEXITCODE }
+} catch {
+    Write-Host "FATAL: `$_"
+    Write-Host `$_.ScriptStackTrace
+    `$exitCode = 1
 }
-finally {
-    Stop-Transcript
-}
+
+Write-Host ''
+Write-Host "Exit code : `$exitCode"
+Write-Host "Completed : `$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+
+if (`$transcriptStarted) { try { Stop-Transcript } catch {} }
+exit `$exitCode
 "@
 
 $encodedBytes = [System.Text.Encoding]::Unicode.GetBytes($fullCommand)
@@ -513,8 +567,12 @@ $taskAction = New-ScheduledTaskAction `
     -Argument $wrapperArgs `
     -WorkingDirectory $discoveryDir
 
+# S4U (run without password) is preferred -- runs whether user is logged on or not
+# and does not store credentials. Falls back to Password logon if S4U is rejected
+# (common with domain service accounts or restrictive Group Policy).
+$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $principal = New-ScheduledTaskPrincipal `
-    -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+    -UserId $currentUser `
     -LogonType S4U `
     -RunLevel Limited
 
@@ -540,11 +598,12 @@ Write-Host "   Script    : $(if ($Mode -eq 'Provider') { $providerScripts[$Provi
 Write-Host "   Arguments : $psArgs" -ForegroundColor DarkGray
 Write-Host "   Output    : $OutputPath" -ForegroundColor White
 Write-Host "   Logs      : $logDir" -ForegroundColor White
-Write-Host "   Run As    : $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)" -ForegroundColor White
+Write-Host "   Run As    : $currentUser" -ForegroundColor White
 Write-Host "   RunNow    : $RunNow" -ForegroundColor $(if ($RunNow) { 'Green' } else { 'DarkGray' })
 Write-Host '  =================================================================' -ForegroundColor DarkCyan
 Write-Host ''
 
+$registered = $false
 try {
     Register-ScheduledTask `
         -TaskName $TaskName `
@@ -555,10 +614,52 @@ try {
         -Settings $settings `
         -Force `
         -ErrorAction Stop | Out-Null
+    $registered = $true
+}
+catch {
+    Write-Warning "S4U logon failed ('$_') -- retrying with Password logon type."
+    Write-Host '  Enter the password for ' -ForegroundColor Yellow -NoNewline
+    Write-Host $currentUser -ForegroundColor Cyan -NoNewline
+    Write-Host ' (stored securely in Task Scheduler):' -ForegroundColor Yellow
+    $taskPassword = Read-Host -AsSecureString -Prompt '  Password'
+    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($taskPassword)
+    try {
+        $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    }
+    finally {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
 
+    # Use -User/-Password parameter set (not -Principal) to avoid parameter set conflict
+    Register-ScheduledTask `
+        -TaskName $TaskName `
+        -TaskPath $TaskFolder `
+        -Action $taskAction `
+        -Trigger $trigger `
+        -RunLevel Limited `
+        -User $currentUser `
+        -Password $plainPassword `
+        -Settings $settings `
+        -Force `
+        -ErrorAction Stop | Out-Null
+    $registered = $true
+    $plainPassword = $null
+}
+
+if ($registered) {
     Write-Host "  Task '$TaskName' registered successfully." -ForegroundColor Green
     Write-Host "  Output dir : $OutputPath" -ForegroundColor White
     Write-Host "  Log dir    : $logDir" -ForegroundColor White
+    Write-Host ''
+    Write-Host '  -- Verify these are correct before running --' -ForegroundColor DarkCyan
+    Write-Host "  Script : $scriptPath" -ForegroundColor Gray
+    Write-Host "  Args   :$scriptArgs" -ForegroundColor Gray
+    Write-Host "  Run as : $currentUser" -ForegroundColor Gray
+    Write-Host ''
+    Write-Host '  Each run writes a timestamped log to:' -ForegroundColor White
+    Write-Host "    $logDir" -ForegroundColor Cyan
+    Write-Host '  View latest log after a run:' -ForegroundColor White
+    Write-Host "    Get-ChildItem '$logDir' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content" -ForegroundColor Gray
     Write-Host ''
 
     if ($RunNow) {
@@ -619,13 +720,6 @@ try {
         Write-Host "    Get-ChildItem '$logDir' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content" -ForegroundColor Gray
         Write-Host ''
     }
-}
-catch {
-    Write-Error "Failed to register scheduled task: $_"
-    Write-Host ''
-    Write-Host '  If "Access Denied", run this script as Administrator.' -ForegroundColor Yellow
-    Write-Host '  The task runs as YOUR account (for DPAPI vault access).' -ForegroundColor Yellow
-    Write-Host ''
 }
 # endregion
 

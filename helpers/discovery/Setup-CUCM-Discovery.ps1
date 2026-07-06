@@ -334,12 +334,12 @@ function Get-CUCMResolvedSnmpSettings {
 
     $resolvedAuthProtocol = $SnmpAuthProtocol
     if ($saved -and $saved.ContainsKey('AuthProtocol') -and -not $script:InputSnmpAuthProtocolSpecified) {
-        $resolvedAuthProtocol = [int]$saved['AuthProtocol']
+        $resolvedAuthProtocol = [string]$saved['AuthProtocol']
     }
 
     $resolvedPrivacyProtocol = $SnmpPrivacyProtocol
     if ($saved -and $saved.ContainsKey('PrivacyProtocol') -and -not $script:InputSnmpPrivacyProtocolSpecified) {
-        $resolvedPrivacyProtocol = [int]$saved['PrivacyProtocol']
+        $resolvedPrivacyProtocol = [string]$saved['PrivacyProtocol']
     }
 
     $resolvedAuthPassword = ConvertTo-CUCMPlainText $SnmpAuthPassword

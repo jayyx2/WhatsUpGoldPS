@@ -57,7 +57,14 @@ param(
     [switch]$SkipWUG,
     [switch]$SkipTest,
     [switch]$SkipSchedule,
-    [string]$OutputPath
+    [string]$OutputPath,
+
+    # Vault scope for DPAPI credential encryption.
+    # LocalMachine (default): any administrator or SYSTEM process on this machine
+    #   can decrypt. Required for scheduled tasks running as SYSTEM.
+    # CurrentUser: only your user account on this machine can decrypt.
+    [ValidateSet('LocalMachine', 'CurrentUser')]
+    [string]$VaultScope = 'LocalMachine'
 )
 
 # ============================================================================
@@ -69,8 +76,30 @@ $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 # Dot-source shared helpers
 . (Join-Path $scriptDir 'DiscoveryHelpers.ps1')
 
+# Set vault scope before any credential operations
+if ($VaultScope -eq 'LocalMachine') {
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isAdmin) {
+        Write-Host ''
+        Write-Host '  [WARNING] LocalMachine vault requires administrator rights.' -ForegroundColor Yellow
+        Write-Host '  Credentials will be readable by SYSTEM scheduled tasks ONLY if this' -ForegroundColor Yellow
+        Write-Host '  wizard is run as Administrator. Re-run elevated for scheduled task support.' -ForegroundColor Yellow
+        Write-Host '  Falling back to CurrentUser vault for this session.' -ForegroundColor DarkGray
+        Write-Host ''
+        $VaultScope = 'CurrentUser'
+    }
+}
+Set-DiscoveryVaultScope -Scope $VaultScope
+Write-Verbose "Vault scope: $VaultScope  Path: $script:DiscoveryVaultPath"
+
 if (-not $OutputPath) {
-    $OutputPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
+    if ($VaultScope -eq 'LocalMachine') {
+        $OutputPath = Join-Path $env:ProgramData 'WhatsUpGoldPS\Output'
+    }
+    else {
+        $OutputPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
+    }
 }
 if (-not (Test-Path $OutputPath)) {
     New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
@@ -735,6 +764,10 @@ if (-not $SkipSchedule) {
                             TriggerType = $schedTrigger
                             OutputPath  = $OutputPath
                         }
+                        if ($VaultScope -eq 'LocalMachine') {
+                            $regArgs['UseSystemVault']    = $true
+                            $regArgs['SkipVaultPopulate'] = $true
+                        }
                         if ($cfg.Target) {
                             if ($cfg.Target -match ',') {
                                 $regArgs['Target'] = ($cfg.Target -split ',' | ForEach-Object { $_.Trim() })
@@ -1003,8 +1036,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkDwFJEDUDBTa4
-# 9MOVvn/bnWV/eJXRGfGY0lFLNVFoTaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvRbDrrdTESC3f
+# 719tJLc9zalIU1HfLgQ71fOo5E4qDaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1207,33 +1240,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDdTtZJiKaGBegpVO2tX14YQZ51RER84ruKS6v6CbBGmjANBgkqhkiG9w0BAQEF
-# AASCAgBfiZbrW8tKWHh/4n6cBRPX7UJfOPxjob7L7ufIkY6vqrwq/0xTIuL6MhyQ
-# WNOiLK+HaBmGOrVABztWnpZVrQCq89U0kxItB3+KX94le22ZLzqA77IM5AGfvr2m
-# 4XYGtZDGMSnbnWj2SwcKKXWgRvcE5zN/3TqKUgqJKOzz/n0GPbE1JpZG7GFF4T4o
-# /zgI4/NqJCj96VOwuxZqXJsC8CcJxyoU9cA9zCBLy8M5l1Dbh82hE1tMJh7fqte0
-# GMhKIwrRXQez3o4/RLUaCOAtcXnao76O6KK5K02q0d83CIBZl/O21mNHbmM8/lNl
-# lAzLVDwLemrmAykfsNQmFpgMFPWC9/GVyqae/+ShxPpTu5naIttdPeyF6UHnActf
-# s+pua09hLzcKvudkUbBayIPCJLSLJtgs1jua0I0Rpw6vVAm6S8rHHIONVqrKdWLi
-# gWWuhyXt+yZ5JpgQ1Bf95G1bPfJTga8311Kp2IlPaL9ze4R2M1K1X09kZhpoRrIl
-# 5jqF6HsH4rSkZDKj7oWNki99mHraGIICb+VSsZs8Fng2BUw7Ft4+aoHih2WN555x
-# /Ogk/+Amp32KloF2C/2+Vno5CJ0iFXFsbMF6h1i1uPcywHc73u2vBjjdjJEP4P0h
-# JmKAVtF23hs/dJhKP2gO04Id/Y+RGniRS0T1GElvl/daCInic6GCAyYwggMiBgkq
+# BCCWbhhPz6O2Bec6q3FF7W8yo9aAz+GGh7dKHFMfKI5+fDANBgkqhkiG9w0BAQEF
+# AASCAgDFQg4Yf8eAa0eazGmV0dxhSh+5+3zSqWXF631KHmyscaIZsJvYEsXniK5w
+# epqMTy9yPQz8VvtBjrk5SGrinMwECohnmn1xL2kKFXM53VD2KVdLXGn/J+1pHLRf
+# Gg6BrGzat4F8FobSE4AdLAOEbMc76SOGfErYJSt6QKMHrwcwIotxYc4hwPfFR5WG
+# wt2zQMgpj1HoGFZn/QC+5JnYGV6S//L6oQUs3BL2PY+jJtFMccpJvDdjO7HqSDij
+# xpoHIIWOuzFwgi5+I/dLX+HssH1W4sg2/cRNqBr3Hw6MU5XnvfHpwIUfS3az3l1H
+# jSr9ESWavKNmc8EjPDfXtKE8smdZgFxTUEfblhSY5AzQP9ckuN3KtLd1X4tgM7nO
+# DhTveZhgk6Y8I3rAhGBYRGSqyN94sOZosk1Af3c87MVmsQ6039y+pmZ6ltaiiO4s
+# MEUxftTtK24TpIeXMSTmSLTfD196e/DZg5JJdpd9Ao35tkuoPEXfyc4QfPTCCVNJ
+# /9+7+ec6AubHIc0PB8E6pz2151vQjtpzhTKv7iBM3D0Rc7VUieThE+wmHebi3C8T
+# +5/56U1Ca1lHDR/9ThuvZc+Z+JDJfSC3NmEip3eh9zEcbazuOEwCYqi5LmeixBXz
+# QBnuS1OoEU0ZVkVzVQkDCLC4uc4lg4yIs6s4TruhHrlEZeMMlaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MTgxNzM0MzdaMC8GCSqGSIb3DQEJBDEiBCCHbTYT
-# 3rCFTCw0TeLCKeUnwT1C2xrnNGsU3cY9npofPTANBgkqhkiG9w0BAQEFAASCAgAt
-# eMkJLRHIBPjA+2aj9JEaO5Jmi+3hKrJ8Lpo1mC3g6crtOhGmFPlHGoFW7ftF/X/E
-# ko+25Dqvuidb+u3Lk39FVufZFzG9w8VF9OzUQeeqUmNEypnjeDTwOa2SJZaIy9ZQ
-# oeOBKKKdlK/FcPp8DchdmUGiePytrqHT0cijFK+Qm4lQLFWMBApPhJhVcbgRuKgi
-# ebfV/qQBOQiTe2O9Dr1FUqplfUGi2NIBEQkLqeLw5D5pJUyyob/ZZLXO6+iUZZFf
-# +dV30V401CvC7hKGJwfy6diFu1mWVzUls/9pVLUyFVjyxiVWn8o65faJlirY9Bwd
-# 82OtKBNjagO8P1XikYysDcAM8+sEbOUa+Frtd7IOBMiww5q9MoSKlKAcpNnUFNUQ
-# 7G8+k4YR0Yl3gOVIGIEirirFXEfRXN3F6mNogPOI87zcRiyzMxb/wpeG/3jZzUx0
-# qTn0HYvlDlnishb7xdolKV2WT114c7I36AyURGiAZfc8rJgb+zmTomaD0R4ovwiL
-# UV/8yaMTWsYw8vvLpKaA9I6KXijZyXLy/Nv/Y72Z6HyhUoM4gGDMLBcTZy5j9NIN
-# NdItva3kiKK66YFLM3w5DmgWDU4rjPaU6Jb5XGCwzRrpqncfdQUB9XGz8g0diian
-# MdRKBzeRPgtoRceAR3ZdAU63K+VEN2OLPV/e9S5YbA==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMDE2NThaMC8GCSqGSIb3DQEJBDEiBCBMhh/j
+# VUdf1nCffkq/WKC6IKhgif2GG+I2lpx7FGGceTANBgkqhkiG9w0BAQEFAASCAgAt
+# jko+6neDS9NQle/Yo9edcMujkdx4PUtmRlNt4kL0S7KSm8HRVX7OkkyGthMa6WLe
+# m3T1rbATpwLT7VUPsVEOkFF5iE1Sr3vjpcpa2VKx24bvE1GRmONd9dbRKOnqWfZe
+# 123XOlDMxCPINNWu76zCBMD/3i9I0ogWTTNLERnwV7NvG7N+7gNmvFjN3IkSQ/42
+# ylQDCGp4KugoeQHuHOqevuu1OttoGj2ErccWK4YWNFLQ8ZB7fKc50oMUUS5AQiOX
+# IddU6zQx5DmpQTMcQc23AS8qraQxj78B0ten5udNueWFZOtl6xp+MlBK734hzRL+
+# sPwfHl0/SUK/VfqblAxUD1qHwOXYmxKo6DKMKB96vilCx7v/4xLUqFOxoqJHEY//
+# xsbe+Gaoa0jDfOVvv1b1z2LjAAuL/NCZrNBY7Es4DoFO/+YuiWz6nhfKE3/fIcYk
+# pCMfw1nkaqzbghlDT7nKDmD44/yYlWm/2j0y4tKW71ESzTYDxOtc31x0ZKkVzp0x
+# /VcwnVsFPtA4RQgOwfPWRA/XxvuClyIdjgglhG1phe/K7rrXXtoplPFRKV8bJmuP
+# Xo9du2i8hYG4cFKVkkOaC5KeanBY85vloIVEmu/Vx/FAveBd72Mh6hGJOjb47Qq0
+# KO/iA8G0rRZ7feueo+KlH72uveNjCoVzaifspQn2KQ==
 # SIG # End signature block

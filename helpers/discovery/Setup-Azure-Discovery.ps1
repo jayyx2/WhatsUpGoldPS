@@ -90,6 +90,7 @@
 #>
 [CmdletBinding()]
 param(
+    [Alias('Target')]
     [string]$TenantId,
 
     [string]$SubscriptionFilter,
@@ -175,7 +176,16 @@ Write-Host ""
 # --- Resolve Tenant ID --------------------------------------------------------
 if (-not $TenantId) {
     # Try to find TenantId from existing vault credential (Azure.*.ServicePrincipal)
-    $vaultDir = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Vault'
+    # Use the vault path from DiscoveryHelpers which respects WUG_VAULT_SCOPE
+    $vaultDir = $script:DiscoveryVaultPath
+    if (-not $vaultDir) {
+        # Fallback if DiscoveryHelpers not loaded yet
+        if ($env:WUG_VAULT_SCOPE -eq 'LocalMachine') {
+            $vaultDir = Join-Path $env:ProgramData 'WhatsUpGoldPS\Vault'
+        } else {
+            $vaultDir = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Vault'
+        }
+    }
     if (Test-Path $vaultDir) {
         $azCredFiles = Get-ChildItem -Path $vaultDir -Filter 'Azure.*.ServicePrincipal.cred' -File -ErrorAction SilentlyContinue
         if ($azCredFiles -and $azCredFiles.Count -gt 0) {
@@ -250,13 +260,30 @@ if ($Action -and ($Action -eq 'PushToWUG' -or $Action -eq 'DashboardAndPush' -or
 Write-Host ""
 Write-Host "Authenticating to Azure tenant $TenantId..." -ForegroundColor Cyan
 
-$bstrAz = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AzureCred.Password)
-try { $plainAzSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrAz) }
-finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrAz) }
-$azParts = $AzureCred.UserName -split '\|'
+# Handle both PSCredential format (UserName="TenantId|AppId", Password=SecureString)
+# and Hashtable format (TenantId, ClientId, ClientSecret) from Fields-based vault storage
+if ($AzureCred -is [PSCredential]) {
+    $bstrAz = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AzureCred.Password)
+    try { $plainAzSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrAz) }
+    finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrAz) }
+    $azParts = $AzureCred.UserName -split '\|'
+    $azTenantId = $azParts[0]
+    $azAppId = $azParts[1]
+}
+elseif ($AzureCred -is [hashtable]) {
+    # Fields-based vault storage: TenantId, ClientId, ClientSecret (plaintext strings)
+    $azTenantId = $AzureCred.TenantId
+    $azAppId = $AzureCred.ClientId
+    $plainAzSecret = $AzureCred.ClientSecret
+}
+else {
+    Write-Warning "No valid Azure service principal credential available."
+    return
+}
+
 $plan = Invoke-Discovery -ProviderName 'Azure' `
     -Target @($SubscriptionFilter) `
-    -Credential @{ TenantId = $azParts[0]; ApplicationId = $azParts[1]; ClientSecret = $plainAzSecret; UseRestApi = $true; MetricsTimespan = $MetricsTimespan }
+    -Credential @{ TenantId = $azTenantId; ApplicationId = $azAppId; ClientSecret = $plainAzSecret; UseRestApi = $true; MetricsTimespan = $MetricsTimespan }
 
 if (-not $plan -or $plan.Count -eq 0) {
     Write-Warning "No items discovered. Check service principal permissions and connectivity."
@@ -424,19 +451,14 @@ switch ($currentChoice) {
         catch { Write-Verbose "Credential search returned error: $_" }
 
         if (-not $wugAzCredId) {
-            # Extract SP credentials from vault
-            $bstrWugAz = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AzureCred.Password)
-            try { $plainWugAzSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrWugAz) }
-            finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrWugAz) }
-            $wugAzParts = $AzureCred.UserName -split '\|'
-
+            # Use pre-extracted SP credentials (supports both PSCredential and Hashtable formats)
             try {
                 $credResult = Add-WUGCredential -Name $azCredName `
                     -Description "Azure Service Principal for tenant $TenantId (auto-created by discovery)" `
                     -Type azure `
-                    -AzureSecureKey $plainWugAzSecret `
-                    -AzureTenantID $wugAzParts[0] `
-                    -AzureClientID $wugAzParts[1]
+                    -AzureSecureKey $plainAzSecret `
+                    -AzureTenantID $azTenantId `
+                    -AzureClientID $azAppId
 
                 if ($credResult) {
                     if ($credResult.PSObject.Properties['data']) {
@@ -487,21 +509,16 @@ switch ($currentChoice) {
         catch { Write-Verbose "REST API credential search returned error: $_" }
 
         if (-not $wugRestCredId) {
-            # No existing credential found — try to create one
-            $bstrRestAz = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AzureCred.Password)
-            try { $plainRestAzSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrRestAz) }
-            finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrRestAz) }
-            $restAzParts = $AzureCred.UserName -split '\|'
-
+            # No existing credential found — try to create one (use pre-extracted SP credentials)
             try {
                 $restCredResult = Add-WUGCredential -Name $restCredName `
                     -Description "Azure OAuth2 client_credentials for tenant $TenantId (auto-created by discovery)" `
                     -Type restapi `
                     -RestApiAuthType '1' `
                     -RestApiGrantType '0' `
-                    -RestApiTokenUrl "https://login.microsoftonline.com/$($restAzParts[0])/oauth2/v2.0/token" `
-                    -RestApiClientId $restAzParts[1] `
-                    -RestApiClientSecret $plainRestAzSecret `
+                    -RestApiTokenUrl "https://login.microsoftonline.com/$azTenantId/oauth2/v2.0/token" `
+                    -RestApiClientId $azAppId `
+                    -RestApiClientSecret $plainAzSecret `
                     -RestApiScope 'https://management.azure.com/.default'
 
                 if ($restCredResult) {
@@ -1329,19 +1346,16 @@ switch ($currentChoice) {
         # Step 1: Create test Azure credential
         Write-Host ""
         Write-Host "Step 1: Creating test Azure credential '$testCredName'..." -ForegroundColor Cyan
-        $bstrTest = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AzureCred.Password)
-        try { $plainTestSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrTest) }
-        finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrTest) }
-        $testParts = $AzureCred.UserName -split '\|'
+        # Use pre-extracted SP credentials (supports both PSCredential and Hashtable formats)
         $testCredId = $null
 
         try {
             $testResult = Add-WUGCredential -Name $testCredName `
                 -Description 'Temporary test credential -- safe to delete' `
                 -Type azure `
-                -AzureSecureKey $plainTestSecret `
-                -AzureTenantID $testParts[0] `
-                -AzureClientID $testParts[1]
+                -AzureSecureKey $plainAzSecret `
+                -AzureTenantID $azTenantId `
+                -AzureClientID $azAppId
 
             if ($testResult) {
                 if ($testResult.PSObject.Properties['data']) {
@@ -1506,13 +1520,12 @@ switch ($currentChoice) {
 } # end foreach actionsToRun
 
 Write-Host ""
-Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cyan
-
+Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cy
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClCnCZ9mQEohPT
-# Iw2YbsQLcON+W/kLtLqPW1y4cgVIO6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsQIEbxc/RpPg+
+# yupHpBP5Fob8G8hpv73enYZ4dydnq6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1715,33 +1728,33 @@ Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cy
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDa7/tfPqENFhcFbSJ2ND3p8GXHYdHE52AyDid+RVIprTANBgkqhkiG9w0BAQEF
-# AASCAgAcRJUZVYoyO0c1sB2V2cocMuwXH2JDr1w3PBI05X4/ylXhjdn+hMAwnn4i
-# FU4ePUpcFfAckidqQVXNfNeTNZiKyE0lRL7jNr1gj+Khvf3mTPGKclVHRxm/YF2h
-# I/xLV3saz3pwkBdY4VoU/5wmjyaUp/3mxz2FIidJ85U/TzRGQ6cgtmAztC0kfY7u
-# 8Fx+96fIdgzXjUBfS0JPzY8HW5BhlVWKr10v4AJ6Xx5m+4T/1xtw1sAfWH+SnLo2
-# b3rkOOOiB8H06KCkQKqvU7pY+O7jA7F7xixzJez6tdmWQjQ0Yajq3sPSIRXXis8T
-# Y89UQ2pYb2uUzy3vzgAG+B/JiB0G/Cc4uI6YioQ7ttz3lTd8DnFQ/JTMR1Ah4Hn0
-# XS6FFFlzZEBqSTtIDlWEywJQ512UHjABcIFJ7FTPt0CSf6B0nHGczxCL2RQ+So18
-# JJuop/R+92jBppcNAk+eRm0qx8ndLmeb6klBHKewaNL1HOhZIuYW4UJU0VYsnpvt
-# kvM2+2NZlTM++BgcWTG8YJmNcaA/sfXTf/fowfWckKoAAgg8B1Vq8ekMRlwdAOgI
-# z4APm4B9TvlPzdqL37N1vZWI/qbfXTgtFc4iiNP67wgVWYWuKm56dbEN5+4G4Pxq
-# NdZNLds5La0ofCkhikFEBS/yOEfAx/j+DTSTDtR/O/utqU3xB6GCAyYwggMiBgkq
+# BCAskcwylSgZiAYvC3mEeGITMognX36e4I7D0oRfU7TAvzANBgkqhkiG9w0BAQEF
+# AASCAgBGaAFq9iZoSuLohi2LubkyJNbSaXqepjVAu2Ofr6nyklosbk9KRzqe7a0Q
+# vGPaWcH6WsoOYeTzzum+9m9hzrBP4XBYVKIB8hXUFz4s6V0W5LVKMmdt1afSehm2
+# QJX13mVUHsPfNHP9c0bAEE1A3aDjdiARlJ/LdjzwEzYRelEMzrtjboeWNgKrKosx
+# DNEsNiDr6mG8Wp5A7E8Z2uHE9vJGKLC7dfu5iNIGMAEDSx4v1o+IeGmSYcS1Icp6
+# BSNMM1X3WPBRSYQ1dI8RTdqP/oiH3+vBQjvifi15rSqapUZ92t91JHNjB+1qlf+9
+# 0Y5jaODaZEE9kZWIXx1UtMmdBWNoCeYANmqQhoPu2jTN+59qhHhssLZ3LqVT01Pg
+# w4i5HEAFuQyh41NAGmcfTbG/+NPd/wRZGNQbLdVNkItPDnPXKLaRnnUDG9AtWYM5
+# 8ScSF3Le+wLz0+OzOopDtKCC5XeMS30u5OKSsUoitoPz7DsC67m5xzfOK/xRdz0x
+# v51+jsGQQikOiarL6VA5daHl2miDzXeABHW8iyoTMpREXl5B4FZllVyRC5tgHDGt
+# 90MIXf/G5HPWrL1dUyGI596LymxoflppKMw6EY/f8CXkO08F829qWAp51F3mNH3H
+# zh6uqnSACcVdDx9Y69MNbJuzvYwLuSyESz97uDc5KfkRKni9T6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjcxOTA2NThaMC8GCSqGSIb3DQEJBDEiBCDZqZo2
-# 3bmFogBGFF7RMDE4l9crNnVNYA958tDITuMhmzANBgkqhkiG9w0BAQEFAASCAgCA
-# NnXGACjJad4OUNHpDP1Rj3mFe/9nu+TnlsddLObsJIx83bRAdCTGl0L0tPcv1HD2
-# 7Uh4ouYHkfwiFt4FFVxPvAGGDMtghXiP5VUk+p7a1y1/Ym99+n1H+C0gTxBTy2ZS
-# NFz4Mrcn+etsQpc9wn1pNHJ1vk3fkwulnBNtSGuYjly9UnV4AEIBeGv7cUrPla5r
-# fOBfCPnBx0zk0iuVIYUiwKU62h0qJjoIt7UlNTLjDx7dKF0YrrPtjVE2c2J2trzT
-# bBfh0UwVQlNl1YsAW2occB64FvGsdcRNg+DEe9FttMSEixQx3ZLsEbLOT5qZTOus
-# WjRqe9EFE+EcO8MZ4AuNb1hSv8ZED0507jD1EhbdykqB9gIj9q3B9NWKVsxls/OI
-# CUXPB4YJZirKaSRKSBh+6cDXW5tKnLEnAYMGd/x1gfQxq7IxowWNk4dEe28WVyhK
-# uBrTCbYiKZIwdmjN9P/p5LMwAceYpmLUBnPAgUyOkNPQ4U1pbhE0C2XTP6z3P1ap
-# B18PlNPTMNcX2gRaUZy7Y/I6NUNFYwP3kr7nZZGxHjTgpnLNxYOc5hfkIZj9bJkc
-# c3Xn8ZzRAEpT58KKIiYMHlGphOT6ulF1bi20S8sJ3TkyhIFUdMlGGelRJXHMOrA2
-# CdYnU5BUP0wnYwUPU8rqLvAwVKJ2rJHr3SYw071CwQ==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMjQ1MDRaMC8GCSqGSIb3DQEJBDEiBCC6JhS5
+# 9Kdea9qi0OEW5ecZclAcfPRwXl0zOI5yZvck6DANBgkqhkiG9w0BAQEFAASCAgCe
+# sRnPUvgFsTkOvCXdQ22ANtLSUXhIPOJi0IMBVuXl/OtjvWNhgU6iHJMPmL0Vf9Sa
+# EOWtx2dikIjqM0nYbxraDK2Ruig/gfesWos1k3kpGdnfphCHw1SWhRHXHs8QRXKQ
+# oRuQ0ejqpf5YUUIevt2pV7hsmhMF8QgV98iZ5ohRiGn3aHaoh2JxErRymrB7ejX6
+# R2tDoUPCVj9aD8H0TtswPxSDbNsV/fgWPKe4a4ERv9kF9lAjSj8Xw5tslo/U3ES/
+# rbCpBDMSVoudwR4uyujQvZTbjS5LcNxuRFE42wr9OGaK/ZtVFUMSgFGQt/W4z7pA
+# W8AUvYGUcnyKDMFgsimN2Y4MU4CrCeE0/gb4UYgKddqjR8wM4dkU7ed0z2+opOyY
+# jR4NwkqNnObSv6OTyapLhBp1m0PIMjIToa/cqTMFBroDwBhp4D2t2vysLH5iCKVn
+# X2pz70StDwVsZ0uaienQGoJTR+x5D5juu3x0KXS2fdLO/S+nTlWzVpw05n/CdTf7
+# ysIBwHtN4N7Ao3COnO9awsyYQApiYsXSfumKY5NYc9WhH4DPXH2osVq9uAIo4sef
+# AmENl7hYi3YhCP68gtCXRcvNkCP28IFvRsC+UOhB6EjrEM6AvLkVnxVbu7ZQXLrO
+# +w0egixvdw0xL1/DuAiA6vYNWDsK+GjKw/+GdVTTiQ==
 # SIG # End signature block

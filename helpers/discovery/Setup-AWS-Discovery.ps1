@@ -138,6 +138,7 @@
 #>
 [CmdletBinding()]
 param(
+    [Alias('Target')]
     [string[]]$Region = @('all'),
 
     [switch]$UseRestApi,
@@ -268,15 +269,29 @@ if (-not $AWSCred) {
     return
 }
 
+# Handle both PSCredential format (UserName=AccessKey, Password=SecureString of SecretKey)
+# and Hashtable format (AccessKey, SecretKey) from Fields-based vault storage
+if ($AWSCred -is [PSCredential]) {
+    $awsAccessKey = $AWSCred.UserName
+    $bstrAws = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AWSCred.Password)
+    try { $plainAwsSK = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrAws) }
+    finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrAws) }
+}
+elseif ($AWSCred -is [hashtable]) {
+    # Fields-based vault storage: AccessKey, SecretKey (plaintext strings)
+    $awsAccessKey = $AWSCred.AccessKey
+    $plainAwsSK = $AWSCred.SecretKey
+}
+else {
+    Write-Warning "No valid AWS credential available."
+    return
+}
+
 # ==============================================================================
 # STEP 3: Discover — authenticate and enumerate AWS resources
 # ==============================================================================
 Write-Host ""
 Write-Host "Scanning AWS: $scanLabel..." -ForegroundColor Cyan
-
-$bstrAws = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AWSCred.Password)
-try { $plainAwsSK = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrAws) }
-finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrAws) }
 
 # First non-'all' region for initial connection; provider resolves 'all' dynamically
 $connectRegion = ($AWSRegions | Where-Object { $_ -ne 'all' } | Select-Object -First 1)
@@ -284,7 +299,7 @@ if (-not $connectRegion) { $connectRegion = 'us-east-1' }
 
 $plan = Invoke-Discovery -ProviderName 'AWS' `
     -Target $AWSRegions `
-    -Credential @{ AccessKey = $AWSCred.UserName; SecretKey = $plainAwsSK; Region = $connectRegion; UseRestApi = $UseRestApi }
+    -Credential @{ AccessKey = $awsAccessKey; SecretKey = $plainAwsSK; Region = $connectRegion; UseRestApi = $UseRestApi }
 
 if (-not $plan -or $plan.Count -eq 0) {
     Write-Warning "No items discovered. Check AWS credentials and region accessibility."
@@ -438,12 +453,8 @@ switch ($currentChoice) {
         Write-Host ""
         Write-Host "Phase 1: AWS Credential in WUG..." -ForegroundColor Cyan
 
-        $bstrAK = $AWSCred.UserName
-        $bstrSK2 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AWSCred.Password)
-        try { $plainSK = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstrSK2) }
-        finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstrSK2) }
-
-        $awsCredName = "AWS - $bstrAK"
+        # Use pre-extracted credentials (supports both PSCredential and Hashtable formats)
+        $awsCredName = "AWS - $awsAccessKey"
         $wugAwsCredId = $null
 
         # Search for existing AWS credential
@@ -460,8 +471,8 @@ switch ($currentChoice) {
         if (-not $wugAwsCredId) {
             try {
                 $newCred = Add-WUGCredential -Name $awsCredName -Type aws `
-                    -AwsAccessKeyID $bstrAK `
-                    -AwsSecureAccessKey $plainSK
+                    -AwsAccessKeyID $awsAccessKey `
+                    -AwsSecureAccessKey $plainAwsSK
                 if ($newCred -and $newCred.id) {
                     $wugAwsCredId = $newCred.id
                     Write-Host "  Created AWS credential: $awsCredName (ID: $wugAwsCredId)" -ForegroundColor Green
@@ -473,7 +484,7 @@ switch ($currentChoice) {
                 else {
                     # Re-search after potential duplicate creation
                     $existingCreds = @(Get-WUGCredential -Type aws)
-                    $matchCred = $existingCreds | Where-Object { $_.name -like "*$bstrAK*" } | Select-Object -First 1
+                    $matchCred = $existingCreds | Where-Object { $_.name -like "*$awsAccessKey*" } | Select-Object -First 1
                     if ($matchCred) {
                         $wugAwsCredId = $matchCred.id
                         Write-Host "  Found AWS credential after create: $($matchCred.name) (ID: $wugAwsCredId)" -ForegroundColor Green
@@ -495,7 +506,7 @@ switch ($currentChoice) {
             }
         }
 
-        $plainSK = $null
+        # Clear sensitive variable (already extracted to $plainAwsSK which is script-scoped)
 
         if (-not $wugAwsCredId) {
             Write-Warning "No AWS credential available in WUG. CloudWatch monitors will not authenticate."
@@ -826,13 +837,12 @@ switch ($currentChoice) {
 } # end foreach actionsToRun
 
 Write-Host ""
-Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cyan
-
+Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cy
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAOiQ0afyhpOGcC
-# 2Q+8E2SwbPkIiCtd7K7rV1/0J4Gtv6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMoifAApOMtfTS
+# GXHgjr/aeHGeG41G/mAhoopdvziBIaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1035,33 +1045,33 @@ Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cyan
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBDzCvwstuMAe5LA7YThemhNaZEK9G6tri95vCHVhzodjANBgkqhkiG9w0BAQEF
-# AASCAgAsaB4gBGdYYxJUXI45o8plgaWL8E1oZZHNxYvif7/WlkNnCoIhjNix9Vwn
-# RF14qea1ikA763gu3arGFJBwbIIDDV3UHv+qfxtACKc30W9WHImg9AqiLa47Nxc5
-# MOkKOXjLztIVnw5vk93cAry7H8MdCpGdt/Rnnn/3Wj4/Em/samAuj0UZzsaePFcv
-# uPvnYPHecoglNTTf7zl2MH+LQXWuZ/jQctfqZom1a7dCpt/dkIu+H8efqkVH1az5
-# n8aeYOHDvuGACYnLJSgoF5kGCHwQWAtpBkiQFRQGACVR+tQgBFBKf8bacVeAIEKk
-# GFrOp3LnUBgM4sjfau7cvi7giGTOY7QRRO74nWEROCvXO9XIExdzB1o5XQxR3iwB
-# 7hlcW9DwA0aOKF/mc/9AmpwbCH9HKDauPJ6mGNmL+zCvbnr9F4fxE43gmcGm6huO
-# 63iZkGarZESDN17FJg0Pcq4lv2NhFX2mp/YkgFTiMyAXFAKzJJqPjwd3vo94aAO+
-# 2PZd27EI486/vi/YDRyXJ8ji0kxlW/9Ed2vsWWkn7puiVn0PY6szW8RK1YTVlqSj
-# sHN8/twb8aukCKuILgbliUO4x1o5cOQR0547Ra+W9qox6Cg0AzB7O9rQ4AwnhdN9
-# Y5M+mpTJQTBijoBef5RVZHdicAAZBqz/k2Tn1K3HDKt6m4P1QaGCAyYwggMiBgkq
+# BCAaZILihPiZwDXjsuWUvrv4conpi8XgGBU7q+9jk1OrfDANBgkqhkiG9w0BAQEF
+# AASCAgAUuG6kFo/+1xuO8sqwdvVNZt4BNE+aTRl3cNnYL9QFFTB41qQoXpWFjGqs
+# L1VKsiZMga13fKPt+r7LQBlPXZDVPkBWVOLfAoXbnD8qCY9N3rru6HF5iHWNnHgn
+# Nc4/aP2qS2tVbdUCBtUib7luvPW1OBqpo/hBbdP5zJPDvrmKuyEHEc8mFSRwAq9/
+# YazNi5KMxZzxgqTU4C4EVMsj9x3TDkfWkNtTJXKFVPuSp0gVbRSFzXa4ZW3P2WpE
+# 9ycjvWuuLKLaQjYtIQjk0ZN/zgv00PA15azd4rmThE11IKrtQ4OcxyEI+ZBgj3oy
+# a89Ze+pIPljpX9eNHtpQJd9jHmqbL9pkDqnKjwMvnqIbtFXImkMObuK+87ese0WQ
+# fD1zZQuflK2zM0z/PkVOxXe5IA2RsF3aP9RONldvTGZD9I1YZXnKh+hlz3hPdHyt
+# 9UWadPcxtNV1K1Oyw02f1P7eaSnZBdK5BeTOZ4w82LS/B2GpuvELQ67pcTjdNXXI
+# Wxk3UvH1xuBLP7IcK1cuwUC57hsF7/hAdh5ndnkCZ6Q/jRS53l4u5Vi2WBz21Pbe
+# 8SpcYWJfDWVh942X7SSxUOfl99VTC9uE2M7QYeyoMIKNqx8qeIN0k1z8LaEy3nN0
+# 1K3lh5S/yju92Gn19YROcOWViId/lb89JTD9hmmjEnSuyH+tK6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA0MTkyMTA1MDlaMC8GCSqGSIb3DQEJBDEiBCBwZWk+
-# rIC+oPFM8PvVvkfEJ0wmwZMpkgGYAq/QjRfrKDANBgkqhkiG9w0BAQEFAASCAgAx
-# QgHXLC90tLTbbzgc1cug9nOv+pIH+PVINcK6qDiO3ZbUzB19bzmcZ1LJB6VxeEI0
-# Tc3lcKoiE1SN/6ZeW61Ho2DkmO9eotT8kbb1vS0jjB29aSvCyh9PtarKKjh8Vx0K
-# mq11ukVwrW8lcXO/Q2JGCBDTBw8wOTxWi8GMpnXxmBiOmJurCR15O772c752jvkH
-# tOK82Mvj4DU6VXEzhha1jRr+YJCUEPttamH3slsOQa9Y5bBf7y+Qw9uXCKdABas9
-# BErdbPyGIMdLu5q/ElKxLsUoXCH7d3v9IqYkcd1buyEqspSPTJlU7v0hugXjAJaT
-# Pg2UJKyMK+BydE6vK1/ewGxMATuAEIIPS1cAf62MiMpDxmQMTCGJjqfp4vNjHGhP
-# DdjkxN9M8HhXotxazdRCRKr4FxNmbg4j6ysieThFMN8vUbquXE4Pvrw3Q5SStW8L
-# WzOJCYe1SjTuyrQLdfUAPsmX5NZ4gzAz38BHRGZPWleAqqeMd1q/N8Why8iHdeUE
-# kOdG4PiZRXaQW+hPZX4PzLNpfhBAJ03nhMbrIda7Xj5YVFUkk9/Sb5TTUkj4prqS
-# Yv1BkR3q2m+QoN7YiiE17BBhJJGN0dAUGLzjX+ea8a4x0l4NI9qjleH9zbyMQMC9
-# 9CwxPPPXlK3lvZT38Ij+N5RFp4R4D3eMveSN9C9heg==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMjQ1MDJaMC8GCSqGSIb3DQEJBDEiBCBt+IDM
+# XwAcAbyQG8FmUi+xI8CtL3LaGW4wri6ysuMkwzANBgkqhkiG9w0BAQEFAASCAgCL
+# witAp0I9X8KEPkT+r9Z9RAS4+NGEj4bLnxo9IQQpgFLrxdNe/IZzVPtqjHKs5Gwd
+# qjb6M3DZpOB0I9XbppfvdOfkh5/DCqvQIb8JF5MalhkurUM0jgiYWkGRuxoO/s39
+# eWbIfquZFXMjPbwZU/T/VlrZHpkMIqofL57Ax7KvoCdnHADPNGcmdIDfJF54OpHd
+# wObuRId2ypFWCD2euQA47E/hgAyEjuBcZnqQirnRJ+r0Fl1x5jyzBI42/YOImbLN
+# 06xV2bUxX61i/D5QvzMVJEWSOeeJe0JPb+G6AscFCsbCCQ/ZTqGl8cO+SzGfPxki
+# bqMUy839KfDFEM6BUTWXjnTj0i+lebnKNdRjvI0hVdvBmRmSbZbXbDXMPYmgUGXb
+# sW0K6AiBF5UaH7xA+ehZ7TCvDY71UrErCwXdhLqtVonNO3K93/Qr3sII+THmVWST
+# 9nLUKV2ozzlCrn9y3zqcffNRtgT3jy3W4UqeBCiSGcnBJIjRRchc/vOqYEeKjUyi
+# zlJYtMVxCaKmNDwz6nIJcm49y5MvvS5ak8Tc3PKOBP3gQOPWMVhRlgeVvCwZ9uGV
+# F0Pd8y7Fpsj2tIw/qbDzVP0SbqJk+OHfdhkC+VwdW6rmu1EyA755GXUBlQlyXzvS
+# z/dE0DafKeuNS9HmFkQaJhmD/4P0HVUrceGKKLqUSw==
 # SIG # End signature block

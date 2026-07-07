@@ -174,7 +174,7 @@ param(
     [string]$OutputPath,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('Token', 'Password')]
+    [ValidateSet('Token', 'Password', 'ApiKey')]
     [string]$AuthMethod,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -187,6 +187,12 @@ param(
     # SYSTEM with no user logged in. Walks you through credential entry first.
     [Parameter(ParameterSetName = 'Register')]
     [switch]$UseSystemVault,
+
+    # Skip the interactive vault population step. Use this when you have
+    # already populated the vault (e.g. via Initialize-WUGDiscoveryVault.ps1)
+    # and only want to register the task.
+    [Parameter(ParameterSetName = 'Register')]
+    [switch]$SkipVaultPopulate,
 
     [Parameter(ParameterSetName = 'Show')]
     [switch]$Show,
@@ -384,7 +390,13 @@ if ($Mode -eq 'Provider') {
 
     # --- Resolve output path (must be known before building args) ---
     if (-not $OutputPath) {
-        $OutputPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
+        if ($UseSystemVault) {
+            # SYSTEM cannot access %LOCALAPPDATA% — use ProgramData instead
+            $OutputPath = Join-Path $env:ProgramData 'WhatsUpGoldPS\Output'
+        }
+        else {
+            $OutputPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output'
+        }
     }
     if (-not (Test-Path $OutputPath)) {
         New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
@@ -401,7 +413,6 @@ if ($Mode -eq 'Provider') {
     $scriptArgs = ''
 
     if ($Target) {
-        # Pass targets as comma-separated for string[] params
         $targetStr = ($Target | ForEach-Object { "'$_'" }) -join ','
         $scriptArgs += " -Target $targetStr"
     }
@@ -425,35 +436,40 @@ if ($Mode -eq 'Provider') {
         $TaskName = "DiscoverySync-$Provider"
     }
 
-    # ---- UseSystemVault: populate LocalMachine vault interactively now ----
+    # ---- UseSystemVault: set LocalMachine vault scope and optionally populate ----
     if ($UseSystemVault) {
         Write-Host ''
         Write-Host '  =================================================================' -ForegroundColor DarkCyan
         Write-Host '   System Vault Setup (-UseSystemVault)' -ForegroundColor Cyan
         Write-Host '  =================================================================' -ForegroundColor DarkCyan
-        Write-Host '  Credentials will be saved to the LocalMachine vault.' -ForegroundColor Yellow
-        Write-Host '  The scheduled task will run as SYSTEM and decrypt them.' -ForegroundColor Yellow
+        Write-Host '  Task will run as SYSTEM using the LocalMachine DPAPI vault.' -ForegroundColor Yellow
         Write-Host "  Vault path: $(Join-Path $env:ProgramData 'WhatsUpGoldPS\Vault')" -ForegroundColor DarkGray
         Write-Host ''
-        Write-Host '  Loading DiscoveryHelpers and switching to LocalMachine scope...' -ForegroundColor DarkGray
 
-        . (Join-Path $discoveryDir 'DiscoveryHelpers.ps1')
-        Set-DiscoveryVaultScope -Scope LocalMachine
+        if ($SkipVaultPopulate) {
+            Write-Host '  -SkipVaultPopulate: assuming vault is already populated.' -ForegroundColor DarkGray
+            Write-Host '  Run Initialize-WUGDiscoveryVault.ps1 first if credentials are missing.' -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host '  Loading DiscoveryHelpers and switching to LocalMachine scope...' -ForegroundColor DarkGray
+            . (Join-Path $discoveryDir 'DiscoveryHelpers.ps1')
+            Set-DiscoveryVaultScope -Scope LocalMachine
 
-        Write-Host ''
-        Write-Host "  Running $Provider setup interactively to collect and store credentials..." -ForegroundColor Cyan
-        Write-Host '  Answer the prompts -- credentials go into the LocalMachine vault.' -ForegroundColor Yellow
-        Write-Host ''
+            Write-Host ''
+            Write-Host "  Running $Provider setup interactively to collect and store credentials..." -ForegroundColor Cyan
+            Write-Host '  Answer the prompts -- credentials go into the LocalMachine vault.' -ForegroundColor Yellow
+            Write-Host ''
 
-        $vaultArgs = @{ Action = 'None' }
-        if ($Target)     { $vaultArgs['Target']     = $Target }
-        if ($WUGServer)  { $vaultArgs['WUGServer']  = $WUGServer }
-        if ($AuthMethod) { $vaultArgs['AuthMethod'] = $AuthMethod }
-        & $providerScripts[$Provider] @vaultArgs
+            $vaultArgs = @{ Action = 'None' }
+            if ($Target)     { $vaultArgs['Target']     = $Target }
+            if ($WUGServer)  { $vaultArgs['WUGServer']  = $WUGServer }
+            if ($AuthMethod) { $vaultArgs['AuthMethod'] = $AuthMethod }
+            & $providerScripts[$Provider] @vaultArgs
 
-        Write-Host ''
-        Write-Host '  Vault populated. Registering task as SYSTEM...' -ForegroundColor Green
-        Write-Host ''
+            Write-Host ''
+            Write-Host '  Vault populated. Registering task as SYSTEM...' -ForegroundColor Green
+            Write-Host ''
+        }
     }
 }
 elseif ($Mode -eq 'Runner') {
@@ -642,7 +658,7 @@ Write-Host "   Script    : $(if ($Mode -eq 'Provider') { $providerScripts[$Provi
 Write-Host "   Arguments : $psArgs" -ForegroundColor DarkGray
 Write-Host "   Output    : $OutputPath" -ForegroundColor White
 Write-Host "   Logs      : $logDir" -ForegroundColor White
-Write-Host "   Run As    : $currentUser" -ForegroundColor White
+Write-Host "   Run As    : $(if ($UseSystemVault) { 'SYSTEM (LocalMachine vault)' } else { $currentUser })" -ForegroundColor $(if ($UseSystemVault) { 'Green' } else { 'White' })
 Write-Host "   RunNow    : $RunNow" -ForegroundColor $(if ($RunNow) { 'Green' } else { 'DarkGray' })
 Write-Host '  =================================================================' -ForegroundColor DarkCyan
 Write-Host ''
@@ -698,7 +714,7 @@ if ($registered) {
     Write-Host '  -- Verify these are correct before running --' -ForegroundColor DarkCyan
     Write-Host "  Script : $scriptPath" -ForegroundColor Gray
     Write-Host "  Args   :$scriptArgs" -ForegroundColor Gray
-    Write-Host "  Run as : $currentUser" -ForegroundColor Gray
+    Write-Host "  Run as : $(if ($UseSystemVault) { 'SYSTEM (LocalMachine vault)' } else { $currentUser })" -ForegroundColor $(if ($UseSystemVault) { 'Green' } else { 'Gray' })
     Write-Host ''
     Write-Host '  Each run writes a timestamped log to:' -ForegroundColor White
     Write-Host "    $logDir" -ForegroundColor Cyan
@@ -719,7 +735,11 @@ if ($registered) {
         $runArgs = @{}
         try {
             if ($Mode -eq 'Provider') {
-                if ($Target)     { $runArgs['Target']     = $Target }
+                if ($Target) {
+                    # Azure/OCI accept a single string via alias; all others accept string[]
+                    $singleTargetProviders = @('Azure', 'OCI')
+                    $runArgs['Target'] = if ($singleTargetProviders -contains $Provider) { $Target[0] } else { $Target }
+                }
                 if ($Action)     { $runArgs['Action']     = $Action }
                 if ($WUGServer)  { $runArgs['WUGServer']  = $WUGServer }
                 if ($AuthMethod) { $runArgs['AuthMethod'] = $AuthMethod }
@@ -770,8 +790,8 @@ if ($registered) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDOBjfJevBeuiOT
-# xvmlMme21Y8lou9w+nIrRf1GMCEmy6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDnm2ZRYsr1HmeX
+# p/eRAeXIXSQwbZKlzrfBTnVJJzCPBqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -974,33 +994,33 @@ if ($registered) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBPil0V2ev5YKe0wPKpxUL8ISvuFbuf5goHVzJiCOPO9DANBgkqhkiG9w0BAQEF
-# AASCAgDk5bZauG/IFb4BCKX6WC6Sv0n61T0D5LC6xdEcbZ8AwXU6UWqy2z+TOgBV
-# IYPEiuYiIJTxTO6v9KrZW78QpW0ucQfevzK3nSA1JFmgkUw8aIWI/JJiAtHNDEtV
-# jAA2I3ze6X7WowEUCqcrFgt/pGQ9xM0mq+g0wrZgj//AP8dS+FFDZfKMU7NxSBDt
-# sKsyUGYgF3C3AO8bP6X4rL89F0lgvjmZc7am0atgRqpLk1vGtg2QMV69xxIhH8Ej
-# PD19NJF0z8c/V8Zb2nYdob6xyfvhX45zGPfNtgigwFmKBS9R+SMpzr4NVGmnrNQD
-# 6+UzHHrkIv4/seTXxPzp4PPbSAjvLXA/aDkh/Gh8WuL5jhFd9T21gMJiVen5c1NZ
-# nBoh8X08+wgBGxOHe7mT+URI1AN/20nwVlixsgpqYopmNvFueAGEPPI2XlQayxgG
-# ZnqpQzfYJTVs5Cr428npzr4ulLtuu1pSj1a/xLHlDpChX7Bmf1zmjzeraGAV34Id
-# 5Y1qBuZLeFbLmLYOWElkk+1NqyfwfaK0fPCnPIjPe3BNWUev12J41i0erUptEvlf
-# YdaiG/KHpFq0BzLzWdKWQ4B8bu5o+xqns1wn1U0hR/CjA6mX1o+R6nqITEOzxsOB
-# B49SMOEGyE4CF7XQZQo6uXkiKphqE1lVCcbCAKFTt1wktURRUKGCAyYwggMiBgkq
+# BCDKW+Heq5w3pbqk5TdyHzpbVKBiCA6x5uhTIFz81HxEoTANBgkqhkiG9w0BAQEF
+# AASCAgDnfDScrUmR6ZkaF1/APt0cyd9jE2mPmJ5SqukBDz2RGFiuEiRVk37yfMNa
+# ORWIiCSEoz+BpLaa96P1pwmJNFoI/ep9U+bZ0HcLwSJr/o63zDE6kCi1gAfiDpU3
+# mWc//XFHxAs76EIn+jRQmcjT4ShTPLd7/S9thPKniQLTNQOw1zwITHXEVe+Ns7Hb
+# eJto1k8BYMlZyt4ObZoTaxH3IcQvakFdnp8DcA5cOTPp32zooFhdVAZZQRvsIEYC
+# ildnH1k43O8ACdT+3E3CEiayMuQppVZkk8MRW3lDVhG66EfvHk81UhdtJvKezkPK
+# bQ2We+tAHUJqJfnABCdtw2kB3b6n61/8kpoAKcid9BYpimiforspGj6eKTiggxFP
+# QQH6r+GdOh74Za8oe5B0VkLUEf6nt45B3tLRovMOIwUQOq+g3LuLLHhl/G88bbT8
+# NcbOiorYjTra9FZUPqeb9D3aLBY7pUsf71eTbjC5SMuRWovYdwc7YuYSiP0JKONq
+# UmSu9iLmh/Bcn0R66uRhixd/tnO63g/VUqUWY1Hm9/3Kg6hVXdTQYi1fwIuOKMfW
+# oUVyrGlGMANoT9lhk6lRsTprntCLqiHtDKs+oBLhIhX3bvvv1MWk9dBcQK0Oo5jw
+# nLP6AJpF2qy3NUPihOqtog9v8h008cZs95d8NW72YneGFQPrcaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MjkyMDI3NTdaMC8GCSqGSIb3DQEJBDEiBCBBNXe3
-# Gqg/stDPqwjNPLD40o5loNYppUa62SZPoWDeGTANBgkqhkiG9w0BAQEFAASCAgCV
-# 9yqtNDzlfY4f0C/sO+8lYI+tojPw9WY4kUpCpsRrTqFOWhpzo4E7WpbtSGjmQrna
-# +iFd5MIid7ZpSUelLs6HBqHViB2GKOmyP71NF5HXnyIZePhg2bB7T9p77A1y5b64
-# KLcgyAWZ6BUWd/gH0dqtsNBisKkjX7wNCpt7ODIuImZIYRa99bTuG4PPPREdQaCa
-# tEgjO642lyE4du7mXKoW/d1N7eKN3ZbFs3JOMn28AZmdydhxMnJTE9njkvSa83/a
-# NaWV7jUbfDYMEjTDsUVhD6U34zbVy8CVhLqjklRlSejdWs6WBUcNqMnBhxo/3NcO
-# +1zrwx8ZJBeH5aPzH+AK8VroO234xtEZa4fCI85wh4L4H8CkiGEkVCGmh8GF8G8v
-# kfeJVo7s9MuT2wvl/2wpKIb5Cc9Xwns4dY8HjDgJIunta94ZedIfjyeEXFHzwxf5
-# VwDG721dxe5RQEs1EbgQjUIV04cRo9kmeVujoQB8eiMS/EOXS2tS2Jhb5OTZrzfK
-# 1Q2kP5Oak2/cq/LpCOgu+YndyBOnVZU3RQqVmES5kmvZYCvk9ogAnfaLzs2IYQA3
-# Nui1vEs7LKzGpLeXWwH5T2qhmVzdYJ8ifUnoEeFlXDthKhbjOS2dkJfv7KLlv85o
-# JHb+O0jH9xcld0HOEh31hwX8GC7tp8yfEFDhkwM9Vw==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMjEwMDlaMC8GCSqGSIb3DQEJBDEiBCBZ8hct
+# S3Le4OJs5tmbXQj44P+7qGl2XZrAI6Iaci2ZnTANBgkqhkiG9w0BAQEFAASCAgBv
+# AxkXGjW7/ER1leXUrjBvc34tOwwQumKkY/ONs/1q4AwcvAhAGjgkGktIaZJB3EVm
+# UWqFhM/ohWYSvP0QF0272F9CWBBELK9sBj8hzH7BpZu1PcHDcES5QMTcQ9UHCzux
+# cqRoR6yRhXdR1cgIHQCPtkF5CTMOc/LLqjPpjD0yr1wYj0oKdLwibFwhKueeHbTG
+# woQXJrDgbsO2vFOZHdS3H4ZdioveN2wlo07qqN8GnxyZjmbZIrVavTBd/jJgddvF
+# fuHUeBFuYCBakbunqrsMGCLZuDZRX03Aqqx8Gzfl/Fup9UJ6OIkNm5DCdYp/Il0m
+# tez6+cEmVf3qLVswoDAhROHqHGcr3mA3tVCmno6opOntbmGuXATh7dOFENJoZ3qH
+# JB3xQv3fyIy2V8HCxcnUKx+rfi7WTZ2to0+TQiZOJj2p79YV+dWRD/MKS3TgkEA2
+# t3wacfPWUF8L8DzMuAR19ZLDaMqtpziL363plJOdPk0z1WL1TfnYLK+OJFtBQJAO
+# i747n5oOCRkXkjhAVrF3aOwaYu8jNQSCVL8MX3biiaMOwWfqkFj7TYn6xZUqQQJX
+# oY9gLhhwMZ4/CaII2MraKLJsdnACqSgK2b0IcmiQ1alBrdydkhFQymE4GIwwqwVj
+# ggkkdT7rlmLS8rXiysZBaq/bk8vWFAEeaBGqnh8HOA==
 # SIG # End signature block

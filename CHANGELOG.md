@@ -31,6 +31,17 @@
   * `DiscoveryProvider-CiscoWLC.ps1` -- Same end-of-MIB graceful handling applied to AP, client, and WLAN table walk catch blocks
   * `Invoke-WUGScheduledTaskE2ETest.ps1` -- **New script**: end-to-end test for scheduled discovery tasks with LocalMachine DPAPI vault; tests vault setup, task registration as SYSTEM, execution with timeout monitoring, output verification, and cleanup
   * `docs/discovery-vault-scheduling.md` -- **New reference doc**: step-by-step vault setup and scheduling guide for all 17 discovery providers with single-line copy-paste commands, vault key reference table, dashboard output locations, and common operations
+  * `helpers/snmp/WhatsUpGoldPS.Snmp` -- **New PowerShell SNMP sub-module**: pure-PowerShell SNMPv1/v2c/v3 client built on SharpSnmpLib (MIT); no WUG COM API or Windows SNMP service dependency; fully compatible with PowerShell 5.1 and runs under SYSTEM scheduled tasks
+    * `Import-SharpSnmpLib.ps1` -- loads SharpSnmpLib DLLs from the bundled pre-built zip (`lib/SharpSnmpLib-prebuilt.zip`); auto-selects the correct .NET target framework (net462 / netstandard2.0 / net8.0) based on the PowerShell runtime; used as a prerequisite by all other SNMP functions
+    * `Invoke-SNMPBulkWalkFriendly.ps1` -- SNMPv2c/v3 bulk walk returning a structured object (`Variables` array + metadata); handles end-of-MIB-view gracefully; supports auth/privacy protocols (MD5, SHA, SHA256, SHA384, SHA512 / DES, AES128, AES192, AES256); used by CiscoWLC and CUCM discovery providers
+    * `Invoke-SNMPMessenger.ps1` -- single OID GET/GETNEXT using the SharpSnmpLib `Messenger` class; SNMPv1/v2c community or v3 USM credentials
+    * `Invoke-SNMPCoreStatic.ps1` -- SNMPv2c bulk walk via `Messenger.BulkWalk` (simpler path for v2c-only targets)
+    * `Get-SNMPTableSharp.ps1` -- walks an SNMP table OID and returns indexed rows as hashtables; column-to-name mapping via `-ColumnMap`; used by the CiscoWLC provider for structured MIB table retrieval
+    * `ConvertTo-SNMPv3AuthProtocol.ps1` / `ConvertTo-SNMPv3PrivProtocol.ps1` -- map friendly name strings (`'SHA'`, `'AES128'`, etc.) to SharpSnmpLib provider objects; `SHA`/`SHA1`/`SHA96` are treated as identical (all map to SHA-1)
+    * `SNMPMib.ps1` -- OID-to-name resolution helpers; `Resolve-OID`, `Get-MibTree`
+    * `SNMPv3EngineCache.ps1` (Private) -- caches SNMPv3 engine ID discovery results per host to avoid repeated engine-ID probes on repeated walks to the same target; PS 5.1-safe hashtable implementation
+    * `SNMPMibTools.ps1` (Private) -- internal MIB parsing utilities
+    * **Third-party notice**: SharpSnmpLib is bundled under the MIT License (Copyright © 2008-2024 Malcolm Crowe, Lex Li, LeXtudio Inc.); see `NOTICE.TXT` for full text
 
 
   * `Start-WUGDiscoverySetup.ps1` -- UAC self-elevation for Steps 5 and 6 (scheduled task registration); when not running as admin, the wizard now builds a temp script with all registration calls and runs it via `Start-Process -Verb RunAs -Wait` instead of failing with "Access is denied"

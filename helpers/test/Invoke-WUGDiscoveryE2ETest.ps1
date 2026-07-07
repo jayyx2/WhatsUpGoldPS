@@ -122,6 +122,11 @@ param(
 
     [switch]$NonInteractive,
 
+    # Vault scope for credential lookups. Default: LocalMachine (matches Initialize-WUGDiscoveryVault.ps1 default).
+    # Use CurrentUser if credentials were saved without -VaultScope LocalMachine.
+    [ValidateSet('LocalMachine','CurrentUser')]
+    [string]$VaultScope = 'LocalMachine',
+
     [switch]$OpenDashboards,
     [switch]$OpenReport
 )
@@ -142,6 +147,11 @@ if (-not (Test-Path $OutputPath)) {
 $discoveryHelpersPath = Join-Path $discoveryDir 'DiscoveryHelpers.ps1'
 if (Test-Path $discoveryHelpersPath) {
     . $discoveryHelpersPath
+    # Set vault scope to match where Initialize-WUGDiscoveryVault.ps1 stored credentials
+    if (Get-Command -Name 'Set-DiscoveryVaultScope' -ErrorAction SilentlyContinue) {
+        Set-DiscoveryVaultScope -Scope $VaultScope
+        Write-Verbose "Vault scope: $VaultScope  Path: $script:DiscoveryVaultPath"
+    }
 }
 else {
     Write-Warning "DiscoveryHelpers.ps1 not found - vault credential checks disabled."
@@ -249,7 +259,7 @@ $vaultConfig = [ordered]@{
     LoadMaster = @{ Name = 'LoadMaster.loadmaster.corp.local.ApiKey'; CredType = 'BearerToken'; ParamName = 'LoadMasterTarget'; Label = 'Kemp LoadMaster' }
     Bigleaf  = @{ Name = 'Bigleaf.Credential'; CredType = 'PSCredential';                  ParamName = 'BigleafTarget';  Label = 'Bigleaf SD-WAN' }
     AWS      = @{ Name = 'AWS.Credential'; CredType = 'AWSKeys';                           ParamName = 'AwsRegion';      Label = 'AWS' }
-    Azure    = @{ Name = 'Azure'; CredType = 'AzureSP';                                    ParamName = 'AzureTenantId';  Label = 'Azure' }
+    Azure    = @{ Name = $null;            CredType = 'AzureSP';                           ParamName = 'AzureTenantId';  Label = 'Azure' }
     GCP      = @{ Name = 'GCP.ServiceAccount'; CredType = 'FilePath';                      ParamName = 'GcpProject';     Label = 'Google Cloud' }
     OCI      = @{ Name = 'OCI.Config'; CredType = 'OCIConfig';                         ParamName = 'OciTenancyId';   Label = 'Oracle Cloud' }
 }
@@ -257,6 +267,20 @@ $vaultConfig = [ordered]@{
 $hasResolveCmd = Get-Command -Name 'Resolve-DiscoveryCredential' -ErrorAction SilentlyContinue
 $vaultStatus = [ordered]@{}
 $promptedAny = $false
+
+# Auto-discover Azure vault key (stored as Azure.<TenantId>.ServicePrincipal)
+if ($hasResolveCmd -and $null -eq $vaultConfig['Azure'].Name) {
+    $vaultDir = $script:DiscoveryVaultPath
+    if ($vaultDir -and (Test-Path $vaultDir)) {
+        $azureCredFile = Get-ChildItem -Path $vaultDir -Filter 'Azure.*.ServicePrincipal.cred' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($azureCredFile) {
+            $azureVaultKey = [System.IO.Path]::GetFileNameWithoutExtension($azureCredFile.Name)
+            $vaultConfig['Azure'] = @{ Name = $azureVaultKey; CredType = 'AzureSP'; ParamName = 'AzureTenantId'; Label = 'Azure' }
+            Write-Verbose "Azure vault key auto-discovered: $azureVaultKey"
+        }
+    }
+}
 
 foreach ($provName in $vaultConfig.Keys) {
     # Skip providers not in the run list
@@ -284,9 +308,15 @@ foreach ($provName in $vaultConfig.Keys) {
 
     if ($hasVault) {
         # Vault creds found — auto-set default target
-        if ($provName -eq 'Azure' -and $cred -is [PSCredential]) {
-            # Extract TenantId from credential UserName (format: TenantId|AppId)
-            $tenantId = ($cred.UserName -split '\|', 2)[0]
+        if ($provName -eq 'Azure') {
+            # New format: Azure.<TenantId>.ServicePrincipal -- extract TenantId from credential
+            if ($cred -is [PSCredential]) {
+                $tenantId = ($cred.UserName -split '\|', 2)[0]
+            } elseif ($cred -is [hashtable] -and $cred.TenantId) {
+                $tenantId = $cred.TenantId
+            } else {
+                $tenantId = ($cred.UserName -split '\|', 2)[0]
+            }
             Set-Variable -Name $paramVar -Value $tenantId
         } else {
             Set-Variable -Name $paramVar -Value $defaultTargets[$provName]
@@ -892,8 +922,8 @@ $script:TestResults
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqBaJvIy1LoiAf
-# JXBHrgLjrm0IuELNvxwihMs1a6sZBaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB9jvY9ijco1qrj
+# EPiKB1bPfu70rQGzhheCUujx2A8fYaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1096,33 +1126,33 @@ $script:TestResults
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCFdsqyyGhCnQ7Birj4R9IBaLYYrQa1AxJFRL7lB6sbajANBgkqhkiG9w0BAQEF
-# AASCAgAkD/4o/H5L/9KGudc46vpLOjJmWz1wr4uwxL5h5/x1WLote2xC+KAp64sJ
-# hbnMHQzIGst4TKc7g7GGLId1vf8i/RK033pWnTPxY9Br4RxhcrXY0gxtUwdCdfGJ
-# 2jDSdyrMeJPZggnoqLTOXweVgwLInjgvimiIN9Ulxw2/kkZyDqoABUKQWN8vFL1Z
-# LV97sS46zv34TE7YV18tgWVfIN7zQYejKG70KgUFkAgGNICfY9LdVkiEEoJdPNyg
-# mD6UAyO8ZxTNU+OBhkXa/JGVOs08gTEZ7oetRdof5BTp/qP0todSHxAuvpQVfLoz
-# 1a0d862d0jMp24HuBKXBdXV6YcPY7xbmvxTsauxNBf37KYQ+HCWLniacgRCbyFTr
-# xE0G513meVrxt8CppxSzXTGNIUvRX/m6Ee3OTKlV8HI3geChmSHUdfmt9Uj81e6T
-# Mlyh8hLdhwfILtH1CJ3rw5cM7nd4y7PGVW3Py5URLhXQmJpFhkDePQt3UTKl8M6p
-# I6jj40bzByw8Ge3Nvmmw6s7ZGM+AhOGak7cpfO3mMVZ59QvxFkE9FF57rYaiBg1G
-# ROISd2f+xnlV3pp4Pd7WkOyizzL7HqSaOvPRrA+02wwYKIRvKluTecxka66pUVa+
-# N7k6+RbG75yUYIHajh79akIoLHRGk9eUp0xjwBdcI95akBgo7KGCAyYwggMiBgkq
+# BCDfoh/GMMNaXLF7P1Gx3LQqp652J29wa7ggNAqBGVTawDANBgkqhkiG9w0BAQEF
+# AASCAgBKCHhT0HiemYBjdusC707arzIb+Cq3QdG+UT6ILGCKxPVJhLyixyggbLaf
+# TadKodieHSZXndAgkWSOtigI3quzdtyaYV3733khzCrIxbO1VOcMeiTbiovgg0wz
+# v0XHQVibpyvLTOl/yyHhkfD+nQvqHDqYUybM5b/hlkbAiWWashlyzPwCUJ5vZNym
+# Nu4vGo81pZa/1XXuxEAT9r1LIJupCEPz8e1D35jA4OOLnUsgBtHn0Drjy46Jf+1Y
+# ykNrBmAeWNVk+oErv6eskEtVrdWKfAbXvA0ILhTayeez2VirPHJ6sOYsz4tq06O4
+# LS//YuzuGWvLZtwCaJECskNNFs8t7FLrCCviZ4ra3qrnkfJsTc9KDE5Bdw9fL94r
+# 9gYKpOlvo8yuRur+6EDSLpxIg085sxS2oLOVszqMK9YpTIWye+JgCsl8W2GJe5oY
+# ic3uCgE1B0DGOmFuDox640QZU7wkj3pCPA7UbZPjZQY4Qxud/4L7gbmI0dXQdmju
+# ZWd41ZPlN8mXBrT0/TrfrDw2lOIAQFb2oscLSC8i4N51OMFT5SCAE/zmAqr+45Fk
+# mm2tZCuRj9BeCvbiBU8HK0snL1OJiQ9IUpJF8peOBvPg4E+1Ja+hGrDliWwiKjqD
+# oQfXofGg9IuE+eVX2i9Tiz+7yQ+PfS+bNNjwmcTkw+JIp0pcD6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjgxMzQxNDlaMC8GCSqGSIb3DQEJBDEiBCAo19+g
-# g7/JfiE90hMnKyCQFOBL8kigMpuFYyAfRyLUZDANBgkqhkiG9w0BAQEFAASCAgAp
-# Kx6eeCvzwyVQCY/UMaxGHHrEOFYauvxwu0IVRwIiwzPuGqI5z5qQhhGl9Lsxa9i+
-# T8vfoAcGmGpSvso2yov4wddPS0QSB1sxoMIOdREzfVDowB4txbsxHleQf13h9j05
-# 6arl1YBuJ/dYfxmcGFoXjEztnenFJookdFzmDDHfE5uS1V4hXcz0CfFAU5SG3TT0
-# j3PeYK/HB9B6jB9oAovnvEFsWG301znpmt6g52WIONmrKGL50QyCkBohX8r3QaAT
-# u6tcl+rnZx+HOnFTpif7xqMeWIsY2xP8sp2iNnm+9+5HDDe+H0CUYREINULzClCK
-# 0Xo/PHkdiaJT2LiEeUQIFnuohcIO+92y83Aewv5DkfBSSUaQvUBtNEH6SlEt1pus
-# 5Y7tbwxlGg3LpORCdEZxfDFC+rlCDSzEfkXkgL8AuAx1e4fKV/PTbexuNgcF7YPX
-# XkqfOoUjI273SP/eSXOB7C0SbvlYNym9jaJfiCdcHpK/Lwf52QyAVvW8lK3F1tie
-# PWsO49KEl92En2hnahGihgartOPEcCyVX8ssm5E4pqw6Ca+U4Wr5+8cQf4U8rJxM
-# 6GGqvA3JTdlue1q/1BwfpxRjf2319gzQvNdDPRdrErlLyg7Z10vCAnscOdh8/mNq
-# olM5QRY6FQwsxM8XJbUifFd0FUKxKzDggIInbAtuyw==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDcxNzM4MTBaMC8GCSqGSIb3DQEJBDEiBCAYYMjH
+# ZZblOn20Gm9sonwglAIU8/YidgMe9Y6Cna+JAjANBgkqhkiG9w0BAQEFAASCAgAe
+# nU28+pcAFsCFBP9eWr84FfqdZRrwbZl40NYmVKFWjQjVMWQGMvBmGAGGGS7JIpsH
+# N9bLBSnXxTW3o7BDR3iNVAMf8NqWJFycLBCaarZMsYuldNfeVucerDXtjIyeztdW
+# rLmLnV2Aw8Y8C9/+1EgK6A9z53C28S2J0GPcSLKG8HOKjG5LEm2nL6wQmeHijIPD
+# 6PJPCHP4hJxFBJKbXgGh4/MaG1Rp6CzCraWhMj2J2B+RMpDNBYs69Q9ZiGKuLoOB
+# 68LcCRxaFDTR9tNXizWxqMQZY5hXaoUs3k8Kc1AGIM/Ssr3j0h4+9esjmjmCDK70
+# ecBOnGTytG/BJqCWf4lhKUMAr+I39VyhV8/ptRzOmpTReBNYRcIjlk3YyQHoqCjs
+# tt8RWIBqslpIaOMeEtMjI3ZeDJKEnRJDK2m9dnwjH8SykUCYe8WnB8GHOEfDyV+i
+# cwXbb4UPwyLMjc2HNIkVb9biqA9BeMc7UCZXGyHdxRnocewh3yJGKfnfCaHNvrpJ
+# 47zIlM/zngiiUivwf9WTqHBX6+VU+h3IsY5Sh3UCu+7lnDrmhwvP7REvBVDUBbHb
+# lPB2R0hrWczbdkti6OnHUTC+t9SEXpn9mH78kYehx/9V1JBxaAejZefodJL36a+W
+# DkrmyV/wX/fc2FSpT6H2pmrpZ9irqNlNtMIYfKGLfA==
 # SIG # End signature block

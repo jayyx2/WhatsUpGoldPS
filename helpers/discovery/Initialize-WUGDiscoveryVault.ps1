@@ -499,11 +499,11 @@ if ($Providers -contains 'CiscoWLC') {
             $wlcVer = 3
             $wlcUser    = Read-Host -Prompt '    Username'
             $wlcCtx     = Read-Host -Prompt '    Context (blank = none)'
-            Write-Host '    Auth protocols: 0=None 1=MD5 2=SHA 3=SHA256 4=SHA384 5=SHA512'
+            Write-Host '    Auth protocols:    0=None  1=MD5  2=SHA(SHA1)  3=SHA256  4=SHA384  5=SHA512'
             $wlcAuthP   = Read-Host -Prompt '    Auth protocol [2=SHA]'
             if ([string]::IsNullOrWhiteSpace($wlcAuthP)) { $wlcAuthP = '2' }
             $wlcAuthPwd = ReadSecure -Prompt 'Auth password'
-            Write-Host '    Privacy protocols: 0=None 1=DES 2=AES128 3=AES192 4=AES256'
+            Write-Host '    Privacy protocols: 0=None  1=DES  2=AES128  3=AES192  4=AES256'
             $wlcPrivP   = Read-Host -Prompt '    Privacy protocol [2=AES128]'
             if ([string]::IsNullOrWhiteSpace($wlcPrivP)) { $wlcPrivP = '2' }
             $wlcPrivPwd = ReadSecure -Prompt 'Privacy password'
@@ -511,8 +511,13 @@ if ($Providers -contains 'CiscoWLC') {
             $wlcFields['SnmpVersion']    = ToSS '3'
             if (-not [string]::IsNullOrWhiteSpace($wlcUser))    { $wlcFields['Username']        = ToSS $wlcUser }
             if (-not [string]::IsNullOrWhiteSpace($wlcCtx))     { $wlcFields['Context']         = ToSS $wlcCtx }
-            $wlcFields['AuthProtocol']   = ToSS $wlcAuthP
-            $wlcFields['PrivacyProtocol']= ToSS $wlcPrivP
+            # Map numeric input to named protocol string expected by Setup scripts and SNMP module
+            $authProtoMap = @{ '0'='None'; '1'='MD5'; '2'='SHA'; '3'='SHA256'; '4'='SHA384'; '5'='SHA512' }
+            $privProtoMap = @{ '0'='None'; '1'='DES'; '2'='AES128'; '3'='AES192'; '4'='AES256' }
+            $wlcAuthName = if ($authProtoMap.ContainsKey($wlcAuthP)) { $authProtoMap[$wlcAuthP] } else { $wlcAuthP }
+            $wlcPrivName = if ($privProtoMap.ContainsKey($wlcPrivP)) { $privProtoMap[$wlcPrivP] } else { $wlcPrivP }
+            $wlcFields['AuthProtocol']   = ToSS $wlcAuthName
+            $wlcFields['PrivacyProtocol']= ToSS $wlcPrivName
             if (-not [string]::IsNullOrWhiteSpace($wlcAuthPwd)) { $wlcFields['AuthPassword']    = ToSS $wlcAuthPwd }
             if (-not [string]::IsNullOrWhiteSpace($wlcPrivPwd)) { $wlcFields['PrivacyPassword'] = ToSS $wlcPrivPwd }
         }
@@ -557,11 +562,11 @@ if ($Providers -contains 'CUCM') {
             # SNMPv3
             $cucmUser    = Read-Host -Prompt '    Username'
             $cucmCtx     = Read-Host -Prompt '    Context (blank = none)'
-            Write-Host '    Auth protocols: 0=None 1=MD5 2=SHA 3=SHA256 4=SHA384 5=SHA512'
+            Write-Host '    Auth protocols:    0=None  1=MD5  2=SHA(SHA1)  3=SHA256  4=SHA384  5=SHA512'
             $cucmAuthP   = Read-Host -Prompt '    Auth protocol [2=SHA]'
             if ([string]::IsNullOrWhiteSpace($cucmAuthP)) { $cucmAuthP = '2' }
             $cucmAuthPwd = ReadSecure -Prompt 'Auth password'
-            Write-Host '    Privacy protocols: 0=None 1=DES 2=AES128 3=AES192 4=AES256'
+            Write-Host '    Privacy protocols: 0=None  1=DES  2=AES128  3=AES192  4=AES256'
             $cucmPrivP   = Read-Host -Prompt '    Privacy protocol [2=AES128]'
             if ([string]::IsNullOrWhiteSpace($cucmPrivP)) { $cucmPrivP = '2' }
             $cucmPrivPwd = ReadSecure -Prompt 'Privacy password'
@@ -569,8 +574,13 @@ if ($Providers -contains 'CUCM') {
             $cucmFields['SnmpVersion']    = ToSS '3'
             if (-not [string]::IsNullOrWhiteSpace($cucmUser))    { $cucmFields['Username']        = ToSS $cucmUser }
             if (-not [string]::IsNullOrWhiteSpace($cucmCtx))     { $cucmFields['Context']         = ToSS $cucmCtx }
-            $cucmFields['AuthProtocol']   = ToSS $cucmAuthP
-            $cucmFields['PrivacyProtocol']= ToSS $cucmPrivP
+            # Map numeric input to named protocol string expected by Setup scripts and SNMP module
+            $authProtoMap = @{ '0'='None'; '1'='MD5'; '2'='SHA'; '3'='SHA256'; '4'='SHA384'; '5'='SHA512' }
+            $privProtoMap = @{ '0'='None'; '1'='DES'; '2'='AES128'; '3'='AES192'; '4'='AES256' }
+            $cucmAuthName = if ($authProtoMap.ContainsKey($cucmAuthP)) { $authProtoMap[$cucmAuthP] } else { $cucmAuthP }
+            $cucmPrivName = if ($privProtoMap.ContainsKey($cucmPrivP)) { $privProtoMap[$cucmPrivP] } else { $cucmPrivP }
+            $cucmFields['AuthProtocol']   = ToSS $cucmAuthName
+            $cucmFields['PrivacyProtocol']= ToSS $cucmPrivName
             if (-not [string]::IsNullOrWhiteSpace($cucmAuthPwd)) { $cucmFields['AuthPassword']    = ToSS $cucmAuthPwd }
             if (-not [string]::IsNullOrWhiteSpace($cucmPrivPwd)) { $cucmFields['PrivacyPassword'] = ToSS $cucmPrivPwd }
         }
@@ -707,8 +717,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhwJTKe3C9p2WJ
-# 93BUoQbqi+xwlurHhaKUYs8EnPZ5dqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZhCFSSxhriaH+
+# MS1/5zhYUe6u2IvjmIPry9v/lExaOqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -911,33 +921,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCA2gHC0UX/ki/shDRkQJG7olousTyIIv9aWquHhzujptzANBgkqhkiG9w0BAQEF
-# AASCAgAeGu7CdCgAx/mEa6G5QVORPSivVuJL6ey0SfX12T/5iuMNwIDGgm5Zva48
-# g0CIb3sHtuMLp6wnN9A5/33f6VDYH1f8BiZsecsEwnIhwEEGKSaKjzj8Ud2tRRRL
-# TG7caM8FIaCvhSP83EDhYDGyUE7R6kXRZ8P96hDYd0U0rnfOUbQp2hYNvvfXiu9M
-# mWqtCrL3lsuQqA9m7fHgT1j82zZalPKO8LWlZ/ot1LCfP5E+GJrDy7atNDo3TW6S
-# ntTJi6lu0hnbOnz992PrZzklG+/sS8quSjDNWvJi7H1etHS+EEUVdSefBZuuE9Gb
-# VQIgAVswJSpWS9aYVCrKgvsV8Fq3PSY5HLJsiKFp93C0M4ZqTPZ/Y8/34IqefRUx
-# Zu/XN022dDwoQZwUy2wQ1rE7q+LHyrt4IUCFARWEZ8lfBKQzfpClLvp/fDpjdKl7
-# dej4xa4KkIwG1jC9qVq5OALX+jz+E8cy0CU3s4RPgXiwXXV4YmDB26dPvDnMaTvR
-# 7x+Ys9ZNNW4Xby4gV21oGi7fTRvKsKcVpxDldAoPLyDZzJUjoLnBRP5Q/Bdr4Z5O
-# XsS7fr8TNIgIXetI7+G9l2vnZk3KRNYbQ7d/VtJ2PqIK6jXWjq06JasR/kiIjEkC
-# NTJNTBhXHI3CAz4fEmz/75ilu9zXl/r3juFTjy3lV7we3DdTRKGCAyYwggMiBgkq
+# BCCeoQvrcEhlbXiPqp7oFKgACsWHf6Fe0YxqBcqrqTQkyjANBgkqhkiG9w0BAQEF
+# AASCAgAa3QCgXBgdI85vjGj/yP/YDD6V1nIGMk4xjwonQ1PgdC7iRNpWwxrzLmJG
+# Ft0V3wT//YDY5s5IVWutezX4t2wdJPOGYqul02R4qayV8HnZ+Q0Tk71bwTTL32R3
+# mOO2kkJDNFRnuKbe/9g/HN3EG1iojUPD1AyDAcWnpp85x5LfZY+j7BJMACGk7r98
+# vcxnzKa5CYkuHeSjzHeqpRtjMTDPMx03JEHtgG4UcooISz4zyKaioqZqNOK/xYvD
+# 7xut7dvYudenEkS/afZbeEkMkgL6PQvw9iq9hP3eKZFfIpN0hdynViKbxIGCktPs
+# tXvWxWb7KfH7nUozhh+Y/ZTgvi9jvM79MYVUAcqVWCM1zlh+++8MYMqBqp0Beufy
+# AS+uzIN6jvOf9Q/ILRXBuuIfKdVpsxcvtLB3hgbzF4EWSCAhkCiSKZqYP+qyE7jT
+# 3096isTvorkGcIVQnpwRqGLEj7s01y2cnjTkR/laDBi+WhErAXKX3H9n5IOj6cOo
+# BLfIywLCvIS+iE5P84cuGlG0FhvWVGjacF537B+Az2XzNDQ4+cfQsiEHHuii6aUu
+# llQFN0b3bJUq2ECzMBsaLLIXIZJnvZl+SW4MpW7KCiEoSxcPyBX4gPSdxcVEaWjL
+# 4by/Zm6zFu2ZAoHYx6xl0BOBqedCmpRcvDwVw3sYVwy/Ju8FgKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMTMwNDBaMC8GCSqGSIb3DQEJBDEiBCCPYqDa
-# WgqH9+xVzbyOVfRB1t49tWtx9jg9Q0BhJfiidjANBgkqhkiG9w0BAQEFAASCAgCp
-# x676Njdt0Di+u68wNb9z+uRAXOBE2vgOH3Ns5Z0NKZNTspBU/ID9Zivn73I/Xr6X
-# e1XvMW6pAzJIPBCVrlplil5N0KNBKWnqeLD6gapeUcs8DnsQudZc9pBit+WvaoCP
-# D7g+UE1pWNBVEbYUSnh8nNzQ+gVFk7U0G7gCJ3KSNg8h9Alta0Ip+WIsoXbq3nbf
-# NTAHcjykVINiv0do0c8ycfbXMC0/FjEffYF7OE7seHn0G/oeeuu8SkXxeK9Z4Zv2
-# WOTxXIQeqY0LjxgRQ0sT2sTZUDIsXEeVonejEEIX5r5BtYDgCGDGm/wJzOCsWsfX
-# isZ2QZ1L6olkkxWZR4AQOTpuLYbMnBI0QaaB55/fZImnVJG00EiE4oNWWc42bfw1
-# BVRQRMgZvzt1d24EgzoDp3+mtrRwjIH9JL/+ooE41pPqwiKvTyUu/3tK9U9QokGv
-# AWNLRguOX1xhj5oQKMddBf6Awy/ZQZ0vbchjIsOwMj1JqUgxN3Sdrw4C9vEe0y/a
-# agfEHCMBfc1EEze6W5UEf/1NTmad3SEPBZjW6Rc6nQmfP82Z16Kta4KWpeV4ePj7
-# 2Uvitm5e/QNGhLJYDMxrqQqNEIRKwy9FYv3RP2vUl0pDYvXUd4kXeI+nGY8RPLJu
-# gCdIaTxtbb+0XgT3Luf3GLatVf7qNovn5vG9E2i2Jg==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDcxMTQ5MzNaMC8GCSqGSIb3DQEJBDEiBCBD5QKo
+# CqxcanK4HHrn+1hdBoHfOVDYI0lDKzjNOfHegDANBgkqhkiG9w0BAQEFAASCAgDP
+# C6rsp+kuCfVPyW7F5Hlk/icVp8YiJv3HF8qsVuZC65X/vqsELXsCj8TCOhc4vx/Q
+# GBlqgmlmgQSohMi7hyGQUnr49iHvS7mRVWpq60BnOgJY2qNoNhacXN5YOlwM5AfB
+# gZJW64tpGXgXjnjYf7/U6hYoR0R6zJ8JKMV4ChDEB3RGQQ9PCJ+VrbbdsmebHUoa
+# zFj7sZbenfqQR0VYd4Ckcwc4/TMrb4oreKS4MaVm7R5dgR8dQxXO4n2sVYn4hAZf
+# m6wOp5dh663wYZ7yAFt/6EjEJcVxu5SLAjpcA8E2qnBqzoMFxglSPm/UB6mg3+91
+# yKFEiDz05jJi8oUqezbpNcmozb7/PVUOEw0qbkefgJwoYPL12i0Jzq0h/MPBeASI
+# 34fZfUZ5EAfrpCm3k3UjvtbGFKuGoDw18bhO+Vv59gR5sVqjPNljj8s92ja9QVdD
+# 7HTeAlhn2gcePMeuERfEc8UiDYvHVeN3Hs02Ka+24NgRzd7yLRMLqYEBzqSyikrc
+# 1D8ALimq+cJjU9BLSf71+9Z6NkrMzYXERapCyEWa/5a0ZNZnTOfdrOBcifhivSg1
+# Wc1S90IPVCNP7xOAEThQETz/NH5dZ5ZQKsMMO6yk41T8yQEH63MPPRKhL4003323
+# 8nbwHZ0G0KbiLmy7+gkzAOvZO8kpOlt4DToF0VLHXQ==
 # SIG # End signature block

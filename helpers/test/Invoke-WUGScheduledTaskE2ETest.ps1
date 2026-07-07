@@ -764,7 +764,8 @@ else {
 $outputFiles = @()
 switch ($Action) {
     'Dashboard' {
-        $dashboardFiles = @(Get-ChildItem -Path $OutputPath -Filter '*Dashboard*.html' -ErrorAction SilentlyContinue | 
+        # Search recursively — CiscoWLC puts dashboards in OutputPath\summary\dashboards\
+        $dashboardFiles = @(Get-ChildItem -Path $OutputPath -Recurse -Include '*Dashboard*.html','wireless-dashboard-*.html' -ErrorAction SilentlyContinue | 
             Where-Object { $_.LastWriteTime -gt $script:TestStartTime } |
             Sort-Object LastWriteTime -Descending)
         if ($dashboardFiles.Count -gt 0) {
@@ -772,7 +773,15 @@ switch ($Action) {
             Record-TestStep -Step 'Dashboard Output' -Status 'Pass' -Detail $dashboardFiles[0].Name
         }
         else {
-            Record-TestStep -Step 'Dashboard Output' -Status 'Fail' -Detail 'No dashboard HTML found'
+            # Check if dashboard exists but predates test start (timing issue)
+            $anyDash = @(Get-ChildItem -Path $OutputPath -Recurse -Include '*Dashboard*.html','wireless-dashboard-*.html' -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending)
+            $detail = if ($anyDash.Count -gt 0) {
+                "Dashboard exists but predates test start: $($anyDash[0].Name) ($($anyDash[0].LastWriteTime.ToString('HH:mm:ss')))"
+            } else {
+                'No dashboard HTML found in output path or subdirectories'
+            }
+            Record-TestStep -Step 'Dashboard Output' -Status 'Fail' -Detail $detail
         }
     }
     'ExportJSON' {

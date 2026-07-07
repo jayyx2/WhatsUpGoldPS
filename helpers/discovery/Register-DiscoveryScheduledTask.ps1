@@ -194,6 +194,14 @@ param(
     [Parameter(ParameterSetName = 'Register')]
     [switch]$SkipVaultPopulate,
 
+    # PowerShell execution policy passed to the scheduled task's powershell.exe.
+    # Default: Bypass (works on most systems).
+    # Use RemoteSigned if your environment blocks Bypass via Group Policy
+    # (scripts in Program Files are local and satisfy RemoteSigned).
+    [Parameter(ParameterSetName = 'Register')]
+    [ValidateSet('Bypass', 'RemoteSigned', 'Unrestricted', 'AllSigned')]
+    [string]$ExecutionPolicy = 'RemoteSigned',
+
     [Parameter(ParameterSetName = 'Show')]
     [switch]$Show,
 
@@ -614,7 +622,7 @@ exit `$exitCode
 
 $encodedBytes = [System.Text.Encoding]::Unicode.GetBytes($fullCommand)
 $encodedCommand = [Convert]::ToBase64String($encodedBytes)
-$wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
+$wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy $ExecutionPolicy -EncodedCommand $encodedCommand"
 
 $taskAction = New-ScheduledTaskAction `
     -Execute 'powershell.exe' `
@@ -627,7 +635,7 @@ $taskAction = New-ScheduledTaskAction `
 # When -UseSystemVault is set, run as SYSTEM -- no logon issues, always available.
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 if ($UseSystemVault) {
-    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Limited
 }
 else {
     $principal = New-ScheduledTaskPrincipal `
@@ -677,6 +685,10 @@ try {
     $registered = $true
 }
 catch {
+    if ($UseSystemVault) {
+        Write-Error "Failed to register task as SYSTEM: $_"
+        return
+    }
     Write-Warning "S4U logon failed ('$_') -- retrying with Password logon type."
     Write-Host '  Enter the password for ' -ForegroundColor Yellow -NoNewline
     Write-Host $currentUser -ForegroundColor Cyan -NoNewline

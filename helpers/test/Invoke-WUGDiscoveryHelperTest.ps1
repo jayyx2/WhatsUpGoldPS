@@ -510,18 +510,23 @@ Write-Host ""
 Write-Host "--- Test 7: Export Secret Scrubbing ---" -ForegroundColor Cyan
 
 Invoke-Test -Name 'Register mock provider' -Group 'Export' -Test {
-    Register-DiscoveryProvider -Name 'MockTest' -DiscoverScript {
-        param($ctx)
-        New-DiscoveredItem -Name "Mock Monitor [$($ctx.DeviceName)]" `
-            -ItemType 'ActiveMonitor' -MonitorType 'RestApi' `
-            -UniqueKey "mock-$($ctx.DeviceName)-1" -MonitorParams @{
-                RestApiUrl          = 'https://example.com/api/status'
-                RestApiCustomHeader = 'Authorization:Bearer secret-token-here'
-                RestApiPassword     = 'hidden-password'
-                SafeParam           = 'visible-value'
-            }
-    }
+    # Register at script scope (not inside & child scope) so it persists across Invoke-Test calls
+    Register-DiscoveryProvider -Name 'MockTest' -DiscoverScript $script:MockTestDiscoverScript
 }
+
+# Pre-register the mock provider at script scope so it survives across & child-scope Invoke-Test calls
+$script:MockTestDiscoverScript = {
+    param($ctx)
+    New-DiscoveredItem -Name "Mock Monitor [$($ctx.DeviceName)]" `
+        -ItemType 'ActiveMonitor' -MonitorType 'RestApi' `
+        -UniqueKey "mock-$($ctx.DeviceName)-1" -MonitorParams @{
+            RestApiUrl          = 'https://example.com/api/status'
+            RestApiCustomHeader = 'Authorization:Bearer secret-token-here'
+            RestApiPassword     = 'hidden-password'
+            SafeParam           = 'visible-value'
+        }
+}
+Register-DiscoveryProvider -Name 'MockTest' -DiscoverScript $script:MockTestDiscoverScript
 
 Invoke-Test -Name 'Invoke-Discovery with mock provider' -Group 'Export' -Test {
     $plan = Invoke-Discovery -ProviderName 'MockTest' -Target 'mockhost1' @verboseFlag
@@ -784,8 +789,8 @@ else {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIQSawisCGcMZp
-# H/hSz0E37uOCPJ8wirM0jHDNEEo2KqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCLGjF646ksnEyJ
+# PZ1ghS03S1pSgyC4XWdy5zmXYwGMmqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -988,33 +993,33 @@ else {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCC0Lw60qtqU/id6xug/6rQLuQh2eBgbHMPY2jBWtm+vVjANBgkqhkiG9w0BAQEF
-# AASCAgDZteJkItB7hjb1nZ1fBhxT+yIg/Ftz2Z8K6bINK6kXNlRKgS46IOQeGedu
-# 2Q5GCtB/tvtglrMudL8/EII1ejU+Fp8T6aOTuMl8qhyKS1FpNTPW/N84uuPxuSud
-# txRlqZzCOGpRCLR4+uQn181KgqJRAU2GtNP3mONpqmhiQFb5nH7NjPQp3ohpMewq
-# bYBuVakvcjxfaanrqO66tkiTmYjtQAXJwoq2ZysA4WElz3M70ew4qGuBuBqjsg8m
-# aqDoSOqnnj66cuHr7kuPvFj2BA04SFuogN1H9AoxcW63ZIoQKc34qaDXK0SbYq/i
-# ONlrsWzTNdXYZBJGrI+UbnIBJdoB9Bl+5EzNDAUgaKxoqy3g/Z/kDeMKf2AOTRRj
-# 4aqgzz5V6xGv3qvw3Zj46Wgqa8Tl8b9zgL6Oz87PGnCtBp2eWFJZpOnVvX18Wmna
-# 2aieVO2SWRCSWYv8cgH0Dgz1Qn9C6gk1WAcbxsGC9/E8kcmbDBL/VT6MSXhI0jMv
-# aOl2mjF04LDAFqHH9jjlUpaT71SMZv3oAN/foUYJHeeiV57CcjkGv5LTKNHDUal7
-# evlbLvr+CE7UKKR7CF1CSDBNUTLKouNdarqSybnCfgtQY7te9cQqIFNmQGSGF6gv
-# LxoCD9tPl0+m+V19iL21j2kZIMGY/p/rHsrcPmXcu+lqjcPttKGCAyYwggMiBgkq
+# BCC7iChmnopLdeKnFAJ+31RZLjffQJMO1DxZahcGHLBveTANBgkqhkiG9w0BAQEF
+# AASCAgBzELgujJ7jl5bCwtYLUEpC1oxV0nh/ykH3xl6N2AZ4VxBSdnb+ahgpm8Hu
+# y8A+Ok0W6HMMSRAYupoUAtHR4VEEm6HtR+xeKJQ8aeCzt7HiQyeEzIJv2ozDSVZs
+# tffOTwqrRp2pRLS4W3bHtsF2OwHgu86aOVjQO4V2bsiVluIp9bGTF92xk9qkiI16
+# 9c5UOsYj2RmJoDoYreQJxu93T1V47BUBgt6awC/yOxq6g+yBGW6lOiGjNHCEK0A1
+# yk/FrPoYA40HtP3PqDreb71lE8W6eXxcZ8OkfkPuo2J1BkLJHcMLiYnYgWc1hLeL
+# D09Yp7Oqf4SpQ6uaHnqDSu4PD7c5IkUe8se/wG2OJz9JgYP4ZKlalWGqYHHXX3EE
+# 41ZGoQHMBxeE9U3+Ocl5to8hd5BgWsOs8URhfpcXHoew4EZ8PR7Bv8LNJYTii1U3
+# 96gnZVWFlD+6ukAUAjJxMUAiXYUtcIldYkMExb007JoKyAHvMjs0M/H69pG/UEjO
+# GL9BzBMtLiRwh5iL5pvd559IXPjPM5xYrUs6ZcRIiad8ngjky/YGJ5Jy9VR/oysO
+# rJg6fB/8aKoKaZjvtY6ElE7U4YngVeaXLQnqhd2s5LurruATRyDArffkSn9Iw6M0
+# S6D6tuCcSdYUVIKRrPBukyLGP8b+5pOXn4Iwm/jMEeHdVPqr0KGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA2MTgxNzE3MDlaMC8GCSqGSIb3DQEJBDEiBCAwteyq
-# /xwGARdr/OF9EHGuAwPaF23U32T550eg4JL9izANBgkqhkiG9w0BAQEFAASCAgB3
-# gIyU6OEWVuC7x7eCKDDzq3BZgwukCQO1tusYrJU4NBDwCGb7uQ0/Aak77M2Cn3kv
-# Tjp4gffxVCOJZLflYWEMkm4ifL2dlYvpHOIrpLCm0lAwWcH/ola66uT4ID/Lgibn
-# PUljuoHh+mhtmHyKVbYe5eyJMOPOC+oCLF1Z0i0DpEj4glTJQqHVM9lThVMstKLL
-# sXTRj4ea7oGMZmoWOlpwkG4mNj1a1V9pytW9ggUTidRPAAeoyxU6YD7n8lHTUsxp
-# wk2enWhVbviEp+vkIpzii1DdJkYuafGxwNAYOiW91t/wtiGMcc3cwz4UlzEq5ViI
-# RHDmWq+rAvsBhtcqP+uFOVX10XnRQePB9XJ7q1bp9H92pLFIltUKntff3jr8uLCy
-# tm9AVZa9ToIGDNbKwAmG+B0y+Kc/4i/9AoFRMxtEPmad0ivUst0v/u8ehI9P1Oc1
-# d3+zSxXYawtMEcDKYVc94caShu8JpLMLtqWgqkdp7XxcUOa7GoX1xO90QRyULP2H
-# Ih3W9qX0Go37YOCvocouS5osYpQS1eP/Ho1LpDK/zYNEgQMDTSdm12wzErYOYEeO
-# WggsjFdbqpXff7vi/SXKzXNXnhQIRDqdsuqHnfLXtZJdLYe2rxaElj/mG8Q3pr6R
-# uWtPffzJJXuUE/OmwjVOSzsYB3RQgi+3nTx0WEt50w==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDcxODM0MjRaMC8GCSqGSIb3DQEJBDEiBCCl5ul2
+# gI3lZZm8aiXOT324zofaVvEG9dv5Z/Xlrp/+pzANBgkqhkiG9w0BAQEFAASCAgCS
+# GBOQgg+bGcN0Z+GTPpAwh7ClizYYc51ZK2tRn9Hgkt+bHh+d9YmAziGmkrOi+T1A
+# mbhhVv6LNL4XeMvHygTzFFAx8OQBv7ibzXQElwg+WbiyoAKQLSCCFOJnY1jTwek5
+# pLxnL08J0EndynxkJ9lEOHCsS3YPgjttpwgzyOGxK3YnxKRPBA/ZCouW+ChuXpxZ
+# cKwhEd82/6PETgxWdhfqUulNloJJksPxWJZPIOOhWjP7bYPH7s7z7S+kSWMP8dzJ
+# cIR5C5TusiCEHPp3NOJ76k8tzMAI/ZrYRB1nC9yVF2tNVQayCcYL4lX6R/qhU/T/
+# 79Z0yaQCZzhElEBV2ZypDUe9OuUQ7KfzQMAgmKyDIFZTq/RZhMOy8o7i5hvH13cU
+# AiLRezpU0NsZczIyDiJCLV0TCpFVnbpbcodBMkvdmePUJQhstbJVVhuIKXx14NTV
+# HeOm00F806/8qOKk3QRrOFuG8SOdRKYRporFzkF4ajFG6TtH9yKIxaJP/B28clfS
+# PPG5mqEefJSwSoyo+PSiyvniw+1zYyBCxk6gP47LFlnxolaB3qJxrKj9sCxAQ4bk
+# +e7sTUHTeidyU2k0RS3gsJ4U4irjczpzzo+WMO4ZKh9DmlTfhoaedWC4z/Ui0aAR
+# FnGkPRLqWCMA2GViqIDyztgg3esATHQwkAyM4Ob7Jw==
 # SIG # End signature block

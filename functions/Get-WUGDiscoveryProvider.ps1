@@ -1,152 +1,128 @@
-﻿$functionFolders = @('functions', 'helpers')
-ForEach ($folder in $functionFolders)
-{
-    $folderPath = Join-Path -Path $PSScriptRoot -ChildPath $folder
-    If (Test-Path -Path $folderPath)
-    {
-        Write-Verbose -Message "Importing from $folder"
-        $functions = Get-ChildItem -Path $folderPath -Filter '*.ps1'
-        ForEach ($function in $functions)
-        {
-            Write-Verbose -Message "  Importing $($function.BaseName)"
-            . $function.FullName
-        }
-    }
-}
+<#
+.SYNOPSIS
+    Get-WUGDiscoveryProvider
 
-# Load discovery framework helpers and provider modules so they are available
-# in module scope when the discovery wizard invokes Setup-*-Discovery scripts.
-$discoveryPath = Join-Path -Path $PSScriptRoot -ChildPath 'helpers\discovery'
-if (Test-Path -Path $discoveryPath) {
-    $discoveryFiles = @(
-        'DiscoveryHelpers.ps1',
-        'DiscoveryProvider-AWS.ps1',
-        'DiscoveryProvider-Azure.ps1',
-        'DiscoveryProvider-Bigleaf.ps1',
-        'DiscoveryProvider-CiscoWLC.ps1',
-        'DiscoveryProvider-CUCM.ps1',
-        'DiscoveryProvider-Docker.ps1',
-        'DiscoveryProvider-F5.ps1',
-        'DiscoveryProvider-Fortinet.ps1',
-        'DiscoveryProvider-GCP.ps1',
-        'DiscoveryProvider-HyperV.ps1',
-        'DiscoveryProvider-LoadMaster.ps1',
-        'DiscoveryProvider-Nutanix.ps1',
-        'DiscoveryProvider-OCI.ps1',
-        'DiscoveryProvider-Proxmox.ps1',
-        'DiscoveryProvider-VMware.ps1',
-        'DiscoveryProvider-Windows.ps1'
+.DESCRIPTION
+    List all available WhatsUpGoldPS discovery providers.
+
+.DESCRIPTION
+    Returns a list of all discovery providers (Azure, AWS, VMware, etc.)
+    with their names, descriptions, and associated setup scripts.
+
+    This is useful for automation, documentation, or building custom
+    discovery orchestration on top of the WhatsUpGoldPS framework.
+
+.PARAMETER Provider
+    Optional. Filter to a specific provider name.
+    If omitted, returns all providers.
+
+.OUTPUTS
+    [PSCustomObject] with properties:
+      - Name: Provider name (e.g., "Azure", "AWS")
+      - Description: Human-readable description
+      - SetupScript: Full path to Setup-*-Discovery.ps1
+
+.EXAMPLE
+    Get-WUGDiscoveryProvider
+
+    Lists all 18+ available discovery providers.
+
+.EXAMPLE
+    Get-WUGDiscoveryProvider -Provider Azure
+
+    Returns details for the Azure provider only.
+
+.EXAMPLE
+    Get-WUGDiscoveryProvider | Select-Object Name, Description
+
+    Show provider names and descriptions in table format.
+
+.NOTES
+    Author  : jason@wug.ninja
+    Created : 2026-07-07
+    Requires: PowerShell 5.1+, WhatsUpGoldPS module
+    See also: Start-WUGDiscoveryWizard
+    
+.LINK
+    https://github.com/jayyx2/WhatsUpGoldPS
+#>
+[CmdletBinding()]
+param()
+
+function Get-WUGDiscoveryProvider {
+    [CmdletBinding()]
+    param(
+        [ValidateSet('AWS', 'Azure', 'Bigleaf', 'CiscoWLC', 'CUCM', 'Docker',
+                     'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'MSSQL',
+                     'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes',
+                     'WindowsDiskIO')]
+        [string]$Provider
     )
-    foreach ($df in $discoveryFiles) {
-        $dfPath = Join-Path -Path $discoveryPath -ChildPath $df
-        if (Test-Path -Path $dfPath) {
-            Write-Verbose -Message "  Importing discovery: $df"
-            . $dfPath
+
+    $ErrorActionPreference = 'Stop'
+    $scriptDir = Split-Path $PSScriptRoot -Parent  # Up from functions/ to root
+    $discoveryDir = Join-Path $scriptDir 'helpers\discovery'
+
+if (-not (Test-Path $discoveryDir)) {
+    Write-Warning "Discovery helpers directory not found: $discoveryDir"
+    return
+}
+
+# Provider descriptions
+$descriptions = @{
+    AWS                = 'Amazon Web Services (EC2, RDS, ELB)'
+    Azure              = 'Microsoft Azure (VMs, App Services, Databases)'
+    Bigleaf            = 'Bigleaf Networks SD-WAN'
+    CiscoWLC           = 'Cisco Wireless LAN Controller'
+    CUCM               = 'Cisco Unified Communications Manager'
+    Docker             = 'Docker Container Hosts'
+    F5                 = 'F5 BIG-IP Load Balancers'
+    Fortinet           = 'FortiGate Firewalls'
+    GCP                = 'Google Cloud Platform'
+    HyperV             = 'Microsoft Hyper-V Virtual Machines'
+    LoadMaster         = 'Kemp LoadMaster Load Balancers'
+    MSSQL              = 'Microsoft SQL Server'
+    Nutanix            = 'Nutanix AHV Virtual Machines'
+    OCI                = 'Oracle Cloud Infrastructure'
+    Proxmox            = 'Proxmox VE Virtual Machines'
+    VMware             = 'VMware vSphere / ESXi'
+    WindowsAttributes  = 'Windows Server Attributes (OS, Hardware, BIOS)'
+    WindowsDiskIO      = 'Windows Disk I/O Performance Monitors'
+}
+
+# Find all Setup-*-Discovery.ps1 files
+$setupFiles = @(Get-ChildItem -Path $discoveryDir -Filter 'Setup-*-Discovery.ps1' -ErrorAction SilentlyContinue)
+
+foreach ($file in $setupFiles | Sort-Object -Property BaseName) {
+    # Extract provider name: Setup-{Name}-Discovery.ps1 => Name
+    if ($file.BaseName -match '^Setup-(.+)-Discovery$') {
+        $name = $Matches[1]
+        
+        # Apply filter if specified
+        if ($Provider -and $name -ne $Provider) {
+            continue
+        }
+        
+        $desc = $descriptions[$name]
+        if (-not $desc) { $desc = $name }
+        
+        [PSCustomObject]@{
+            PSTypeName = 'WhatsUpGoldPS.DiscoveryProvider'
+            Name = $name
+            Description = $desc
+            SetupScript = $file.FullName
+            Status = if (Test-Path $file.FullName) { 'Available' } else { 'Not Found' }
         }
     }
 }
 
-Export-ModuleMember -Function Get-WUGProduct
-Export-ModuleMember -Function Add-WUGDeviceTemplate
-Export-ModuleMember -Function Add-WUGDeviceTemplates
-Export-ModuleMember -Function Add-WUGMonitorTemplate
-Export-ModuleMember -Function Set-WUGDeviceTemplate
-Export-ModuleMember -Function Invoke-WUGDeviceRefresh
-Export-ModuleMember -Function Get-WUGActiveMonitor
-Export-ModuleMember -Function Set-WUGActiveMonitor
-Export-ModuleMember -Function Add-WUGActiveMonitorToDevice
-Export-ModuleMember -Function Get-WUGMonitorTemplate
-Export-ModuleMember -Function Import-WUGMonitorTemplate
-Export-ModuleMember -Function Add-WUGActiveMonitor
-Export-ModuleMember -Function Remove-WUGActiveMonitor
-Export-ModuleMember -Function Add-WUGDevice
-Export-ModuleMember -Function Connect-WUGServer
-Export-ModuleMember -Function Disconnect-WUGServer
-Export-ModuleMember -Function Get-WUGDevice
-Export-ModuleMember -Function Get-WUGDeviceAttribute
-Export-ModuleMember -Function Get-WUGDeviceReportCPU
-Export-ModuleMember -Function Get-WUGDeviceReportDiskSpaceFree
-Export-ModuleMember -Function Get-WUGDeviceReportDisk
-Export-ModuleMember -Function Get-WUGDeviceReportInterface
-Export-ModuleMember -Function Get-WUGDeviceReportInterfaceDiscards
-Export-ModuleMember -Function Get-WUGDeviceReportInterfaceErrors
-Export-ModuleMember -Function Get-WUGDeviceReportInterfaceTraffic
-Export-ModuleMember -Function Get-WUGDeviceReportMemory
-Export-ModuleMember -Function Get-WUGDeviceReportPingAvailability
-Export-ModuleMember -Function Get-WUGDeviceReportPingResponseTime
-Export-ModuleMember -Function Get-WUGDeviceReportStateChange
-Export-ModuleMember -Function Get-WUGDeviceGroup
-Export-ModuleMember -Function Get-WUGDeviceGroupReportCpu
-Export-ModuleMember -Function Get-WUGDeviceGroupReportDiskSpaceFree
-Export-ModuleMember -Function Get-WUGDeviceGroupReportDisk
-Export-ModuleMember -Function Get-WUGDeviceGroupReportInterfaceDiscards
-Export-ModuleMember -Function Get-WUGDeviceGroupReportInterfaceErrors
-Export-ModuleMember -Function Get-WUGDeviceGroupReportInterfaceTraffic
-Export-ModuleMember -Function Get-WUGDeviceGroupReportInterface
-Export-ModuleMember -Function Get-WUGDeviceGroupReportMaintenance
-Export-ModuleMember -Function Get-WUGDeviceGroupReportMemory
-Export-ModuleMember -Function Get-WUGDeviceGroupReportPingAvailability
-Export-ModuleMember -Function Get-WUGDeviceGroupReportPingResponseTime
-Export-ModuleMember -Function Get-WUGDeviceGroupReportStateChange
-Export-ModuleMember -Function Get-WUGDeviceMaintenanceSchedule
-Export-ModuleMember -Function Set-WUGDeviceMaintenanceSchedule
-Export-ModuleMember -Function Get-WUGDeviceProperties
-Export-ModuleMember -Function Get-WUGDeviceTemplate
-Export-ModuleMember -Function Remove-WUGDevice
-Export-ModuleMember -Function Remove-WUGDevices
-Export-ModuleMember -Function Set-WUGDeviceAttribute
-Export-ModuleMember -Function Set-WUGDeviceMaintenance
-Export-ModuleMember -Function Set-WUGDeviceProperties
-Export-ModuleMember -Function Get-WUGDeviceReport
-Export-ModuleMember -Function Get-WUGDeviceGroupReport
-Export-ModuleMember -Function Get-WUGDeviceScan
-Export-ModuleMember -Function Get-WUGDeviceRole
-Export-ModuleMember -Function Set-WUGDeviceRole
-Export-ModuleMember -Function Get-WUGRole
-Export-ModuleMember -Function Set-WUGRole
-Export-ModuleMember -Function Import-WUGRoleTemplate
-Export-ModuleMember -Function Export-WUGRoleTemplate
-Export-ModuleMember -Function Get-WUGCredential
-Export-ModuleMember -Function Add-WUGCredential
-Export-ModuleMember -Function Set-WUGCredential
-Export-ModuleMember -Function Get-WUGDeviceInterface
-Export-ModuleMember -Function Get-WUGDeviceStatus
-Export-ModuleMember -Function Get-WUGDeviceCredential
-Export-ModuleMember -Function Set-WUGDeviceCredential
-Export-ModuleMember -Function Invoke-WUGDevicePollNow
-Export-ModuleMember -Function Get-WUGDeviceGroupMembership
-Export-ModuleMember -Function Get-WUGDevicePollingConfig
-Export-ModuleMember -Function Set-WUGDeviceInterface
-Export-ModuleMember -Function Set-WUGDevicePollingConfig
-Export-ModuleMember -Function Set-WUGDeviceGroup
-Export-ModuleMember -Function Remove-WUGDeviceAttribute
-Export-ModuleMember -Function Add-WUGDeviceInterface
-Export-ModuleMember -Function Remove-WUGDeviceInterface
-Export-ModuleMember -Function Remove-WUGDeviceMonitor
-Export-ModuleMember -Function Remove-WUGDeviceGroup
-Export-ModuleMember -Function Add-WUGDeviceGroup
-Export-ModuleMember -Function Add-WUGDeviceGroupMember
-Export-ModuleMember -Function Remove-WUGDeviceGroupMember
-Export-ModuleMember -Function Add-WUGPerformanceMonitor
-Export-ModuleMember -Function Add-WUGPerformanceMonitorToDevice
-Export-ModuleMember -Function Add-WUGPassiveMonitor
-Export-ModuleMember -Function Add-WUGPassiveMonitorToDevice
-Export-ModuleMember -Function Get-WUGPassiveMonitor
-Export-ModuleMember -Function Set-WUGPassiveMonitor
-Export-ModuleMember -Function Remove-WUGPassiveMonitor
-Export-ModuleMember -Function Set-WUGMonitorTemplate
-Export-ModuleMember -Function Set-WUGDeviceGroupMembership
-Export-ModuleMember -Function Get-WUGPerformanceMonitor
-Export-ModuleMember -Function Set-WUGPerformanceMonitor
-Export-ModuleMember -Function Get-WUGDiscoveryProvider
-Export-ModuleMember -Function Start-WUGDiscoveryWizard
-
+} # End of function Get-WUGDiscoveryProvider
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDppxgFkn5YiKng
-# RIy5L1M7jb9rA/OCY+YQbZgkcLPSbaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsODrdCc9uMTdd
+# GOlk9HGEANuVFptcZGNy98gaZQ/iC6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -349,33 +325,33 @@ Export-ModuleMember -Function Start-WUGDiscoveryWizard
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDcLG3cmhPwXy2lA3IUMdOFwEbDVTXqkSUaAKOXxEsS7TANBgkqhkiG9w0BAQEF
-# AASCAgBdQwj6PKyd037HflmV3fIATv7KO9L6Uy/PxVZ2HX/BXR/JwpbvuSy/xdEu
-# vTFDRu0tnQ7oCDhxdkgB9HobX8PZ7H0eUupC/4bpfhrju7mITL0y2xYUjg8i7NEa
-# RcXI1UpgeFidi2Pt7Hoim2z8IcronhG2fTQ/EyuYNxcVwPv1ug1ZwuljspC2SL8C
-# BbzJVIE3HuMTOiaiCm5/ex437zM3kcUzZonGsFYX5xglc+RjVZ1eMDX5+fDEUH6O
-# rp49T1WXxsLZX0JX4AUCiPqjC7gtUxBQYQSg52pekL5lUk+zM7WzwHzNTQY91GCV
-# 8QkkswipkmelV4llvvB4OmoicPJNc8uncdGSSVFL7FsK8f8RhZ6iRRBrHe+uKRIA
-# ktWcJPMigyFlClvJXY4PzcoghdU6kY7/0vUckCLhbnNuZJE925EzKmUiic4A4iaF
-# km/wCicMevTROdaITnOpwMCZzzk/8P7cGYlO6KZpnTcrzsKmAZsvYxoquxgcYLYf
-# H2HJnVsa9d7s9vrTDCZU3fskALwenkL3uBiz4QrX+2VF41edtzZl7N3bdLV0jGxn
-# auBjOzz+b37+dDOtarCkZ7ZVVFbV3ngzuy1wguqic4XHkjNRmQ395Z8/RjAjZbEq
-# vd2jA1Qb45XjGzOe8C355zVEmoud0yAB2u0dX0nSzq1TPH6sGqGCAyYwggMiBgkq
+# BCAuSTqjnEsPY5f5SdG9Hv6YV84xM3o9nnJo12VDbOJj2zANBgkqhkiG9w0BAQEF
+# AASCAgC0ykwXwRV12kfL3Ni7sWOmiV7cl4Ue5J/IZaOe9bTx8y30r+1gbJ3wZN0w
+# iu7od39IL28VptxumC9l85SkpYD1XvK76iY7VG9rqR4iXkLVV+Foqojjoz/novIM
+# kqcTy1dt0wmcZCqZZvP0wnzcW+wX/vuo3BMJ+3jBTi4imXmAsgHRAI6qG1hfQcYq
+# 7KKm4I+PBfyBQg8/aqlt0DUumxdpliGWy7ZhG2aFFfbuOT1wI4Nlxf3nOo5Npxax
+# Ck6mKex/PneQ6P8/Em6+gXMt/9CJfOjqOXytQkXOoObKNuv7TN2+oeuGdGTclJ7L
+# 09kcPP81/db4Ws6xqQ3IuM1BlhMbCQ7LSA2dOwr4XdwI3i3RLDRZCTgYviQnjzDQ
+# GRH0K0fnyAPP2krr70eLZu/aCJcJqVO8K1iQ5k7gWA5+taItMd0Sj8Bz/CARg2Oh
+# vqQgpUJTRTD80S2vUogx4JUPGT3j9i6kO3K9VYgCWqmy9BXtv1jHyk7Deif6HG5j
+# k5BsIB1JAwYpqMEARB1vqtzJ1+DrK8sP7fPdhzFPnCfCYCwmQQPooYVD0jkGYIbk
+# kEzm2BBvq3wq5Of7HtM+mX0Om/nsj/QTwCi9wDTp9QTx/d+ejwBU+lKUUe1fjG2N
+# mazbJouctkMRW4cLKn942KdYYctlLb2AyleC6aXkRsruPT8/KqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcyMTQ0MTJaMC8GCSqGSIb3DQEJBDEiBCD9tPrV
-# ysYaRDtQqFSgE9rJOxxOD39loRVU7NXllPAPBjANBgkqhkiG9w0BAQEFAASCAgAf
-# wdYSvAejL5K/8/oDb4ee5xVI+NRGaF4pmYbWvGMsIymYmjCZRgdcYouMhmskqrub
-# NP3Gkhy6xqJl9PUWRElz9/+t24t1Vc7J7/QYbc2slHglq/o3h/9f1QjrJFS1MR1s
-# I9egEH1S1U5xmmBiLJVQjgwkOszIZE3SIz3kAy0bOxKIAB2BeRKC6wc79i3oUiUE
-# 7n5FjK9bXkfesXE+hM9tNLXtv9xbuf4T9PiS9eM8qhoLxgAG3ELAr5JNNmqnVTwA
-# JmkMMDC3U4+cixNOx9/Kgd0iSAQzOFu7sh3YRDWctT8rR0RsmA8D1CoN0AaSnNsA
-# ApWw+eJNHjCwmzs+2hU82L/2o/YXxQhb01crRZCrFA8SicWobXmx/cg7peQ2RJvT
-# ZXLITIV0axdU0KrpikH0rdnVFwbs5PZCAHqB4nK1Uo8TAekRQZeexgPUKau5v1vA
-# WG9HjcY0MuSsxPQeQnsYN55pcf4ma4lY0VS4Lam7p9he+qKR2QX1+yxtKfhbdAH2
-# NywMkNhibFHfy2WbZGDcAWH0hjhbUMsBEdPukKHb+YRU8OIfiaszs75hDTj3fuR4
-# rfPwKABwl3bN+b+VSNMRSq20P704yj+EMCcng9MCGwXxLm0t4HfQnWg6G3r2Xrwt
-# Cv+c+EvR1vCici/evAli9blYrVO6TxOMnWoNmOAVDw==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDcyMDQxMzlaMC8GCSqGSIb3DQEJBDEiBCCR7iP9
+# 7zjmrt0Yg3Nhbqdu8EMmPn6R+kUTEy6l8dtW5zANBgkqhkiG9w0BAQEFAASCAgCf
+# wUZvH0UG7jvABBpW+1YYWx3Ug9/E00ij3YB023q8vGRQyrGDO9yUzwn2Nid1IKMk
+# deyrIJgr5OGz9+GWeN5+NqDEouRoCnHJjSXhbdOeRuzJepv0gOZrrCBjBDvLhFQY
+# 4nSWLNAVW0xxuuOw7o/4VC3t/ztMHzqX9b2wjzcz2cUOPk4Zf99Qr8oJ9vmfYjvu
+# /0AILuWaOXeXDQ0iTX789NhBdWBO4ciXkhgJDL8f+cDHAiI39aalYooM4FQVTwrs
+# nOzLqpxUMwZvec9ej63VSZXYWnX0kPcwoL/FXSV5cZWPuaLKd7K5bW7hAJsAEV2N
+# YA1FMw9ZKz2HNVRNmqmk1bymUGXUaTHA4wCmOM6l0/In2esX6vjUpzvIOZvnVbc2
+# ERIe/f2/LgGuV3xI1N54pEImRECmUdOW5qWq84XOB48wwjkSo+Moby1F3meoIX1T
+# ftfeW3/DfYtfcOu3iddA2e05KfEoKC2Y/EmOpDi0/pgk5u21fImWgl08EVoN4G0t
+# h7oKT+eDngXpETAG7BR9/z/QXXavp3+tME/tNTYhhL/tanuQd5zm3Kh/O+/SSiDf
+# wCtntmrHub3jIl9kR2MGVw7y9hdGpX0xmsldVqz0xq+qwquqVZcPbQAAoX1YhMUr
+# y5DYPYUcXoVsToR3XnFZ9vquMeDk/6/H0c2rDRoRJQ==
 # SIG # End signature block

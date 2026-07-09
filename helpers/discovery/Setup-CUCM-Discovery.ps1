@@ -725,6 +725,20 @@ catch {
 $dynDashPath = Join-Path (Split-Path $scriptDir -Parent) 'reports\Export-DynamicDashboardHtml.ps1'
 if (Test-Path $dynDashPath) { . $dynDashPath }
 
+# Prompt for targets interactively if none provided
+if (-not $Target -and -not $NonInteractive) {
+    Write-Host 'Enter CUCM IP address(es) or hostname(s) to discover.' -ForegroundColor Yellow
+    Write-Host '  Separate multiple entries with commas (e.g., 10.0.0.1, 10.0.0.2)' -ForegroundColor DarkYellow
+    $targetInput = Read-Host '  CUCM Target(s)'
+    if ($targetInput) {
+        $Target = @($targetInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    if (-not $Target -or $Target.Count -eq 0) {
+        Write-Warning 'No targets specified. Exiting.'
+        return
+    }
+}
+
 Write-Host '=== CUCM Phone Inventory Discovery ===' -ForegroundColor Cyan
 Write-Host "Targets: $($Target -join ', ')" -ForegroundColor Cyan
 Write-Host ''
@@ -939,8 +953,8 @@ foreach ($currentChoice in $actionsToRun) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/C34WDo2R9B5O
-# OZYcGcXyL/IRGk0oKeka4NSuhmz4SqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhju9qNM/Yp77B
+# wNxAYx23t6vXkN9d8TKkq7o7S+ucwqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1143,33 +1157,33 @@ foreach ($currentChoice in $actionsToRun) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDM84zmbQdIY1+gtka/sphHZSXMOK0uuJQEVPZqSCQANTANBgkqhkiG9w0BAQEF
-# AASCAgC51ToLOMhyGe8glQjAWz+spV1IDdmaYqJj8qWAmI8M3Jt+fV/h6Lmho7Sw
-# Wx0an9bZ7mNwmcLgniFb/ljrk6fikio9o0oybPOGfBet8vwj7IoxfHap5MCFYLgY
-# tYvYcuXwO8IFwE6pCboVjX8TFABDLufLStqKFKde1lfoit5CqTJT8USDCcXTSEh4
-# j7SdDSQxFeGWdKSapKLccJ2FgJb9EIFjbqn+sXLySKDJSbBahP0zmLoKzQo2WGIQ
-# LNjWHMdsZ/hD+02pIAoVFyb9cYlanlsEQTyv8aP14oB8MJD+Eq74pwDiAFR4iV+a
-# GzfuSdFgeXAKL2mhx2OSz+QrnlQMxspEEUFSrJO7p68CK2G366DKR3gLHHEt+wAF
-# 7Opn3nncJ30e2rV/AqNkKI5FLog5BJ+FLJMYIiALNLsS+IlkxhaCzMnvTB5SIvxn
-# 3Jv3S3g+cLE2H/EeKETrZyg5ukhB1bvfJBBny7gzFmTLwFVignHrsnE+9ksyA/9r
-# vr+EGEAJznx1wt9To/3wfg0tYK3rIjhdo1LfnHDYMpNQmzx2CXo7ChXrPZg635TU
-# fELCNtVPtuRb03nxaes5Ya45lJQsC6CGUTqqKQqNbZfBlKGPHzBIvZH8X/sixQw9
-# 9JE+8lb3Q6J1co5Pt54pGWRsJhUJiS8IRrY9mJHZ7D9Y5rA3YqGCAyYwggMiBgkq
+# BCCdbiogZWfge7X9nH0fjry/6wtQ7W76sMn1gjASgDQ6lDANBgkqhkiG9w0BAQEF
+# AASCAgC26jWdfcpAHsNFSJ4ZZGctC1ZcPo+nJZHuB4rV4wQrrDgAOxLVoQaCBh0c
+# BhGZslcEL+1jVNgoaebDMRv66CpGOJ14ySJ4e4q3aYLWx6/rDqJoCsEnCDROG23T
+# 6VYMvVa40L6sNWJ/UHGwatCOAWsiFnDlwJTSXvjVoHb+U/UI2jSfVis/7ZU8rF3/
+# ZOBJZGq39CGb9TlVP/dnk/8SPWe72RoBseZDJlQpu9agRznCMcl2MGsfoDoBwqP1
+# vqTwmHKYU3mkp1rc8kveqrdsPX3Ie7qOD6ogdyNn4iRhlckXmC7rms/01TVsNisg
+# iGPdkRocv/CkujcvzDpbJdXn7sk3y89yOL+UqcDvnIyJ7UKgDEx2ZbcaGQ4FssPx
+# 5WsNLFbVl08aGkNbOKKo0OdXScCoXMo4u0XpolZ4Bns9oU4//+I9qNebTZZZuHox
+# 4gEhcqoES8XOBsM6J8nCRZ9nMnp7PMET4bBntWquZCQxHVwy7xkMf6+ACGn9sLcp
+# GP8zJO6CnH8RR1gDF8uStioNvxtr5z/GGh0gaoemj5zfGHYUVdnRdh0wyITWMRoW
+# ijRfcmmqYSLSpeMZmtukUN4vy6fNPsCTOuJ+KkZcOKjKFmnFx29bRUyYZqtXvWr1
+# oLX+M7iWUNt3GZ7lAutNfaABiTZ6VZ0bFiiertMRW1s3K44VMKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcxNzIzMTVaMC8GCSqGSIb3DQEJBDEiBCD5h/eY
-# Pt7qhRMw+0s3rNurmBU8vzPBM5VPyepbvTXX3zANBgkqhkiG9w0BAQEFAASCAgBg
-# 9EBAK/PAQJWiVD5hRco6pf4qvgWOaC6tD99OruGMmC6TgLZl7la5Vj3r/7nNTcsF
-# yeViGTbpi5P+tmQkC4J82N6rS0mua68edfZ0JXua6QE6+kD24IG12LgKHgw+CmBo
-# lbgc/ezGIzlzKgaKPjwzPH9f90AjTMgAF6z3BIus9bdPd637+Z1a6ZP60z6CxBTt
-# Dl7jnbqGJMpW+fk7RSwSUnH1RLw6qC0qMX7sb4QArPgTgKLlc4CqVgECdOHJC9zJ
-# JU30Ba6fmY/66qSlaS5sUEdQCngr7gyZthVmZwC0Ifg5Dne3SvwwGOYxlrrYUcaj
-# y1TuQDYuwxTHa+WeiTij4eeeXPodR7JNohg8iu9+X4zmV9sVedQylBeH0FIs22V8
-# LsMfLhz1z6AgfBsrVy4C9t54I0SizXqlHmbtAGjXvKsQd1A7ksnaw72YXRhDSSo8
-# GKXQvfr8pxFfFCO0QjrxxzI6PDyKajmiXkxGmvqukFBcltqpIygJ/1MzqYgth/Zk
-# bZhnjFT3GKEP5E0CdobtXhJ+2a/vAqniWOXWKrQShJ9HwtbmHDc/x3QqursAYnIE
-# ptYAuZThHHhm4sAI8CcKZQ9DbtXeOFaN01XDv2qnSYZi08kw/4tYcPQ6Rml71vYX
-# FI+9fsUhGh0Sble5+7v953f8dk717Q4+nv77rNqWVQ==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDcyMDQxMDJaMC8GCSqGSIb3DQEJBDEiBCB5WrqK
+# 0rkqvTqHnx+in6v7NjJKacua2LO/bQOFF+09mjANBgkqhkiG9w0BAQEFAASCAgAe
+# ma1EMpGmdII1zD4LPpbaV1VfNgZQVFx35MUbBoXkvbgUJ6cF/RgPtZvHh/yzCFSX
+# NDs4D6YrYGO2P1QLiN/klmAqA9c/X/WMfEJxvRUutWOIepSDznODZ0E6j7kxWuPw
+# L8MPJ4HIzVAm59lnH3ZpSK5PPs6rPl76qU/STMS+wiaG5jnSEY0yMOSbewhHFZU+
+# +dbqSZUufVl3cVooWVnQjEqAvs2PK7QbKk4+peexti9IDKL4gWM9sboAdEV3iA6Z
+# TdaxhomVvW7I3Zv/nkmEXrw/qIrD75DIoQ72OEmHib2tnsLXTECeviOtcEQr8jRQ
+# UpCUg+zpnCyrid2qpGn70FFb+sfzynm27KLeack8Vxf5YUuQXV80CI543mgot1RN
+# 0cWMZDNn69PxN9GLTYExBI4ISf9ag+9HAnzhzHse6HatN5J0l9xhZQ8IbtvIbMRg
+# w03TrJQ2zJ79T2RqYJm1D1ZNheTWcEBwSyNRY6RrusfKZGhJwwQlfGu+vXzFcT8i
+# GkW3iuBQRkFQ4jO446kGtQMlzW7iI2sfCipJTR0G8uIdoF0z/Q9vfS35svGmAIm8
+# M3BfQKG7hA0mHso9EDadamnIVDydVmsAXJAajoXr4Q8VrBknzAr2vnqLQcWyesau
+# ScUM2kaH2MWNQIujqGqC7WdjLIfmuadIRFUCvhgokQ==
 # SIG # End signature block

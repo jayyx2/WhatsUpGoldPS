@@ -438,7 +438,7 @@ if ($Mode -eq 'Provider') {
     }
     $scriptArgs += ' -NonInteractive'
     # Legacy $psArgs kept for display purposes
-    $psArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$scriptPath`"$scriptArgs"
+    $psArgs = "-NoProfile -NonInteractive -ExecutionPolicy $ExecutionPolicy -File `"$scriptPath`"$scriptArgs"
 
     if (-not $TaskName) {
         $TaskName = "DiscoverySync-$Provider"
@@ -509,7 +509,7 @@ elseif ($Mode -eq 'Runner') {
         $scriptArgs += " -OutputPath '$OutputPath'"
     }
     # Legacy $psArgs kept for display purposes
-    $psArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$runnerScript`"$scriptArgs"
+    $psArgs = "-NoProfile -NonInteractive -ExecutionPolicy $ExecutionPolicy -File `"$runnerScript`"$scriptArgs"
 
     if (-not $TaskName) {
         if ($RunnerProviders) {
@@ -629,19 +629,33 @@ $taskAction = New-ScheduledTaskAction `
     -Argument $wrapperArgs `
     -WorkingDirectory $discoveryDir
 
-# S4U (run without password) is preferred -- runs whether user is logged on or not
-# and does not store credentials. Falls back to Password logon if S4U is rejected
-# (common with domain service accounts or restrictive Group Policy).
-# When -UseSystemVault is set, run as SYSTEM -- no logon issues, always available.
+# Determine task principal (who the task runs as).
+# Priority: SYSTEM (always works, requires admin) > S4U (no password, any logon state) > Interactive (fallback)
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-if ($UseSystemVault) {
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if ($UseSystemVault -or $isAdmin) {
+    # SYSTEM runs whether logged in or not, no password, no DPAPI user-binding issues
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Limited
+    $runAsLabel = 'SYSTEM (runs whether logged in or not)'
 }
 else {
-    $principal = New-ScheduledTaskPrincipal `
-        -UserId $currentUser `
-        -LogonType S4U `
-        -RunLevel Limited
+    # Non-admin: use S4U first (runs whether logged in or not, no password).
+    # Falls back to Interactive if S4U is rejected (e.g., Microsoft accounts).
+    $principal = $null
+    try {
+        $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType S4U -RunLevel Limited
+    }
+    catch {
+        $principal = $null
+    }
+    if (-not $principal) {
+        $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+        $runAsLabel = "$currentUser (runs only when logged in)"
+    }
+    else {
+        $runAsLabel = "$currentUser (S4U, runs whether logged in or not)"
+    }
 }
 
 $settings = New-ScheduledTaskSettingsSet `
@@ -666,7 +680,7 @@ Write-Host "   Script    : $(if ($Mode -eq 'Provider') { $providerScripts[$Provi
 Write-Host "   Arguments : $psArgs" -ForegroundColor DarkGray
 Write-Host "   Output    : $OutputPath" -ForegroundColor White
 Write-Host "   Logs      : $logDir" -ForegroundColor White
-Write-Host "   Run As    : $(if ($UseSystemVault) { 'SYSTEM (LocalMachine vault)' } else { $currentUser })" -ForegroundColor $(if ($UseSystemVault) { 'Green' } else { 'White' })
+Write-Host "   Run As    : $runAsLabel" -ForegroundColor White
 Write-Host "   RunNow    : $RunNow" -ForegroundColor $(if ($RunNow) { 'Green' } else { 'DarkGray' })
 Write-Host '  =================================================================' -ForegroundColor DarkCyan
 Write-Host ''
@@ -685,37 +699,30 @@ try {
     $registered = $true
 }
 catch {
-    if ($UseSystemVault) {
+    if ($UseSystemVault -or $isAdmin) {
         Write-Error "Failed to register task as SYSTEM: $_"
         return
     }
-    Write-Warning "S4U logon failed ('$_') -- retrying with Password logon type."
-    Write-Host '  Enter the password for ' -ForegroundColor Yellow -NoNewline
-    Write-Host $currentUser -ForegroundColor Cyan -NoNewline
-    Write-Host ' (stored securely in Task Scheduler):' -ForegroundColor Yellow
-    $taskPassword = Read-Host -AsSecureString -Prompt '  Password'
-    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($taskPassword)
+    # S4U may fail at registration time (e.g., MS accounts). Fall back to Interactive.
+    Write-Host "  S4U registration failed. Falling back to Interactive (runs when logged in)..." -ForegroundColor Yellow
+    $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
     try {
-        $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+        Register-ScheduledTask `
+            -TaskName $TaskName `
+            -TaskPath $TaskFolder `
+            -Action $taskAction `
+            -Trigger $trigger `
+            -Principal $principal `
+            -Settings $settings `
+            -Force `
+            -ErrorAction Stop | Out-Null
+        $registered = $true
+        Write-Host "  Note: task will only run when $currentUser is logged in." -ForegroundColor Yellow
     }
-    finally {
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    catch {
+        Write-Error "Failed to register scheduled task: $_"
+        return
     }
-
-    # Use -User/-Password parameter set (not -Principal) to avoid parameter set conflict
-    Register-ScheduledTask `
-        -TaskName $TaskName `
-        -TaskPath $TaskFolder `
-        -Action $taskAction `
-        -Trigger $trigger `
-        -RunLevel Limited `
-        -User $currentUser `
-        -Password $plainPassword `
-        -Settings $settings `
-        -Force `
-        -ErrorAction Stop | Out-Null
-    $registered = $true
-    $plainPassword = $null
 }
 
 if ($registered) {
@@ -802,8 +809,8 @@ if ($registered) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVkSIn50CbwPqO
-# wb7QiVT4mA9anUzT9JPnt/J+w5tRpKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBeZhsfoJF9Y/Bz
+# 8RnqkADnBYfm3ZC2wBe1PJhFD/aUZ6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1006,33 +1013,33 @@ if ($registered) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDzWqKI5f5WysOlsBHK1saeqo+suTvflbm37yOdQmrKCzANBgkqhkiG9w0BAQEF
-# AASCAgBG/AwC+mPdL8UMc4lH9KLXgWR16LVc1bADouuPMydNQwfGuQef4y/Rwz7S
-# saqowx3tz1GeeqPRLWBNbMZlGgfIazXz3GmpsxYmS5eJYPgwu9Td0cJ9X/8Uv4po
-# KtguPV0KTSxw+j5FikDeOH5JJmNKGwHJbZMg4ml5zgvr8I86s8fT6T2zZ2poyt9Z
-# d1A/N07re22RB0fixxI5J3FGrTuDzO5c1h0o1KtiW1/6tnvX4zPvN3gbeRp+XDpX
-# F7pBHXxCL3iOViBQrUMy2N4iX0Ec/1tL2DQ6NGlGlWu0pAlSN9W2+32Q5c5EobNG
-# HY0qSvbg5XKSGrCJ1DH6tpmpiVUPj6FvEMou+k63k0kGxDLMpbF1/hALp1d/jvc9
-# 4nYUCUssVWirOElrRwK6bYbIYhlOPlp0Si2QkXCWqeZPmFtmPoUUia7jgy/xXNiV
-# UXt7+IplvWzsb6eQKiNsRDp748uNZ13eohltkCnTBfazoyZDP8JPC8+g3yRGu4Yp
-# tooZSXBo2YTcrLdNc2cOh5bS38X7bftoUPXM+CYxm/oBvui59IwocMJXDqXq+Alq
-# mBW1X3SVSAVW/qWhcK7S2GUFR3T/PXqdIOlvOO06grukXYmj1X+qiOkOHHs4Pcdc
-# ggoe9JN8btyU7dnW6VKziueUy9dbtXHq/w3a9FI/vVJI7b6FkaGCAyYwggMiBgkq
+# BCBrbEET6xfJyFI3HTZytdTXqsUgNihauWzXMLuMYGT96jANBgkqhkiG9w0BAQEF
+# AASCAgARlQ/7jev9EY6zE8Sx4P2UlY4qSl0/ZmAH9Jrz4lPQ8xLydt0wZR7ewwsr
+# jMyz55IoRZA+me2xQwLdsGGzWB+MZcjOckZoB+K6m6maor6nzOCOjH2nXC9+Yf8x
+# kH1pVBWUbKDnCjciQQ2cGha8YSRhN7a/lb4JSw5PtuGRZ8MdEf/QHBAFax6ky2Gw
+# jY0D4IW82yKxgpMu1exH6eljLeoitkVwbIPEZ69HyVlQKcq7rcA+rbEGyuD1fPrh
+# Z07W3kHuG9+YLtfQ5Scz1u1o19wnBg5++BqvNec5ya0y+1xTwyUi93wnbXJ+vsES
+# 73zsNqg8pPbA/KxjQ0llTRASqd27F1HT42TRmgZMo6RMlTsXdf/qqUeYr4Wk3IMP
+# kR17FYfzh/plXCNo7TAjfqjXgIiw5Z1+m8Dx0AMcRhAm3LAPXh7w2XVPX0W/peP0
+# LP5sTeldrnWl+UxsfbpUL5q4yHbQJGjAk+S2ZOgRJapoornq4DU5LH5snhDZiiJZ
+# Qj/83S/BDPyGMtxRiWspTPE564uaAwj6SZ8XrHyf2yn2k3NQfVxwv/8xB7WNfuH6
+# JorjMkBSmw4nlu+J0LHsBkdLypyVr4Qs0lULuOr4s9gyTKtVYNR6eNx0s1eG195H
+# KJC2AZTToc/Fz3IvQYvNTWZ2yzHXseabOnan5XeHyucNXEeyF6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcxNzIzMTBaMC8GCSqGSIb3DQEJBDEiBCDIb4Ts
-# f8RU4TY8EmhbI84xwUzNBRoZty/RbnVDjP7VqDANBgkqhkiG9w0BAQEFAASCAgBt
-# IbhkDWt3m0UKUWj+4PMmB7496SWxVnOxAL9BtQfl6zhHwN94BB1FYmy9LbY6vKz7
-# V27VQQY+ZZBOY0OzvsSfQCT0899wrXndN9PbQThFyCTTiqdm/5evJbpcfq6Jzmim
-# U21EZT7pafAIGRiufCu8LxI1DLWSSZuZUuSO6pFi6fcWacgUN7xz4bgGEer2lAYb
-# RZ5wZd4T6kFG4Xt96Kabg+BnTEjkMKomOKP3t2qmkMM5JD8pEd7GDkaxYI+9aKfl
-# H/NyGsy1ZUpZS+yQFQB2EQ1H64zuBTf1MhXHGaZz+XKZq5E1MK62EgMlLvfjITpS
-# VeYyIGTLSxpCa7ES0w3gvBD3X782842yxWHt5BuqQRhIheXtgaM7zbjn/mrLOxXr
-# 4UwIJHgbgdiHtNGD7iWytxR3jJOJWMpi1Fi7ggPArrcAdWXMXWDZ492qiktbE1HQ
-# B13Xg1NUD8XY5QYozA4xY/XkhuObQ1vUIObZeIpZ7LHYMt/4CyDuSgj0zucC+CXw
-# bz4P9ukl9Ig4P6bTy6pURYlN7YYd7ewkAwW3HJarnS7b0BAQEfs+tlEAVo0pYG3J
-# dskgPyrmp3oKSeWBpAZ6q3S1/1V9GnKklS7BBKL+xAzYQf++TBS97FqTgVQM8Fpw
-# eE8LvU0GDRcqGTE7wBZArLb/9LgAuQLiRK/YcT3eAw==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDgxNjA2MDNaMC8GCSqGSIb3DQEJBDEiBCD1YR9A
+# 6P1IhXP3Cyu3aXmXkyuYUC1tTKqdhqnVHyyOjDANBgkqhkiG9w0BAQEFAASCAgCV
+# JWet+n/rqFLJy3A81ArE08EzJzV0bErhKJT2Ur8KTlLpGmK3ZMVEc6L+F95goPv/
+# iz0ceU+QiiYV5XtPaQ0puaIMeZfLjWOIG0gRmE9X25BT0OPtUIc7BrSa//j8s8wh
+# sLFZTdx+9ggo5r3ASbcf/x0a47yNB8Ys48IrD+EfpxpsAT9UFrTRQXLl9nNifDtB
+# QU4zxdjeUbQ6WRLdeqiWwn0sbxmV7yETexj5Rcr+KRyOERTVqnGyeNHCeH3XEDCE
+# IFxwjwBTIBQkxMe6C0zLTMTGwJlsPrwbeg2A9vYcm1u9/EtFQGKQARO1f8oldCI3
+# KoADBjeV4uevLd6m2xzXqaLwAV+hsTh/1gs1pCRKE30ARu3+d/6nAkgH5IKaRTwX
+# Wxf1/mRnw5nrGBN6/PnUqW5uG8LGcOoIayEOOv3nD/qPQeuLsZsIt8kTot15jLRr
+# bIQELXE/JOGVkHGvekLJRpoLBLs0CNVUuzw5EXaFRcXLMoEoWS1Sc8HoT4YE7f3O
+# W16bviag1xKPjGOx/45FvcFT9S3gNHF4yLSlqooXjjgyaXJ+cQ/yzwpruIjxcI6W
+# GWPBIUluacl+GyARCA+Bvsyo95QZerm2EbrFwb/nKha9vep/hYB/A32Rhtw4aS5E
+# bsQgNdte1Gj9Jxl21KawQv7d7M3DgS66wjN2OtztSw==
 # SIG # End signature block

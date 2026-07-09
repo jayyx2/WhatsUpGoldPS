@@ -630,17 +630,18 @@ $taskAction = New-ScheduledTaskAction `
     -WorkingDirectory $discoveryDir
 
 # Determine task principal (who the task runs as).
-# Priority: SYSTEM (always works, requires admin) > S4U (no password, any logon state) > Interactive (fallback)
+# SYSTEM only when -UseSystemVault is explicitly requested (requires admin + LocalMachine vault).
+# Otherwise run as current user with S4U (or Interactive fallback).
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-if ($UseSystemVault -or $isAdmin) {
-    # SYSTEM runs whether logged in or not, no password, no DPAPI user-binding issues
+if ($UseSystemVault) {
+    # SYSTEM runs whether logged in or not, uses LocalMachine DPAPI vault
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Limited
     $runAsLabel = 'SYSTEM (runs whether logged in or not)'
 }
 else {
-    # Non-admin: use S4U first (runs whether logged in or not, no password).
+    # Run as current user — uses their CurrentUser DPAPI vault.
+    # Try S4U first (runs whether logged in or not, no password needed).
     # Falls back to Interactive if S4U is rejected (e.g., Microsoft accounts).
     $principal = $null
     try {
@@ -809,8 +810,8 @@ if ($registered) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBeZhsfoJF9Y/Bz
-# 8RnqkADnBYfm3ZC2wBe1PJhFD/aUZ6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcDF+hCIApzm4g
+# 9pi4ukHh39dM/XGtDFW9nS+7bE6T9aCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1013,33 +1014,33 @@ if ($registered) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBrbEET6xfJyFI3HTZytdTXqsUgNihauWzXMLuMYGT96jANBgkqhkiG9w0BAQEF
-# AASCAgARlQ/7jev9EY6zE8Sx4P2UlY4qSl0/ZmAH9Jrz4lPQ8xLydt0wZR7ewwsr
-# jMyz55IoRZA+me2xQwLdsGGzWB+MZcjOckZoB+K6m6maor6nzOCOjH2nXC9+Yf8x
-# kH1pVBWUbKDnCjciQQ2cGha8YSRhN7a/lb4JSw5PtuGRZ8MdEf/QHBAFax6ky2Gw
-# jY0D4IW82yKxgpMu1exH6eljLeoitkVwbIPEZ69HyVlQKcq7rcA+rbEGyuD1fPrh
-# Z07W3kHuG9+YLtfQ5Scz1u1o19wnBg5++BqvNec5ya0y+1xTwyUi93wnbXJ+vsES
-# 73zsNqg8pPbA/KxjQ0llTRASqd27F1HT42TRmgZMo6RMlTsXdf/qqUeYr4Wk3IMP
-# kR17FYfzh/plXCNo7TAjfqjXgIiw5Z1+m8Dx0AMcRhAm3LAPXh7w2XVPX0W/peP0
-# LP5sTeldrnWl+UxsfbpUL5q4yHbQJGjAk+S2ZOgRJapoornq4DU5LH5snhDZiiJZ
-# Qj/83S/BDPyGMtxRiWspTPE564uaAwj6SZ8XrHyf2yn2k3NQfVxwv/8xB7WNfuH6
-# JorjMkBSmw4nlu+J0LHsBkdLypyVr4Qs0lULuOr4s9gyTKtVYNR6eNx0s1eG195H
-# KJC2AZTToc/Fz3IvQYvNTWZ2yzHXseabOnan5XeHyucNXEeyF6GCAyYwggMiBgkq
+# BCBrdOGkxnr48kM4sR/cApuukhW1xqZ+UP2I0Rwk+0LTzzANBgkqhkiG9w0BAQEF
+# AASCAgBkV7axzj5UIU9n+38Dv07wLrDMt1jAelQAPaWzg80ZLO5fkIDXeyMO1Q/e
+# SGXwa0rhSN9BU1Su0c/3V9jnWSaxN2ve2m3K/IBbA92fOn64bUgyJ7rCcUP2x8Ws
+# cKMaDXL++epEN/shleZusTCEXnLqM2FJLdwEKwmWYxH6t5Z0FB4DIvvCX4cRFvbi
+# +EjLqTrbhMlAC6CyaBZeC9aBX5esy58xxkC9TqGzTK1b5p10A7G0AMDm/GYM2aQc
+# HdzrYNx76o8yiWiMEzSQNWcxTVYy9B+K66/c9RHO0xvS5YPJiz9zNmN34KU/0W0Z
+# iWPob03d0xSyI7rX2wzEusLrUkVMRYFdyJxio98TaM4AcsH139bF3XjmjT7+YUOO
+# EcuobRwM0IZfbXFym38TBAqTn1XnI8qPvfaQU+EhuEF5G8/dtkn6QjMae/zbjSR5
+# yOK60j142UyPXyNkiIHPK2gurbgFHehvLjFEgF8jXS5XwiOLB0FH8Gpf8dJjvlBD
+# pyCwiTxuopkDVGLXxOcp9YIoewWHJs49pCEO6GcxicZlkI/Yb2j9hxtnT3nGTcsp
+# wz6CX0UWKU+aOZBPi0HmUNtr7izV9B01jnNOmf/PHEjPFBfx3KbKpe3SnvsovwS/
+# bFTHKdvHo0f7JNpnDoSEAjySnihEVD803ACAfCn+w95OjJFQwqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDgxNjA2MDNaMC8GCSqGSIb3DQEJBDEiBCD1YR9A
-# 6P1IhXP3Cyu3aXmXkyuYUC1tTKqdhqnVHyyOjDANBgkqhkiG9w0BAQEFAASCAgCV
-# JWet+n/rqFLJy3A81ArE08EzJzV0bErhKJT2Ur8KTlLpGmK3ZMVEc6L+F95goPv/
-# iz0ceU+QiiYV5XtPaQ0puaIMeZfLjWOIG0gRmE9X25BT0OPtUIc7BrSa//j8s8wh
-# sLFZTdx+9ggo5r3ASbcf/x0a47yNB8Ys48IrD+EfpxpsAT9UFrTRQXLl9nNifDtB
-# QU4zxdjeUbQ6WRLdeqiWwn0sbxmV7yETexj5Rcr+KRyOERTVqnGyeNHCeH3XEDCE
-# IFxwjwBTIBQkxMe6C0zLTMTGwJlsPrwbeg2A9vYcm1u9/EtFQGKQARO1f8oldCI3
-# KoADBjeV4uevLd6m2xzXqaLwAV+hsTh/1gs1pCRKE30ARu3+d/6nAkgH5IKaRTwX
-# Wxf1/mRnw5nrGBN6/PnUqW5uG8LGcOoIayEOOv3nD/qPQeuLsZsIt8kTot15jLRr
-# bIQELXE/JOGVkHGvekLJRpoLBLs0CNVUuzw5EXaFRcXLMoEoWS1Sc8HoT4YE7f3O
-# W16bviag1xKPjGOx/45FvcFT9S3gNHF4yLSlqooXjjgyaXJ+cQ/yzwpruIjxcI6W
-# GWPBIUluacl+GyARCA+Bvsyo95QZerm2EbrFwb/nKha9vep/hYB/A32Rhtw4aS5E
-# bsQgNdte1Gj9Jxl21KawQv7d7M3DgS66wjN2OtztSw==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDkxODE1MzhaMC8GCSqGSIb3DQEJBDEiBCB2a97+
+# PycXc0SjKD0R4WymHyj0rvyEo0aWQS4I6SD9VjANBgkqhkiG9w0BAQEFAASCAgCx
+# vutatBjJ4b7H11BD4BdiM5sXm0J50ktusgpyfzWOA0Dl7VLoDLZ44J4hpbk4iADa
+# AZqdb8iTNsaZwC1M+UOGfilCqxBG9gEbCRl6aFjo1S3yUKIm+Te/wFDzd0d0Y263
+# 7Ohamho2cDSrKVUionvSRh0FGCIe0PWlqhts0rcbYMlfGRV2+EfvufNmgXlq671v
+# aMrYjgeJlKCl2TwkdOVEs94VQLfUlc9EmA+LcBUWbB9sozFqknVZTtACAwjqasmU
+# LpUAMGucAmdxqel+OYTV7+dtPMcE/H7uCaLiBFoDOYlYRNT++Ss3fMoOkGp9dfvH
+# GWERGSyCcng0PHtP9pbJoB4/1g4Vt9nM/gO2UghyOdQAMglzeaj9/Ffx2FHwCIBU
+# 4abDU21ULPFqSlMm/6os+z4dJ2u228Rlg3FvLYOeCcGe1RpoZHvzKjFmsgCraD9C
+# mI2Dw5ShrWMjRz9xZfqWEVddxHzXhp0eD6wrQDIaNY/OU3F/hIpDz12wx/a+NMjx
+# jOV7YQP0U+jjAqFM6y+Tckd6DFyolUxrt4dSv2x/pejeE/c/B9d6/d8q2/F+OzXF
+# z7BqKHXTpIluHvN6OioLkb59lgca1mz9JgUpYnEcN3bBg8FV5RkqIxwcDk77K3c1
+# I3AHD2mravQSC3oevyCDU/OqccMIoFayhgEwxe0B/g==
 # SIG # End signature block

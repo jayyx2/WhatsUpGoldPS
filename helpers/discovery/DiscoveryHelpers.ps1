@@ -1314,6 +1314,55 @@ Or use: Request-DiscoveryCredential -Name '$Name'
         [System.IO.File]::WriteAllText($filePath, $json, $Utf8Bom)
         Write-VaultAuditLog -Action 'Save' -CredentialName $Name -Detail "Type=$credType$(if($expiresUtc){"; Expires=$expiresUtc"})"
         Write-Verbose "Credential '$Name' ($credType) saved to vault"
+
+        # Also save to the OTHER vault scope so scheduled tasks work regardless
+        # of whether they run as SYSTEM (LocalMachine) or the current user (CurrentUser).
+        $otherScope = if ($script:VaultDpapiScope -eq 'LocalMachine') { 'CurrentUser' } else { 'LocalMachine' }
+        $otherVaultPath = if ($otherScope -eq 'LocalMachine') {
+            Join-Path $env:ProgramData 'WhatsUpGoldPS\Vault'
+        } else {
+            Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Vault'
+        }
+        try {
+            if (-not (Test-Path $otherVaultPath)) {
+                New-Item -ItemType Directory -Path $otherVaultPath -Force | Out-Null
+            }
+            $otherFilePath = Join-Path $otherVaultPath "$Name.cred"
+            # Re-encrypt for the other DPAPI scope
+            $savedScope = $script:VaultDpapiScope
+            $script:VaultDpapiScope = $otherScope
+            $otherCredObject = $credObject.Clone()
+            if ($credType -eq 'Bundle') {
+                $otherFields = [ordered]@{}
+                foreach ($fieldName in $Fields.Keys) {
+                    $fieldSS = $Fields[$fieldName]
+                    $fieldEncrypted = Invoke-VaultEncrypt -SecureString $fieldSS
+                    $otherFields[$fieldName] = Protect-VaultData -Data $fieldEncrypted
+                }
+                $otherCredObject['Fields'] = $otherFields
+                $otherIntegritySource = ($otherFields.Values | Sort-Object) -join '|'
+            }
+            else {
+                $otherDpapi = Invoke-VaultEncrypt -SecureString $ss
+                $otherCredObject['Encrypted'] = Protect-VaultData -Data $otherDpapi
+                $otherIntegritySource = $otherCredObject['Encrypted']
+            }
+            if ($otherScope -eq 'LocalMachine') {
+                $otherIntegrityInput = "$otherIntegritySource|$($env:COMPUTERNAME)|LOCALMACHINE"
+            } else {
+                $otherIntegrityInput = "$otherIntegritySource|$($env:COMPUTERNAME)|$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+            }
+            $otherCredObject['Integrity'] = Get-VaultHmac -Data $otherIntegrityInput
+            $otherCredObject['User'] = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+            $otherJson = $otherCredObject | ConvertTo-Json -Depth 5
+            [System.IO.File]::WriteAllText($otherFilePath, $otherJson, $Utf8Bom)
+            $script:VaultDpapiScope = $savedScope
+            Write-Verbose "Credential '$Name' also saved to $otherScope vault"
+        }
+        catch {
+            $script:VaultDpapiScope = $savedScope
+            Write-Verbose "Could not save to $otherScope vault: $_"
+        }
     }
 
     [PSCustomObject]@{
@@ -3547,12 +3596,12 @@ function Deploy-DashboardWebConfig {
         Write-Warning "  Could not deploy web.config to ${Path}: $_"
     }
 }
-# endregion
+# endregio
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAenJyScRPzLhPR
-# xRt/QzSmXhPr0SOHlhbBrIly3UM316CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdXDicQl7yF9+J
+# CySWH3hmCLUX6l/iVetO9L5lW+0xtqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -3755,33 +3804,33 @@ function Deploy-DashboardWebConfig {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCx//KGQAt5Zcn75XnGKm0Y8Cv0gGCF4Ro+l+aA19o/WjANBgkqhkiG9w0BAQEF
-# AASCAgDxLJzqIy12qspEaDXxE40AsOczm20RclipQqHKcBH/8fM3UTdNTuwPd5W1
-# KnXn6fPD5UYUbCUHdS5FgjmlCzvCSp4X7OivYP8clYuNtgzSaqDtEAzeXDMdNS37
-# YJP+831ePzMffA8LQNTOzfCQ+WD775PSgfdnIzZ0WOSy8LUgKSV6Q4E4nIhIngPp
-# 9+SNkdGIJ75/vl24lWelVhGwVC4Rlx/WaXadzbOkj/ckpPcwwcDmgKIj9UvmyfNM
-# XsyhTftqo8P1kYKVfAty17MLuh7TpWIi8LyB5zaO4tpomRm0+jUsEkIHAXhv8uAX
-# nufb4+lcHOkANF5YsgeoPzPa0GJfiDRzsY/xcheQ3if+1g2QNybojG34ke1amZTj
-# IA7hwX1KU9fRbBtoYbIcdUkEVsYkik3/maiA/sDCgQI76U4AGNCAF1uYTR8VQBRb
-# n3t4G31mP/H48WuorYhL4uUdbiUXSLMNdjvFcFns9aQUCPHfYZBoxShbH0Uk7ms1
-# Q/wuvkj/0i9NhgPk/MlZwRF+QSGoAb+QxkFoUxpvcwTSBGshHw1zmOcdQIjDLE3j
-# Xut3EJr03Imb3qjaskkE2uKRrxgtaa1462U3j4clHYEwMVS97MP1rOAxvTQ+UQlu
-# Um1TGvn2eZ9SR+v6ATJapW84VweXVjkL2gGjJI7KcxHwSv1ODqGCAyYwggMiBgkq
+# BCDvv+s2u1zJPkA+DeaLVorczDcviwf5JDHncwaazanxATANBgkqhkiG9w0BAQEF
+# AASCAgDEY7tOvnKUlSswjucoY3oUTsriZSwYWHke7Hf4F/mogMuqdpOwYcCkhkCW
+# l0zPIFEWbISaiQMXzXcUIU7H1VA4n34AxXZtlGm2CZqAgbvaDYIdbesFlO4j92SF
+# 6/vnoeBJlKh1tmVK9Ws+20SOL9tgqZRiLi21CR2TQ33INVhByL1TDgzzhaboun47
+# Sod+jYctDa1zpLlthfl37RvyAudh46rFCavv4gob/8xenCmMHVRqFRKVstNBLp16
+# bvQg0PQ7AXzOf8wRQk2gjyEDpNuV/SRqTtiNH0/9n8QXlN7UdLRfKzMH80aYftgq
+# AVgbPPKIPD+D5OIbTsASkClAgqTcqcaP0nzVeBhoMXaxVwq8KYvxzzqZnd4OhdQI
+# 9hWcWq9laxXCo0PQCD0ddyuZ6wYKWbJ0bmCcbXt6zXD/9QbTbxjEbOw+XBP1ehVm
+# EsBLvmDpQ9jOfzJ9VTMSnPUREt6iNc3uDSwrFvCoFIo6bRxuinqG+eBZiGX7KCIO
+# 6rHE1fW0kSutb0fs09eHgDCKKCWvTXFmSs2FK9379Ir0FNQt+086dNgLOdYkAu5I
+# eyeMR+Cf6J+075rzttRuEQRMYsHyu7nLiZmNB4jhdjv+k9+b84Swvmh4VeVNq+AZ
+# 4w2n5qRQ+d8v64f2sosCc+9lpF8XvnTw7n/MLKAjzhEekcokEaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMDE2NDRaMC8GCSqGSIb3DQEJBDEiBCDL/aqC
-# UWWHlppscJcm3oyjMH+MUFT7TP8fiH7qQ/LumjANBgkqhkiG9w0BAQEFAASCAgDJ
-# 1Dmk3gxyCwdYdcU5CWFC3AKJ9m9aucFhYFpGwFt7nvR9nEHE+rs/JDAjWjNO9Yts
-# SA3rK9SZ0EkMhhbGiCC3ZywdhKdyINe+vFscaUooi6cck5KF92sLNWc2tb+5vvPg
-# XzuHqB0hERLl5kUQm8vP/6rqvBeXcdyWtTI/WwFVQVMujWYI6QINzCqhgaCap5rv
-# QELe8HrCDLuGv5KaM46slHxyXTxnRUmE7l0zvRxsnWb5Kua59kprPj0nm6vHqcmX
-# dAmQ693gdRzB0Pr4G3kdTvmwLVp3aZy5tT0nIeQ/nf7PRc+4g3dxJa9KojFjtiR+
-# 9K0pyIMsC98GqgOg2aE4VLoo9+9S9DgSP8G08zZCqeQJrdhVOKd+mClA70WB+xE6
-# 73hlGKqeZTOk/V+2uaFJUsvclI4mBQWRSJbRPZzobuRjOxu9jOzEdJXqkc0+NXh+
-# JXNXnxjIgSaDeGR6Orit1gMdnGj4tFhpfIwWAvyY5xE67VaoR21vScdWUS2Bq7Zq
-# 9S1d0xWCkgSJQOO12MUCPmPeUe3tGKYOFV29Aj+26cas4pm1xMBvQelYr+Mngy6M
-# rlMTgVmStElAf9qae5Eb/QJTR8cCs2HWz/xMDSUShd5JDOEkCYw+b7ESsZaLn4Fe
-# m7B6/KIZJrcLBdZucsXWTlAHSLnNZaxSoohGx7xq3Q==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDkxODE2NDJaMC8GCSqGSIb3DQEJBDEiBCDMiTSi
+# 8eCwCn1KtXGSEB0y8/oK1YJxQAmu43n105nARzANBgkqhkiG9w0BAQEFAASCAgAB
+# Bl1wP2n8nYiIDdZfHkNOW6d8aPGbeBMRlGEyuSWMtHeAkgaAK8WZYQ6uvnuyhsUC
+# EW4C+sRiRIU1HhxoHlHKFMVnwGnc4o0bSPRptqQK8GxqfKchkOKEaEAeeqFGYPMD
+# MKWBP3rjaMQ9U0z5ZaD3H8iTPYuNJhKsdZJ8RZth8tkPqeNem9PDP8w6l4msUT3l
+# prA00DQB9xZzZ8+XjgP6Y6Kn1zWnZvS/y5F7KNXFtmxdyKULNPQ/uE3/kuQMBn+H
+# xMpOL/cmT2VOm8zKJ0/q8PRaxEWzk9UQjMfXOcPLixNRrOOpdqvTgZgfY40uglwA
+# S8WA3lU5RvqRgE648UU2fnNCsZhxkiQxhQSOg2wgHpfYQah1HhIsRw07M4r1ymTT
+# ZmKaud6fvDDWU+dzpkj+R5gw/3QO/r546SsEpesRGV46vEeSh1aukUVcPtFBKGSL
+# AK2UgFIWlNn6LgQhFwz/D59vxsQH9mZ/Rv5ZpX7uz7CE76BeIz1+vYKMQaOKesNe
+# ct6xk6LlQNEJNQx1KsBSO9kYpDponkBp+2PNzxI49tVXnv3LQmrYQT8xbX+td5Ls
+# WzKzoqJ/02mcPcpRL/+ywc9LO4+N833pGkw1dBb3XdzkfpSK/eC33sRGBQqkKvkh
+# wpCrCzqASDDHyqdR/vODRyxmzPi/GTPg88HY4C/s5Q==
 # SIG # End signature block

@@ -280,9 +280,11 @@ function Start-WUGDiscoveryWizard {
         }
     }
 
-    # Run as current user (no admin required, uses CurrentUser DPAPI vault)
     $taskSplat['SkipVaultPopulate'] = $true
     $taskSplat['ExecutionPolicy'] = 'RemoteSigned'
+    # Note: we do NOT set UseSystemVault. The task runs as the current user
+    # so it can access the same CurrentUser DPAPI vault where credentials
+    # were just saved during the interactive provider run above.
 
     # Build the manual command string with full absolute path
     $registerScriptFull = (Resolve-Path $registerScript -ErrorAction SilentlyContinue).Path
@@ -330,12 +332,12 @@ function Start-WUGDiscoveryWizard {
 
     Write-Host ""
 
-} # End of function Start-WUGDiscove
+} # End of function Start-WUGDiscov
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnOgH3xZcEebLK
-# jsRk5GN6aeoGzpL1I/M97W7pPCkfQaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/4VUsiIkYAUWn
+# FfzrunO4m121ojtaEflYcZqb7ERx5qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -538,33 +540,33 @@ function Start-WUGDiscoveryWizard {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCB+9vERSDGtoIuaRidEtL5Qkyg5DrreIrR3UEBFSiCtPzANBgkqhkiG9w0BAQEF
-# AASCAgDVnyMBYnEr9aa4B+qVTg4Ux3P7fnkyAHvTdOfe5f870fUP4rUa+uj94lij
-# WYx+201by5FBHSPnU9O1rIOVgbBVqREoU5toJ+UtZgsvQD8R8Ajn1yVwCiQ3qhLP
-# Ap4z0JgilpFTLuPHimZXwTlaxUwnuZ4jsEDUftjCetEL8HSAzVXcJi80+H0OMltK
-# DOMe/EeK5dQXrJxBRv1h52cettJe4jY1zDLBtKkzPS6vYPp5109eyVSgQKCz0+Hv
-# kjUmm2YMsh29J4kr2DvGIK5Gyp7WuKIZc/Jht0ra49ZiCbgHocnsxMv9IR07ut9o
-# 6V8MxK36eYiOdtj75JZvZ6+ySwBlrvxlGIRCbDNM/G5WgQtopjwEYl7Qw1TusdNR
-# 078sjJJWAwmLEOdjdXe1HvwSePR1hMEzEyOxYLN1wTjoAAAMiJaB56ESYIBVDRNG
-# 9GW/a+1X/vyWmxuIAMxdTWUVYj7p/SorWxBmjt0AVJrRh5M5+qGyYXrfXJFr7Jby
-# mmkkVxGAJfPd4bq8VGLd3lo3zmFY/f4Njnf9DUJqnBgBBO+X+hTP961ltB9QY/BA
-# MEvLzuOnDAN64tvS00mNj1jCTgRp8/lQENiQF7PITOhXDfv0C+8dvxdCcFn8pfg4
-# sQviBOQef9ep7CbPHlVNlBf8P+26Lev5794YmKd9hsykOyN5MqGCAyYwggMiBgkq
+# BCD036YiorJEX8vrQQ6aOPIpJTRRHVihMMszW4lSqHmtLTANBgkqhkiG9w0BAQEF
+# AASCAgAYIlvhmOcLan6I2rEizGEQIgL09IJ3fAJnhQwmAZa/7zkTk2MXITIka4Gw
+# fUUSWmeJx0KvxZopnlA/hmw8F/47UPGDwAejfDCFv/jUIWEoDRhms3dl2lbbfB/B
+# HQYJDsYOsFLspDbQ4E/+gKS0z1x+vlI8nuekEsiVfkujsy8rCNEWd/hVouOl1xoM
+# kS3CmDTGHNy4skXofGvbKLc3VJxXInvnpV1z7ViCc+pfFrXrKGnQFUBZ4c0Hccr7
+# BSL9fwPpsQsD5LDqrpddIUWOdZy8/phI5PKcz81X27VdMLj90Sb3jHvDoRIR8nMp
+# IaRPEt9R73JLGFGeyPWa+Fv1kqrA5TXlVDyWYPHPvnlMHLKofiexbrQNE6Hjv/cQ
+# Ev2QSy8iWcuQRd57EvPFPqfBTOiBUKiTViqqKD4FC6yuwodEG3Jns44gea+3gCD2
+# ZotqORXOM5fXVrlcX4lwkmkqSIc+sRPk9LtX3/cd4G5iWe0F8NwP1dDk1WpwFPC6
+# 7LpYFax7as2LvNQEyMNC1olNeNx7c6z+iBecMfXTBxr44bdFpEeNluLUbYywB3Hl
+# wcVOSzzSrWq96PHqLgjACqPMYoRoaVyWoFAE+DQ2rnp17JMEzQD72IelmLfK0e4a
+# z0p1bOq+qc0XhbMQLskWZRh4uMQ/AFk90jifvr1pG8p7U7Ni7qGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDkxNzEwNDRaMC8GCSqGSIb3DQEJBDEiBCBsiDw5
-# SVqv3ePdlDcaHXUKiGb8Mbe53MVU+yMagx1HxTANBgkqhkiG9w0BAQEFAASCAgCg
-# Ruq61lZSqh2yURREQoS3ho7D5HUw30cHnl5rcqe88jR4KQNWRtHW9nyAi3eTeWYV
-# 8zG2+WUUrQnX/lvcnuy39btYPXuXMej/09HL/cD+cZwGP6eVbTT/i1a8cZZyMyol
-# C9XK2DKu2M5Iir80dg7Bf+YxScSL8keC+TYlsxYEJsj6wnR0xggIb1Jore8jkBFa
-# /H22efPfJ81GQ+ddpOrNwQb/ZWT8KlkYhyEtDS5303+R6/TPNWnInlyqjqxX1zGO
-# 8qLL7pyrN5m/waFNLL/iL5HbOUpPR9koANdR8ZWoln3sU7VkVQg9OV3U3+xfWfXa
-# Ncr3nDroXTd4Res0I091Zf76yiQEw+atdy04kXzWDKl7rSd5laBpXyW537WQYa36
-# HcRVFHiaTNghBoOQGPgFs5PstVYo2ZOu6u+HJyl4/MxYu8JE5ph/VA2Q7nFFbdy0
-# hRHKRMyZgDXy3BiEtYqoDe/3ag3eNqpS38gb238bl4r7bai1VpqUD7mm1p4JSvop
-# OKsLLusAERUV7kb0J9uoWbnBM/kSp3URzTnBC53UktDmlti0rFm06XQ0uLZ0V20F
-# 7GOH+zjnB1SHzwk33xwy28UkyXsU4BVvuAzO5l50fWNjl24/8xTkicjpg9dY1OOH
-# 7hfBVHx4pcwreAoOePGg6KMMymI9NUVMDy7Bz3IiCg==
+# CSqGSIb3DQEJBTEPFw0yNjA3MDkxODE1MzVaMC8GCSqGSIb3DQEJBDEiBCCtkfjX
+# mKXQ3LQT8VTnVMA5Qg4tVJSJEjArfWasmVA+LzANBgkqhkiG9w0BAQEFAASCAgBu
+# 8Fw9b/RhAVHZ4TRpGHCKrQ/2lrpPf6HtkRLKxgDTWZQnlusma1fnKwPBOBXJ8eXQ
+# FZvL7HQdp1tMLa8BvQ8L3s2xpCL3d4ZZ+xHN9pUnY8kA5uAXd4kPF/bCrvKp+rBp
+# odV9eqdiavNe6IJ8EacpN7fIuxKN+zPjKOva2tBhxvexHImhkxEJmIzNrlu7Cn6V
+# 8RomNGvwLVxF/IABO4h9kDV1GSOVZ3zAnVJBP2d9+WiLnV9QN/oGMkikV0fCWE4m
+# hJczh5wpVCbq3f/aXYYfn/iYV9S5UdET/8gaUJvGm/E5dUcrJEkyZUWCda6tGErE
+# kgQnlc6pHyxPRYBy3kCl3x4b3qbSwLQU4Xf8dsjpqRQoUV9HTdjRwDYs6ZknyFdC
+# 93BSVN3EWDefNvYC8BIVxYV8+6eVNe247xQJiIsEpEAkFTji0QQG6skXiKeM1/qG
+# luRpJnXKPnLfn1HLuKM5FkJcN6hHWOkNhhSnM+mrTxD/FQjRFtcfCxvytnKw1xn2
+# f6xkzAvqM7ubUmb2lsoj6RsMbVodFs4K4MI5W5gRTUaHEeRwO/dfa0KS9XV3xiKn
+# 5rqgNmORLlnMhLHh2wtpoJcg6/aiVQmpsTf8UWKVGLv0828xV+8ID06/6bCBKARf
+# xJD5IpagsR5GzzfYQ//xpemp4Fy/o+mBiF+K/oH3Cw==
 # SIG # End signature block

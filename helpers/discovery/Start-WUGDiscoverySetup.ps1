@@ -155,8 +155,23 @@ $providerDefs = [ordered]@{
             @{ Key = '1'; Label = 'SNMP v2c (community string)'; Value = 'SnmpV2' }
             @{ Key = '2'; Label = 'SNMP v3 (user/auth/privacy)'; Value = 'SnmpV3' }
         )
-        ApiPort     = 161
-        Notes       = 'Runs on the WUG server using the built-in SNMP COM API and generates a phone inventory dashboard plus optional SNMPTable phone status monitors.'
+        ApiPort     = $null
+        Notes       = 'Runs on the WUG server using SharpSnmpLib and generates a phone inventory dashboard plus optional SNMPTable phone status monitors.'
+    }
+    CiscoWLC = @{
+        Label       = 'Cisco Wireless LAN Controller (WLC)'
+        Script      = 'Setup-CiscoWLC-Discovery.ps1'
+        TargetLabel = 'WLC host(s) - IP or FQDN (comma-separated)'
+        TargetDefault = ''
+        TargetParam = 'Target'
+        CredType    = $null
+        CredVault   = 'CiscoWLC.Snmp'
+        AuthChoices = @(
+            @{ Key = '1'; Label = 'SNMP v2c (community string)'; Value = 'SnmpV2' }
+            @{ Key = '2'; Label = 'SNMP v3 (user/auth/privacy)'; Value = 'SnmpV3' }
+        )
+        ApiPort     = $null
+        Notes       = 'Discovers APs, clients, WLANs via SNMP LWAPP MIBs. Generates wireless dashboard and optional WUG monitors.'
     }
     Docker   = @{
         Label       = 'Docker Hosts'
@@ -613,9 +628,14 @@ if (-not $SkipTest) {
 
             try {
                 $runArgs = @{
-                    Action         = 'Dashboard'
-                    OutputPath     = $OutputPath
-                    NonInteractive = $true
+                    Action     = 'Dashboard'
+                    OutputPath = $OutputPath
+                }
+                # SNMP-based providers handle their own credential prompts during first run
+                # and save to vault. Other providers already have creds resolved.
+                $snmpProviders = @('CUCM', 'CiscoWLC')
+                if ($provKey -notin $snmpProviders) {
+                    $runArgs['NonInteractive'] = $true
                 }
 
                 # Add target
@@ -629,12 +649,20 @@ if (-not $SkipTest) {
                     }
                 }
 
-                # Add auth method
+                # Add auth method (SNMP providers use -SnmpVersion instead of -AuthMethod)
                 if ($cfg.AuthMethod) {
-                    $runArgs['AuthMethod'] = $cfg.AuthMethod
+                    if ($provKey -in $snmpProviders) {
+                        switch ($cfg.AuthMethod) {
+                            'SnmpV2' { $runArgs['SnmpVersion'] = 2 }
+                            'SnmpV3' { $runArgs['SnmpVersion'] = 3 }
+                        }
+                    }
+                    else {
+                        $runArgs['AuthMethod'] = $cfg.AuthMethod
+                    }
                 }
 
-                # Add API port
+                # Add API port (CUCM doesn't use this - SnmpPort is defaulted internally)
                 if ($cfg.ApiPort) {
                     $runArgs['ApiPort'] = $cfg.ApiPort
                 }
@@ -1036,8 +1064,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvRbDrrdTESC3f
-# 719tJLc9zalIU1HfLgQ71fOo5E4qDaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCK6Nj6jVoRNm2B
+# fcJxQHQdz6KXZqAlkJixPb4jGFFnQKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1240,33 +1268,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCWbhhPz6O2Bec6q3FF7W8yo9aAz+GGh7dKHFMfKI5+fDANBgkqhkiG9w0BAQEF
-# AASCAgDFQg4Yf8eAa0eazGmV0dxhSh+5+3zSqWXF631KHmyscaIZsJvYEsXniK5w
-# epqMTy9yPQz8VvtBjrk5SGrinMwECohnmn1xL2kKFXM53VD2KVdLXGn/J+1pHLRf
-# Gg6BrGzat4F8FobSE4AdLAOEbMc76SOGfErYJSt6QKMHrwcwIotxYc4hwPfFR5WG
-# wt2zQMgpj1HoGFZn/QC+5JnYGV6S//L6oQUs3BL2PY+jJtFMccpJvDdjO7HqSDij
-# xpoHIIWOuzFwgi5+I/dLX+HssH1W4sg2/cRNqBr3Hw6MU5XnvfHpwIUfS3az3l1H
-# jSr9ESWavKNmc8EjPDfXtKE8smdZgFxTUEfblhSY5AzQP9ckuN3KtLd1X4tgM7nO
-# DhTveZhgk6Y8I3rAhGBYRGSqyN94sOZosk1Af3c87MVmsQ6039y+pmZ6ltaiiO4s
-# MEUxftTtK24TpIeXMSTmSLTfD196e/DZg5JJdpd9Ao35tkuoPEXfyc4QfPTCCVNJ
-# /9+7+ec6AubHIc0PB8E6pz2151vQjtpzhTKv7iBM3D0Rc7VUieThE+wmHebi3C8T
-# +5/56U1Ca1lHDR/9ThuvZc+Z+JDJfSC3NmEip3eh9zEcbazuOEwCYqi5LmeixBXz
-# QBnuS1OoEU0ZVkVzVQkDCLC4uc4lg4yIs6s4TruhHrlEZeMMlaGCAyYwggMiBgkq
+# BCAl5DVMBh8AKV2SpqF5o1WRJJePytC63l78mLH4oIZfqTANBgkqhkiG9w0BAQEF
+# AASCAgAV//4j4PdFHQ/uEe8lom11wdzj2kC3dlLSpW++UwiE7oechG017SJZgnV0
+# GrkQGnOaBcwabUjwoT6u22DhbeBImR/vRznIyS2ZWy31Cshq//vNpcgeUh1/mQlR
+# n7OEj+hOnw6Uxzuj6Sr8k0/s2oSrMiXg1dR/rYzw2dcH5GDKLfx+7KGQa7vIR6Oc
+# INCsNR30yEfLi58pDHeA2TF/SVgtoBt9jEf65Wj5eAe6aUTRFrAzye3MCeTforjS
+# j8jzyfKAwTAo1TzbJ4pfLL9Wp/bAtvsI56BHbqfoVhHG8k4VpHgK4l4cThUX6NzN
+# 1FMEHh3DaKcyNHvsgnlwKzO1Iaxpbbik2BatLOWc1L+VdkQNGFNqAMtIno0GqM7o
+# v5Ksf+qVnPgKtzUg4uYrJCuK+omqfbvJmzAIpxmjIkmcAekbzVgd7aa3RNH2vCra
+# mQ7u1CJyYerh8EnvbfhX6gi3tOd6LcFG3oZmlF15YQ8zkctA1o8/tHfQBq3nV/HR
+# nQEHxywr4VCuz9O/WvnVUbuaqL1X/uYjBqkxo+b39bhnT+qgO/Qe3ZqyXY0sSDqD
+# uDrAYnFHvKqHAoMC1yvvzT84psmNgWYcWh6DKhVyzBZmSCVgUpEyABi+lj2sPwcN
+# RlPkVCtaEzJbHsHRUGUaYkpac6M1s6Vvav8t6fSxVdh3GDmvr6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMDE2NThaMC8GCSqGSIb3DQEJBDEiBCBMhh/j
-# VUdf1nCffkq/WKC6IKhgif2GG+I2lpx7FGGceTANBgkqhkiG9w0BAQEFAASCAgAt
-# jko+6neDS9NQle/Yo9edcMujkdx4PUtmRlNt4kL0S7KSm8HRVX7OkkyGthMa6WLe
-# m3T1rbATpwLT7VUPsVEOkFF5iE1Sr3vjpcpa2VKx24bvE1GRmONd9dbRKOnqWfZe
-# 123XOlDMxCPINNWu76zCBMD/3i9I0ogWTTNLERnwV7NvG7N+7gNmvFjN3IkSQ/42
-# ylQDCGp4KugoeQHuHOqevuu1OttoGj2ErccWK4YWNFLQ8ZB7fKc50oMUUS5AQiOX
-# IddU6zQx5DmpQTMcQc23AS8qraQxj78B0ten5udNueWFZOtl6xp+MlBK734hzRL+
-# sPwfHl0/SUK/VfqblAxUD1qHwOXYmxKo6DKMKB96vilCx7v/4xLUqFOxoqJHEY//
-# xsbe+Gaoa0jDfOVvv1b1z2LjAAuL/NCZrNBY7Es4DoFO/+YuiWz6nhfKE3/fIcYk
-# pCMfw1nkaqzbghlDT7nKDmD44/yYlWm/2j0y4tKW71ESzTYDxOtc31x0ZKkVzp0x
-# /VcwnVsFPtA4RQgOwfPWRA/XxvuClyIdjgglhG1phe/K7rrXXtoplPFRKV8bJmuP
-# Xo9du2i8hYG4cFKVkkOaC5KeanBY85vloIVEmu/Vx/FAveBd72Mh6hGJOjb47Qq0
-# KO/iA8G0rRZ7feueo+KlH72uveNjCoVzaifspQn2KQ==
+# CSqGSIb3DQEJBTEPFw0yNjA3MTMxMzExMDFaMC8GCSqGSIb3DQEJBDEiBCBUd1Wq
+# b/Cy4QwAv6mK8XyKdlTe4CGyTpwDh/pGJfZTAzANBgkqhkiG9w0BAQEFAASCAgB/
+# RhORJ7g9Muz3tkZNlGszno2Am8zaCsvco2JqLyeHGqWYf4Ia4DOnU4RtmdlPpPtI
+# P0YyNIwoF83zvIEnK2KOm20njjUZCJd2fgkAe29zRYwDqmFf203zjD9gZTmQEim9
+# E92XtWNJzjErQbF804FLA5NH1Jq1lt0CwYZSBEkOHrnLUq95kzTUdDJm1Wodvr2g
+# 6Z5J+8bgiv5HFrx8+bcuvZq7LDi98WiwO/vpFoq8BNUGrIavOkw4OpluulauDQf+
+# 0rf5ba2qTSDgQTR8qIQwUl7YQha/k3Mf9mLN0t3hQh0DDNYc47qH2mQU8eZRYtIg
+# /EymdkYSVAgic44e0fZnc8NdI7F52p14UfCOcIB++LzEU7t7+0ayrtkoUEGLS/3N
+# hfAnw3mglQCKXGE3rgfa6zle0McXbox7nYwemmc7gpaz5ebyngpqTR98DEWfwO9y
+# OVpDSxClYze8elKlMykamx+BM17XyfRnuxojlX2kiQ3iGBsf27Z4jDPq23NeRCbE
+# kwNLol7q8zcCkZWx1EUcuTIJhc0YkswA+6zRAgFWqzkVriaXtYlzysVGC3LpakMD
+# nGQpZNp5LeACuv3KKLgjYA3yGNGttVv+oSCZolnNXdw8R4sxmstucwWIJZrRrqB4
+# CZA6qhny2Z+9SgL2LO5Qzt+9a7ysf7fpYS5cK99ICg==
 # SIG # End signature block

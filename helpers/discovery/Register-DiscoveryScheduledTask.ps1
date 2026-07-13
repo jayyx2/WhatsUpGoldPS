@@ -434,7 +434,14 @@ if ($Mode -eq 'Provider') {
         $scriptArgs += " -OutputPath '$OutputPath'"
     }
     if ($AuthMethod) {
-        $scriptArgs += " -AuthMethod $AuthMethod"
+        if ($Provider -in @('CUCM', 'CiscoWLC')) {
+            # SNMP providers use -SnmpVersion instead of -AuthMethod
+            $snmpVer = switch ($AuthMethod) { 'SnmpV2' { 2 } 'SnmpV3' { 3 } default { 2 } }
+            $scriptArgs += " -SnmpVersion $snmpVer"
+        }
+        else {
+            $scriptArgs += " -AuthMethod $AuthMethod"
+        }
     }
     $scriptArgs += ' -NonInteractive'
     # Legacy $psArgs kept for display purposes
@@ -471,7 +478,15 @@ if ($Mode -eq 'Provider') {
             $vaultArgs = @{ Action = 'None' }
             if ($Target)     { $vaultArgs['Target']     = $Target }
             if ($WUGServer)  { $vaultArgs['WUGServer']  = $WUGServer }
-            if ($AuthMethod) { $vaultArgs['AuthMethod'] = $AuthMethod }
+            if ($AuthMethod) {
+                if ($Provider -in @('CUCM', 'CiscoWLC')) {
+                    $snmpVer = switch ($AuthMethod) { 'SnmpV2' { 2 } 'SnmpV3' { 3 } default { 2 } }
+                    $vaultArgs['SnmpVersion'] = $snmpVer
+                }
+                else {
+                    $vaultArgs['AuthMethod'] = $AuthMethod
+                }
+            }
             & $providerScripts[$Provider] @vaultArgs
 
             Write-Host ''
@@ -762,7 +777,15 @@ if ($registered) {
                 }
                 if ($Action)     { $runArgs['Action']     = $Action }
                 if ($WUGServer)  { $runArgs['WUGServer']  = $WUGServer }
-                if ($AuthMethod) { $runArgs['AuthMethod'] = $AuthMethod }
+                if ($AuthMethod) {
+                    if ($Provider -in @('CUCM', 'CiscoWLC')) {
+                        $snmpVer = switch ($AuthMethod) { 'SnmpV2' { 2 } 'SnmpV3' { 3 } default { 2 } }
+                        $runArgs['SnmpVersion'] = $snmpVer
+                    }
+                    else {
+                        $runArgs['AuthMethod'] = $AuthMethod
+                    }
+                }
                 $runArgs['OutputPath']     = $OutputPath
                 $runArgs['NonInteractive'] = $true
                 & $providerScripts[$Provider] @runArgs
@@ -810,8 +833,8 @@ if ($registered) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcDF+hCIApzm4g
-# 9pi4ukHh39dM/XGtDFW9nS+7bE6T9aCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCj57/3B1xtHXyQ
+# fhkkTmtnFCT/4+NWU+YThRQKeysG+6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1014,33 +1037,33 @@ if ($registered) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBrdOGkxnr48kM4sR/cApuukhW1xqZ+UP2I0Rwk+0LTzzANBgkqhkiG9w0BAQEF
-# AASCAgBkV7axzj5UIU9n+38Dv07wLrDMt1jAelQAPaWzg80ZLO5fkIDXeyMO1Q/e
-# SGXwa0rhSN9BU1Su0c/3V9jnWSaxN2ve2m3K/IBbA92fOn64bUgyJ7rCcUP2x8Ws
-# cKMaDXL++epEN/shleZusTCEXnLqM2FJLdwEKwmWYxH6t5Z0FB4DIvvCX4cRFvbi
-# +EjLqTrbhMlAC6CyaBZeC9aBX5esy58xxkC9TqGzTK1b5p10A7G0AMDm/GYM2aQc
-# HdzrYNx76o8yiWiMEzSQNWcxTVYy9B+K66/c9RHO0xvS5YPJiz9zNmN34KU/0W0Z
-# iWPob03d0xSyI7rX2wzEusLrUkVMRYFdyJxio98TaM4AcsH139bF3XjmjT7+YUOO
-# EcuobRwM0IZfbXFym38TBAqTn1XnI8qPvfaQU+EhuEF5G8/dtkn6QjMae/zbjSR5
-# yOK60j142UyPXyNkiIHPK2gurbgFHehvLjFEgF8jXS5XwiOLB0FH8Gpf8dJjvlBD
-# pyCwiTxuopkDVGLXxOcp9YIoewWHJs49pCEO6GcxicZlkI/Yb2j9hxtnT3nGTcsp
-# wz6CX0UWKU+aOZBPi0HmUNtr7izV9B01jnNOmf/PHEjPFBfx3KbKpe3SnvsovwS/
-# bFTHKdvHo0f7JNpnDoSEAjySnihEVD803ACAfCn+w95OjJFQwqGCAyYwggMiBgkq
+# BCAepB8r60FxvQEu6Cj94rFJilGUuzP3erSaKZ6SsETg9jANBgkqhkiG9w0BAQEF
+# AASCAgDYoNRxuG/iVdopRr29m6GKuk4XRqOtZ+AQxzbTz/FSh5NDt6t/Dign7z9R
+# bjIiTh3YKPwnWTtfvFUpAIZ9OJB2O/Qc/dXFRPEENRAcAC4ZaDLyg20HfIBSobCO
+# olmsXOx0HzEq3OOGQyINpAGMOG74EUKsurQSUZGLbDNbcN6prr1mpkE5M+85e0BD
+# ZDp/rWjkgWIYtqGE3ne1xGeKDbd0ztMVGj+QPagkf4yE/pXHpVELiheHOSWCuiQo
+# 7+YAgMvm3caJFBDiiJqYJx8a8jvwTSDzMu4lB91kx5fbw1l/Ft0agW2VJJivN18m
+# dI/5NHdHYs8OmhqKMv21rhne5FpK/ZbeVwoCzdYEhv5XVCpKs0FucwL9Je09xt1O
+# vjG5Vsfyot21FfKgCl05ruqIJwsKpOxXph+n+ewrKvmvWVG4Yh8kRsGqF5tqMdh0
+# EQx6cytKET6YyX3pJ7cCiiMvuqQ1Zc4JiIGvlRn8zm6PdEffKkwnEqNLgJkPJ2Ou
+# p9iQEwrOdnEhmrW5W06RFq+XFtm6iFp9JtuGIaDxDqmRQLd392JCi1Qpx5jv8eNf
+# /FvS0tZ1MLCHMGrmZ8oAsZGsOjQP5eLD0ZdRZ7KU0J9earqwiXoCxcciebL6FgdK
+# ecErPmNtL36Dv/0qEB0kGwtR1DEnbSQSj0k/TmcwklpohrOAc6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDkxODE1MzhaMC8GCSqGSIb3DQEJBDEiBCB2a97+
-# PycXc0SjKD0R4WymHyj0rvyEo0aWQS4I6SD9VjANBgkqhkiG9w0BAQEFAASCAgCx
-# vutatBjJ4b7H11BD4BdiM5sXm0J50ktusgpyfzWOA0Dl7VLoDLZ44J4hpbk4iADa
-# AZqdb8iTNsaZwC1M+UOGfilCqxBG9gEbCRl6aFjo1S3yUKIm+Te/wFDzd0d0Y263
-# 7Ohamho2cDSrKVUionvSRh0FGCIe0PWlqhts0rcbYMlfGRV2+EfvufNmgXlq671v
-# aMrYjgeJlKCl2TwkdOVEs94VQLfUlc9EmA+LcBUWbB9sozFqknVZTtACAwjqasmU
-# LpUAMGucAmdxqel+OYTV7+dtPMcE/H7uCaLiBFoDOYlYRNT++Ss3fMoOkGp9dfvH
-# GWERGSyCcng0PHtP9pbJoB4/1g4Vt9nM/gO2UghyOdQAMglzeaj9/Ffx2FHwCIBU
-# 4abDU21ULPFqSlMm/6os+z4dJ2u228Rlg3FvLYOeCcGe1RpoZHvzKjFmsgCraD9C
-# mI2Dw5ShrWMjRz9xZfqWEVddxHzXhp0eD6wrQDIaNY/OU3F/hIpDz12wx/a+NMjx
-# jOV7YQP0U+jjAqFM6y+Tckd6DFyolUxrt4dSv2x/pejeE/c/B9d6/d8q2/F+OzXF
-# z7BqKHXTpIluHvN6OioLkb59lgca1mz9JgUpYnEcN3bBg8FV5RkqIxwcDk77K3c1
-# I3AHD2mravQSC3oevyCDU/OqccMIoFayhgEwxe0B/g==
+# CSqGSIb3DQEJBTEPFw0yNjA3MTMxMzExMDNaMC8GCSqGSIb3DQEJBDEiBCAKNYl1
+# gCD8rfXOzWQ9Y7rxJrR2Ei97t+vAS7jBcXWlzDANBgkqhkiG9w0BAQEFAASCAgCj
+# pnZuzGPWa87wyvkSrhc9td0wGtwm2wx26zlo0V6SZML4ZhyOq4WnwE/n/g7Y+1QS
+# P9/f8pOVlIXTxR0qmQjlPmEMIBT4usc+nfTIS65YtYbyTORfkYZAa3zrYoCBQLQ2
+# QzcvPpLR8CEdC+xJ7iKVk1kPOAN08UM0QBKUNRK4008umiA4+c1+5DLAXiNgSY0U
+# vDEpsnmqwvx+giHDNgX9V1mTlXlePpVHYjwJw8SkjkGbkrNGZid6cZ5LjWvWh2Jw
+# 20M10nQrM9lFujnDgP8Il1I4qSvEe9Wr30SmYqrM5x7vGcKsAhcMM6NX1JgUxtnj
+# NQzu14v99k2h+9hrOW9C/lSwY+NTpRrudzO+h0PZVmjcDhYRtQSFCzNS1QSLTgQy
+# abYKvt6W3uKZ37UjIPeHfD/5kYl7vK9wlGuzOZnSAHxfv2SkAEfwmEXivLs4nL7l
+# W6/zUFUZpcWIiOSDFz3wv1ry+Ml67GvdLfR8AggiaGqLQ/Fzb4SqYXtQ1B+liE7x
+# RwK0B8rnVm3Lqm5xgWKGsAbrVtu63+7m7IIziJltVkwdejct46Jt+OX5osHV1ghM
+# M0cfR5EVYeRd+evSEksY6pRCw76GNxkNwD3CFKJ/LRFGGpV9VpXh5tToguWRtsqs
+# sXT4exFw1ZXqjZogHUjgwfKuABh17yE88lvEvd0zPw==
 # SIG # End signature block

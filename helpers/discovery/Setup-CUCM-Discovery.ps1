@@ -107,12 +107,12 @@ param(
     [string]$SnmpContext,
 
     [ValidateSet('None', 'MD5', 'SHA', 'SHA1', 'SHA256', 'SHA384', 'SHA512')]
-    [string]$SnmpAuthProtocol = 'SHA256',
+    [string]$SnmpAuthProtocol = 'SHA',
 
     [string]$SnmpAuthPassword,
 
     [ValidateSet('None', 'DES', '3DES', 'TripleDES', 'AES', 'AES128', 'AES192', 'AES256')]
-    [string]$SnmpPrivacyProtocol = 'AES256',
+    [string]$SnmpPrivacyProtocol = 'AES128',
 
     [string]$SnmpPrivacyPassword,
 
@@ -287,13 +287,24 @@ function Get-CUCMResolvedSnmpSettings {
         $savedVersion = if ($saved.ContainsKey('SnmpVersion')) { [string]$saved['SnmpVersion'] } else { '2' }
         $savedAuth = if ($savedVersion -eq '3') { 'SNMP v3' } else { "SNMP v$savedVersion" }
 
-        Write-Host "  Vault: $VaultName" -ForegroundColor DarkGray
-        Write-Host "  Found: $savedAuth settings" -ForegroundColor Green
-
-        if ($NonInteractive -or $Action) {
+        # Auto-reset if caller explicitly requested a different SNMP version
+        if ($script:InputSnmpVersionSpecified -and [int]$savedVersion -ne [int]$SnmpVersion) {
+            $requestedAuth = if ($SnmpVersion -eq 3) { 'SNMP v3' } else { "SNMP v$SnmpVersion" }
+            Write-Host "  Vault: $VaultName" -ForegroundColor DarkGray
+            Write-Host "  Found: $savedAuth settings (switching to $requestedAuth)" -ForegroundColor Yellow
+            Write-Host '  Removing old credential...' -ForegroundColor Yellow
+            Remove-DiscoveryCredential -Name $VaultName -Confirm:$false -ErrorAction SilentlyContinue
+            $saved = $null
+        }
+        elseif ($NonInteractive -or $Action) {
+            Write-Host "  Vault: $VaultName" -ForegroundColor DarkGray
+            Write-Host "  Found: $savedAuth settings" -ForegroundColor Green
             Write-Host '  Using existing credential.' -ForegroundColor Green
         }
         else {
+            Write-Host "  Vault: $VaultName" -ForegroundColor DarkGray
+            Write-Host "  Found: $savedAuth settings" -ForegroundColor Green
+
             $savedChoice = Read-Host -Prompt '  Use existing? [Y]es / [R]eset / [N]o skip'
             switch -Regex ($savedChoice) {
                 '^[Rr]' {
@@ -368,11 +379,47 @@ function Get-CUCMResolvedSnmpSettings {
             $resolvedUsername = Read-Host -Prompt 'SNMP v3 username'
         }
 
+        # Prompt for auth protocol if not explicitly specified and no vault value
+        if (-not $script:InputSnmpAuthProtocolSpecified -and -not $saved -and -not $NonInteractive) {
+            Write-Host ''
+            Write-Host '  Authentication protocol:' -ForegroundColor Cyan
+            Write-Host '    [1] SHA / SHA1 (default)' -ForegroundColor White
+            Write-Host '    [2] SHA256' -ForegroundColor White
+            Write-Host '    [3] SHA512' -ForegroundColor White
+            Write-Host '    [4] MD5' -ForegroundColor White
+            Write-Host '    [5] None (no authentication)' -ForegroundColor White
+            $authChoice = Read-Host -Prompt '  Choice [default: 1]'
+            $resolvedAuthProtocol = switch ($authChoice) {
+                '2' { 'SHA256' }
+                '3' { 'SHA512' }
+                '4' { 'MD5' }
+                '5' { 'None' }
+                default { 'SHA' }
+            }
+        }
+
         if ($resolvedAuthProtocol -gt 0 -and [string]::IsNullOrWhiteSpace($resolvedAuthPassword)) {
             if ($NonInteractive) {
                 throw 'SNMP v3 auth password is required when SnmpAuthProtocol is set.'
             }
             $resolvedAuthPassword = ConvertTo-CUCMPlainText (Read-Host -AsSecureString -Prompt 'SNMP v3 auth password')
+        }
+
+        # Prompt for privacy protocol if not explicitly specified and no vault value
+        if (-not $script:InputSnmpPrivacyProtocolSpecified -and -not $saved -and -not $NonInteractive) {
+            Write-Host ''
+            Write-Host '  Privacy protocol:' -ForegroundColor Cyan
+            Write-Host '    [1] AES / AES128 (default)' -ForegroundColor White
+            Write-Host '    [2] AES256' -ForegroundColor White
+            Write-Host '    [3] DES' -ForegroundColor White
+            Write-Host '    [4] None (no encryption)' -ForegroundColor White
+            $privChoice = Read-Host -Prompt '  Choice [default: 1]'
+            $resolvedPrivacyProtocol = switch ($privChoice) {
+                '2' { 'AES256' }
+                '3' { 'DES' }
+                '4' { 'None' }
+                default { 'AES128' }
+            }
         }
 
         if ($resolvedPrivacyProtocol -gt 0 -and [string]::IsNullOrWhiteSpace($resolvedPrivacyPassword)) {
@@ -641,6 +688,9 @@ function Get-CUCMCredentialIdentifier {
         $CredentialObject
     )
 
+    if ($null -eq $CredentialObject) {
+        throw 'WUG credential creation failed (returned null). Check that the WUG server is reachable and credentials are valid.'
+    }
     if ($CredentialObject.PSObject.Properties['resourceId']) { return [string]$CredentialObject.resourceId }
     if ($CredentialObject.PSObject.Properties['id']) { return [string]$CredentialObject.id }
     throw 'Could not determine the WUG credential identifier.'
@@ -953,8 +1003,8 @@ foreach ($currentChoice in $actionsToRun) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhju9qNM/Yp77B
-# wNxAYx23t6vXkN9d8TKkq7o7S+ucwqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHcoaRbYJCyL4F
+# dTxw92Kb1+gqUGpTye/t5aQHdvmgAqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1157,33 +1207,33 @@ foreach ($currentChoice in $actionsToRun) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCdbiogZWfge7X9nH0fjry/6wtQ7W76sMn1gjASgDQ6lDANBgkqhkiG9w0BAQEF
-# AASCAgC26jWdfcpAHsNFSJ4ZZGctC1ZcPo+nJZHuB4rV4wQrrDgAOxLVoQaCBh0c
-# BhGZslcEL+1jVNgoaebDMRv66CpGOJ14ySJ4e4q3aYLWx6/rDqJoCsEnCDROG23T
-# 6VYMvVa40L6sNWJ/UHGwatCOAWsiFnDlwJTSXvjVoHb+U/UI2jSfVis/7ZU8rF3/
-# ZOBJZGq39CGb9TlVP/dnk/8SPWe72RoBseZDJlQpu9agRznCMcl2MGsfoDoBwqP1
-# vqTwmHKYU3mkp1rc8kveqrdsPX3Ie7qOD6ogdyNn4iRhlckXmC7rms/01TVsNisg
-# iGPdkRocv/CkujcvzDpbJdXn7sk3y89yOL+UqcDvnIyJ7UKgDEx2ZbcaGQ4FssPx
-# 5WsNLFbVl08aGkNbOKKo0OdXScCoXMo4u0XpolZ4Bns9oU4//+I9qNebTZZZuHox
-# 4gEhcqoES8XOBsM6J8nCRZ9nMnp7PMET4bBntWquZCQxHVwy7xkMf6+ACGn9sLcp
-# GP8zJO6CnH8RR1gDF8uStioNvxtr5z/GGh0gaoemj5zfGHYUVdnRdh0wyITWMRoW
-# ijRfcmmqYSLSpeMZmtukUN4vy6fNPsCTOuJ+KkZcOKjKFmnFx29bRUyYZqtXvWr1
-# oLX+M7iWUNt3GZ7lAutNfaABiTZ6VZ0bFiiertMRW1s3K44VMKGCAyYwggMiBgkq
+# BCBrL9TDCmuGaDNGqs0b/zl7Dxnu/PHk0gydDLJv8/nVojANBgkqhkiG9w0BAQEF
+# AASCAgBblDsbBPfGkMb6pypTj3HzcraKx73NodvJkWdtgtDy1akzVDe0UhvZxF48
+# V19/z3lXC7awkDd7Wabpth8PvriyGgOzerTSd1ywKXiZGJ0zI6AC/XrJKLldXEP+
+# ZC+LAfYaMlEnAS2RSflUiHTAAyeNKDnJOQsO+p/F9MTmp/KgotdBj8qpN8xsFbfi
+# BPh01MDBYHUB5yVtz3H6ZPygiU/vYT3xHlL1BV5PDp0ibajmAsZYz7L+EgGq8R9d
+# kgS9V4NZN06KTjmG1g/pkWSBs2FRJJdeKVELV23Ws/GVePC9h6QqbOiDLQzBr7As
+# r3Cr36Cu16k4OaxsjkhaBVraob+r8xVA539TqlVXz4TeHJ5wSsLOtN3kLXgzpXhm
+# nwvrFryjuuyE4oGVch3kzaP2Og5IXxv0ad8fVcqJV2Sifdc/ut/2sCtveP6kn6CX
+# VTDQk618I+xVSJHIJoPlfx0YEg0WdFVUPsFtb0gp/e6RNgIjKd7Kt1SlRUTNbgNO
+# SLXd7Cg7JuhSDiJRjxBe28ziRD+Q7nUZ0NPlQjk+58y3G/7HX+FFNopwbaw9gqT2
+# ffpuY7wr5/YRC3UXBQdgTXo/VDzUq9QPjlXDATNxEky5RaqOEE9uuWDm2dgpQVsz
+# exTtcGTpKXnJVTigSBvpjN82zKUTl9N50SY1J3JnCvoVGmre2aGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcyMDQxMDJaMC8GCSqGSIb3DQEJBDEiBCB5WrqK
-# 0rkqvTqHnx+in6v7NjJKacua2LO/bQOFF+09mjANBgkqhkiG9w0BAQEFAASCAgAe
-# ma1EMpGmdII1zD4LPpbaV1VfNgZQVFx35MUbBoXkvbgUJ6cF/RgPtZvHh/yzCFSX
-# NDs4D6YrYGO2P1QLiN/klmAqA9c/X/WMfEJxvRUutWOIepSDznODZ0E6j7kxWuPw
-# L8MPJ4HIzVAm59lnH3ZpSK5PPs6rPl76qU/STMS+wiaG5jnSEY0yMOSbewhHFZU+
-# +dbqSZUufVl3cVooWVnQjEqAvs2PK7QbKk4+peexti9IDKL4gWM9sboAdEV3iA6Z
-# TdaxhomVvW7I3Zv/nkmEXrw/qIrD75DIoQ72OEmHib2tnsLXTECeviOtcEQr8jRQ
-# UpCUg+zpnCyrid2qpGn70FFb+sfzynm27KLeack8Vxf5YUuQXV80CI543mgot1RN
-# 0cWMZDNn69PxN9GLTYExBI4ISf9ag+9HAnzhzHse6HatN5J0l9xhZQ8IbtvIbMRg
-# w03TrJQ2zJ79T2RqYJm1D1ZNheTWcEBwSyNRY6RrusfKZGhJwwQlfGu+vXzFcT8i
-# GkW3iuBQRkFQ4jO446kGtQMlzW7iI2sfCipJTR0G8uIdoF0z/Q9vfS35svGmAIm8
-# M3BfQKG7hA0mHso9EDadamnIVDydVmsAXJAajoXr4Q8VrBknzAr2vnqLQcWyesau
-# ScUM2kaH2MWNQIujqGqC7WdjLIfmuadIRFUCvhgokQ==
+# CSqGSIb3DQEJBTEPFw0yNjA3MTQwMDE5MDhaMC8GCSqGSIb3DQEJBDEiBCCNhRMR
+# D6xiMY72Snx72owNkQoiWrpzjzD+sLRsi0TvrDANBgkqhkiG9w0BAQEFAASCAgDJ
+# EIIi41kOiCY2urkQVh0Pkxc8LDteGIdCAkh5b4uWUIVTXNJa1IS4RGj6EbSTr3lo
+# ZqR0BAgFPd7NV7BGkTXPCfyjRTK6aIBPnH6pWJFv+SzNKwy6zvLZgyvn6VDQNFa8
+# aPbKZS2st+RMU4x3eus3JRKpSoXfatsLIrVN7ApyFekzvp0eIZ/m1tBhcAtUvCAp
+# evKU3F9QSvrVGKMsEPHPK9byN4qwrzdcJfOaOGf0qruk2JV/9lS+8zFgjM4w1BTa
+# xg5yyhtgFtzU72cY5rZP9xmhdZbtSQNvOckeOL5F8Ct4oRSOCS6IsBMA1ig0gIQR
+# DhZQkmrw+niW0ROXg9TqGEIm2PrEGPOIWjdZfej45C5Pl7kEqGwklAy6foJk/6Kr
+# G1FJDu0YQV8iSrKxea3yWEgOfoX3YWTHzROBMv08RqJ8Ydotq5iWQGG8k6kIsVgq
+# nt7CrELvcBBQVuUU5ZfIEW2BjVzJD7iX7bPJRVYZt2aesEXwZkG6HU6yI2PBDEr+
+# XS2XzLXwSVQeBa/jNDcfkguOtXQIgge7NByiBJNCYp5fHvKnW2cBDHuWbRcLLhsB
+# nASVCD0gCUwlGz9hrGyK4upag0+YNToiltb9DskhISEQnh5qoSytmLIIlKbn99/V
+# Azw/Tp1ITEMntTfJ6TcUuB2WEnyzAd4BYuD2By9zHw==
 # SIG # End signature block

@@ -174,7 +174,7 @@ param(
     [string]$OutputPath,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('Token', 'Password', 'ApiKey')]
+    [ValidateSet('Token', 'Password', 'ApiKey', 'SnmpV2', 'SnmpV3')]
     [string]$AuthMethod,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -201,6 +201,14 @@ param(
     [Parameter(ParameterSetName = 'Register')]
     [ValidateSet('Bypass', 'RemoteSigned', 'Unrestricted', 'AllSigned')]
     [string]$ExecutionPolicy = 'RemoteSigned',
+
+    # Use a plain-text wrapper .ps1 file instead of -EncodedCommand.
+    # Some endpoint security products (TrendMicro, CrowdStrike, etc.) block
+    # -EncodedCommand by default. This switch writes the task wrapper to a
+    # .ps1 file in the output/logs directory and invokes it with -File.
+    [Parameter(ParameterSetName = 'Register')]
+    [Alias('NoEncodedCommand')]
+    [switch]$UseEncodedCommand,
 
     [Parameter(ParameterSetName = 'Show')]
     [switch]$Show,
@@ -635,9 +643,49 @@ if (`$transcriptStarted) { try { Stop-Transcript } catch {} }
 exit `$exitCode
 "@
 
-$encodedBytes = [System.Text.Encoding]::Unicode.GetBytes($fullCommand)
-$encodedCommand = [Convert]::ToBase64String($encodedBytes)
-$wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy $ExecutionPolicy -EncodedCommand $encodedCommand"
+if ($UseEncodedCommand) {
+    # Legacy: use -EncodedCommand (may be blocked by EDR products).
+    $encodedBytes = [System.Text.Encoding]::Unicode.GetBytes($fullCommand)
+    $encodedCommand = [Convert]::ToBase64String($encodedBytes)
+    $wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy $ExecutionPolicy -EncodedCommand $encodedCommand"
+}
+else {
+    # Default: use the signed Invoke-DiscoveryTask.ps1 wrapper with -File.
+    # Works with -ExecutionPolicy RemoteSigned because the wrapper is
+    # Authenticode-signed as part of the module distribution.
+    $taskRunner = Join-Path $discoveryDir 'Invoke-DiscoveryTask.ps1'
+    if (-not (Test-Path -LiteralPath $taskRunner)) {
+        Write-Warning "Invoke-DiscoveryTask.ps1 not found at: $taskRunner -- falling back to -EncodedCommand."
+        $encodedBytes = [System.Text.Encoding]::Unicode.GetBytes($fullCommand)
+        $encodedCommand = [Convert]::ToBase64String($encodedBytes)
+        $wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy $ExecutionPolicy -EncodedCommand $encodedCommand"
+    }
+    else {
+        # Build the ScriptArgs string for the task runner (key=value;key=value)
+        $runnerScriptArgs = "NonInteractive=true"
+        if ($scriptArgs) {
+            # Parse the existing $scriptArgs (format: " -Key Value -Switch")
+            # into key=value pairs for Invoke-DiscoveryTask.ps1
+            $argParts = $scriptArgs.Trim() -split '\s+-'
+            foreach ($part in $argParts) {
+                $part = $part.Trim()
+                if (-not $part) { continue }
+                $spaceIdx = $part.IndexOf(' ')
+                if ($spaceIdx -gt 0) {
+                    $k = $part.Substring(0, $spaceIdx).Trim()
+                    $v = $part.Substring($spaceIdx + 1).Trim().Trim("'", '"')
+                    $runnerScriptArgs += ";$k=$v"
+                }
+                else {
+                    # Switch parameter (no value)
+                    $runnerScriptArgs += ";$part=true"
+                }
+            }
+        }
+        $vaultArg = if ($UseSystemVault) { ' -VaultScope LocalMachine' } else { '' }
+        $wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy $ExecutionPolicy -File `"$taskRunner`" -Script `"$scriptPath`" -ScriptArgs `"$runnerScriptArgs`" -LogDir `"$logDir`" -TaskName `"$TaskName`"$vaultArg"
+    }
+}
 
 $taskAction = New-ScheduledTaskAction `
     -Execute 'powershell.exe' `
@@ -833,8 +881,8 @@ if ($registered) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCj57/3B1xtHXyQ
-# fhkkTmtnFCT/4+NWU+YThRQKeysG+6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkuYVll0GHyHRX
+# Gw80eDuobSRSdJO68o9SS6LFkrB6WqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1037,33 +1085,33 @@ if ($registered) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAepB8r60FxvQEu6Cj94rFJilGUuzP3erSaKZ6SsETg9jANBgkqhkiG9w0BAQEF
-# AASCAgDYoNRxuG/iVdopRr29m6GKuk4XRqOtZ+AQxzbTz/FSh5NDt6t/Dign7z9R
-# bjIiTh3YKPwnWTtfvFUpAIZ9OJB2O/Qc/dXFRPEENRAcAC4ZaDLyg20HfIBSobCO
-# olmsXOx0HzEq3OOGQyINpAGMOG74EUKsurQSUZGLbDNbcN6prr1mpkE5M+85e0BD
-# ZDp/rWjkgWIYtqGE3ne1xGeKDbd0ztMVGj+QPagkf4yE/pXHpVELiheHOSWCuiQo
-# 7+YAgMvm3caJFBDiiJqYJx8a8jvwTSDzMu4lB91kx5fbw1l/Ft0agW2VJJivN18m
-# dI/5NHdHYs8OmhqKMv21rhne5FpK/ZbeVwoCzdYEhv5XVCpKs0FucwL9Je09xt1O
-# vjG5Vsfyot21FfKgCl05ruqIJwsKpOxXph+n+ewrKvmvWVG4Yh8kRsGqF5tqMdh0
-# EQx6cytKET6YyX3pJ7cCiiMvuqQ1Zc4JiIGvlRn8zm6PdEffKkwnEqNLgJkPJ2Ou
-# p9iQEwrOdnEhmrW5W06RFq+XFtm6iFp9JtuGIaDxDqmRQLd392JCi1Qpx5jv8eNf
-# /FvS0tZ1MLCHMGrmZ8oAsZGsOjQP5eLD0ZdRZ7KU0J9earqwiXoCxcciebL6FgdK
-# ecErPmNtL36Dv/0qEB0kGwtR1DEnbSQSj0k/TmcwklpohrOAc6GCAyYwggMiBgkq
+# BCBB9pxgYpz8x2e0Kk57iRGRqEJms/G6ZxUEU3SZdEWY0jANBgkqhkiG9w0BAQEF
+# AASCAgALMbiWVfYX/ofsrEoEuMl2A/BEGaGNoSjjCTwxEa+gVXjADTuntIJcgLGM
+# cbMthMpwMaQzbQ37vF/lXvjbWZGfuzdNjWjdV6j1Kitvg93G6DoaEijebOK7GkiY
+# BUD3aN+MUr1Zk2N8UmbxdifqzeIA/yzG6tBcP0d4zZVkkFKQ1BzTyIxryNO/VWsk
+# UDrFg8rqAfhoLAcXdpE3qiBsidKbmAtB2FLqWysqhL4q7ceaRX4jSJzINtdLaE0x
+# OXFXSdWpXWEmUtYeAJUA79LtbTIJm+hMa8NPjss4hRsKb5FOYq356Sc6ZA8encxW
+# wYXWzAl5wIPxsSTg1WqJFqFZ3PkaBtftGlU2igMQ5ri+iaM8fkhYlmxLeSqV5sVu
+# EPHinZvQJalNug/Q+IhI+jUBlvMB4b/mZGFYQAUSJ+ZYGragzmNeTk9TYWIUWVSJ
+# /Yvk443sFrmb6uVxPYhi3GNnCrKpFzez28J/zxCTpgiUYovF1GTc5rc9WnL46sKP
+# 1SxMQQn8M+d3Dn7YjMlanZHWwXAjeRJSDEtaFk8nEuaOB79emuCsxkV2BO0ONsOP
+# SW4PaZtbTyc1davKNZ/oLSpq2ETDk2zZkBLOsjSIPStNgrkSyPR4KYHDHfvLzen6
+# 22/SgaGxVqegH83T5DbxInAe9iqeYuWF3TsXsDrsFffkQc10XKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MTMxMzExMDNaMC8GCSqGSIb3DQEJBDEiBCAKNYl1
-# gCD8rfXOzWQ9Y7rxJrR2Ei97t+vAS7jBcXWlzDANBgkqhkiG9w0BAQEFAASCAgCj
-# pnZuzGPWa87wyvkSrhc9td0wGtwm2wx26zlo0V6SZML4ZhyOq4WnwE/n/g7Y+1QS
-# P9/f8pOVlIXTxR0qmQjlPmEMIBT4usc+nfTIS65YtYbyTORfkYZAa3zrYoCBQLQ2
-# QzcvPpLR8CEdC+xJ7iKVk1kPOAN08UM0QBKUNRK4008umiA4+c1+5DLAXiNgSY0U
-# vDEpsnmqwvx+giHDNgX9V1mTlXlePpVHYjwJw8SkjkGbkrNGZid6cZ5LjWvWh2Jw
-# 20M10nQrM9lFujnDgP8Il1I4qSvEe9Wr30SmYqrM5x7vGcKsAhcMM6NX1JgUxtnj
-# NQzu14v99k2h+9hrOW9C/lSwY+NTpRrudzO+h0PZVmjcDhYRtQSFCzNS1QSLTgQy
-# abYKvt6W3uKZ37UjIPeHfD/5kYl7vK9wlGuzOZnSAHxfv2SkAEfwmEXivLs4nL7l
-# W6/zUFUZpcWIiOSDFz3wv1ry+Ml67GvdLfR8AggiaGqLQ/Fzb4SqYXtQ1B+liE7x
-# RwK0B8rnVm3Lqm5xgWKGsAbrVtu63+7m7IIziJltVkwdejct46Jt+OX5osHV1ghM
-# M0cfR5EVYeRd+evSEksY6pRCw76GNxkNwD3CFKJ/LRFGGpV9VpXh5tToguWRtsqs
-# sXT4exFw1ZXqjZogHUjgwfKuABh17yE88lvEvd0zPw==
+# CSqGSIb3DQEJBTEPFw0yNjA3MTQwMDI5MjdaMC8GCSqGSIb3DQEJBDEiBCDKz6tQ
+# shKNOZYI/iRDjA1+IgXPK1G8vHy/azYiBoyWbTANBgkqhkiG9w0BAQEFAASCAgCF
+# Cdct/fmS4/hoCMzNnBA3NiFAYOfJGUoH+tVDDxb0CHC7FegVioVT50eRnwILydzF
+# FpPQE58CCE51d1CyzR06dAUTKkp3XbUHoBI+ULpLKWwAgyjUgUlb4s6ZUUoeiEbD
+# dIMHa0YArlTkN1Fub2Z2n/Z1Z+TBq/ErwDrDmM7+j0pCmse1fiQq2hcy8Y+Gejb0
+# +wxHGshWOJGrq3XVX4PENvVru0eMZQd5majRWDyqUQojXPZh6lHdCqvI2ltOGiRr
+# kY0FB1RxA1CIcy205CF1Z9w9H+vaqkgueCOJiQQwpkLSf0dPAbXOUdshxGi6gQq8
+# 2vXc8/bNgaIneHnbg4vCNvqO8zOy4nj0kyS0s2e7BWlaafvH0OkF2y90xKfte+gE
+# rK7YRiQRy2Jrij4LM3fVVnTjw4+N/9y/fQiXfF0c6FMWEhzPEXd1r7v4xD/8TyFw
+# irNDGk6pCqpzhuhvVtCqG3lDyNPBzcsEvK/0bom+S+ETIxxXlXtgjZASV0qX6FMY
+# +62aYUQhLgrSSgUZIqxSilSVLPExTwio9kxqFeBmsAjVpHm+PX5SGDlxB4FVAyJH
+# MXW3X7jy35oV4K6ewK8z8EADiNfhqY6sfybUGRG1iB7ZP7MihwHW+VTe38G7CaHQ
+# l1Sw4dCgbOI4+BxhaOA86eWyOvX20sFbR+/RXep7LA==
 # SIG # End signature block

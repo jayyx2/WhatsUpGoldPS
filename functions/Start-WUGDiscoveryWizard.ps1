@@ -179,6 +179,24 @@ function Start-WUGDiscoveryWizard {
         }
     }
 
+    # SNMP-based providers: ask for SNMP version before running the script
+    $snmpProviders = @('CUCM', 'CiscoWLC')
+    $collectedSnmpVersion = $null
+    if ($provName -in $snmpProviders -and -not $NonInteractive) {
+        Write-Host ''
+        Write-Host '  SNMP version:' -ForegroundColor Yellow
+        Write-Host '    [1] SNMP v2c (community string)' -ForegroundColor Green
+        Write-Host '    [2] SNMP v3  (user/auth/privacy)' -ForegroundColor Green
+        Write-Host ''
+        $snmpChoice = Read-Host '  Choice (default: 1)'
+        if ($snmpChoice -eq '2') {
+            $collectedSnmpVersion = 3
+        }
+        else {
+            $collectedSnmpVersion = 2
+        }
+    }
+
     # ── Step 2: Run the provider ─────────────────────────────────────────────
     Write-Host "`n" -ForegroundColor Cyan
     Write-Host "  +================================================================+" -ForegroundColor Cyan
@@ -190,6 +208,7 @@ function Start-WUGDiscoveryWizard {
     if ($VaultScope) { $splat['VaultScope'] = $VaultScope }
     if ($NonInteractive) { $splat['NonInteractive'] = $true }
     if ($collectedTarget) { $splat['Target'] = $collectedTarget }
+    if ($collectedSnmpVersion) { $splat['SnmpVersion'] = $collectedSnmpVersion }
 
     $savedEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -237,6 +256,12 @@ function Start-WUGDiscoveryWizard {
     # Reuse target collected earlier for scheduling
     if ($collectedTarget -and $collectedTarget.Count -gt 0) {
         $taskSplat['Target'] = $collectedTarget
+    }
+
+    # Pass SNMP version as AuthMethod for SNMP-based providers
+    # Register-DiscoveryScheduledTask maps SnmpV2/SnmpV3 to -SnmpVersion for CUCM/CiscoWLC
+    if ($collectedSnmpVersion) {
+        $taskSplat['AuthMethod'] = if ($collectedSnmpVersion -eq 3) { 'SnmpV3' } else { 'SnmpV2' }
     }
 
     if ($schedChoice -eq '2') {
@@ -332,12 +357,12 @@ function Start-WUGDiscoveryWizard {
 
     Write-Host ""
 
-} # End of function Start-WUGDiscov
+} # End of function Start-WUGDisco
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/4VUsiIkYAUWn
-# FfzrunO4m121ojtaEflYcZqb7ERx5qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3Nmzh1SeD7Bom
+# P+rxS2dhtI+XAw80/mWFaCTs8nkNZaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -540,33 +565,33 @@ function Start-WUGDiscoveryWizard {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCD036YiorJEX8vrQQ6aOPIpJTRRHVihMMszW4lSqHmtLTANBgkqhkiG9w0BAQEF
-# AASCAgAYIlvhmOcLan6I2rEizGEQIgL09IJ3fAJnhQwmAZa/7zkTk2MXITIka4Gw
-# fUUSWmeJx0KvxZopnlA/hmw8F/47UPGDwAejfDCFv/jUIWEoDRhms3dl2lbbfB/B
-# HQYJDsYOsFLspDbQ4E/+gKS0z1x+vlI8nuekEsiVfkujsy8rCNEWd/hVouOl1xoM
-# kS3CmDTGHNy4skXofGvbKLc3VJxXInvnpV1z7ViCc+pfFrXrKGnQFUBZ4c0Hccr7
-# BSL9fwPpsQsD5LDqrpddIUWOdZy8/phI5PKcz81X27VdMLj90Sb3jHvDoRIR8nMp
-# IaRPEt9R73JLGFGeyPWa+Fv1kqrA5TXlVDyWYPHPvnlMHLKofiexbrQNE6Hjv/cQ
-# Ev2QSy8iWcuQRd57EvPFPqfBTOiBUKiTViqqKD4FC6yuwodEG3Jns44gea+3gCD2
-# ZotqORXOM5fXVrlcX4lwkmkqSIc+sRPk9LtX3/cd4G5iWe0F8NwP1dDk1WpwFPC6
-# 7LpYFax7as2LvNQEyMNC1olNeNx7c6z+iBecMfXTBxr44bdFpEeNluLUbYywB3Hl
-# wcVOSzzSrWq96PHqLgjACqPMYoRoaVyWoFAE+DQ2rnp17JMEzQD72IelmLfK0e4a
-# z0p1bOq+qc0XhbMQLskWZRh4uMQ/AFk90jifvr1pG8p7U7Ni7qGCAyYwggMiBgkq
+# BCDD/q7U9aV+C2q6tnW9xVLve1dajlkjQsh2zhfQl1VEITANBgkqhkiG9w0BAQEF
+# AASCAgAsa16lXJt8+DhI7v6a7W/XwVSne6LZx8V1z/gGXR0PZc83yJfkOYbuv9mE
+# VDHKiaRZA/dCpjHvexaKiV0t+7JguCh/Bp5dplfJgqfbLDjw7HNyHtBLmf/Dq7OH
+# U7LDUblR9OfXkpCfyhMjszk1a1CKlEiyDzr78q/L+qTakdub6LORakH+zjwIJvwK
+# O2ZCtSnD8oKZINlwqRxkUAh9w/dA6AofU8OLmEGkMl5cvwbmmMRlZEXZbfwJ2bVC
+# x5R80cc4yQOhwsBWwnWwi/jTkdFc2VQKJxkx4H4V/3YZ7z/5PuI7G6II+EvErL+V
+# bfcPUN6EBIN1SLvPQutwyfKzjh7hGjbRjNLZcaN2hBw8+2RTdmtwDArrPvWQbABX
+# JJaxrMMfi0REbgR4bk1RflBV87JPaMubap4+ZAeyPRf4jALfA0elg1You5e5g4bM
+# y5oHmi5jHhRQu4dJaQDPLkksYVzRIAHgGL51oVVsBJMsLGA25xIRfw5UM//Uir5m
+# j8dmgdaBsWyFkz+H0M/xeSoSphbMzC+k6Zc1boenAA4kv45rnA3ZTq+o6I6E9FXu
+# 2vDTsbLPoxhi8EZ//51bpHCubPOFfdE7E0Z4FyIKcRml1euV4VIOHlmKcYgV5rTZ
+# vAAOcgYkFqIh9lJUsgV36pBroNJv5eoDCfKsEsO7eDuvaoviQqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDkxODE1MzVaMC8GCSqGSIb3DQEJBDEiBCCtkfjX
-# mKXQ3LQT8VTnVMA5Qg4tVJSJEjArfWasmVA+LzANBgkqhkiG9w0BAQEFAASCAgBu
-# 8Fw9b/RhAVHZ4TRpGHCKrQ/2lrpPf6HtkRLKxgDTWZQnlusma1fnKwPBOBXJ8eXQ
-# FZvL7HQdp1tMLa8BvQ8L3s2xpCL3d4ZZ+xHN9pUnY8kA5uAXd4kPF/bCrvKp+rBp
-# odV9eqdiavNe6IJ8EacpN7fIuxKN+zPjKOva2tBhxvexHImhkxEJmIzNrlu7Cn6V
-# 8RomNGvwLVxF/IABO4h9kDV1GSOVZ3zAnVJBP2d9+WiLnV9QN/oGMkikV0fCWE4m
-# hJczh5wpVCbq3f/aXYYfn/iYV9S5UdET/8gaUJvGm/E5dUcrJEkyZUWCda6tGErE
-# kgQnlc6pHyxPRYBy3kCl3x4b3qbSwLQU4Xf8dsjpqRQoUV9HTdjRwDYs6ZknyFdC
-# 93BSVN3EWDefNvYC8BIVxYV8+6eVNe247xQJiIsEpEAkFTji0QQG6skXiKeM1/qG
-# luRpJnXKPnLfn1HLuKM5FkJcN6hHWOkNhhSnM+mrTxD/FQjRFtcfCxvytnKw1xn2
-# f6xkzAvqM7ubUmb2lsoj6RsMbVodFs4K4MI5W5gRTUaHEeRwO/dfa0KS9XV3xiKn
-# 5rqgNmORLlnMhLHh2wtpoJcg6/aiVQmpsTf8UWKVGLv0828xV+8ID06/6bCBKARf
-# xJD5IpagsR5GzzfYQ//xpemp4Fy/o+mBiF+K/oH3Cw==
+# CSqGSIb3DQEJBTEPFw0yNjA3MTMyMzM3MTdaMC8GCSqGSIb3DQEJBDEiBCCBfXOU
+# hIrmuag69KfNtc0ZsFS70Hh2qhBl4S8u1lRCKjANBgkqhkiG9w0BAQEFAASCAgBm
+# u1HsAHTdx1HLi/rHSmLfCZ+kEKW0F79+47p4bZ0G2Nbt8SS3JJu9GIi9yWUYZCod
+# AMRHeBlxYPyQM+EhtkW1GxjKoVVH6fJplPvrIDkULlul0aPgWcv9uZu8Mg8KdeCg
+# 4pNb5NUPt6cY9T/uWolQCMpPaNS1xMIyKE7Bp8MjVLMmNTbmtHiGvkyGWC60bI52
+# kwgwDRVV4h0xmnJ7xZZPUxchwIMMQ+yVV6KQoBHwin5XekNN8RVYanpjXditgj1X
+# +nb1oWNEYRlyu/5RMdnMTyMcLfxScOWgeb9RiVqwzI9i2Fb5pgcb6SxRuRPfR507
+# +4lvLt1RO+qdVGh4q2CXdjTRQt+f6otGSohHgNJOOKxFx1eQLHp9zgrF4AfWmwI7
+# TQUfHZDvG0fQZmHPMmJan0MSBxLjhL1WVH3sapaoPyFFc0sgR9EZP+j1SYLi3otR
+# Hw5OscGK7R/w9LJq/IpCQu8T/mJPY+XWfXNqwlJAWbjMHnKaatfQ9y5mznlFNGYy
+# /zf1dX/BLDmIJXILDCZFrR/IXgXvge3OgWO4wCZhRH9pxg+yyk4p78k9Fd39jv7D
+# tTPNNPcuJBGGPOGrIviZSzpJNV1d7Bg3b/n1LGBAtdcpWPyChhmqpplYiU0sZCjy
+# YQ/d4PrtMZm2FwdpLggWswnYfdK96fbi/91PbtORfw==
 # SIG # End signature block

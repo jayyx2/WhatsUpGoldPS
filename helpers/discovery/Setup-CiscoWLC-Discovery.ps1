@@ -132,12 +132,12 @@ param(
     [string]$SnmpContext,
 
     [ValidateSet('None', 'MD5', 'SHA', 'SHA1', 'SHA256', 'SHA384', 'SHA512')]
-    [string]$SnmpAuthProtocol = 'SHA256',
+    [string]$SnmpAuthProtocol = 'SHA',
 
     [string]$SnmpAuthPassword,
 
     [ValidateSet('None', 'DES', '3DES', 'TripleDES', 'AES', 'AES128', 'AES192', 'AES256')]
-    [string]$SnmpPrivacyProtocol = 'AES256',
+    [string]$SnmpPrivacyProtocol = 'AES128',
 
     [string]$SnmpPrivacyPassword,
 
@@ -216,13 +216,25 @@ function Get-WLCResolvedSnmpSettings {
     if ($saved) {
         $savedVersion = if ($saved.ContainsKey('SnmpVersion')) { [string]$saved['SnmpVersion'] } else { '2' }
         $savedLabel   = if ($savedVersion -eq '3') { 'SNMP v3' } else { "SNMP v$savedVersion" }
-        Write-Host "  Vault: $VaultName" -ForegroundColor DarkGray
-        Write-Host "  Found: $savedLabel settings" -ForegroundColor Green
 
-        if ($NonInteractive -or $Action) {
+        # Auto-reset if caller explicitly requested a different SNMP version
+        if ($script:InputSnmpVersionSpecified -and [int]$savedVersion -ne [int]$SnmpVersion) {
+            $requestedLabel = if ($SnmpVersion -eq 3) { 'SNMP v3' } else { "SNMP v$SnmpVersion" }
+            Write-Host "  Vault: $VaultName" -ForegroundColor DarkGray
+            Write-Host "  Found: $savedLabel settings (switching to $requestedLabel)" -ForegroundColor Yellow
+            Write-Host '  Removing old credential...' -ForegroundColor Yellow
+            Remove-DiscoveryCredential -Name $VaultName -Confirm:$false -ErrorAction SilentlyContinue
+            $saved = $null
+        }
+        elseif ($NonInteractive -or $Action) {
+            Write-Host "  Vault: $VaultName" -ForegroundColor DarkGray
+            Write-Host "  Found: $savedLabel settings" -ForegroundColor Green
             Write-Host '  Using existing credential.' -ForegroundColor Green
         }
         else {
+            Write-Host "  Vault: $VaultName" -ForegroundColor DarkGray
+            Write-Host "  Found: $savedLabel settings" -ForegroundColor Green
+
             $choice = Read-Host -Prompt '  Use existing? [Y]es / [R]eset / [N]o skip'
             switch -Regex ($choice) {
                 '^[Rr]' {
@@ -293,12 +305,50 @@ function Get-WLCResolvedSnmpSettings {
             if ($NonInteractive) { throw 'SNMP v3 username is required for non-interactive discovery.' }
             $resolvedUsername = Read-Host -Prompt 'SNMP v3 username'
         }
+
+        # Prompt for auth protocol if not explicitly specified and no vault value
+        if (-not $script:InputSnmpAuthProtocolSpecified -and -not $saved -and -not $NonInteractive) {
+            Write-Host ''
+            Write-Host '  Authentication protocol:' -ForegroundColor Cyan
+            Write-Host '    [1] SHA / SHA1 (default)' -ForegroundColor White
+            Write-Host '    [2] SHA256' -ForegroundColor White
+            Write-Host '    [3] SHA512' -ForegroundColor White
+            Write-Host '    [4] MD5' -ForegroundColor White
+            Write-Host '    [5] None (no authentication)' -ForegroundColor White
+            $authChoice = Read-Host -Prompt '  Choice [default: 1]'
+            $resolvedAuthProtocol = switch ($authChoice) {
+                '2' { 'SHA256' }
+                '3' { 'SHA512' }
+                '4' { 'MD5' }
+                '5' { 'None' }
+                default { 'SHA' }
+            }
+        }
+
         if (-not [string]::IsNullOrWhiteSpace($resolvedAuthProtocol) -and
             $resolvedAuthProtocol -ne 'None' -and
             [string]::IsNullOrWhiteSpace($resolvedAuthPassword)) {
             if ($NonInteractive) { throw 'SNMP v3 auth password is required when SnmpAuthProtocol is set.' }
             $resolvedAuthPassword = ConvertTo-WLCPlainText (Read-Host -AsSecureString -Prompt 'SNMP v3 auth password')
         }
+
+        # Prompt for privacy protocol if not explicitly specified and no vault value
+        if (-not $script:InputSnmpPrivacyProtocolSpecified -and -not $saved -and -not $NonInteractive) {
+            Write-Host ''
+            Write-Host '  Privacy protocol:' -ForegroundColor Cyan
+            Write-Host '    [1] AES / AES128 (default)' -ForegroundColor White
+            Write-Host '    [2] AES256' -ForegroundColor White
+            Write-Host '    [3] DES' -ForegroundColor White
+            Write-Host '    [4] None (no encryption)' -ForegroundColor White
+            $privChoice = Read-Host -Prompt '  Choice [default: 1]'
+            $resolvedPrivacyProtocol = switch ($privChoice) {
+                '2' { 'AES256' }
+                '3' { 'DES' }
+                '4' { 'None' }
+                default { 'AES128' }
+            }
+        }
+
         if (-not [string]::IsNullOrWhiteSpace($resolvedPrivacyProtocol) -and
             $resolvedPrivacyProtocol -ne 'None' -and
             [string]::IsNullOrWhiteSpace($resolvedPrivacyPassword)) {
@@ -716,8 +766,8 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqfKaGi2PiRiia
-# L6KB7HX9zYBmiMvLxvuXAx7q55VfA6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEOso+DDjztn1L
+# mwo6HSiESRvGvF5O42TKE0kwr0a1hqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -920,33 +970,33 @@ Write-Host "`n=== Discovery Complete ===" -ForegroundColor Cyan
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDGcrGTmSsOCohYZTkX6RwFUMZ9eVezfxY5ZCjozXrW6zANBgkqhkiG9w0BAQEF
-# AASCAgA2MUFqtO/vEuonviFDjbuQEPtbHSSTqLg4q24NSTGSnMOimm1/52kZ5vN1
-# n9prKaxM+bp6usS1d9hGIUhilEbhgxkjub8WTXlORFY4hCFJHVuYcSv6voiSXhf0
-# 07dfbM+EWrOeo0a4720c5xk4+e14bcKRcI8jX7KHJMNwnHU740Z+A2vWu5oT+ijh
-# jfRQWy0vYFTCsXHzKhBInIPa81StAELaidfkDjnUrhnBjxEYKOk8CMoR7F0mjdvJ
-# VqPiQWISzxbT5RDglKbHjeKQQJMCSoqrqZvR45ps8fF4i+TXwn9w43Im8PRFMZ7j
-# WpcakfQf1ZsEsDmMIymb4PAzcCwM/y3DHBAz1plKxjoJUR9Z+pyVeb3QSh8q926j
-# N/WQXRA0v72HBzWKS/g1Hh+O0T1ikcwEanJIKIYU/2TesbipyGjY7bD1Hl+SFrdI
-# VfOoC8llk/WXglIyKwluHDgkPPKTa6YuK19yICCavRY+0CeFvyKwq8vjOElJM4vq
-# puWgWRSL/XsmPm/6zVAsWZMKYgHMqZOX3zhdg1j57BgULZ1/EsiyVMONtgiOPxph
-# wf/JJThbmfDaWZqFirhCdHUaV11LUFFiOdYgNppA3aa8ECz8RujlgIcK1TeiaCU+
-# sB+Uc4VXxalMCkP2L3EbqKiE+fW0ATAfBa+J9VYRztTBmWjRoKGCAyYwggMiBgkq
+# BCD7WzxViXD4cS62nMsJKWj2wjdBW5CTZqZaq6uy4QyuITANBgkqhkiG9w0BAQEF
+# AASCAgB4NWke5tRqDY2bILa/fsHtRPfnNp+VR8Q39BfsA5yWT/GRL+tHdlDJm7gF
+# 3ujYCuQTRSv6dOFnJUTaWofNWJ5M3pnnqhSSMHtP9d10OnawqDUF2hRuvLafIO8+
+# sKrT2UeIUmxiva1S78PEO1wMONvcvURMR5z86e74FDzAI+DV9D/quq/+/nV9L0cz
+# 4vufe2NfUKOIcGI8k5FGT5sC1ZbdbE0S3hxNt3Z4VWWDFUU6NuIIDDNLxA8tE4Zw
+# Rw1I85oXt3KueA1vbWBUSpKGAvXD24yd+1B+EYlUi6XAPMOlHFZ+Xd34TWRA29eG
+# En/Xe9dlKUKXrvh1H8clIYJWLd0+RPIwTgAuHeQULgkeBqZnBJOhhqamyOv/2IbB
+# 47Qv9UqBRgdc7D+Cx3OfVWwitTTUiHZuIvq/IxKoxgJn7lZaJLJ1ZjGVB0zJSGNd
+# 1y5uupjzDfnBqy2iPaX1zJKyUkHqO4Yq40FKLhKIFzZpRKT/6quKamWw9+NyFptS
+# dBYL3kE3IKjQasG3QC6RYUpHN1wlSMVHLyoM2VJqHNusxgm5Yv1haRVgGZjDXELX
+# UvpejukvNyJ8KHUCJoeNjzegrszxx9vzxeEXgRIaeagco2rF4Ugzn675ZJdkUukJ
+# A4rr39RLPnQY/epTLlj8SRUqmhZQaPWTPWvPmD1J0X5V269Hh6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcyMDQwNTNaMC8GCSqGSIb3DQEJBDEiBCDbWuMi
-# BZDPbPl9S7rsFYs/LocA0q1oje2ZTcoR7VcQezANBgkqhkiG9w0BAQEFAASCAgAg
-# PHvOW900ZuXzKM9oCNNQ1xrH5SStJndU2HAqUrWG4Vrh4R+uZBRUvBgbh0AfegwM
-# WmMKbYa7DLAh8SCjsPFlkq5Witk2NbgQNWC0M57+A9EEHIl9LeCmy4wDXyNCs+OL
-# FBGiu8FwIwDgBGbidBIcUKxc5dgJLF/V1PQm1R5dgsE7J88W2X9sYotXozhX2KYb
-# bBPNhnA9+caAIz85hakxO+dpt5uEPwHNgioiTjhNE/s/4cwJeJzTEiV1qTh9NP7N
-# PjOzkMjugEFKqFCw3SQLEqjRukrGVHkNXpMiXLh/0R1pYTzwH2BHQkf94GwWfkdt
-# hFT0DyLJTztk6kYC183vOIb/TWjRerQR7dw5r609Kd4biH+DOMEvds8pePTMK54c
-# fabQnxpnY4BTTXkbfUM4VnQA+LM/rmSt3Tt7xKGpClTLKT+fZuVlTdU6M6jWORVC
-# g6AEKhra5GC+nK/Y7ln+5S+oyVNdHzlu0IjabGcTEo0oUTmhY33NP4Z3EukQX84l
-# aEfNK8Geg2bz8+Qz5bCbVxtFcX2QDia9dDoHLA+DDVAxumEkXFhZJCIYbXyVKMib
-# 1vKepY6C9atfe39chpykScRec2b3fuHBVMyQeofso50rTqacGit7YVSZSFpmv1JQ
-# 4uUbaxYC7bTYXtc/RXSpxQpcG3CKaKL1mKr7wCMB7g==
+# CSqGSIb3DQEJBTEPFw0yNjA3MTQwMDE5MTBaMC8GCSqGSIb3DQEJBDEiBCB7l4fk
+# 2mO1342AHnPBSjmIbkA47YrVn968nQen4OxUFzANBgkqhkiG9w0BAQEFAASCAgAd
+# q4oGcdYSE6nxhckpJ2qZqqHSNfPCJojRD3Vr8t+J7AE0eo0ZmsUXFlfz4qDZCGM/
+# 3EqO4NpW31MkKyrxnUxvgH4eyCTeTiPngeYFUWQLMbnW5yzkX4/oKQ9uKsUc9Qcx
+# JipfXdzY6kJRxLByBqAUEXoDfmEG11PAudTrP1BhdkabDvvvDGtkGFv94AfH8AxX
+# KJpV/2fbZEPf5r69R7iEW5DddFQFBW6KJq3mORcep/BxCOvD5xtxvQJX57NP064p
+# 45kl8GEZx5E3HdOgrglrR2qQ7tcrzAOE7DcIA5aQnMJyv1Je/q6bQpbjhSIxeK0i
+# KDNa0ib6yYJTEAwXxaEhU6m2m0wdoCQ7Y4PJDQQ60Z+BWhGRsgU15AqP7FrTkZRD
+# 8Y7vJEA8narSkkjkPWlGAxh/aYH3cDhYiIwrUaQxyqAqe0YE8m3V3brZq9Y64aRQ
+# Z2vc20xAsXzUYuZZm0rpM5FWfkUfEdhkvnz6KFf+gC4uaF62aKcvGvVv4kBUP7zx
+# hDthsvS91VgPZ79vlMUbx+Ns9WwmRLUkijB63ytWrXYqh0dZBx5wh6cbpKzcuz8z
+# JZAALc1PE6/+NgWn55bEMpsaNcIws5zWCWwLWMEI+jTsw3eBMKaaTSUPyOPbVt/l
+# xXgke9QVEtSbk1lj5ETd8FS2OKiQOnZtShnplD0dOw==
 # SIG # End signature block

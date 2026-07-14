@@ -454,7 +454,7 @@ if ($Filter -ne '*-Dashboard.html') {
     $scriptArgs += " -Filter '$Filter'"
 }
 # Legacy $psArgs kept for display purposes
-$psArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$scriptPath`"$scriptArgs"
+$psArgs = "-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File `"$scriptPath`"$scriptArgs"
 
 $logDir = Join-Path $resolvedSource 'logs'
 if (-not (Test-Path $logDir)) {
@@ -479,7 +479,7 @@ if ($UseEncodedCommand) {
     # Legacy: use -EncodedCommand (may be blocked by EDR products).
     $encodedBytes = [System.Text.Encoding]::Unicode.GetBytes($fullCommand)
     $encodedCommand = [Convert]::ToBase64String($encodedBytes)
-    $wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
+    $wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -EncodedCommand $encodedCommand"
 }
 else {
     # Default: use the signed Invoke-DiscoveryTask.ps1 wrapper with -File.
@@ -488,7 +488,7 @@ else {
         Write-Warning "Invoke-DiscoveryTask.ps1 not found -- falling back to -EncodedCommand."
         $encodedBytes = [System.Text.Encoding]::Unicode.GetBytes($fullCommand)
         $encodedCommand = [Convert]::ToBase64String($encodedBytes)
-        $wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
+        $wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -EncodedCommand $encodedCommand"
     }
     else {
         # Build ScriptArgs for the task runner
@@ -600,8 +600,8 @@ catch {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDtrYdAEccqNKaL
-# 3yjFJaAgBiywWQ1sx+ugMaLchSsq06CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCcdRfvxa99Vt3r
+# yzI3rxyxeCTwB0QI83nJV+xmd6Xtd6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -804,33 +804,33 @@ catch {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCcJDc8PtRuhzu6WSfvweaoPGb2jjYfjx8sSsiwA0MI+zANBgkqhkiG9w0BAQEF
-# AASCAgByAFdIxsWcMrFc1+MXbtQf6A27V8xVtOGKR+OioIRGjRYFyIzSHj7/Gb74
-# t1NFEbGcvTwTpaKN41s9KN/HMcCpa8DWioslP0q6mKDzmNaP6HTnVatJ0KA7kWcT
-# vDtWz5Oi4WjwCcdd33IeINY+uarIs9zlkYrZoxCUEE3fW3x1gPQiqhc7vRrW18f6
-# 13+Xl1IXHZ8J6eg0rNfgcrXqQcJ8AXLf0nUvnvBc1AE8ajYd0mh12HYscxENcYHs
-# 37WOQVHA9xePYalQO9e611HsTwXcUuRLROQUBOxLAbrtveXcYBq1mYhEJHAql60A
-# tcXCgcIBOW2G140LJRGMHHNOxUhsYkYyhy+GEtNkb26wMYivxieVhG9UNQkK6x53
-# Xz2kNn5I9Vd2L0VI0m7Mh0BOU+Hg27gCwYBiA+ctN7RsNa9BlWoQ+gZhTYpG8ADy
-# JMKIX9UuT6BjUMqJSJyKe89MA0dAfTB4zK8A5LFesfdHXio2wt/9eAggPgjW8NnL
-# QahvbnLgi3KORsmrwXUuIXcpWas0ObAhtP17lSFONWHuAaj7ehxeGPpWMCWG9u6n
-# A7YR9mF8W+B073x+on8IIisMNKTXrPtJToQ694VPppphhjq7ISgJYHsDFTvDfCp3
-# pX+4uo0Ypt5VdS8T6Ir2INSFjbQqI27XkDUGrpQQC3HpvC/iOaGCAyYwggMiBgkq
+# BCB0/bRlxFfumKqLoreVBRW3EXhQmmq3f8xqHboJx0pIqTANBgkqhkiG9w0BAQEF
+# AASCAgAtrO8OmuR4vNJVsieBY71iZYvRftcRy+3wfAil1GpjCagfScUmr8NNT8Nw
+# 9pUX1III7jC1vvrGO08IPEvOkTqcwpEjWnzcIDTphdLyMtfN4p1v+Cd7ydNEIacF
+# w/YumggifBEVd4K1g2n6d5uYNKtB7DbMNdaJTIGB/fLmdrNj8Ng10FeMq8tFqaml
+# pg4q9KrHo44OgQ2NYh9WNIS3yo7121aqaxFosk30S91XFE3pgU47JiP0EI9sL4Y3
+# n//Qum3FasLXMVEm/scIBOZxPPMFNJvtnsVLNiiE+aAdG4oeU4xJIK/OvsZ808XU
+# R5zkB5b0H4SRUfdeKqNm8i9D9iT1Jc1P+qP6lBlAvbHTx+5HcccQ5Wr4w+A5GKkC
+# ArceO32I5y84hqrYZaakfaf5JyEe3VJ1ppjXewE/fBPnJpxhZsUd/6mCwMnRz2KN
+# zl+wbGddn2ZRbXPvdQPSXxLh3Pce/sRkfTIUZWNczeszn4xHlGoqcXb0PqehQwyl
+# KysyZ/Cbp4ymQQvChqP6WNFYyqjZCSu0pkX+/0jgVrz4AjoN1gRBCxTyH5RmUdZO
+# 7ceOZyjNiVhJX2Z5MqCBOv2rRUvid2TaI2hyZMi5ae4hHXlpiI1WonsTVEEG+y3X
+# srewI/7PArZ6jCxPQoGgvqH4Rxo5ZMH1FhobMc6NJgAu4+QZDKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MTQwMDI5MjlaMC8GCSqGSIb3DQEJBDEiBCC5lsn8
-# FL21GeafgSQKUDSmbu7ZSIDCoxyyXQy40lKTdjANBgkqhkiG9w0BAQEFAASCAgCX
-# KIkHZf9sgnSaNTVFb4W2hl0D7BVFznFixkf5K8OxSI/St6t2goeZk5tX4aBQw2Jv
-# e/6XLDqrrPptVbKgUwsNy8JW3pqomwkHPwDf6/IBS2clsFkC1KA3lXD5MnrIBxnJ
-# sr9urR3nTi3KG2etXZeFx9rvVFyJy3Upys9pm21PO5ooh68Kr2KM6CtjF8rfBRgN
-# oxf2e4gUMr6C3rGzC9ZJnIxDsSkkHOS/QTGViY3XuVlBN0Rt8/jnh6SR/Pt1NFID
-# UlLErFaPG6HFQLgC14u41L7dYYD1QC9FTXFe2t9b1EHpOrsTNVybcf9oO5q0PVLb
-# Y2AH8+NQBQfwzSVBmW1IMfYa8TLS9aIy1PaFEEcDmCdEmcZkTiSJHBzQGOcWCAPP
-# exQnk/99rJoLl32ocVatZq6cfU4iKbXLOKztUYNfp94vEW3Htob3Kz8TbdZJmpRm
-# WXj44oh6c+YoMALyvMa5NylG6lSyc7CVIXPX8cxLeUrXMtYVwvJ52dABf3OU0Hv8
-# TMri0X5DTrbj8nulog2kpckd53n2QasxKzOy7EpYY6eIn/QWwB6ekfmHvItjGFNB
-# LXPwMvMNxEwhxTsEQFGtr854bujt59i8CvEr50k9B+bCwduZzEHCP84fGZ05X9Yr
-# 2Mmze+pgc0887tDfmPwUzq2MnDrXDKMdzfQv2YTEnw==
+# CSqGSIb3DQEJBTEPFw0yNjA3MTQwMDQ1MjBaMC8GCSqGSIb3DQEJBDEiBCBRRWTq
+# ON3bQ4sUDbvLQJ8bph/0n8mywhgH/HKewebdyDANBgkqhkiG9w0BAQEFAASCAgC5
+# vcGF6W60c97ayq4JoSLJSWUg12DkzbN2pBFJb4K7WwYZoT0Yyy/yko3NTF1qcc0A
+# WO9vD1D2HWvkOUYHh6gmK+zE6rDINQLIC2uy8dhTNDeNf0ZQ33iMBWft84JwORBy
+# 9UEz1tNnoqJYLJvi7hF4zER21EH1bJrG3sWIdNVkNsgQdn+v8lLDdThOKYS8X6p2
+# HNbX02FKDI89mgeBM6q4ihGPeuaRPKxZArFhdBr0SRvxLeRiAksiwR/hpUo7R/lk
+# dh7f6PjuAeEmfBeVgY9y86NkyPlwXAypBWy+ExsjTecn8ASDD35xjd9+uTksE5wc
+# RqGU+WZxI9fS+W2Xw1tCKSnk0r2utx7fjGI/8MwIFUM6wDwXm/fufj3SL/8l698a
+# 8p5cAiM5ZsPsCRX0XcFZhSxRSlu76Krc9g7Ek0r95ZFiVdVLOsu5Vn5Fp8D+9RnO
+# 7n1cVsrxSYIlSaM1ukPdVrYUCqs/f0OJV3+nw5bEeezqvbw7N/Mo9Hj/2KkcFgrQ
+# h08Dl2W/L/zkky7ykwPXMAxWTWU2c2M5XwneZ041a8nMJEDu/Y0EplEEftJ4lZ/n
+# mlsuO99SKKBT6hfY/haGwG8hX65rAji7IjTWrxIPYnYpfCwii7vpzCr5+ql6fUwB
+# TCc7+/nlim4U81qAPOoOt62dYDcidRSvxPdXpB2RBg==
 # SIG # End signature block

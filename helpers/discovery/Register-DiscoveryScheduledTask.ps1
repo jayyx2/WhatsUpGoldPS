@@ -662,26 +662,32 @@ else {
     }
     else {
         # Build the ScriptArgs string for the task runner (key=value;key=value)
-        $runnerScriptArgs = "NonInteractive=true"
-        if ($scriptArgs) {
-            # Parse the existing $scriptArgs (format: " -Key Value -Switch")
-            # into key=value pairs for Invoke-DiscoveryTask.ps1
-            $argParts = $scriptArgs.Trim() -split '\s+-'
-            foreach ($part in $argParts) {
-                $part = $part.Trim()
-                if (-not $part) { continue }
-                $spaceIdx = $part.IndexOf(' ')
-                if ($spaceIdx -gt 0) {
-                    $k = $part.Substring(0, $spaceIdx).Trim()
-                    $v = $part.Substring($spaceIdx + 1).Trim().Trim("'", '"')
-                    $runnerScriptArgs += ";$k=$v"
-                }
-                else {
-                    # Switch parameter (no value)
-                    $runnerScriptArgs += ";$part=true"
-                }
+        # Built directly from typed parameters to avoid quoting/parsing issues.
+        $runnerParts = [System.Collections.Generic.List[string]]::new()
+        if ($Target) {
+            $runnerParts.Add("Target=$($Target -join ',')")
+        }
+        if ($Action) {
+            $runnerParts.Add("Action=$Action")
+        }
+        if ($OutputPath) {
+            $runnerParts.Add("OutputPath=$OutputPath")
+        }
+        if ($WUGServer) {
+            $runnerParts.Add("WUGServer=$WUGServer")
+        }
+        if ($AuthMethod) {
+            if ($Provider -in @('CUCM', 'CiscoWLC')) {
+                $snmpVer = switch ($AuthMethod) { 'SnmpV2' { 2 } 'SnmpV3' { 3 } default { 2 } }
+                $runnerParts.Add("SnmpVersion=$snmpVer")
+            }
+            else {
+                $runnerParts.Add("AuthMethod=$AuthMethod")
             }
         }
+        $runnerParts.Add("NonInteractive=true")
+        $runnerScriptArgs = $runnerParts -join ';'
+
         $vaultArg = if ($UseSystemVault) { ' -VaultScope LocalMachine' } else { '' }
         $wrapperArgs = "-NoProfile -NonInteractive -ExecutionPolicy $ExecutionPolicy -File `"$taskRunner`" -Script `"$scriptPath`" -ScriptArgs `"$runnerScriptArgs`" -LogDir `"$logDir`" -TaskName `"$TaskName`"$vaultArg"
     }
@@ -740,8 +746,9 @@ Write-Host '  ================================================================='
 Write-Host "   Task Name : $TaskName" -ForegroundColor White
 Write-Host "   Folder    : $TaskFolder" -ForegroundColor White
 Write-Host "   Trigger   : $TriggerType $(if ($TriggerType -eq 'Hourly') { "every ${RepeatIntervalMinutes}min" } else { "at $TimeOfDay" })" -ForegroundColor White
-Write-Host "   Script    : $(if ($Mode -eq 'Provider') { $providerScripts[$Provider] } else { $runnerScript })" -ForegroundColor White
-Write-Host "   Arguments : $psArgs" -ForegroundColor DarkGray
+Write-Host "   Script    : $scriptPath" -ForegroundColor White
+Write-Host "   Args     : $scriptArgs" -ForegroundColor White
+Write-Host "   Wrapper  : $(if ($wrapperArgs -match 'Invoke-DiscoveryTask') { 'Invoke-DiscoveryTask.ps1 (signed, -File)' } elseif ($wrapperArgs -match 'EncodedCommand') { '-EncodedCommand (legacy)' } else { 'direct' })" -ForegroundColor DarkGray
 Write-Host "   Output    : $OutputPath" -ForegroundColor White
 Write-Host "   Logs      : $logDir" -ForegroundColor White
 Write-Host "   Run As    : $runAsLabel" -ForegroundColor White
@@ -881,8 +888,8 @@ if ($registered) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkuYVll0GHyHRX
-# Gw80eDuobSRSdJO68o9SS6LFkrB6WqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbdtnr3LvmlEoz
+# gCOIEJhHfWwyjkPlvmf3zHEyOQxrEqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1085,33 +1092,33 @@ if ($registered) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBB9pxgYpz8x2e0Kk57iRGRqEJms/G6ZxUEU3SZdEWY0jANBgkqhkiG9w0BAQEF
-# AASCAgALMbiWVfYX/ofsrEoEuMl2A/BEGaGNoSjjCTwxEa+gVXjADTuntIJcgLGM
-# cbMthMpwMaQzbQ37vF/lXvjbWZGfuzdNjWjdV6j1Kitvg93G6DoaEijebOK7GkiY
-# BUD3aN+MUr1Zk2N8UmbxdifqzeIA/yzG6tBcP0d4zZVkkFKQ1BzTyIxryNO/VWsk
-# UDrFg8rqAfhoLAcXdpE3qiBsidKbmAtB2FLqWysqhL4q7ceaRX4jSJzINtdLaE0x
-# OXFXSdWpXWEmUtYeAJUA79LtbTIJm+hMa8NPjss4hRsKb5FOYq356Sc6ZA8encxW
-# wYXWzAl5wIPxsSTg1WqJFqFZ3PkaBtftGlU2igMQ5ri+iaM8fkhYlmxLeSqV5sVu
-# EPHinZvQJalNug/Q+IhI+jUBlvMB4b/mZGFYQAUSJ+ZYGragzmNeTk9TYWIUWVSJ
-# /Yvk443sFrmb6uVxPYhi3GNnCrKpFzez28J/zxCTpgiUYovF1GTc5rc9WnL46sKP
-# 1SxMQQn8M+d3Dn7YjMlanZHWwXAjeRJSDEtaFk8nEuaOB79emuCsxkV2BO0ONsOP
-# SW4PaZtbTyc1davKNZ/oLSpq2ETDk2zZkBLOsjSIPStNgrkSyPR4KYHDHfvLzen6
-# 22/SgaGxVqegH83T5DbxInAe9iqeYuWF3TsXsDrsFffkQc10XKGCAyYwggMiBgkq
+# BCAQrKPUZ6S5ITdyp3l3n7d80lYVmdF6UK+6/T1hIWlizTANBgkqhkiG9w0BAQEF
+# AASCAgCndSoVSsRy4K+/N5+cwOiSvSU+2Kgru/M5wm9dqvlTjYtrZ0aMhTnl6R9y
+# 8BX+wspMSeJ5ST/+WpgmtXrubf/N5VrmF4KJrHa7Z+iN/DjyWAPyOsdzvWqIlxy6
+# ztl+uQJbNnla9jwrjFrrx30gGU/t+txIvsk1Lacyz0s8CfRb/EvTboHzgq0mhcW7
+# 3si2KeSM8ivzXDnRT1knOm/KehJqy4R1afmpI3+s2suQ3lh5QP+kGz5JAgFtSR1A
+# VSxe4meDSKeFKU5qKzMimI4KzbfQMcY9cl3ntOPrwFUaAa2mT3qJUeFJhjqHFqSg
+# MjWklehZd/bwBhyoCTLbmhTNBb1H9ejMSAP8SNbfsf7sEf/p8XV8u77hxoaITOgW
+# V72MrGp4SItmQcWbHTueBUi7YZtzz9e8c7qhroHTVqDVe37MfQ2htvExvDHt05sg
+# 4AdAFkbW/1kAbX4Nxe0V7slv0a3t2mxnj9Mb5qG6X2JFS4a1qRUZF+pGlY4cbK/s
+# pXdtzDHVmhdiYq+JVaunlRV/DOEXxNwHsj/ttFOSN5GThetlnzz72SKvQTdl9A5L
+# v3+ML6ZKTfupvR2cAbdwW3vTYaGsOI5HqsvC8nlOZiBS6hta0hQNAEPt1FCh+LZC
+# 1D0gYfS7SjeS9YT/PySBVUOQECvC3OZgyp4DoXSmn3PbIPQITqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MTQwMDI5MjdaMC8GCSqGSIb3DQEJBDEiBCDKz6tQ
-# shKNOZYI/iRDjA1+IgXPK1G8vHy/azYiBoyWbTANBgkqhkiG9w0BAQEFAASCAgCF
-# Cdct/fmS4/hoCMzNnBA3NiFAYOfJGUoH+tVDDxb0CHC7FegVioVT50eRnwILydzF
-# FpPQE58CCE51d1CyzR06dAUTKkp3XbUHoBI+ULpLKWwAgyjUgUlb4s6ZUUoeiEbD
-# dIMHa0YArlTkN1Fub2Z2n/Z1Z+TBq/ErwDrDmM7+j0pCmse1fiQq2hcy8Y+Gejb0
-# +wxHGshWOJGrq3XVX4PENvVru0eMZQd5majRWDyqUQojXPZh6lHdCqvI2ltOGiRr
-# kY0FB1RxA1CIcy205CF1Z9w9H+vaqkgueCOJiQQwpkLSf0dPAbXOUdshxGi6gQq8
-# 2vXc8/bNgaIneHnbg4vCNvqO8zOy4nj0kyS0s2e7BWlaafvH0OkF2y90xKfte+gE
-# rK7YRiQRy2Jrij4LM3fVVnTjw4+N/9y/fQiXfF0c6FMWEhzPEXd1r7v4xD/8TyFw
-# irNDGk6pCqpzhuhvVtCqG3lDyNPBzcsEvK/0bom+S+ETIxxXlXtgjZASV0qX6FMY
-# +62aYUQhLgrSSgUZIqxSilSVLPExTwio9kxqFeBmsAjVpHm+PX5SGDlxB4FVAyJH
-# MXW3X7jy35oV4K6ewK8z8EADiNfhqY6sfybUGRG1iB7ZP7MihwHW+VTe38G7CaHQ
-# l1Sw4dCgbOI4+BxhaOA86eWyOvX20sFbR+/RXep7LA==
+# CSqGSIb3DQEJBTEPFw0yNjA3MTQwMTAxMzFaMC8GCSqGSIb3DQEJBDEiBCCfG+Nh
+# u9m8ptmFYVeDtDuKK5GFyuK0m8rt0vkeYYE9TDANBgkqhkiG9w0BAQEFAASCAgAw
+# vEkkMiNLLBvf/mbRbFrzLM4LB4s1Z3eiDRNZ+TxkxgdpYlfSybNAASXO8+pWl5fX
+# ZYRTXqnGuHCyzxf1XHHRXSoYivW8YObaJWXZhpHwffkN+e+qUBx1EmLfRyAwXvg7
+# +shdC2FcPrr/ogGPmq8kskVa8coBSYiCcK5YxBkHBNr1gwOLWalCA7UtNXPCSHv9
+# 1lwLeI1QIpFAL+sddmUsRpSHPFjODdpt/StrVpKrM6fbxGYbiLJZWRPj0/hLs/Pg
+# YZcUAOkncdjpjICv8ZZVJsxsq/ny6RrqPbzwK8K8kCdu5o++U7ipXNhIUDceB7A6
+# pdKO1aZq0EPn6VyLOJMjFdMeph/j7QksILYdU5ZFNgnNQ0E33OXvCZrlWKwPKp2s
+# XBDOn5N4YBJhPAxI3Ju/3Ue6MrPdmwzDje9T9gluaeMWAUVwnJSTmgVmrmjIbxyi
+# yWEe2lyK+QoaEAIGSIrjgiCmVAkL8dTw1ndMSU1hHlmLMi6xXPvrbyNoP+Nm3I7G
+# LFnKEsG3+5RqjPOcd/QCQSkRlP6O9tMZ8+KkvKW+emPY8plcK3XWWK9sWtUZ2mvM
+# ZAjE9QYFV3juA9WeTkE9nZJY2XyLpLoKfszbQe7zdcZzBQuLRNsowrwVL5HIkRoy
+# Fay/SyJj40HS+o31Sh6Vr4dPa2P+kc/aCjgmX8tlMg==
 # SIG # End signature block

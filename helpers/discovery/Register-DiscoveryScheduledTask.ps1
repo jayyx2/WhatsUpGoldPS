@@ -138,7 +138,7 @@ param(
     [string]$Mode,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'CiscoWLC', 'CUCM', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'MSSQL', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
+    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'CiscoWLC', 'CUCM', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'MSSQL', 'Nutanix', 'NvidiaSmi', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
     [string]$Provider,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -167,7 +167,7 @@ param(
     [string]$WUGServer,
 
     [Parameter(ParameterSetName = 'Register')]
-    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'CiscoWLC', 'CUCM', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'MSSQL', 'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
+    [ValidateSet('AWS', 'Azure', 'Bigleaf', 'CiscoWLC', 'CUCM', 'Docker', 'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'MSSQL', 'Nutanix', 'NvidiaSmi', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes', 'WindowsDiskIO')]
     [string[]]$RunnerProviders,
 
     [Parameter(ParameterSetName = 'Register')]
@@ -239,6 +239,7 @@ $providerScripts = @{
     LoadMaster = Join-Path $discoveryDir 'Setup-LoadMaster-Discovery.ps1'
     MSSQL    = Join-Path $discoveryDir 'Setup-MSSQL-Discovery.ps1'
     Nutanix  = Join-Path $discoveryDir 'Setup-Nutanix-Discovery.ps1'
+    NvidiaSmi = Join-Path $discoveryDir 'Setup-NvidiaSmi-Discovery.ps1'
     OCI      = Join-Path $discoveryDir 'Setup-OCI-Discovery.ps1'
     Proxmox  = Join-Path $discoveryDir 'Setup-Proxmox-Discovery.ps1'
     VMware   = Join-Path $discoveryDir 'Setup-VMware-Discovery.ps1'
@@ -888,8 +889,8 @@ if ($registered) {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbdtnr3LvmlEoz
-# gCOIEJhHfWwyjkPlvmf3zHEyOQxrEqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdbxgpJ1g2x4D5
+# XutDrC16WOt5IGNwlLcr8NH3opEYiqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1092,33 +1093,33 @@ if ($registered) {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAQrKPUZ6S5ITdyp3l3n7d80lYVmdF6UK+6/T1hIWlizTANBgkqhkiG9w0BAQEF
-# AASCAgCndSoVSsRy4K+/N5+cwOiSvSU+2Kgru/M5wm9dqvlTjYtrZ0aMhTnl6R9y
-# 8BX+wspMSeJ5ST/+WpgmtXrubf/N5VrmF4KJrHa7Z+iN/DjyWAPyOsdzvWqIlxy6
-# ztl+uQJbNnla9jwrjFrrx30gGU/t+txIvsk1Lacyz0s8CfRb/EvTboHzgq0mhcW7
-# 3si2KeSM8ivzXDnRT1knOm/KehJqy4R1afmpI3+s2suQ3lh5QP+kGz5JAgFtSR1A
-# VSxe4meDSKeFKU5qKzMimI4KzbfQMcY9cl3ntOPrwFUaAa2mT3qJUeFJhjqHFqSg
-# MjWklehZd/bwBhyoCTLbmhTNBb1H9ejMSAP8SNbfsf7sEf/p8XV8u77hxoaITOgW
-# V72MrGp4SItmQcWbHTueBUi7YZtzz9e8c7qhroHTVqDVe37MfQ2htvExvDHt05sg
-# 4AdAFkbW/1kAbX4Nxe0V7slv0a3t2mxnj9Mb5qG6X2JFS4a1qRUZF+pGlY4cbK/s
-# pXdtzDHVmhdiYq+JVaunlRV/DOEXxNwHsj/ttFOSN5GThetlnzz72SKvQTdl9A5L
-# v3+ML6ZKTfupvR2cAbdwW3vTYaGsOI5HqsvC8nlOZiBS6hta0hQNAEPt1FCh+LZC
-# 1D0gYfS7SjeS9YT/PySBVUOQECvC3OZgyp4DoXSmn3PbIPQITqGCAyYwggMiBgkq
+# BCAAuPIh82NU0n1Qeel+mulON5JgvUBggzpgB3aGWldwpzANBgkqhkiG9w0BAQEF
+# AASCAgCx6i6g16SDbTUANojd3aFMetc2NOebLZZ0E+9AGihv30MK/VPNHln7MvT+
+# Eatw+w20frzInmwSZ0LzUQ8IIubfv8daLmz24tZIyU89xoCBeQpV34K2IFPbcsCx
+# D4SZ2BnF13yIRoTa+I/T+7oLLlSZjG/XCp8shisvxMFoEuJrG3CbVf/um+iA6kxg
+# h/W70BarrhSMq4uckFyNP9/LnjLVsetdBaqno1WCZ5N0UmVXJtd5GH34xEH4gRSr
+# PRPnCbVWJk70aoxy1SZuDaMivEPMmXhipImkCDhhDc1APrbzFbaw8kOlQ2c7u9mO
+# UTRIrZQEC3sVWXUWQPhHRRAyB776L1Q3BSUaNZcm9Rp6e3LJ2Bxj4jXFEppu6+Ao
+# HPSM5dPeNOdT31z2Ef/8FJIARbLT/S02t+fm43UI0jK8n/gNj3leGMZgSClJpTB/
+# iLTZm0snYC5qtSMJx1Q6DR/c46sgHDMWd5Fa8ffTdn5ytuOKzaCCC6JLcuQzfMmC
+# EKhcFzub9eDf9MZICNg0UmsDgQ63J5rRvyKe5B67e3D03GBlZ7tSlIwajZqJkNf9
+# H3tTxsuA9h7Slpv6Qg+cz/4RHMb2smF5lUDmoo4P8H8acyWKuja+HXk0Zxb2cAOv
+# Kf4zfeQ2YrT6jqS+rqI8ezcsIdFf46DhzQLT0PYI9Ki1LCeJaKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MTQwMTAxMzFaMC8GCSqGSIb3DQEJBDEiBCCfG+Nh
-# u9m8ptmFYVeDtDuKK5GFyuK0m8rt0vkeYYE9TDANBgkqhkiG9w0BAQEFAASCAgAw
-# vEkkMiNLLBvf/mbRbFrzLM4LB4s1Z3eiDRNZ+TxkxgdpYlfSybNAASXO8+pWl5fX
-# ZYRTXqnGuHCyzxf1XHHRXSoYivW8YObaJWXZhpHwffkN+e+qUBx1EmLfRyAwXvg7
-# +shdC2FcPrr/ogGPmq8kskVa8coBSYiCcK5YxBkHBNr1gwOLWalCA7UtNXPCSHv9
-# 1lwLeI1QIpFAL+sddmUsRpSHPFjODdpt/StrVpKrM6fbxGYbiLJZWRPj0/hLs/Pg
-# YZcUAOkncdjpjICv8ZZVJsxsq/ny6RrqPbzwK8K8kCdu5o++U7ipXNhIUDceB7A6
-# pdKO1aZq0EPn6VyLOJMjFdMeph/j7QksILYdU5ZFNgnNQ0E33OXvCZrlWKwPKp2s
-# XBDOn5N4YBJhPAxI3Ju/3Ue6MrPdmwzDje9T9gluaeMWAUVwnJSTmgVmrmjIbxyi
-# yWEe2lyK+QoaEAIGSIrjgiCmVAkL8dTw1ndMSU1hHlmLMi6xXPvrbyNoP+Nm3I7G
-# LFnKEsG3+5RqjPOcd/QCQSkRlP6O9tMZ8+KkvKW+emPY8plcK3XWWK9sWtUZ2mvM
-# ZAjE9QYFV3juA9WeTkE9nZJY2XyLpLoKfszbQe7zdcZzBQuLRNsowrwVL5HIkRoy
-# Fay/SyJj40HS+o31Sh6Vr4dPa2P+kc/aCjgmX8tlMg==
+# CSqGSIb3DQEJBTEPFw0yNjA3MjkyMDM4MDBaMC8GCSqGSIb3DQEJBDEiBCAEa9Mr
+# nFIivIEr6vHsQszDLs8LhVh/sw+AV+etfnhnzDANBgkqhkiG9w0BAQEFAASCAgBx
+# Ep7kjcWN4EydmSE7xrIvirV8XvqDhk7XNU3lIqdLyMsviiMBKKMCrsDVdG74KLiF
+# M/Mw9lBH1XAnYmBznx6+0v0HGemvQuvTj0m01+zBith17F+kov29cM2ZPQ2sPag0
+# hdf/DyiMPWP4K6wWMlLlCtiRhiuupxNcUtcK1ik3wcwJen5CYgfsrIeOw/SoxdOv
+# 6RDv74sn5qk8bhcCyMKyP9Hy8FbY4UWmC8PRtz0ivgllawc3b0mPu2mYGAMXDE7g
+# 5lHVRUTFpgyHYmXEnfoxsnkdWZ2AG6Ye6rpW3RiOMjJ7I+uzvpvCi8kjVQQ/40Cd
+# K0LQR4hdBfkdgtQB2Kl/DDl0JpecaUjT6l0QlKhmuopVNmc6G35umJylOkzDTHRR
+# 6udlE7e1NPv0yr+tTd5y4D9TZw3PiamioCqVR1fZGfPrXPO2RmVJovXOSY4t+/+M
+# LdJbqsCkzthE3h9hwW214LtunPCNRrONWv0eNqIBhZvbni+Eqy9vOD11pb6wSVZg
+# xpGYsB4alhrayHuMgJvK9SpcSt+MdKLkqy3uq20EbqAMAPcDxSVb03lhshwCMUER
+# iUE3PTLtVfDYXmxW9mw5cgT1R3W8IHJRwqWjkeh593M+uprmSph3kALexHutF3eC
+# KBH3xV5nl5kjiC9w6TZCJhs4gd7WwnvEbwC9VNQH3A==
 # SIG # End signature block

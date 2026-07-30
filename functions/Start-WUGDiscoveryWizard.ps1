@@ -63,7 +63,7 @@ function Start-WUGDiscoveryWizard {
     param(
         [ValidateSet('AWS', 'Azure', 'Bigleaf', 'CiscoWLC', 'CUCM', 'Docker',
                      'F5', 'Fortinet', 'GCP', 'HyperV', 'LoadMaster', 'MSSQL',
-                     'Nutanix', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes',
+                     'Nutanix', 'NvidiaSmi', 'OCI', 'Proxmox', 'VMware', 'WindowsAttributes',
                      'WindowsDiskIO')]
         [string]$Provider,
 
@@ -95,6 +95,7 @@ function Start-WUGDiscoveryWizard {
         LoadMaster         = 'Kemp LoadMaster Load Balancers'
         MSSQL              = 'Microsoft SQL Server'
         Nutanix            = 'Nutanix AHV Virtual Machines'
+        NvidiaSmi          = 'NVIDIA GPU Monitoring (nvidia-smi via SSH)'
         OCI                = 'Oracle Cloud Infrastructure'
         Proxmox            = 'Proxmox VE Virtual Machines'
         VMware             = 'VMware vSphere / ESXi'
@@ -168,7 +169,7 @@ function Start-WUGDiscoveryWizard {
 
     # Providers that need a target (IP/hostname) for discovery
     $targetProviders = @('CiscoWLC', 'CUCM', 'Docker', 'F5', 'Fortinet',
-                         'HyperV', 'LoadMaster', 'Nutanix', 'Proxmox', 'VMware')
+                         'HyperV', 'LoadMaster', 'Nutanix', 'NvidiaSmi', 'Proxmox', 'VMware')
     $collectedTarget = $null
     if ($provName -in $targetProviders -and -not $NonInteractive) {
         Write-Host "  Enter target IP/hostname for $provName discovery." -ForegroundColor Yellow
@@ -357,12 +358,12 @@ function Start-WUGDiscoveryWizard {
 
     Write-Host ""
 
-} # End of function Start-WUGDisc
+} # End of function Start-WUGDi
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAj7ZHw2NL1K1+3
-# zfBVMqU9pmlz0OxdiaCK7w2fXuuV3KCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBSHZddZYoIjGJd
+# vhBhIoYv8yo5TBF7RXyZ6wlmWPIHrKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -565,33 +566,33 @@ function Start-WUGDiscoveryWizard {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAN3UNUGXcb2dUixY37Iwem2CC3hVBI5APN7I1Hxku2UjANBgkqhkiG9w0BAQEF
-# AASCAgCjbm3zMDsj69X61xW86j5oLdUtmSfMWhMtGew0rmZkFQqvek8sjuXVEqUm
-# KqqfRtlVYTesKVZQrsVVGAf/7FA3VcXQy35TP7iQua0FyGJR1XkdDJiFgEcN5pEZ
-# /TDoRxpd74pEHLrP8ATX4cOSCMIYb9B3wkSEstQ0dwGZfSyjlm1pe0+UPDwZVzff
-# g2rAuFVMq6jKFSqjPfjv9DQeA2Q0UK1c/5879Rl2E88nWZkVodx4j3s0hIv+7oEe
-# tVDTslDaKdYq/tNLDhKmdVeUmu6T0YzTeyjJkbJxJqsaXGmwh+F0AlXCdQo2WGKm
-# 9UfPVltPAPg7xJpDj3CP82CiU5PglNhTY0Al3L+fx2EJHak3URTLhsZoCi5PmU8B
-# UWaugOVsx/ohnfUECqrf/Iry1iDNE9C3b35WsyR84mMdr9YYmilFEepfHBFBsMSq
-# 9AMi9uYfHtFzJeXCvvUS4ZJRSoFgJdiy4qqLVFx/OnZ3dk+v5Ws9+CSPgQfaDyEv
-# lmIHt0cf7/+kOimkHJwovJV2eAnGaQDXyctcbI3h/9BK1OSm0IwqaI4pQ5L6HxJc
-# fY84zExTOlEoLnHcr6Cl+XczXldz7pi/tvzYOaii1XG6GIfAFtD4G74LWdBqQQmb
-# OFIjAI6cme+2y/jR/qiRbcQaGdAFAVLMHiHNFvijX1mE3rs0rqGCAyYwggMiBgkq
+# BCCMqwV2ao2c8lVY0G4EvpSdm2dPJJsNRje0MHZf2gVRSzANBgkqhkiG9w0BAQEF
+# AASCAgCtsoJxvx1Df/bhD0qHj+nchmms0HKQKGki5powBszfYYNUVmssDalXcA49
+# uV2UwBG5BltdvRIlTc4nHUKdy/TH96/fgoQu/r3dOFSWJ2dZQZdv9LLasdk0zLh8
+# UoJTmBEUZHK0dI4CF051C+kDUF7/MLr0Be1hkGxTenxu0hW+9W+rCphoJqakW9u6
+# 2exDqgDifiOv/HD3C6JlRuyMwMhbYYZRYrhax73IGsYI4B+V4SCX5cIqE0yO/u2r
+# OGpGTjHbvU7k07I96hohS3gV80Ee+waQB+YlmJyp++fdlW9XcE0EWzJ3kfzq4pm2
+# FjY/rCu0ADWidwYm+aK2YyvXiYq/na9WIzcmWZmt84KIRKNZethQD4oiyTkGkjPS
+# Ym+CjIIY3R0gWcqzVr9AKZI3KkhX3+iay8sih+dIdMKcNlDnySFO/C+ezjSJ+tqv
+# 9B6K1+H52ST/sTCHCtgrvOrsuXfNXdYQl4umxAaBeKKaeNrgwXorrkUIEY+eueNQ
+# GJQA9LMUvEwxUWXgMQJSMEyyWFFiCMKLwElB0nedGerJH1PRb22lJVHePhs/D3Jg
+# qI3Rp4FaosCklAd4i+IYfK0O6OfCH0fqKrdDu3KC+qLhnItMHHyKnH9c9k1irbf9
+# p+Hn2O4DZLierN3OMOFvFoVTHm7/T/Oh5GEMu3R3s526W/iveaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MTQwMDM3MDhaMC8GCSqGSIb3DQEJBDEiBCCmFwCL
-# mL9ec6Zb+PFwKWsNtK9IRA9ZfXIFOhmqr+m+DjANBgkqhkiG9w0BAQEFAASCAgCP
-# cEjjc1RNxr91viKZzvXiM1kNUTV7/7SpoDRidvXxUSsRjpaVD4/IYrFOzNUmn+2W
-# J1J5DT8G5zq4yuijZjyYJFW3UyzSJlhrWTy+sXYF1d6nVX+ikiecYzrRZgbTtikR
-# eXLymM7jtZ3YpRmj+w0j4qI0R/FcEOI0NPL7THzZgklb+ehLbL+0NXOmP+T7olpY
-# I+Uw2IAY3y4wcTZsNtd5O1/PQLd56WQZkKBfyX4Y23FPbgf+RdfZNx2uS4uhJFn1
-# ouIVcVaC32/Bxbe3KcB+CWnqClglq0R7FKHNLjX5fApvxl9fqsdnIvt6+UGA5uQ1
-# YKOeyhFUZAM+z6VYxAdrQG6Chtw7L15QqBe6pFBZ7ZcBfvN+WjP827h0+2oWEO3f
-# 9ZWguQpi5Cu+zdGFJmG5JdiCMgT5VmIpd4ZIWEwP+6qwf0q0qwMsIh/ZGPVZQwJ2
-# 2eEZhOxzt6qO+R4hemcem29OrWRm2nTGayheTyOMLcE3QZCP3t7T/23uVUh+9Goj
-# YWbU6mqYJEqsdPFY3Drfr1mqU/ueJcYa2JILc7k1piyu/VKGkWgMg2dmDZfiv2dg
-# skjtGWTTmXipeFj3ijZmOtMQHCyje319Uo/RIn/qciB0pI172Xp5mO5LwM5oN2CB
-# eK8Duf+tVm6VDav2gPJPOsDHmAP3Hjolo5qZ1/aIzw==
+# CSqGSIb3DQEJBTEPFw0yNjA3MzAxOTEyMjdaMC8GCSqGSIb3DQEJBDEiBCAuhgfe
+# XgL3Gcf0Mb0C7Tm3co+siVSOztrBao6sR10f4TANBgkqhkiG9w0BAQEFAASCAgBk
+# 615gBT6R4g+bkO0shGNrapzYd7nnj26KYPFtYI6HlHYUlmmN7XU+c6jv0niy9HR9
+# laYuRzLFhZ2YJa7DLKdhRiYBalj2I7uYhjZZNiKiex21pgc9P+cM1klZt2BJgJed
+# rOsfciIqs7Fxlbvtd5QDGJvy8ZcSu3zZgO9rfJe/5gI35w/x497ZR8StCNeKNy2b
+# WYRjQIPuRvecEpq554H+p4VHKadAgVKvvRXJ86e60gLj+8qqz2DEWZSUSxcsbCDs
+# +l7BsOpzI7EY2Qqlr9ISujO2f//yAZq9QmgSEJDsVnY/fUWl5o0XzDp1WzaPdx3u
+# q9fJylRFnH2bIp4x6zBLl4+JgF+CtWg5AizfmMDrKWLVp8nzBqzvYIg2r7prT08m
+# Afbzl8Ncw11A5FcizTr3qsZTqm2qQqNK2+4UYeqG8CCWfhiAO8WNwCGu37bwI+sE
+# XhGGlVM5CUUDb1htOzCEboyzrX/qIUNev9uGmnIJMp6tNLLgT+Caapkom4RJv/Sd
+# h/NzG/6A2V60LLT4nr9mEWXqOljee7DyJy4WC/ct+kXOHEb6wU7f1jF7p/+J3vSB
+# oeOE3WT4KNOjrq+jywzJICjmy3CbkuRORySy6LwJXr9TPXBm0Zh3ahSBii2iqTI+
+# PY4A0fwzBJaS8vygb7hsF8xJEAAFQ3v9DKJSJ/yBIA==
 # SIG # End signature block

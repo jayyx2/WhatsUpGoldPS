@@ -260,6 +260,18 @@ $providerDefs = [ordered]@{
         ApiPort     = 9440
         Notes       = 'Requires Prism Central admin or viewer credentials.'
     }
+    NvidiaSmi = @{
+        Label       = 'NVIDIA GPU (nvidia-smi via SSH)'
+        Script      = 'Setup-NvidiaSmi-Discovery.ps1'
+        TargetLabel = 'Linux GPU host(s) - IP or FQDN (comma-separated)'
+        TargetDefault = ''
+        TargetParam = 'Target'
+        CredType    = 'PSCredential'
+        CredVault   = 'NvidiaSmi.Ssh'
+        AuthChoices = $null
+        ApiPort     = $null
+        Notes       = 'Requires SSH access to Linux hosts with nvidia-smi installed. Creates WUG SSH performance monitors.'
+    }
     OCI      = @{
         Label       = 'Oracle Cloud Infrastructure (OCI)'
         Script      = 'Setup-OCI-Discovery.ps1'
@@ -1064,8 +1076,8 @@ Write-Host ''
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCK6Nj6jVoRNm2B
-# fcJxQHQdz6KXZqAlkJixPb4jGFFnQKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCt1/k/whxcZI3j
+# cD9LI+ty72WN7isd8jLnIGzj6hbKwaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1268,33 +1280,33 @@ Write-Host ''
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAl5DVMBh8AKV2SpqF5o1WRJJePytC63l78mLH4oIZfqTANBgkqhkiG9w0BAQEF
-# AASCAgAV//4j4PdFHQ/uEe8lom11wdzj2kC3dlLSpW++UwiE7oechG017SJZgnV0
-# GrkQGnOaBcwabUjwoT6u22DhbeBImR/vRznIyS2ZWy31Cshq//vNpcgeUh1/mQlR
-# n7OEj+hOnw6Uxzuj6Sr8k0/s2oSrMiXg1dR/rYzw2dcH5GDKLfx+7KGQa7vIR6Oc
-# INCsNR30yEfLi58pDHeA2TF/SVgtoBt9jEf65Wj5eAe6aUTRFrAzye3MCeTforjS
-# j8jzyfKAwTAo1TzbJ4pfLL9Wp/bAtvsI56BHbqfoVhHG8k4VpHgK4l4cThUX6NzN
-# 1FMEHh3DaKcyNHvsgnlwKzO1Iaxpbbik2BatLOWc1L+VdkQNGFNqAMtIno0GqM7o
-# v5Ksf+qVnPgKtzUg4uYrJCuK+omqfbvJmzAIpxmjIkmcAekbzVgd7aa3RNH2vCra
-# mQ7u1CJyYerh8EnvbfhX6gi3tOd6LcFG3oZmlF15YQ8zkctA1o8/tHfQBq3nV/HR
-# nQEHxywr4VCuz9O/WvnVUbuaqL1X/uYjBqkxo+b39bhnT+qgO/Qe3ZqyXY0sSDqD
-# uDrAYnFHvKqHAoMC1yvvzT84psmNgWYcWh6DKhVyzBZmSCVgUpEyABi+lj2sPwcN
-# RlPkVCtaEzJbHsHRUGUaYkpac6M1s6Vvav8t6fSxVdh3GDmvr6GCAyYwggMiBgkq
+# BCDuRTycyssKYdjML9G6rbXlHPzy2/UN4PuEa+CMFFNr4DANBgkqhkiG9w0BAQEF
+# AASCAgBKD/kQTK7uiVuN0VsaFLCF6u/HWiLiIzgH2Pls0lntTAbLYfp1qjr/bYTE
+# AH5SqmUx7mJ7HNiwGMfcgap8ne5+uVU2uMlkFsxJ6VtNi7vfq6ZUMxCpTCjipiOL
+# T2+CCiS58777nADhPV6GCUT9idOXDiSyGriV0L38ovVtqbJmLwF5lOFu3sKetxO/
+# g9UujAGwMQdlgcVXzKAKy+ukieLPkZOn4RDZ4kOaNkEDuG7H/7zSWMiRbuMSmNZQ
+# kYRv2wF+hlQIxRTdmyqMpO3YST7jUthIiNPnPZ+MhzwFG5oi1kTd1fVb40an7ITT
+# hKG23VzUap+J3bR4rEinl5xIEJk5IFrJo8AV1OsQ/ONSHteelLe4JCtMiahiEFPA
+# IDG4iKlVpaO+KoLBDXDtb2XWXpSgFGic3WrVxBfXYRQQkmFIjAeSVZZ9ld0Rq3f+
+# +tMKIpTcpTFlTe5+9XKRJJXXVpR7iE4dy3+SqIz4W3uJji4Ln9DbAAy+KDnVEMx1
+# LLPgf8y2KmgIeNAwPneMZOKO0Cq2MS3bR1MaRcsqkBlKsm/bLp/20htIjAdapzFn
+# koNNXgZ9pTmAz/PUxp9LoKruUBLcSz/536A6ufWCBxJZbUL+59PXAskshJ5mUnIk
+# 2Yivqwdce4Mzmg+D7iBY6f03bQ424Rbua6Bafhu9voiz976wZ6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MTMxMzExMDFaMC8GCSqGSIb3DQEJBDEiBCBUd1Wq
-# b/Cy4QwAv6mK8XyKdlTe4CGyTpwDh/pGJfZTAzANBgkqhkiG9w0BAQEFAASCAgB/
-# RhORJ7g9Muz3tkZNlGszno2Am8zaCsvco2JqLyeHGqWYf4Ia4DOnU4RtmdlPpPtI
-# P0YyNIwoF83zvIEnK2KOm20njjUZCJd2fgkAe29zRYwDqmFf203zjD9gZTmQEim9
-# E92XtWNJzjErQbF804FLA5NH1Jq1lt0CwYZSBEkOHrnLUq95kzTUdDJm1Wodvr2g
-# 6Z5J+8bgiv5HFrx8+bcuvZq7LDi98WiwO/vpFoq8BNUGrIavOkw4OpluulauDQf+
-# 0rf5ba2qTSDgQTR8qIQwUl7YQha/k3Mf9mLN0t3hQh0DDNYc47qH2mQU8eZRYtIg
-# /EymdkYSVAgic44e0fZnc8NdI7F52p14UfCOcIB++LzEU7t7+0ayrtkoUEGLS/3N
-# hfAnw3mglQCKXGE3rgfa6zle0McXbox7nYwemmc7gpaz5ebyngpqTR98DEWfwO9y
-# OVpDSxClYze8elKlMykamx+BM17XyfRnuxojlX2kiQ3iGBsf27Z4jDPq23NeRCbE
-# kwNLol7q8zcCkZWx1EUcuTIJhc0YkswA+6zRAgFWqzkVriaXtYlzysVGC3LpakMD
-# nGQpZNp5LeACuv3KKLgjYA3yGNGttVv+oSCZolnNXdw8R4sxmstucwWIJZrRrqB4
-# CZA6qhny2Z+9SgL2LO5Qzt+9a7ysf7fpYS5cK99ICg==
+# CSqGSIb3DQEJBTEPFw0yNjA3MjkyMDM4MDJaMC8GCSqGSIb3DQEJBDEiBCB7Hcrn
+# aD0gKjvJmZcG8brLw7jqkmQ8AQNogKhofLTFczANBgkqhkiG9w0BAQEFAASCAgAc
+# iLrb1Jyt/bgb2ve0/O5sQhkmqekRzp19JAmUd/3PFQy+YvsLVjSX9TMQ1/wlpQkf
+# L1kwbVbFKtsMLp7ZAD1qiRLEDqz5GO3q1p0kwHTZOOCcHc8nbZk7SB6yOdfiQaBU
+# 6zeotMX2YLeLqBdPD500tCjCuaPjkjX3cUVp2unxaV0Q9CYOl0uXL85hMlAwo8/e
+# nD3jlHbaFsiISz8rG1vSSj8PF9PIMF09RpSEe2hae2/Saolfg6kuXUlm0ny7Sfcp
+# 2QpdCm6dpui2ml9YPvgoAhLl79niB2nRDt+ARhnPQ2STQFURXsHqVcE7BvOdnlhf
+# T8u0j9QuDuL70qh5Wn8Xm+5nnUHvCYwmhNLgRB1K7aSyqv1j22CLuBPoaf7xFp6u
+# jueoSAcr2oMqNkIwzTDJiugnnCRNRjyiFVNUrMUSRwUIgryhcCoYhX5iwRT8KcTZ
+# TBfvb+MZwhWyTiAQZjsPGyZ4zsrxnsqSoABEyADkUeYoEJv/jFjtH3fE5eflEhyl
+# 1Coar6IExQ5jmvvFzaqDj3Up8FVw05GcZjbtCDzoRPWT8kujJL6HuAzsXGzsGcZ+
+# /Y5ckIC8Dz/WTC8hnydZPd3F8rErqrdyYMJLnWFHVwbd/RY3opAg7aJnLiesuvaQ
+# ByYDkSHECT3SvFQjooxmOIYUxX52/yvQAVjw3xXeaw==
 # SIG # End signature block

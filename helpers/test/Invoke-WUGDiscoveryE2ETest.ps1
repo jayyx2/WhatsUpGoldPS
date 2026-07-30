@@ -91,13 +91,13 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('AWS','Azure','Bigleaf','Docker','F5','Fortinet','GCP',
-                 'HyperV','LoadMaster','Nutanix','OCI','Proxmox','VMware',
+    [ValidateSet('AWS','Azure','Bigleaf','CiscoWLC','CUCM','Docker','F5','Fortinet','GCP',
+                 'HyperV','LoadMaster','Nutanix','NvidiaSmi','OCI','Proxmox','VMware',
                  'WindowsAttributes','WindowsDiskIO')]
     [string[]]$IncludeProvider,
 
-    [ValidateSet('AWS','Azure','Bigleaf','Docker','F5','Fortinet','GCP',
-                 'HyperV','LoadMaster','Nutanix','OCI','Proxmox','VMware',
+    [ValidateSet('AWS','Azure','Bigleaf','CiscoWLC','CUCM','Docker','F5','Fortinet','GCP',
+                 'HyperV','LoadMaster','Nutanix','NvidiaSmi','OCI','Proxmox','VMware',
                  'WindowsAttributes','WindowsDiskIO')]
     [string[]]$ExcludeProvider,
 
@@ -113,6 +113,11 @@ param(
     [string[]]$FortinetTarget,
     [string[]]$LoadMasterTarget,
     [string]$BigleafTarget,
+    [string[]]$CiscoWLCTarget,
+    [string[]]$CUCMTarget,
+    [string[]]$NvidiaSmiTarget,
+    [string]$NvidiaSmiSshUsername,
+    [string]$NvidiaSmiSshKeyFile,
     [string]$AwsRegion,
     [string]$AzureTenantId,
     [string[]]$GcpProject,
@@ -246,6 +251,9 @@ $defaultTargets = @{
     Azure    = $null
     GCP      = @('gcp')
     OCI      = 'oci'
+    CiscoWLC = @('192.168.75.33')
+    CUCM     = @('192.168.75.33')
+    NvidiaSmi = @('192.168.75.80')
 }
 
 # Vault names and cred types (matching Invoke-WUGDiscoveryRunner.ps1 config)
@@ -262,6 +270,9 @@ $vaultConfig = [ordered]@{
     Azure    = @{ Name = $null;            CredType = 'AzureSP';                           ParamName = 'AzureTenantId';  Label = 'Azure' }
     GCP      = @{ Name = 'GCP.ServiceAccount'; CredType = 'FilePath';                      ParamName = 'GcpProject';     Label = 'Google Cloud' }
     OCI      = @{ Name = 'OCI.Config'; CredType = 'OCIConfig';                         ParamName = 'OciTenancyId';   Label = 'Oracle Cloud' }
+    CiscoWLC = @{ Name = 'CiscoWLC.Snmp'; CredType = 'PSCredential';                   ParamName = 'CiscoWLCTarget'; Label = 'Cisco WLC' }
+    CUCM     = @{ Name = 'CUCM.Snmp'; CredType = 'PSCredential';                       ParamName = 'CUCMTarget';     Label = 'Cisco CUCM' }
+    NvidiaSmi = @{ Name = 'NvidiaSmi.Ssh'; CredType = 'PSCredential';                   ParamName = 'NvidiaSmiTarget'; Label = 'NVIDIA GPU (SSH)' }
 }
 
 $hasResolveCmd = Get-Command -Name 'Resolve-DiscoveryCredential' -ErrorAction SilentlyContinue
@@ -505,6 +516,33 @@ $providers = [ordered]@{
         VaultName     = 'OCI.Config'
         PreCheck      = { -not [string]::IsNullOrEmpty($OciTenancyId) }
         PreCheckLabel = "OCI vault cred + tenancy ($OciTenancyId)"
+    }
+
+    CiscoWLC = @{
+        Script        = 'Setup-CiscoWLC-Discovery.ps1'
+        Args          = @{ Target = $CiscoWLCTarget; Action = 'Dashboard'; NonInteractive = $true; OutputPath = $OutputPath }
+        DashboardFile = 'CiscoWLC-Dashboard.html'
+        VaultName     = 'CiscoWLC.Snmp'
+        PreCheck      = { $null -ne $CiscoWLCTarget -and $CiscoWLCTarget.Count -gt 0 }
+        PreCheckLabel = "CiscoWLC vault cred + target ($($CiscoWLCTarget -join ', '))"
+    }
+
+    CUCM = @{
+        Script        = 'Setup-CUCM-Discovery.ps1'
+        Args          = @{ Target = $CUCMTarget; Action = 'Dashboard'; NonInteractive = $true; OutputPath = $OutputPath }
+        DashboardFile = 'cucm-dashboard-phones.html'
+        VaultName     = 'CUCM.Snmp'
+        PreCheck      = { $null -ne $CUCMTarget -and $CUCMTarget.Count -gt 0 }
+        PreCheckLabel = "CUCM vault cred + target ($($CUCMTarget -join ', '))"
+    }
+
+    NvidiaSmi = @{
+        Script        = 'Setup-NvidiaSmi-Discovery.ps1'
+        Args          = @{ Target = $NvidiaSmiTarget; Action = 'Dashboard'; NonInteractive = $true; OutputPath = $OutputPath; SshUsername = $NvidiaSmiSshUsername; SshKeyFile = $NvidiaSmiSshKeyFile }
+        DashboardFile = 'nvidiasmi-dashboard-gpu.html'
+        VaultName     = 'NvidiaSmi.Ssh'
+        PreCheck      = { $null -ne $NvidiaSmiTarget -and $NvidiaSmiTarget.Count -gt 0 }
+        PreCheckLabel = "NvidiaSmi SSH vault cred + target ($($NvidiaSmiTarget -join ', '))"
     }
 }
 
@@ -924,8 +962,8 @@ $script:TestResults
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5LNuzWpBKwX8w
-# KmdMEG77xIBg6SNtK1ftTcxJy8to4aCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6+wGPjEZnlv9/
+# wZK4JFPE3Thd7QTNxcuYfv4aUEtgj6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1128,33 +1166,33 @@ $script:TestResults
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDF23q+7ferPd/xxX2+6JaOSzatgmc/6f+zPQXngVo5/TANBgkqhkiG9w0BAQEF
-# AASCAgAtsn4z9dUn/Fd6gw6ASZS2wBMEXPojYYhxx1KfsK5pWI4FZGyu8UAN37Fm
-# 30VlTXdlH4Bs1ROsJZyeNy0iMCR5UYo5aLLyKF605nUa123jUAB87OPrr6NkbgVK
-# yzMYhVlx0jOwNZNBM2RZjWzYHNzKX+V320cBvierFDyVGLHkixx7c6leZIfeHwsv
-# gBXPDvdybZ65bBcL3I1f1y/jb8WaN2iTlW/hJMn69mWELODa0UkDfqNpwZYKjFFc
-# Lxj0qqmN0n74b6oZpZjKs+aPKyhona270Y/JciF/uNwoDycvUNj55pb3uu3xe9bX
-# nZa0Ep5DSwybek20FZWsF+c0bF40RCTPJWbvcVefUd9f4tMBdohwDknblJSF9AmO
-# rcl0J71Vj0z0LaxPo51OUYyLzdYYkrQ9bB8aM0ht/i3YXNe///4vDkat77KWdr2R
-# mdahSlL82URYiAS09OQr4Gd1uEdBP3BpEjmg0o7xdfbVVWlHsMiu5YsehjVuCSEs
-# N85dAdURtuJ4Ec8bxMvR2/RPG+Xrh/8DJToeKHDR97nFU92TdThraMFq0pM+2+lA
-# aityrgUmNedyGFEX5wevN+hTjWcUV3eAhwb2moamadAuNHEx6FH5KagoPo2Y98mP
-# 8yGVSOXlKbbSCyeltOZGmnuJsouFzS+7UV5JZuHsD8ApKCh4X6GCAyYwggMiBgkq
+# BCCH2OvvL5Jf/z4R81EaloTfeScxggfYNZuSsxiWtwNCMzANBgkqhkiG9w0BAQEF
+# AASCAgCd0DCZQKezfPwWTbkyOSz8JfL+XuOz8f6R/KwMV/AqGWcdwKt17TQuXfBU
+# WVqB26nx0PNL+Mz92tMwNQrZwrKS3UwUjI9n58qVD5cgAI0MIt/NZwHEeinaTUu+
+# MCTcjlpei2TAjQXAE0+VCgZn18jVYmvegfsfMyE0t5Qe1+qkt5A32A4U79VM+ofm
+# 4EYn3/UBopAN4WAJc+gboRTHPzxRPiyBXfyBOOxWbdIuypFyCgUmVUWS0dPAr8yy
+# g0C/A0E+OLo8/FG2UNuI8NBOyuDJYycs7k2oQoeskdxgU2IpF8kuzkC/yqutCXoL
+# PWOxNnNItch+EZ1MDguUMbH0rZRMo6hHvNjwqtNlCcoONsux4GG+Fli3+InaWPYH
+# vsiW89MkmR+QGR3c5TmMkIhX9dTvDD+VhW79UD1bj3IkfIZ1ssu6aDEPVvYK8eCU
+# afLYNHvJtgt7oT1cYNolvMj4cIHMEERr3SEar7pyWo+3JO6doNgn/FlBrKfsrlVG
+# HaSP//gsr0ivInmPtR1PHtA/gaRJa8jnEuvcc+K4HHmljcm0dAySTzGXh6cRyGDd
+# cHwlL1gg7J6syE9bolj/KXY547Ze0brifyG2M5jYezdyqVaj3TuKWtJYMwgcLP1y
+# mmzjDGIz19HLRVafFNWABfbmOFWGCqc5C75xlY7dKtz3L0RUUKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcxNzQ2MTBaMC8GCSqGSIb3DQEJBDEiBCB+HtEM
-# s1hdutct9uJiek629kRHNyW62qb9Yhj/IrQo1TANBgkqhkiG9w0BAQEFAASCAgBp
-# pnSYYhn3vd4ZZm460lZU7pvQ9KsYhXi0DAX2BNBBuqVfm3xWOOHPo8qVyTrECuw3
-# Q6lFJK5XlET6l+rQK969wxpr4w32/CyiaaBdE8H2VF1Hs5ImEIPFhFR/Ijcc6eoq
-# z3NzAUSke2fqhNRME+kJB/tVKp5qYR2LH8VXv8Mv0uyxdR92yp22QmoiDEbCBDOi
-# bKjwmDYEr+aJDPmPSDvOP0QviTXAgw/DDqQmV3a57apPKobfIFClCfFUEchg0Bh0
-# F2y5ZTw4AgT/ccDcFfF7uOduW35gtEIQZfPimAFZbartDGbdJ+X8IVK9PEb4MiCx
-# W11bMIcaPkixq3ukwh8PGcd9LWEZCnnURMsFZkHJc6EbAFy4RabLERRp8uBkzf6b
-# RGIWmuUJR4sv2ANPW68oK5pqrpRRn1DAsyKstPHjfXdTE9xffbUALuk3fkLXMy0F
-# 2oJhAoFNBzXdK5vX0qV2F/RUQR4L0mHR+fXcs/bqdvvQlZExbkYlRREsY+N3sZs4
-# vk8XWA25+XnWw1wzacb93QTJfPRDa8AhT1hD1uJCqXOsx6k3mlcCUs0Ppi9Lps98
-# BmWDTYlqHvUUZirInQ6tjyFI5OtmggModTWWPu/t3TgjLKCtehItuv15A4OEPy7z
-# YONb8LHGJUDw5N1oBNX7TXjoItAUAMj5IXQr2QWfKA==
+# CSqGSIb3DQEJBTEPFw0yNjA3MjkyMjA5MzVaMC8GCSqGSIb3DQEJBDEiBCDC03V6
+# 5KOWm/l3aAhhKz56Q6j2o6ifcf2SuXLEVeek9TANBgkqhkiG9w0BAQEFAASCAgDI
+# up4zs5vX3ZMttMWG+QRiACxX8Y5k4tJVqPPhW3KZCBp1fCh2IcnByEeUTdXh+vcI
+# 4jleoAcCL+S964HPPvJCAQW4Fb+/8m6fcMdC2eiMfX4yfLnXQAgM3LiiRSZi84e9
+# qUz2WPGWWSi67wdjIaZve6efMXP9p4piDODGmuTdu8GWMLGv5/a2MErah37B2f5n
+# Lyx1uLVciSOeU/y1GXDcSV/8ZwFiseWZwQpn9X+TcOqYxk9uNnZNXCx+xZGufi5L
+# 6LpIpD8Dq9FYKNy1VPLBnNt2SY7Jg5D0KalSdArc2c/gL3/d4WB75TYY1t09bBz2
+# Zlp14ZXsIT3KtdLFfDuriBz7KJABBtio8EePbxKddB2hKOu804mFBCM5TKpW2LIw
+# iTVZsFICXBiZ0F/RoFN9Y6zg4X9xk2l5QmlNHNflrMOR/i1u5B7W1uBEBJM+Caxb
+# lZuweVI+vDcV2oX/F/y63SiC6LBdWvd7dlWdTbzcjcyPXQfW7n1YHvOsIxtTjPm3
+# LRh6H+6w3HjzTY9Jg8bEAXvQ2EFalX2KxRCgT8XzpcPfhiGYqbUo/tLQ9iB3aI42
+# clZwi8zmhjhjSytS+CPNiQehyse1ug4DhOn6xFFpyenjojoDSEa/U1fHX1+fMWga
+# WGgpc1AvVXbHabpmeyuyp+sc8ySwJIQnRhd8zIGksQ==
 # SIG # End signature block

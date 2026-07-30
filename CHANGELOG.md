@@ -1,5 +1,28 @@
 ﻿﻿# WhatsUpGoldPS Release History
-## 0.1.22 - 2026-07-07
+## 0.1.22 - 2026-07-30
+
+### Added
+* **WhatsUpGoldPS.Ssh module** (`helpers/ssh/WhatsUpGoldPS.Ssh/`) -- SSH command execution via SSH.NET (Renci.SshNet) with PS 5.1 compatibility; framework-aware assembly loading (`netstandard2.0` preferred, `net40` fallback); functions: `Import-SshNet`, `New-SshSession`, `Invoke-SshCommand`, `Close-SshSession`, `Test-SshConnection`; supports password and private key authentication (Ed25519, RSA, DSA)
+* **NvidiaSmi discovery provider** (`Setup-NvidiaSmi-Discovery.ps1`) -- SSH-based NVIDIA GPU discovery; connects to Linux hosts, runs nvidia-smi, discovers GPU inventory (model, VRAM, driver version, utilization, temperature, power); generates dashboards; creates 14 WUG SSH Script performance monitors (GPU utilization, memory, temperature, power, clocks, fan, encoder/decoder); vault-backed SSH credentials; integrated into wizard and scheduled tasks
+* **CiscoWLC in discovery wizard** -- `Start-WUGDiscoveryWizard` and `Start-WUGDiscoverySetup` now include Cisco Wireless LAN Controller as a selectable provider with SNMP v2/v3 auth choice
+* **Invoke-DiscoveryTask.ps1** -- Signed task runner wrapper for scheduled tasks; replaces `-EncodedCommand` as the default execution method; compatible with `-ExecutionPolicy RemoteSigned` and EDR products (TrendMicro, CrowdStrike) that block encoded commands
+* **SNMP v3 interactive prompts** -- CUCM and CiscoWLC setup scripts now prompt for authentication protocol (SHA, SHA256, SHA512, MD5, None) and privacy protocol (AES128, AES256, DES, None) during v3 setup; choices saved to vault
+* **SNMP version auto-reset** -- When the wizard passes a different SNMP version than what's saved in vault, the vault is automatically cleared and new credentials collected (no manual Reset needed)
+
+### Changed
+* **Scheduled tasks default to signed `-File` invocation** -- `Register-DiscoveryScheduledTask.ps1` and `Copy-WUGDashboardReports.ps1` now use `Invoke-DiscoveryTask.ps1` with `-File` by default instead of `-EncodedCommand`; `-ExecutionPolicy Bypass` eliminated from all paths (uses `RemoteSigned`); old behavior available via `-UseEncodedCommand` switch
+* **Default SNMP v3 protocols** -- Changed from SHA256/AES256 to SHA/AES128 (more commonly deployed)
+* **Task args serialization** -- Scheduled task parameters built directly from typed values (no string parsing); fixes multi-target quoting issues
+* **Display in Register output** -- Shows actual script path and args instead of legacy `$psArgs` format
+
+### Fixed
+* **CUCM wizard "API port" prompt removed** -- CUCM and CiscoWLC are SNMP-based; no longer ask for API port or pass `-ApiPort` (which didn't exist as a parameter)
+* **AuthMethod mapping for SNMP providers** -- Wizard, Register script, and elevated task scripts now correctly map `SnmpV2`/`SnmpV3` to `-SnmpVersion 2`/`3` for CUCM and CiscoWLC (previously passed invalid `-AuthMethod` parameter)
+* **Register-DiscoveryScheduledTask ValidateSet** -- Added `SnmpV2`, `SnmpV3`, and `NvidiaSmi` to `AuthMethod` and `Provider` validation sets
+* **DiscoveryHelpers.ps1 vault Clone error** -- `[OrderedDictionary].Clone()` doesn't exist in PS 5.1; replaced with manual key-by-key copy for cross-scope vault saves
+* **MibTranslationCache.ps1 syntax error** -- `Get-MibCacheStatistics` function was missing closing `}`
+* **Export-DynamicDashboardHtml strict mode** -- Dashboard generator now disables strict mode internally to prevent `.Count` failures on single-element objects from callers with `Set-StrictMode -Version Latest`
+* **CUCM "Cannot index into null array"** -- Added null guard in `Get-CUCMCredentialIdentifier` for when `Add-WUGCredential` returns null
 
 * Fixed
   * **Hardcoded paths in discovery & dashboard scripts** (16 files) -- All discovery helpers and dashboard generators now use dynamic, portable output directories; removed hardcoded `T:\OneDrive\GitHub\WhatsUpGoldPS`, `C:\temp\*`, and `D:\SecureVault\*` paths that broke remote/non-interactive execution. Changes: (1) **Setup-CiscoWLC-Discovery.ps1** -- Standardized parameter from `OutputDirectory` to `OutputPath`, added LOCALAPPDATA defaults for non-interactive mode; (2) **Build-Wireless-Summaries.ps1**, **Export-Wireless-Dashboard-Pack.ps1**, **Export-CUCM-Dashboard.ps1**, **Custom_report.ps1** -- Replaced all `C:\temp` hardcodes with `$env:LOCALAPPDATA\WhatsUpGoldPS\DiscoveryHelpers\Output` with auto-directory creation; (3) **10 dashboard helpers** (Get-*Dashboard.ps1 for AWS, Azure, Docker, GCP, Hyper-V, Nutanix, OCI, Proxmox, VMware, Certificates) -- Replaced fallback logic from `if ($env:TEMP) { $env:TEMP } else { "C:\temp" }` with consistent LOCALAPPDATA pattern and `-LiteralPath` flag in Test-Path calls. Standard pattern: Interactive mode uses `$env:TEMP`, non-interactive/scheduled tasks use `$env:LOCALAPPDATA\WhatsUpGoldPS\DiscoveryHelpers\Output`. All directories auto-created before use; module discovery fallback for repo paths when scripts run standalone

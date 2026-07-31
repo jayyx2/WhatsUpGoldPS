@@ -144,7 +144,7 @@
     function formatStatusAuto(value) {
         if (!value) return '<span class="status-grey"><span class="status-dot dot-grey"></span>N/A</span>';
         var v = String(value).toLowerCase();
-        var greens = ['running','active','available','succeeded','up','ok','healthy','online','poweredon','enabled','true','yes','pass','passed','connected','ready','completed','registered'];
+        var greens = ['running','active','available','succeeded','up','ok','healthy','online','poweredon','enabled','true','yes','pass','passed','connected','ready','completed','registered','good','excellent'];
         var reds   = ['stopped','failed','down','error','critical','expired','offline','poweredoff','disabled','false','no','fail','terminated','deleted','disconnected','unregistered'];
         var oranges = ['warning','pending','stopping','creating','updating','paused','suspended','degraded','provisioning','unknown','rejected','partiallyregistered'];
         if (greens.indexOf(v) !== -1) return '<span class="status-green"><span class="status-dot dot-green"></span>' + escapeHtml(value) + '</span>';
@@ -154,7 +154,7 @@
     }
 
     // Map card labels to status dot colours so cards and table dots match
-    var statusCardGreens  = ['running','active','available','succeeded','up','ok','healthy','online','poweredon','enabled','true','yes','pass','passed','connected','ready','completed','registered'];
+    var statusCardGreens  = ['running','active','available','succeeded','up','ok','healthy','online','poweredon','enabled','true','yes','pass','passed','connected','ready','completed','registered','good','excellent'];
     var statusCardReds    = ['stopped','failed','down','error','critical','expired','offline','poweredoff','disabled','false','no','fail','terminated','deleted','disconnected','unregistered'];
     var statusCardOranges = ['warning','pending','stopping','creating','updating','paused','suspended','degraded','provisioning','unknown','rejected','partiallyregistered'];
     var statusCardGreys   = ['idle','n/a','na','none'];

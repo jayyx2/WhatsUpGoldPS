@@ -1,4 +1,4 @@
-### Requirements
+﻿### Requirements
 
 * This template is required. Any request that does not include enough information may be closed at the maintainers' discretion.
 * Have you (put an X between the brackets on each line to confirm):

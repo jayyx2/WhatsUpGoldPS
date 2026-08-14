@@ -1,4 +1,4 @@
-# Discovery Vault & Scheduled Task Setup Guide
+﻿# Discovery Vault & Scheduled Task Setup Guide
 
 Complete step-by-step instructions for every discovery provider — vault setup, test run, and scheduling.
 

@@ -1,4 +1,4 @@
-# WhatsUpGoldPS
+﻿# WhatsUpGoldPS
 ![WhatsUpGoldPS](docs/banner.jpg)
 [![PowerShell Gallery Version](https://img.shields.io/powershellgallery/v/WhatsUpGoldPS?label=PSGallery&color=blue)](https://www.powershellgallery.com/packages/WhatsUpGoldPS/)
 [![PowerShell Gallery Downloads](https://img.shields.io/powershellgallery/dt/WhatsUpGoldPS?color=green)](https://www.powershellgallery.com/packages/WhatsUpGoldPS/)

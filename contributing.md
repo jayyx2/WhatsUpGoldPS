@@ -1,4 +1,4 @@
-# Contributing
+﻿# Contributing
 
 See an issue that you can help with? Have an idea for the next great feature? Thanks for taking the time to contribute!!!
 

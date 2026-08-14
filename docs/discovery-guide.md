@@ -1,4 +1,4 @@
-# Discovery Providers — A Plain-English Guide
+﻿# Discovery Providers — A Plain-English Guide
 
 ## What Is This?
 

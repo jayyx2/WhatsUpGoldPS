@@ -1,4 +1,4 @@
-# Discovery Framework — Copilot Instructions
+﻿# Discovery Framework — Copilot Instructions
 
 ## Overview
 

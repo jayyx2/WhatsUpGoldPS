@@ -1,4 +1,4 @@
-# Cisco WLC Wireless Helpers
+﻿# Cisco WLC Wireless Helpers
 
 Helper scripts for Cisco wireless controller SNMP data enrichment and dashboard generation. Designed to be copied directly into the [WhatsUpGoldPS](https://github.com/jayyx2/WhatsUpGoldPS) module under `helpers/cisco-wlc/`.
 

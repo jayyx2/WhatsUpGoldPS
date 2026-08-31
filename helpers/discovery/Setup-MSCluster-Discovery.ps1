@@ -6,9 +6,19 @@
 
 .DESCRIPTION
     Point this at any single node of a failover cluster. It probes root\MSCluster over
-    WMI and returns the whole cluster: nodes, clustered roles with their virtual network
-    names and virtual IPs, cluster resources, cluster networks, cluster shared volumes,
-    quorum configuration, SQL Failover Cluster Instances and Always On AG listeners.
+    WMI and returns the whole cluster: nodes with their OS build and drain status,
+    clustered roles with virtual network names, virtual IPs, failover policy, preferred
+    owners and anti-affinity, cluster resources with their restart and health-check
+    policy, cluster networks with roles and metrics, cluster shared volumes including
+    redirected and maintenance state, cluster disk capacity, installed resource types,
+    unassigned available disks, heartbeat tuning, and quorum and witness configuration
+    with per-node vote weights. SQL Failover Cluster Instances and Always On AG
+    listeners are identified along the way.
+
+    Anything unhealthy is called out as it is found: nodes not Up or being drained,
+    mismatched node builds, roles not Online, resources not Online, CSVs in redirected
+    or maintenance mode, a single or absent cluster-communication network, cluster disks
+    below 10% free, and an even vote count with no witness configured.
 
     It then builds a monitor plan that respects how a cluster actually behaves:
 
@@ -229,18 +239,73 @@ if (-not $wmiCred) {
 # ==============================================================================
 Write-Host "Discovering cluster from: $($clusterTargets -join ', ')..." -ForegroundColor Cyan
 
-$plan = Invoke-Discovery -ProviderName 'MSCluster' `
-    -Target $clusterTargets `
-    -Credential @{
-        Username     = $wmiCred.UserName
-        Password     = $wmiCred.GetNetworkCredential().Password
-        PSCredential = $wmiCred
+$credHash = @{
+    Username     = $wmiCred.UserName
+    Password     = $wmiCred.GetNetworkCredential().Password
+    PSCredential = $wmiCred
+}
+
+# One node returns the whole cluster, so a target is only scanned when it belongs
+# to a cluster not already discovered. Extra targets therefore act as fallbacks
+# for an unreachable node, while nodes of a genuinely different cluster still get
+# discovered in the same run.
+$plan = @()
+$seenClusters = @{}
+$pending = [System.Collections.Generic.List[string]]::new()
+foreach ($t in $clusterTargets) { $pending.Add($t) }
+
+while ($pending.Count -gt 0) {
+    $currentTarget = $pending[0]
+    $pending.RemoveAt(0)
+
+    $result = @(Invoke-Discovery -ProviderName 'MSCluster' -Target @($currentTarget) -Credential $credHash)
+    if ($result.Count -eq 0) { continue }
+
+    $foundCluster = $result[0].Attributes['MSCluster.ClusterName']
+    if ($foundCluster -and $seenClusters.ContainsKey($foundCluster)) {
+        Write-Host "  $currentTarget belongs to '$foundCluster', already discovered. Skipping." -ForegroundColor DarkGray
+        continue
+    }
+    if ($foundCluster) { $seenClusters[$foundCluster] = $true }
+    $plan += $result
+
+    # Remaining targets that are members of this cluster no longer need scanning
+    $members = @{}
+    foreach ($it in $result) {
+        $mn = $it.Attributes['MSCluster.NodeName']
+        $mi = $it.Attributes['MSCluster.NodeIP']
+        if ($mn) { $members[$mn] = $true }
+        if ($mi) { $members[$mi] = $true }
+    }
+    foreach ($nn in @($result[0].Attributes['MSCluster.Nodes'] -split ',')) {
+        if ($nn) { $members[$nn.Trim()] = $true }
     }
 
-if (-not $plan -or $plan.Count -eq 0) {
+    for ($p = $pending.Count - 1; $p -ge 0; $p--) {
+        $cand = $pending[$p]
+        $short = if ($cand -match '^([^.]+)\.') { $Matches[1] } else { $cand }
+        if ($members.ContainsKey($cand) -or $members.ContainsKey($short)) {
+            Write-Host "  $cand is a node of '$foundCluster'. Already covered." -ForegroundColor DarkGray
+            $pending.RemoveAt($p)
+        }
+    }
+}
+
+if ($plan.Count -eq 0) {
     Write-Warning "Nothing discovered. Check connectivity, credentials, and that the target is a cluster node."
     return
 }
+
+if ($seenClusters.Count -gt 1) {
+    Write-Host "  Discovered $($seenClusters.Count) clusters: $(@($seenClusters.Keys) -join ', ')" -ForegroundColor Cyan
+}
+
+# Safety net in case two seeds resolved to the same cluster under different names
+$uniquePlan = [ordered]@{}
+foreach ($it in $plan) {
+    if (-not $uniquePlan.Contains($it.UniqueKey)) { $uniquePlan[$it.UniqueKey] = $it }
+}
+$plan = @($uniquePlan.Values)
 
 # ==============================================================================
 # STEP 4: Apply counter filters, then group the plan into devices
@@ -264,22 +329,23 @@ if ($SkipRoleDevices) {
 }
 
 $devicePlan = [ordered]@{}
-$clusterName = $null
 
 foreach ($item in $plan) {
     $devType = $item.Attributes['MSCluster.DeviceType']
-    if (-not $clusterName) { $clusterName = $item.Attributes['MSCluster.ClusterName'] }
+    $itemCluster = $item.Attributes['MSCluster.ClusterName']
 
     switch ($devType) {
         'Node' {
             $name = $item.Attributes['MSCluster.NodeName']
-            $key  = "node:$name"
+            $key  = "$itemCluster|node:$name"
             $ip   = $item.Attributes['MSCluster.NodeIP']
             $kind = 'Node'
         }
         'Role' {
             $name = $item.Attributes['MSCluster.VirtualName']
-            $key  = "role:$($item.Attributes['MSCluster.ResourceGroup'])"
+            # Group names such as 'Cluster Group' repeat in every cluster, so the
+            # key has to be cluster-qualified.
+            $key  = "$itemCluster|role:$($item.Attributes['MSCluster.ResourceGroup'])"
             $ip   = $item.Attributes['MSCluster.PrimaryIP']
             $kind = $item.Attributes['MSCluster.RoleKind']
         }
@@ -288,16 +354,19 @@ foreach ($item in $plan) {
 
     if (-not $devicePlan.Contains($key)) {
         $devicePlan[$key] = @{
-            Name  = $name
-            IP    = $ip
-            Type  = $devType
-            Kind  = $kind
-            Attrs = $item.Attributes
-            Items = [System.Collections.ArrayList]@()
+            Name    = $name
+            IP      = $ip
+            Type    = $devType
+            Kind    = $kind
+            Cluster = $itemCluster
+            Attrs   = $item.Attributes
+            Items   = [System.Collections.ArrayList]@()
         }
     }
     [void]$devicePlan[$key].Items.Add($item)
 }
+
+$clusterName = @($seenClusters.Keys) -join ', '
 
 # Cap per-node performance monitors so a big S2D cluster does not flood WUG
 $cappedCount = 0
@@ -355,10 +424,78 @@ if ($nodesNoIP.Count -gt 0) {
     Write-Host ""
 }
 
+$sampleNodeAttrs = $null
+if ($nodeDevices.Count -gt 0) { $sampleNodeAttrs = $nodeDevices[0].Attrs }
+if ($sampleNodeAttrs) {
+    foreach ($cn in @($seenClusters.Keys)) {
+        $cNode = @($nodeDevices | Where-Object { $_.Cluster -eq $cn }) | Select-Object -First 1
+        if (-not $cNode) { continue }
+        $ca = $cNode.Attrs
+        Write-Host "Quorum - $cn" -ForegroundColor Cyan
+        Write-Host "    Type:          $($ca['MSCluster.QuorumType'])" -ForegroundColor Gray
+        Write-Host "    Witness:       $(if ($ca['MSCluster.WitnessType']) { "$($ca['MSCluster.WitnessType']) ($($ca['MSCluster.WitnessState']))" } else { 'none configured' })" -ForegroundColor Gray
+        Write-Host "    Total votes:   $($ca['MSCluster.QuorumVotes'])" -ForegroundColor Gray
+        if ($ca['MSCluster.ClusterDisks']) {
+            Write-Host "    Cluster disks: $($ca['MSCluster.ClusterDisks'])" -ForegroundColor Gray
+        }
+        Write-Host ""
+    }
+}
+
+$badRoles = @($roleDevices | Where-Object { $_.Attrs['MSCluster.UnhealthyResources'] -or ($_.Attrs['MSCluster.RoleState'] -and $_.Attrs['MSCluster.RoleState'] -ne 'Online') })
+$badNodes = @($nodeDevices | Where-Object { $_.Attrs['MSCluster.NodeState'] -ne 'Up' })
+if ($badNodes.Count -gt 0 -or $badRoles.Count -gt 0) {
+    Write-Host "Needs attention:" -ForegroundColor Yellow
+    foreach ($n in $badNodes) {
+        Write-Host "    Node $($n.Name): $($n.Attrs['MSCluster.NodeState'])" -ForegroundColor DarkYellow
+    }
+    foreach ($r in $badRoles) {
+        $detail = $r.Attrs['MSCluster.UnhealthyResources']
+        if (-not $detail) { $detail = $r.Attrs['MSCluster.RoleState'] }
+        Write-Host "    Role $($r.Name): $detail" -ForegroundColor DarkYellow
+    }
+    Write-Host ""
+}
+
+# Every clustered role, including those with no virtual IP. A role only becomes its
+# own WUG device when it owns one; the rest live on whichever node currently owns them.
+$roleRows = @()
+foreach ($cn in @($seenClusters.Keys)) {
+    $srcNode = @($nodeDevices | Where-Object { $_.Cluster -eq $cn }) | Select-Object -First 1
+    if (-not $srcNode) { continue }
+    $raw = $srcNode.Attrs['MSCluster.AllRoles']
+    if (-not $raw) { continue }
+    foreach ($entry in @($raw -split ';')) {
+        if (-not $entry) { continue }
+        $f = $entry -split '\|'
+        if ($f.Count -lt 5) { continue }
+        $roleRows += [PSCustomObject]@{
+            Cluster   = $cn
+            Role      = $f[0]
+            Kind      = $f[1]
+            State     = $f[2]
+            OwnerNode = $f[3]
+            VirtualIP = $f[4]
+            Monitored = if ($f[4] -eq 'no-VIP') { 'on owner node' } else { 'own device' }
+        }
+    }
+}
+
+if ($roleRows.Count -gt 0) {
+    Write-Host "Clustered roles:" -ForegroundColor Cyan
+    $roleRows | Format-Table Cluster, Role, Kind, State, OwnerNode, VirtualIP, Monitored -AutoSize
+    $noVip = @($roleRows | Where-Object { $_.VirtualIP -eq 'no-VIP' })
+    if ($noVip.Count -gt 0) {
+        Write-Host "  $($noVip.Count) role(s) have no virtual IP (VM and storage roles typically do not) so they get no device of their own." -ForegroundColor Gray
+        Write-Host ""
+    }
+}
+
 Write-Host "Cluster device layout:" -ForegroundColor Cyan
 $devicePlan.Values | Sort-Object @{E = { $_.Type }}, @{E = { $_.Name }} |
     ForEach-Object {
         [PSCustomObject]@{
+            Cluster  = $_.Cluster
             Device   = $_.Name
             Type     = $_.Type
             Kind     = $_.Kind
@@ -374,7 +511,7 @@ foreach ($key in $devicePlan.Keys) {
     $dev = $devicePlan[$key]
     $a   = $dev.Attrs
     $inventory += [PSCustomObject]@{
-        Cluster       = $clusterName
+        Cluster       = $dev.Cluster
         Device        = $dev.Name
         Type          = $dev.Type
         Kind          = $dev.Kind
@@ -386,9 +523,26 @@ foreach ($key in $devicePlan.Keys) {
         SqlInstance   = $a['MSCluster.SqlInstance']
         AvailGroup    = $a['MSCluster.AvailabilityGroup']
         Resources     = $a['MSCluster.Resources']
-        SharedVolumes = $a['MSCluster.SharedVolumes']
-        Networks      = $a['MSCluster.Networks']
+        ResourceTypes = $a['MSCluster.ResourceTypesInUse']
+        ResourcePolicy = $a['MSCluster.ResourcePolicy']
+        Unhealthy     = $a['MSCluster.UnhealthyResources']
+        FailoverPolicy = $a['MSCluster.FailoverPolicy']
+        PreferredOwner = $a['MSCluster.PreferredOwners']
+        AntiAffinity  = $a['MSCluster.AntiAffinity']
+        NodeBuild     = $a['MSCluster.NodeBuild']
+        DrainStatus   = $a['MSCluster.NodeDrainStatus']
+        NodeVote      = $a['MSCluster.NodeVote']
+        QuorumVotes   = $a['MSCluster.QuorumVotes']
         QuorumType    = $a['MSCluster.QuorumType']
+        DynamicQuorum = $a['MSCluster.DynamicQuorum']
+        Witness       = $a['MSCluster.WitnessType']
+        WitnessState  = $a['MSCluster.WitnessState']
+        S2DEnabled    = $a['MSCluster.S2DEnabled']
+        SharedVolumes = $a['MSCluster.SharedVolumes']
+        ClusterDisks  = $a['MSCluster.ClusterDisks']
+        AvailableDisks = $a['MSCluster.AvailableDisks']
+        Networks      = $a['MSCluster.Networks']
+        Heartbeat     = $a['MSCluster.HeartbeatTuning']
         ActiveCount   = @($dev.Items | Where-Object { $_.ItemType -eq 'ActiveMonitor' }).Count
         PerfCount     = @($dev.Items | Where-Object { $_.ItemType -eq 'PerformanceMonitor' }).Count
     }
@@ -511,16 +665,56 @@ switch ($currentChoice) {
                 $wugDeviceMap[$key] = $existingDevice.id
                 $devicesFound++
                 Write-Host "  [EXISTS] $($existingDevice.displayName) (ID: $($existingDevice.id)) [$($dev.Type)]" -ForegroundColor Gray
+
+                # A role can keep the same name while its VIP moves to a new
+                # subnet. Reconcile the default WUG interface so reruns follow
+                # the current VIP instead of leaving the device on an old IP.
+                $currentAddress = [string]$existingDevice.networkAddress
+                $defaultInterface = $null
+                try {
+                    $defaultInterface = @(Get-WUGDeviceInterface -DeviceId $existingDevice.id -Default) | Select-Object -First 1
+                }
+                catch {
+                    Write-Verbose "Could not retrieve the default interface for '$($dev.Name)': $_"
+                }
+                if (-not $defaultInterface -and $existingDevice.PSObject.Properties['interfaces']) {
+                    $defaultInterface = @($existingDevice.interfaces | Where-Object { $_.isDefault -eq $true }) | Select-Object -First 1
+                    if (-not $defaultInterface) {
+                        $defaultInterface = @($existingDevice.interfaces) | Select-Object -First 1
+                    }
+                }
+                if ($defaultInterface -and $defaultInterface.networkAddress) {
+                    $currentAddress = [string]$defaultInterface.networkAddress
+                }
+
+                if ($currentAddress -and $currentAddress -ne $dev.IP) {
+                    if ($defaultInterface -and $defaultInterface.interfaceId) {
+                        try {
+                            Set-WUGDeviceInterface `
+                                -DeviceId $existingDevice.id `
+                                -InterfaceId $defaultInterface.interfaceId `
+                                -NetworkAddress $dev.IP `
+                                -IsDefault $true
+                            Write-Host "           Updated address: $currentAddress -> $($dev.IP)" -ForegroundColor Yellow
+                        }
+                        catch {
+                            Write-Warning "  Failed to update address for '$($dev.Name)' ($currentAddress -> $($dev.IP)): $_"
+                        }
+                    }
+                    else {
+                        Write-Warning "  Existing device '$($dev.Name)' has no resolvable default interface; address remains $currentAddress (discovered $($dev.IP))."
+                    }
+                }
                 continue
             }
 
             if ($dev.Type -eq 'Role') {
-                $note = "Clustered role '$($dev.Attrs['MSCluster.ResourceGroup'])' in cluster '$clusterName'. " +
+                $note = "Clustered role '$($dev.Attrs['MSCluster.ResourceGroup'])' in cluster '$($dev.Cluster)'. " +
                         "This device owns SHARED cluster resources and follows the role across failover. " +
                         "Node-local resources belong on the node devices."
             }
             else {
-                $note = "Failover cluster node in cluster '$clusterName'. " +
+                $note = "Failover cluster node in cluster '$($dev.Cluster)'. " +
                         "This device owns NODE-LOCAL resources. Shared role resources belong on the role virtual IP devices."
             }
 
@@ -666,8 +860,8 @@ Write-Host ""
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAr5lnExmoXkdO+
-# 03VthXKrT2SQzUHMJAw5Ce6jAtOSf6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrX3eljDhltVdI
+# WVIXd8S4Z9839Go1KAE8zw7af8mTUKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -870,33 +1064,33 @@ Write-Host ""
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBYPWzi5ocuActyLHvS3nryRAXpIUWiP/EkzcVlm8/4FDANBgkqhkiG9w0BAQEF
-# AASCAgAIMnN3HBvOu4//RSpeMV3inrH4JbqyH/nO2WmhbYE5or2EtDwSOTDRIHwA
-# W4T7jQriVIHzgWmB2ky+jeFzUl9kX/Yp4hPbu+sd+4FgVxD0OjH1q4AuoPNyozZs
-# tZSwIc6a+6hI0+5g2PER51Zu1N4tu+Ja83VpvpSRtw9zwoqJ52R+Dtcc4g3Wn57G
-# rmZBkWWi89/3ww090EouBnkRkKTTZ5Gf9w1c9bQj/W0ZZA5SEbZa2X72SszEuApv
-# 6/VTwdb/2fZ4vrEEiDlJ8PJirrzRYTAxV9TfRALAm2YMByjRmw+VYssvgLEuxfWe
-# LKwQvzgBaleSrY0v8BAVvvvn3GqVmFetu3oB9OlCFe3hEljlI68KIrDa/1FU1ArQ
-# 27qtKpp0pTBlEcpUX3WpHHyCfQZOlbp9y9hZ5ZjaePo72WyhDLJoKvM4hoI/WpWT
-# Qz2P6rcXOxlStiV7WrMyTzQc8+V4y7jPPFQ2ah6U3jjaNvE73vlWXTDfcoSY+ktZ
-# EyW0V1wsZHYYo8yphitM47Mb2dpWTAZAAWxRhBV1fPJrR/xKFJ3s7F79Ohx+Xl1k
-# kEe4lHD7S5kCWtWHTyADtj5s3idQaMTjt1m3WmiSnXlSpTiVTBoq5DbPv/d4WaaF
-# wn6bhMNis7kgpKMrcv4qPlcsjE+WbFH24UGC+drCJ5MLzkaLb6GCAyYwggMiBgkq
+# BCC9UsEkrA7wPlAE5wlCgj3Iy2DD9CtC++7v0iYPFgeqIzANBgkqhkiG9w0BAQEF
+# AASCAgCZi1tqYF3GGIBTD0OtAYBA7/z0HUJr1Yyuudh4S7WDwX9OsRDiIFX+jYrq
+# 1akjYYLx7wh4CGUkDM+z0XcTv8Y/VDGBRPbit+qZvAIM3RKVQNKjoHq6I0nVDVxU
+# dxfoMYfZO7OHuunkJ4m0vuZRzowZ/FQ3L9x9wQxwXtV40FSPQRb6Y+HbIt2Y+Cbd
+# S/ReeSCwLckimIoCCq1rMr6yu6TFlxkQtvnJv1XzymIIMp0VAZc+3q5nz70YdDXp
+# XHhM/ldAU3sl8JkW+0FwBA8YdgYAi8dFRQvZ/0+JBNnyikIfV3MtHfy+lbq/9/am
+# FzpFb58gjal9oJqUPM/yF0QvmsK7kb/cK6cdFbEn+8PrcLEZJIFPgS23G7TezL/+
+# pdEFaaDEE+v947v+Anyu/ImHPEverkYCv8RosceVEb0dCdiUWDnz31rSQjYqdxq1
+# U1MPLV2RDdMvlwJuLM/U0qSPRJJLTjI2vRjkB0obp7MM4Myv7h7vjeyH9hVTVxhc
+# pw5i1DcwAIRRoEOCIE7AOGzY7i5o9HDMilN39AnpkM5MyIPBA3uvqvvxP92t48Df
+# 66hjAAGV/P9pxOOMItYhOsMomxj9X9rSm9XDC0T9NfJG9V1EDXx0V5KBSIu52m12
+# MLIDNjh+KaetShUxRJxKcEKwjglh2vC1JYFqs13zkcORdmm+06GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA4MjgyMTI3NDdaMC8GCSqGSIb3DQEJBDEiBCBs9Y8V
-# Or1lmlRZPtmIXOtjiiIRLMSNkFJLZlYFnHqpGjANBgkqhkiG9w0BAQEFAASCAgCM
-# zSl3uoMjoQj27ajlPP6227/LRuGMYfqqbN7GTxzPLJf6eMi0vsiEK7rDn7lgr14G
-# mGMLbLl9hum/nV31Kr/L7HR+wGkPnobz9QWB2Gfjff53gd87B9y7QroZ9czduh9P
-# pg2lJIofdM4FVAT5DEj/IR5MI2gZFNNMDCy/fInklGdcvZwYvkm0Nc7gsjvTcVV9
-# Q5UoBOoeqYJOt9/NpwiM1Gwn+s8b47tvki594SFRI2wQLrJYi4+sGqYO4zhOJts1
-# wq8Frn6IxjKaQdm4HrsD46kJMQ9pr8M5QVGAORX46LUkI0ztiJvjm6FcqjoCZs18
-# C5p+7h+JiSd9xH1/FDE04KBPiks8tJMNc96Td+8X/SJ79UaJ3TrqyKAudng5EqgQ
-# b2H9PaQq6vrSqioy2W8AQYO8v02Y3EU6gvVTDTPPMeRIUTFBt+Q1P1TSfBH66mbw
-# V2qd2acw/UeL3BNgbD+KzBgpxpOOf9gNtOkwnskoNI9AfN27GUMDHmCMVykIAMVw
-# pzUkCL7v/wlsdtc9qSBslDUe4Yas2D2Fdzo6Srol28ZCPqbAeN4pO7e1PsXm3Fj+
-# LA5LClljMAa3a+y3BkU3tx+cwklIZLNBKVJsyd4qw3s1vBMi7gMWPkwlD6vc+3I+
-# XWCbIIBrZSnlyNUwuv+fZr4zDkwfCL6NwuZPfLVafQ==
+# CSqGSIb3DQEJBTEPFw0yNjA4MzAyMzI0NThaMC8GCSqGSIb3DQEJBDEiBCDgTN4e
+# PCtkHRou25qINaDEG4wGqtA/qs72XjtqGT2ZFjANBgkqhkiG9w0BAQEFAASCAgCM
+# L2J8hUdBcFrP1GFqYTF/BYJNk8/Oxy8nThKxr5l9LjDGo7FKl+F02uKt4ht6U60g
+# GaAozRLbfnVdaFHg6whAeXOI/yCVVpvCpXnRmu+uum7y9l5BfsIx/c0ZIoryItlM
+# Xoi9EK7u+Fg6yYtbDaZstE0xrGtqBSMDc/R7LDyuGSAxY1kaK7alMnB75ddXF80d
+# fZBfJYFWuHrfgMR4zdHQuFQpDk/cphAmegbB6mV7g97LPWD9XtK6yYUW7OpoC/2S
+# 6Xm79og7Dq1idcyQgaBxSdUsvGEpvpQrf/xoBVMgpWpL4qTlYKEEeGKYrbC2AJzq
+# Da6WOGqO9c0Ha8+PYsWcaKY3Fp7r3TZzpECFADGd6I9EA1b4FJb4A+9rVJF9L/t+
+# ZEPEOwibNAh7KYn5CM9WONak8k2svwDHk1SRTzhU5SLMZ8tYeHnh1bGIRsRAa69U
+# kYKzZgo4Q4p1mIFZRUTALsXMjVj9MwdddLMYV6qH/+KDUl6kpi4yIEZi3tGJbdQ6
+# K92vdjEzOeVyZ/ZNfvNGVjYtyI/OMYJIvFijN9rSuvhoulIk4SdgNjLd7BDpZ+do
+# /HR8N4msiiA5Snu8m2aot6KYh4m9YZlXZJ2KpYYQM3VMZ8g45wT0kej6WTIVJv5i
+# ioBdEkHvCQ5sCJL9hBJIhXOWm7dbrXou+sUybEBNSA==
 # SIG # End signature block

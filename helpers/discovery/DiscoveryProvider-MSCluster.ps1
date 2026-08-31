@@ -8,13 +8,25 @@
     validated monitor plan.
 
     Discovers:
-      - The cluster itself (name, functional level, quorum configuration)
-      - Every node (name, state, cluster network IP)
-      - Every resource group / clustered role, with its virtual network name (VNN)
-        and virtual IP address(es)
-      - Every cluster resource (type, state, owner group, owner node)
+      - The cluster itself: name, FQDN, functional level, upgrade version, admin
+        access point, dynamic quorum, shared volume root, S2D state, CSV balancer
+      - Heartbeat tuning: same/cross subnet delay and threshold, route history
+      - Quorum health: witness resource type and state, per-node vote weights, and
+        the total vote count, with a warning when an even vote count has no witness
+      - Every node: state, cluster network IP, OS build, drain status, status text,
+        with a warning when node builds differ outside a rolling upgrade
+      - Every resource group / clustered role, with its virtual network name (VNN),
+        virtual IP address(es), failover policy (auto-failback, threshold, period,
+        priority), anti-affinity classes and preferred owners
+      - Every cluster resource: type, state, owner group, owner node, and its
+        restart / IsAlive / LooksAlive policy, flagging anything not Online
       - SQL Server Failover Cluster Instances and Always On AG listeners
-      - Cluster networks and cluster shared volumes (CSV)
+      - Installed cluster resource types and unassigned available disks
+      - Cluster networks with role, mask and metric, warning on a single or absent
+        cluster-communication network
+      - Cluster shared volumes including redirected access, maintenance mode, fault
+        and backup state, warning on redirected or in-maintenance volumes
+      - Cluster disk capacity: path, label, file system, mount points, percent free
       - Cluster performance counter classes present on each node, validated to
         actually return data
 
@@ -107,6 +119,67 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             $cred = $ctx.Credential
         }
 
+        # --- Connect to root\MSCluster over CIM ---
+        # Get-WmiObject returns the embedded PrivateProperties object as an empty
+        # string, which silently loses every virtual IP, virtual name and SQL
+        # instance name. CIM materialises it properly, so the cluster inventory
+        # goes over a CIM session. DCOM is tried first because WSMan needs
+        # Kerberos or an HTTPS/TrustedHosts setup that clusters often lack.
+        function Connect-MSClusterCim {
+            param([string]$Target, [PSCredential]$Cred)
+
+            $isLocal = ($Target -eq 'localhost' -or $Target -eq '.' -or $Target -eq '127.0.0.1' -or
+                        $Target -eq '::1' -or $Target -eq $env:COMPUTERNAME)
+            if ($isLocal) { return @{ Session = $null; IsLocal = $true; Method = 'Local' } }
+
+            foreach ($proto in @('Dcom', 'Wsman')) {
+                try {
+                    $opt = New-CimSessionOption -Protocol $proto
+                    $s = New-CimSession -ComputerName $Target -Credential $Cred -SessionOption $opt -ErrorAction Stop
+                    return @{ Session = $s; IsLocal = $false; Method = $proto }
+                }
+                catch {
+                    Write-Verbose "CIM $proto to ${Target} failed: $($_.Exception.Message)"
+                }
+            }
+            return $null
+        }
+
+        function Get-MSClusterInstance {
+            param($Conn, [string]$Class, [int]$Retries = 3)
+            $splat = @{ Namespace = 'root\MSCluster'; ClassName = $Class; ErrorAction = 'Stop' }
+            if ($Conn -and $Conn.Session) { $splat.CimSession = $Conn.Session }
+
+            # DCOM to a cluster intermittently returns "The remote procedure call
+            # failed", so a single failure is not treated as an empty class.
+            $lastError = $null
+            for ($attempt = 1; $attempt -le $Retries; $attempt++) {
+                try { return @(Get-CimInstance @splat) }
+                catch {
+                    $lastError = $_
+                    Write-Verbose "$Class attempt $attempt/$Retries failed: $($_.Exception.Message)"
+                    if ($attempt -lt $Retries) { Start-Sleep -Milliseconds (400 * $attempt) }
+                }
+            }
+            throw $lastError
+        }
+
+        function Get-MSClusterQueryResult {
+            param($Conn, [string]$Query, [int]$Retries = 3)
+            $splat = @{ Namespace = 'root\MSCluster'; Query = $Query; ErrorAction = 'Stop' }
+            if ($Conn -and $Conn.Session) { $splat.CimSession = $Conn.Session }
+
+            $lastError = $null
+            for ($attempt = 1; $attempt -le $Retries; $attempt++) {
+                try { return @(Get-CimInstance @splat) }
+                catch {
+                    $lastError = $_
+                    if ($attempt -lt $Retries) { Start-Sleep -Milliseconds (400 * $attempt) }
+                }
+            }
+            throw $lastError
+        }
+
         # --- Build a WMI splat for a target (omits ComputerName/Credential locally) ---
         function New-MSClusterWmiSplat {
             param([string]$Target, [PSCredential]$Cred, [string]$Namespace = 'root\MSCluster')
@@ -139,23 +212,89 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             return "State$key"
         }
 
+        # --- Read a set of properties off a WMI object, skipping any that the
+        #     build does not expose. Returns an ordered name -> string map. ---
+        function Get-MSClusterProps {
+            param($Object, [string[]]$Names)
+
+            $out = [ordered]@{}
+            if (-not $Object) { return $out }
+
+            $available = @{}
+            foreach ($p in $Object.PSObject.Properties) {
+                if ($p.MemberType -eq 'Property') { $available[$p.Name] = $true }
+            }
+
+            foreach ($n in $Names) {
+                if (-not $available.ContainsKey($n)) { continue }
+                $v = $null
+                try { $v = $Object.$n } catch { continue }
+                if ($null -eq $v) { continue }
+                if ($v -is [System.Array]) { $v = ($v -join ',') }
+                $s = ([string]$v).Trim()
+                if ($s -eq '') { continue }
+                $out[$n] = $s
+            }
+            return $out
+        }
+
+        # --- Flatten a property map into "Key=Value; Key=Value" ---
+        function ConvertTo-MSClusterSummary {
+            param([System.Object]$Map, [string[]]$Order)
+            if (-not $Map -or $Map.Count -eq 0) { return $null }
+            $parts = @()
+            $keys = if ($Order) { $Order } else { @($Map.Keys) }
+            foreach ($k in $keys) {
+                if (-not $Map.Contains($k)) { continue }
+                $parts += "$k=$($Map[$k])"
+            }
+            if ($parts.Count -eq 0) { return $null }
+            return ($parts -join '; ')
+        }
+
+        # --- Nodes associated with a cluster object (preferred / possible owners) ---
+        function Get-MSClusterAssociatedNode {
+            param($Conn, [string]$SourceClass, [string]$SourceName)
+            $names = @()
+            if (-not $SourceName) { return $names }
+            try {
+                $escaped = $SourceName.Replace('\', '\\').Replace("'", "\'")
+                $q = "ASSOCIATORS OF {${SourceClass}.Name='${escaped}'} WHERE ResultClass=MSCluster_Node"
+                $names = @(Get-MSClusterQueryResult -Conn $Conn -Query $q | ForEach-Object { [string]$_.Name })
+            }
+            catch {
+                Write-Verbose "Associator query failed for ${SourceClass} '${SourceName}': $($_.Exception.Message)"
+            }
+            return $names
+        }
+
         # ================================================================
-        # Phase 1: Find a reachable cluster node and enumerate the cluster
+        # Phase 1: Confirm the target is a cluster node, then enumerate
         # ================================================================
-        $clusterName  = $null
-        $seedTarget   = $null
-        $seedSplat    = $null
-        $clusterObj   = $null
+        # Invoke-Discovery calls this script once per target, so $targets holds a
+        # single host. One node returns the whole cluster; the setup script is
+        # responsible for not re-scanning a cluster it has already seen.
+        $clusterName = $null
+        $seedTarget  = $null
+        $conn        = $null
+        $clusterObj  = $null
 
         foreach ($t in $targets) {
             if (-not $t) { continue }
-            Write-Host "    Probing root\MSCluster on $t ..." -ForegroundColor DarkGray -NoNewline
+            Write-Host "    Connecting to $t ..." -ForegroundColor DarkGray -NoNewline
+            $tryConn = Connect-MSClusterCim -Target $t -Cred $cred
+            if (-not $tryConn) {
+                Write-Host " no CIM connection" -ForegroundColor DarkYellow
+                continue
+            }
+            Write-Host " $($tryConn.Method)" -ForegroundColor Green -NoNewline
+
+            Write-Host " | reading root\MSCluster ..." -ForegroundColor DarkGray -NoNewline
             try {
-                $trySplat = New-MSClusterWmiSplat -Target $t -Cred $cred
-                $clusterObj = Get-WmiObject -Class MSCluster_Cluster @trySplat | Select-Object -First 1
+                $clusterObj = Get-MSClusterInstance -Conn $tryConn -Class MSCluster_Cluster | Select-Object -First 1
                 if ($clusterObj) {
-                    $seedTarget = $t
-                    $seedSplat  = $trySplat
+                    $seedTarget  = $t
+                    $conn        = $tryConn
                     $clusterName = [string]$clusterObj.Name
                     Write-Host " OK ($clusterName)" -ForegroundColor Green
                     break
@@ -166,10 +305,11 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                 Write-Host " unreachable" -ForegroundColor DarkYellow
                 Write-Verbose "root\MSCluster on $t : $($_.Exception.Message)"
             }
+            if ($tryConn.Session) { Remove-CimSession $tryConn.Session -ErrorAction SilentlyContinue }
         }
 
         if (-not $clusterObj) {
-            Write-Warning "No failover cluster found on: $($targets -join ', '). Verify WMI access and that the host is a cluster node."
+            Write-Verbose "No failover cluster reachable on: $($targets -join ', ')."
             return $items
         }
 
@@ -181,20 +321,100 @@ Register-DiscoveryProvider -Name 'MSCluster' `
         $clusterFunctionalLevel = $null
         try { $clusterFunctionalLevel = [string]$clusterObj.ClusterFunctionalLevel } catch { }
 
+        # Deeper cluster configuration. Property availability varies by OS build,
+        # so anything missing is simply left out.
+        $clusterCfg = Get-MSClusterProps -Object $clusterObj -Names @(
+            'Fqdn', 'Description', 'ClusterFunctionalLevel', 'ClusterUpgradeVersion',
+            'AdminAccessPoint', 'DynamicQuorumEnable', 'WitnessDynamicWeight',
+            'PreventQuorum', 'EnableSharedVolumes', 'SharedVolumesRoot',
+            'S2DEnabled', 'S2DCacheDesiredState', 'BlockCacheSize',
+            'SameSubnetDelay', 'SameSubnetThreshold', 'CrossSubnetDelay', 'CrossSubnetThreshold',
+            'RouteHistoryLength', 'RequestReplyTimeout',
+            'QuorumArbitrationTimeMax', 'QuorumArbitrationTimeMin',
+            'DefaultNetworkRole', 'CsvBalancer', 'DrainOnShutdown'
+        )
+
+        $heartbeatSummary = ConvertTo-MSClusterSummary -Map $clusterCfg -Order @(
+            'SameSubnetDelay', 'SameSubnetThreshold', 'CrossSubnetDelay', 'CrossSubnetThreshold', 'RouteHistoryLength'
+        )
+        $clusterFqdn = if ($clusterCfg.Contains('Fqdn')) { $clusterCfg['Fqdn'] } else { $null }
+
+        Write-Host "    Reading cluster configuration ..." -ForegroundColor DarkGray
+        # --- Resource types installed on the cluster ---
+        $resourceTypes = @()
+        try {
+            $resourceTypes = @(Get-MSClusterInstance -Conn $conn -Class MSCluster_ResourceType |
+                ForEach-Object { [string]$_.Name } | Sort-Object -Unique)
+        }
+        catch {
+            Write-Verbose "Could not enumerate MSCluster_ResourceType: $($_.Exception.Message)"
+        }
+
+        # --- Disks presented to the cluster but not yet in use ---
+        $availableDisks = @()
+        try {
+            $availableDisks = @(Get-MSClusterInstance -Conn $conn -Class MSCluster_AvailableDisk |
+                ForEach-Object { [string]$_.Name } | Where-Object { $_ })
+        }
+        catch {
+            Write-Verbose "MSCluster_AvailableDisk unavailable: $($_.Exception.Message)"
+        }
+
+        Write-Host "    Reading nodes ..." -ForegroundColor DarkGray
         # --- Nodes ---
         $nodes = @()
         try {
-            $nodes = @(Get-WmiObject -Class MSCluster_Node @seedSplat)
+            $nodes = @(Get-MSClusterInstance -Conn $conn -Class MSCluster_Node)
         }
         catch {
             Write-Warning "Could not enumerate cluster nodes: $($_.Exception.Message)"
         }
         $nodeNames = @($nodes | ForEach-Object { [string]$_.Name })
 
+        # Without nodes there is nothing to build a plan from, and continuing would
+        # quietly emit an empty result that looks like a healthy "nothing to do".
+        if ($nodes.Count -eq 0) {
+            Write-Error "Connected to cluster '$clusterName' but could not enumerate its nodes. This is usually a transient DCOM/RPC failure - re-run, or check RPC connectivity and permissions on $seedTarget."
+            if ($conn -and $conn.Session) { Remove-CimSession $conn.Session -ErrorAction SilentlyContinue }
+            return $items
+        }
+
+        # --- Per-node build and drain detail ---
+        $nodeDetail = @{}
+        foreach ($n in $nodes) {
+            $nName = [string]$n.Name
+            $np = Get-MSClusterProps -Object $n -Names @(
+                'NodeName', 'Description', 'MajorVersion', 'MinorVersion', 'BuildNumber',
+                'CSDVersion', 'NodeHighestVersion', 'NodeLowestVersion',
+                'NodeDrainStatus', 'NodeDrainTarget', 'StatusInformation', 'NeedsPreventQuorum'
+            )
+
+            $build = $null
+            if ($np.Contains('MajorVersion') -and $np.Contains('MinorVersion') -and $np.Contains('BuildNumber')) {
+                $build = "$($np['MajorVersion']).$($np['MinorVersion']).$($np['BuildNumber'])"
+            }
+            elseif ($np.Contains('BuildNumber')) {
+                $build = $np['BuildNumber']
+            }
+
+            $nodeDetail[$nName] = @{
+                Build       = $build
+                DrainStatus = if ($np.Contains('NodeDrainStatus')) { $np['NodeDrainStatus'] } else { $null }
+                Status      = if ($np.Contains('StatusInformation')) { $np['StatusInformation'] } else { $null }
+                Description = if ($np.Contains('Description')) { $np['Description'] } else { $null }
+            }
+        }
+
+        # A mixed-build cluster is supported only during a rolling upgrade.
+        $distinctBuilds = @($nodeDetail.Values | ForEach-Object { $_.Build } | Where-Object { $_ } | Sort-Object -Unique)
+        if ($distinctBuilds.Count -gt 1) {
+            Write-Warning "Cluster '$clusterName' nodes are running different builds ($($distinctBuilds -join ', ')). Expected only during a rolling upgrade."
+        }
+
         # --- Node IPs from cluster network interfaces ---
         $nodeIPs = @{}
         try {
-            foreach ($ni in @(Get-WmiObject -Class MSCluster_NetworkInterface @seedSplat)) {
+            foreach ($ni in @(Get-MSClusterInstance -Conn $conn -Class MSCluster_NetworkInterface)) {
                 $niNode = [string]$ni.Node
                 $niAddr = [string]$ni.Address
                 if (-not $niNode -or -not $niAddr) { continue }
@@ -220,14 +440,23 @@ Register-DiscoveryProvider -Name 'MSCluster' `
         }
 
         # --- Cluster networks ---
+        # Role: 0 = disabled, 1 = cluster (heartbeat) only, 2 = client only, 3 = both
+        $networkRoleMap = @{ 0 = 'Disabled'; 1 = 'ClusterOnly'; 2 = 'ClientOnly'; 3 = 'ClusterAndClient' }
+        Write-Host "    Reading networks ..." -ForegroundColor DarkGray
         $clusterNetworks = @()
         try {
-            $clusterNetworks = @(Get-WmiObject -Class MSCluster_Network @seedSplat | ForEach-Object {
+            $clusterNetworks = @(Get-MSClusterInstance -Conn $conn -Class MSCluster_Network | ForEach-Object {
+                $np = Get-MSClusterProps -Object $_ -Names @('AddressMask', 'Metric', 'AutoMetric', 'Description')
+                $roleVal = $null
+                try { $roleVal = [int]$_.Role } catch { }
                 [PSCustomObject]@{
-                    Name    = [string]$_.Name
-                    Address = [string]$_.Address
-                    Role    = [string]$_.Role
-                    State   = [int]$_.State
+                    Name        = [string]$_.Name
+                    Address     = [string]$_.Address
+                    AddressMask = if ($np.Contains('AddressMask')) { $np['AddressMask'] } else { $null }
+                    Role        = $roleVal
+                    RoleText    = if ($null -ne $roleVal -and $networkRoleMap.ContainsKey($roleVal)) { $networkRoleMap[$roleVal] } else { 'Unknown' }
+                    Metric      = if ($np.Contains('Metric')) { $np['Metric'] } else { $null }
+                    State       = [int]$_.State
                 }
             })
         }
@@ -235,14 +464,32 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             Write-Verbose "Could not enumerate MSCluster_Network: $($_.Exception.Message)"
         }
 
+        $heartbeatNets = @($clusterNetworks | Where-Object { $_.Role -eq 1 -or $_.Role -eq 3 })
+        if ($heartbeatNets.Count -eq 1 -and $clusterNetworks.Count -gt 0) {
+            Write-Warning "Cluster '$clusterName' has only one cluster-enabled network ($($heartbeatNets[0].Name)). Intra-cluster communication has no redundant path."
+        }
+        elseif ($heartbeatNets.Count -eq 0 -and $clusterNetworks.Count -gt 0) {
+            Write-Warning "Cluster '$clusterName' has no network enabled for cluster communication."
+        }
+
         # --- Cluster shared volumes ---
+        Write-Host "    Reading shared volumes ..." -ForegroundColor DarkGray
         $csvVolumes = @()
         try {
-            $csvVolumes = @(Get-WmiObject -Class MSCluster_ClusterSharedVolume @seedSplat | ForEach-Object {
+            $csvVolumes = @(Get-MSClusterInstance -Conn $conn -Class MSCluster_ClusterSharedVolume | ForEach-Object {
+                $cp = Get-MSClusterProps -Object $_ -Names @(
+                    'VolumeFriendlyName', 'RedirectedAccess', 'MaintenanceMode', 'FaultState',
+                    'BackupState', 'BlockRedirectedIOReason', 'FileSystemRedirectedIOReason'
+                )
                 [PSCustomObject]@{
-                    Name       = [string]$_.Name
-                    VolumeName = [string]$_.VolumeName
-                    State      = [int]$_.State
+                    Name             = [string]$_.Name
+                    VolumeName       = [string]$_.VolumeName
+                    FriendlyName     = if ($cp.Contains('VolumeFriendlyName')) { $cp['VolumeFriendlyName'] } else { $null }
+                    State            = [int]$_.State
+                    RedirectedAccess = if ($cp.Contains('RedirectedAccess')) { $cp['RedirectedAccess'] } else { $null }
+                    MaintenanceMode  = if ($cp.Contains('MaintenanceMode')) { $cp['MaintenanceMode'] } else { $null }
+                    FaultState       = if ($cp.Contains('FaultState')) { $cp['FaultState'] } else { $null }
+                    BackupState      = if ($cp.Contains('BackupState')) { $cp['BackupState'] } else { $null }
                 }
             })
         }
@@ -250,10 +497,47 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             Write-Verbose "MSCluster_ClusterSharedVolume unavailable: $($_.Exception.Message)"
         }
 
+        # Redirected I/O routes every write through the coordinator node and is a
+        # well known throughput cliff, so it is worth saying out loud.
+        $redirectedCsv = @($csvVolumes | Where-Object { $_.RedirectedAccess -eq 'True' -or $_.RedirectedAccess -eq '1' })
+        if ($redirectedCsv.Count -gt 0) {
+            Write-Warning "Cluster '$clusterName' CSV(s) in redirected access mode: $(@($redirectedCsv | ForEach-Object { $_.Name }) -join ', ')"
+        }
+        $maintCsv = @($csvVolumes | Where-Object { $_.MaintenanceMode -eq 'True' -or $_.MaintenanceMode -eq '1' })
+        if ($maintCsv.Count -gt 0) {
+            Write-Warning "Cluster '$clusterName' CSV(s) in maintenance mode: $(@($maintCsv | ForEach-Object { $_.Name }) -join ', ')"
+        }
+
+        # --- Cluster disks (capacity is a common cluster outage cause) ---
+        Write-Host "    Reading cluster disks ..." -ForegroundColor DarkGray
+        $clusterDisks = @()
+        try {
+            $clusterDisks = @(Get-MSClusterInstance -Conn $conn -Class MSCluster_DiskPartition | ForEach-Object {
+                $totalMB = 0
+                $freeMB  = 0
+                try { $totalMB = [double]$_.TotalSize } catch { }
+                try { $freeMB = [double]$_.FreeSpace } catch { }
+                $dp = Get-MSClusterProps -Object $_ -Names @('FileSystem', 'SerialNumber', 'PartitionNumber', 'MountPoints')
+                [PSCustomObject]@{
+                    Path        = [string]$_.Path
+                    VolumeLabel = [string]$_.VolumeLabel
+                    FileSystem  = if ($dp.Contains('FileSystem')) { $dp['FileSystem'] } else { $null }
+                    MountPoints = if ($dp.Contains('MountPoints')) { $dp['MountPoints'] } else { $null }
+                    TotalMB     = $totalMB
+                    FreeMB      = $freeMB
+                    PercentFree = if ($totalMB -gt 0) { [Math]::Round(($freeMB / $totalMB) * 100, 1) } else { $null }
+                }
+            })
+        }
+        catch {
+            Write-Verbose "MSCluster_DiskPartition unavailable: $($_.Exception.Message)"
+        }
+
         # --- Resources, grouped by owning resource group ---
+        Write-Host "    Reading resources ..." -ForegroundColor DarkGray
         $resources = @()
         try {
-            $resources = @(Get-WmiObject -Class MSCluster_Resource @seedSplat)
+            $resources = @(Get-MSClusterInstance -Conn $conn -Class MSCluster_Resource)
         }
         catch {
             Write-Warning "Could not enumerate cluster resources: $($_.Exception.Message)"
@@ -269,6 +553,7 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                     Kind         = 'Other'
                     NetworkNames = [System.Collections.Generic.List[string]]::new()
                     VirtualIPs   = [System.Collections.Generic.List[string]]::new()
+                    OnlineIPs    = [System.Collections.Generic.List[string]]::new()
                     SqlInstances = [System.Collections.Generic.List[string]]::new()
                     AGNames      = [System.Collections.Generic.List[string]]::new()
                     Resources    = [System.Collections.Generic.List[object]]::new()
@@ -279,16 +564,31 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             $resType = [string]$res.Type
             $resName = [string]$res.Name
 
+            $rp = Get-MSClusterProps -Object $res -Names @(
+                'RestartAction', 'RestartThreshold', 'RestartPeriod', 'RestartDelay',
+                'IsAlivePollInterval', 'LooksAlivePollInterval', 'PendingTimeout', 'DeadlockTimeout',
+                'PersistentState', 'SeparateMonitor', 'CoreResource', 'Description',
+                'StatusInformation', 'LastOperationStatusCode', 'ResourceSpecificStatus'
+            )
+
             $g.Resources.Add([PSCustomObject]@{
-                Name      = $resName
-                Type      = $resType
-                State     = ConvertTo-MSClusterStateText -Map $resourceStateMap -Value $res.State
-                OwnerNode = [string]$res.OwnerNode
+                Name       = $resName
+                Type       = $resType
+                State      = ConvertTo-MSClusterStateText -Map $resourceStateMap -Value $res.State
+                OwnerNode  = [string]$res.OwnerNode
+                Policy     = ConvertTo-MSClusterSummary -Map $rp -Order @('RestartAction', 'RestartThreshold', 'RestartPeriod', 'IsAlivePollInterval', 'LooksAlivePollInterval')
+                CoreRes    = if ($rp.Contains('CoreResource')) { $rp['CoreResource'] } else { $null }
+                StatusInfo = if ($rp.Contains('StatusInformation')) { $rp['StatusInformation'] } else { $null }
             })
 
             if ($resType -like '*IP Address*') {
                 $addr = Get-MSClusterPrivateProp -Resource $res -PropertyName 'Address'
                 if ($addr -and -not $g.VirtualIPs.Contains($addr)) { $g.VirtualIPs.Add($addr) }
+                # A multi-subnet role carries one IP per subnet but only the one for
+                # the owning node's subnet is online, so that is the address to monitor.
+                if ($addr -and ([int]$res.State) -eq 2 -and -not $g.OnlineIPs.Contains($addr)) {
+                    $g.OnlineIPs.Add($addr)
+                }
             }
             elseif ($resType -like '*Network Name*') {
                 $nn = Get-MSClusterPrivateProp -Resource $res -PropertyName 'DnsName'
@@ -311,13 +611,26 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             }
         }
 
-        # --- Resource group states ---
+        # --- Resource group states and failover policy ---
+        Write-Host "    Reading resource groups and failover policy ..." -ForegroundColor DarkGray
         $groupStates = @{}
         try {
-            foreach ($rg in @(Get-WmiObject -Class MSCluster_ResourceGroup @seedSplat)) {
-                $groupStates[[string]$rg.Name] = @{
-                    State     = ConvertTo-MSClusterStateText -Map $groupStateMap -Value $rg.State
-                    OwnerNode = [string]$rg.OwnerNode
+            foreach ($rg in @(Get-MSClusterInstance -Conn $conn -Class MSCluster_ResourceGroup)) {
+                $rgName = [string]$rg.Name
+                $gp = Get-MSClusterProps -Object $rg -Names @(
+                    'AutoFailbackType', 'FailbackWindowStart', 'FailbackWindowEnd',
+                    'FailoverPeriod', 'FailoverThreshold', 'Priority', 'PersistentState',
+                    'AntiAffinityClassNames', 'ColdStartSetting', 'GroupType', 'IsCoreGroup',
+                    'DefaultOwner', 'Description', 'StatusInformation'
+                )
+
+                $groupStates[$rgName] = @{
+                    State          = ConvertTo-MSClusterStateText -Map $groupStateMap -Value $rg.State
+                    OwnerNode      = [string]$rg.OwnerNode
+                    FailoverPolicy = ConvertTo-MSClusterSummary -Map $gp -Order @('AutoFailbackType', 'FailoverThreshold', 'FailoverPeriod', 'Priority')
+                    AntiAffinity   = if ($gp.Contains('AntiAffinityClassNames')) { $gp['AntiAffinityClassNames'] } else { $null }
+                    GroupType      = if ($gp.Contains('GroupType')) { $gp['GroupType'] } else { $null }
+                    Preferred      = @(Get-MSClusterAssociatedNode -Conn $conn -SourceClass 'MSCluster_ResourceGroup' -SourceName $rgName)
                 }
             }
         }
@@ -330,6 +643,8 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             $g = $groupData[$grpName]
             $stateInfo = if ($groupStates.ContainsKey($grpName)) { $groupStates[$grpName] } else { $null }
             $ipv4 = @($g.VirtualIPs | Where-Object { $_ -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$' })
+            $ipv4Online = @($g.OnlineIPs | Where-Object { $_ -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$' })
+            $primary = if ($ipv4Online.Count -gt 0) { $ipv4Online[0] } elseif ($ipv4.Count -gt 0) { $ipv4[0] } else { $null }
 
             $roles += [PSCustomObject]@{
                 GroupName    = $g.GroupName
@@ -337,16 +652,82 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                 VirtualName  = if ($g.NetworkNames.Count -gt 0) { $g.NetworkNames[0] } else { $null }
                 NetworkNames = @($g.NetworkNames)
                 VirtualIPs   = @($g.VirtualIPs)
-                PrimaryIP    = if ($ipv4.Count -gt 0) { $ipv4[0] } else { $null }
+                OnlineIPs    = @($g.OnlineIPs)
+                PrimaryIP    = $primary
                 SqlInstances = @($g.SqlInstances)
                 AGNames      = @($g.AGNames)
                 Resources    = @($g.Resources)
                 State        = if ($stateInfo) { $stateInfo.State } else { 'Unknown' }
                 OwnerNode    = if ($stateInfo -and $stateInfo.OwnerNode) { $stateInfo.OwnerNode } else { $g.OwnerNode }
+                FailoverPolicy = if ($stateInfo) { $stateInfo.FailoverPolicy } else { $null }
+                AntiAffinity   = if ($stateInfo) { $stateInfo.AntiAffinity } else { $null }
+                GroupType      = if ($stateInfo) { $stateInfo.GroupType } else { $null }
+                PreferredOwners = if ($stateInfo) { @($stateInfo.Preferred) } else { @() }
             }
         }
 
-        Write-Host "    Cluster '$clusterName' (via $seedTarget): $($nodeNames.Count) node(s), $($roles.Count) role(s), $($resources.Count) resource(s), $($csvVolumes.Count) CSV(s)" -ForegroundColor Gray
+        Write-Host "    Cluster '$clusterName' (via $seedTarget): $($nodeNames.Count) node(s), $($roles.Count) role(s), $($resources.Count) resource(s), $($csvVolumes.Count) CSV(s), $($clusterNetworks.Count) network(s), $($clusterDisks.Count) disk(s), $($resourceTypes.Count) resource type(s)" -ForegroundColor Gray
+
+        # ================================================================
+        # Phase 1b: Quorum model and current health
+        # ================================================================
+        # A witness resource lives in the core cluster group. Its presence and the
+        # sum of node vote weights decide whether the cluster survives a node loss.
+        $witnessResources = @($resources | Where-Object { [string]$_.Type -like '*Witness*' })
+        $witnessType  = if ($witnessResources.Count -gt 0) { [string]$witnessResources[0].Type } else { $null }
+        $witnessState = if ($witnessResources.Count -gt 0) {
+            ConvertTo-MSClusterStateText -Map $resourceStateMap -Value $witnessResources[0].State
+        } else { $null }
+
+        # NodeWeight is absent on older builds; a missing weight means the node votes.
+        $totalVotes = 0
+        $nodeWeights = @{}
+        foreach ($n in $nodes) {
+            $w = $null
+            try { $w = $n.NodeWeight } catch { }
+            $weight = if ($null -eq $w) { 1 } else { [int]$w }
+            $nodeWeights[[string]$n.Name] = $weight
+            $totalVotes += $weight
+        }
+        $witnessVotes = if ($witnessResources.Count -gt 0) { 1 } else { 0 }
+        $quorumVotes  = $totalVotes + $witnessVotes
+
+        if ($witnessResources.Count -eq 0 -and ($totalVotes % 2) -eq 0 -and $totalVotes -gt 0) {
+            Write-Warning "Cluster '$clusterName' has $totalVotes voting node(s) and no witness resource. An even vote count without a witness cannot survive the loss of half the nodes."
+        }
+        elseif ($witnessState -and $witnessState -ne 'Online') {
+            Write-Warning "Cluster '$clusterName' witness ($witnessType) is '$witnessState'. Quorum is degraded."
+        }
+
+        # --- Current health: anything not in its normal state is worth saying out loud ---
+        $unhealthyNodes = @($nodes | Where-Object {
+            (ConvertTo-MSClusterStateText -Map $nodeStateMap -Value $_.State) -ne 'Up'
+        } | ForEach-Object {
+            "$($_.Name) ($(ConvertTo-MSClusterStateText -Map $nodeStateMap -Value $_.State))"
+        })
+        if ($unhealthyNodes.Count -gt 0) {
+            Write-Warning "Cluster '$clusterName' node(s) not Up: $($unhealthyNodes -join ', ')"
+        }
+
+        $drainingNodes = @($nodeDetail.Keys | Where-Object {
+            $ds = $nodeDetail[$_].DrainStatus
+            $ds -and $ds -ne '0' -and $ds -ne 'NotInitiated'
+        } | ForEach-Object { "$_ ($($nodeDetail[$_].DrainStatus))" })
+        if ($drainingNodes.Count -gt 0) {
+            Write-Warning "Cluster '$clusterName' node(s) draining or drained: $($drainingNodes -join ', ')"
+        }
+
+        $unhealthyRoles = @($roles | Where-Object { $_.State -ne 'Online' } |
+            ForEach-Object { "$($_.GroupName) ($($_.State))" })
+        if ($unhealthyRoles.Count -gt 0) {
+            Write-Warning "Cluster '$clusterName' role(s) not Online: $($unhealthyRoles -join ', ')"
+        }
+
+        $lowDisks = @($clusterDisks | Where-Object { $null -ne $_.PercentFree -and $_.PercentFree -lt 10 } |
+            ForEach-Object { "$($_.Path) $($_.PercentFree)% free" })
+        if ($lowDisks.Count -gt 0) {
+            Write-Warning "Cluster '$clusterName' disk(s) below 10% free: $($lowDisks -join ', ')"
+        }
 
         # ================================================================
         # Phase 2 + 2.5: Discover cluster perf counter classes, then keep
@@ -356,11 +737,17 @@ Register-DiscoveryProvider -Name 'MSCluster' `
         # (S2D, CSV, SQL) add classes the other nodes may not have.
         $nodeCounters = @{}   # nodeName -> @( @{ Class; Property; Instances } )
 
+        $nodeIndex = 0
         foreach ($nodeName in $nodeNames) {
+            $nodeIndex++
+            $nodeSw = [System.Diagnostics.Stopwatch]::StartNew()
             $probeTarget = if ($nodeIPs.ContainsKey($nodeName)) { $nodeIPs[$nodeName] } else { $nodeName }
             $cimvSplat = $null
             try { $cimvSplat = New-MSClusterWmiSplat -Target $probeTarget -Cred $cred -Namespace 'root\cimv2' }
             catch { continue }
+
+            Write-Host "    [$nodeIndex/$($nodeNames.Count)] ${nodeName} ($probeTarget): listing cluster performance classes ..." -ForegroundColor DarkGray
+            Write-Progress -Activity 'MS Cluster discovery' -Status "Listing performance classes on $nodeName" -PercentComplete 0
 
             $classNames = @()
             try {
@@ -378,9 +765,17 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                 continue
             }
 
+            Write-Host "        $($classNames.Count) class(es) found, validating which return data ..." -ForegroundColor DarkGray
             $validated = [System.Collections.Generic.List[object]]::new()
+            $classIndex = 0
 
             foreach ($className in $classNames) {
+                $classIndex++
+                $pct = [Math]::Round(($classIndex / $classNames.Count) * 100)
+                Write-Progress -Activity 'MS Cluster discovery' `
+                    -Status "${nodeName}: validating counters [$classIndex/$($classNames.Count)]" `
+                    -CurrentOperation $className -PercentComplete $pct
+
                 $rows = @()
                 try {
                     $rows = @(Get-WmiObject -Query "Select * from $className" @cimvSplat)
@@ -431,17 +826,43 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             }
 
             $nodeCounters[$nodeName] = @($validated)
-            Write-Host "    ${nodeName}: $($classNames.Count) cluster counter class(es), $($validated.Count) validated counter(s)" -ForegroundColor Gray
+            $nodeSw.Stop()
+            Write-Host "        ${nodeName}: $($classNames.Count) class(es), $($validated.Count) validated counter(s) in $([Math]::Round($nodeSw.Elapsed.TotalSeconds, 1))s" -ForegroundColor Gray
         }
+        Write-Progress -Activity 'MS Cluster discovery' -Completed
 
         # ================================================================
         # Phase 3: Build the monitor plan
         # ================================================================
         $roleSummary = @($roles | Where-Object { $_.VirtualName } | ForEach-Object { $_.VirtualName }) -join ','
-        $csvSummary  = @($csvVolumes | ForEach-Object { $_.Name }) -join ','
-        $netSummary  = @($clusterNetworks | ForEach-Object {
-            if ($_.Address) { "$($_.Name) ($($_.Address))" } else { $_.Name }
+        $csvSummary  = @($csvVolumes | ForEach-Object {
+            $flags = @()
+            if ($_.RedirectedAccess -eq 'True' -or $_.RedirectedAccess -eq '1') { $flags += 'redirected' }
+            if ($_.MaintenanceMode -eq 'True' -or $_.MaintenanceMode -eq '1') { $flags += 'maintenance' }
+            if ($flags.Count -gt 0) { "$($_.Name) [$($flags -join '/')]" } else { $_.Name }
         }) -join ','
+        $netSummary  = @($clusterNetworks | ForEach-Object {
+            $bits = @($_.Name)
+            if ($_.Address) { $bits += "$($_.Address)" }
+            $bits += $_.RoleText
+            "$($bits -join ' ')"
+        }) -join ','
+        $diskSummary = @($clusterDisks | ForEach-Object {
+            if ($null -ne $_.PercentFree) { "$($_.Path) $($_.PercentFree)% free" } else { $_.Path }
+        }) -join ','
+        $resTypeSummary = @($resourceTypes) -join ','
+        $availDiskSummary = @($availableDisks) -join ','
+
+        # Every role, including the ones with no virtual IP (VM roles, storage
+        # groups). Those never become their own device, so this is the only place
+        # they show up.
+        $allRolesSummary = @($roles | ForEach-Object {
+            $vip = if ($_.PrimaryIP) { $_.PrimaryIP } else { 'no-VIP' }
+            "$($_.GroupName)|$($_.Kind)|$($_.State)|$($_.OwnerNode)|$vip"
+        }) -join ';'
+
+        $vipRoleCount = @($roles | Where-Object { $_.PrimaryIP }).Count
+        Write-Host "    Roles: $($roles.Count) total, $vipRoleCount with a virtual IP (own device), $($roles.Count - $vipRoleCount) without (live on their owner node)" -ForegroundColor Gray
 
         # --- NODE devices: node-local resources ---
         foreach ($node in $nodes) {
@@ -456,13 +877,34 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                 'MSCluster.NodeState'    = "$nodeState"
                 'MSCluster.Nodes'        = "$($nodeNames -join ',')"
                 'MSCluster.Roles'        = "$roleSummary"
+                'MSCluster.NodeVote'     = "$(if ($nodeWeights.ContainsKey($nodeName)) { $nodeWeights[$nodeName] } else { 1 })"
+                'MSCluster.QuorumVotes'  = "$quorumVotes"
             }
             if ($nodeIP)                 { $nodeAttrs['MSCluster.NodeIP'] = "$nodeIP" }
             if ($quorumType)             { $nodeAttrs['MSCluster.QuorumType'] = "$quorumType" }
             if ($quorumPath)             { $nodeAttrs['MSCluster.QuorumPath'] = "$quorumPath" }
+            if ($witnessType)            { $nodeAttrs['MSCluster.WitnessType'] = "$witnessType" }
+            if ($witnessState)           { $nodeAttrs['MSCluster.WitnessState'] = "$witnessState" }
             if ($clusterFunctionalLevel) { $nodeAttrs['MSCluster.FunctionalLevel'] = "$clusterFunctionalLevel" }
+            if ($clusterFqdn)            { $nodeAttrs['MSCluster.Fqdn'] = "$clusterFqdn" }
             if ($csvSummary)             { $nodeAttrs['MSCluster.SharedVolumes'] = "$csvSummary" }
             if ($netSummary)             { $nodeAttrs['MSCluster.Networks'] = "$netSummary" }
+            if ($diskSummary)            { $nodeAttrs['MSCluster.ClusterDisks'] = "$diskSummary" }
+            if ($resTypeSummary)         { $nodeAttrs['MSCluster.ResourceTypes'] = "$resTypeSummary" }
+            if ($availDiskSummary)       { $nodeAttrs['MSCluster.AvailableDisks'] = "$availDiskSummary" }
+            if ($heartbeatSummary)       { $nodeAttrs['MSCluster.HeartbeatTuning'] = "$heartbeatSummary" }
+            if ($allRolesSummary)        { $nodeAttrs['MSCluster.AllRoles'] = "$allRolesSummary" }
+            if ($clusterCfg.Contains('DynamicQuorumEnable')) { $nodeAttrs['MSCluster.DynamicQuorum'] = "$($clusterCfg['DynamicQuorumEnable'])" }
+            if ($clusterCfg.Contains('S2DEnabled'))          { $nodeAttrs['MSCluster.S2DEnabled'] = "$($clusterCfg['S2DEnabled'])" }
+            if ($clusterCfg.Contains('SharedVolumesRoot'))   { $nodeAttrs['MSCluster.SharedVolumesRoot'] = "$($clusterCfg['SharedVolumesRoot'])" }
+
+            $nd = $null
+            if ($nodeDetail.ContainsKey($nodeName)) { $nd = $nodeDetail[$nodeName] }
+            if ($nd) {
+                if ($nd.Build)       { $nodeAttrs['MSCluster.NodeBuild'] = "$($nd.Build)" }
+                if ($nd.DrainStatus) { $nodeAttrs['MSCluster.NodeDrainStatus'] = "$($nd.DrainStatus)" }
+                if ($nd.Status)      { $nodeAttrs['MSCluster.NodeStatusInfo'] = "$($nd.Status)" }
+            }
 
             $nodeTags = @('mscluster', 'node', $nodeName, $clusterName)
 
@@ -534,14 +976,37 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                 'MSCluster.OwnerNode'     = "$($role.OwnerNode)"
                 'MSCluster.Nodes'         = "$($nodeNames -join ',')"
             }
+            if ($role.OnlineIPs -and $role.OnlineIPs.Count -gt 0) {
+                $roleAttrs['MSCluster.OnlineVirtualIP'] = "$($role.OnlineIPs -join ',')"
+            }
             if ($role.SqlInstances.Count -gt 0) {
                 $roleAttrs['MSCluster.SqlInstance'] = "$($role.SqlInstances -join ',')"
             }
             if ($role.AGNames.Count -gt 0) {
                 $roleAttrs['MSCluster.AvailabilityGroup'] = "$($role.AGNames -join ',')"
             }
+            if ($role.FailoverPolicy)  { $roleAttrs['MSCluster.FailoverPolicy'] = "$($role.FailoverPolicy)" }
+            if ($role.AntiAffinity)    { $roleAttrs['MSCluster.AntiAffinity'] = "$($role.AntiAffinity)" }
+            if ($role.GroupType)       { $roleAttrs['MSCluster.GroupType'] = "$($role.GroupType)" }
+            if ($role.PreferredOwners -and $role.PreferredOwners.Count -gt 0) {
+                $roleAttrs['MSCluster.PreferredOwners'] = "$($role.PreferredOwners -join ',')"
+            }
             if ($role.Resources.Count -gt 0) {
                 $roleAttrs['MSCluster.Resources'] = "$(@($role.Resources | ForEach-Object { $_.Name }) -join ',')"
+                $roleAttrs['MSCluster.ResourceTypesInUse'] = "$(@($role.Resources | ForEach-Object { $_.Type } | Sort-Object -Unique) -join ',')"
+
+                $policyDetail = @($role.Resources | Where-Object { $_.Policy } |
+                    ForEach-Object { "$($_.Name): $($_.Policy)" })
+                if ($policyDetail.Count -gt 0) {
+                    $roleAttrs['MSCluster.ResourcePolicy'] = "$($policyDetail -join ' | ')"
+                }
+
+                $badResources = @($role.Resources | Where-Object { $_.State -ne 'Online' } |
+                    ForEach-Object { "$($_.Name) ($($_.State))" })
+                if ($badResources.Count -gt 0) {
+                    $roleAttrs['MSCluster.UnhealthyResources'] = "$($badResources -join ',')"
+                    Write-Warning "Role '$($role.GroupName)' has resource(s) not Online: $($badResources -join ', ')"
+                }
             }
 
             $roleTags = @('mscluster', 'role', $role.Kind, $roleName, $clusterName)
@@ -562,6 +1027,8 @@ Register-DiscoveryProvider -Name 'MSCluster' `
         }
 
         Write-Host "    Plan: $(@($items | Where-Object { $_.ItemType -eq 'ActiveMonitor' }).Count) active, $(@($items | Where-Object { $_.ItemType -eq 'PerformanceMonitor' }).Count) performance item(s)" -ForegroundColor Gray
+
+        if ($conn -and $conn.Session) { Remove-CimSession $conn.Session -ErrorAction SilentlyContinue }
 
         return $items
     }
@@ -607,8 +1074,8 @@ function Export-MSClusterDashboardHtml {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCc/sOjYFANJT0Y
-# 8wLQROIz/gj9dPpePiqfNaAFoph9ZKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJTk42gnUIVB8Q
+# x4pEhc3DYuvyNr7AK0kzKU+wjkUdJaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -811,33 +1278,33 @@ function Export-MSClusterDashboardHtml {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCClh0p+bYGnBq9vJWzs60rKlQ8bTX0EcDQXzEFTWks2CDANBgkqhkiG9w0BAQEF
-# AASCAgC3bSx4kIv4gUArSIOFKvVPOlz6Pr/THaMtMKworZyGEEzk1CpHIGr1nysu
-# v/45chjTAP61WzhGutVuWFktbqjy7y7GViFON5jGq/RELwQ/87U9skRjsfFl/ePC
-# J7Vw3IGlXwlA6Wh+OwEyqHOjk+ounkEjAaZAWH8REZuU2hqO4zm21IRJnL1xnnXS
-# 7LPJtSxp91X5zr+kvTi68AsFXUTVFlfkmZq1pcgIZHNbqbVw8gsymoE2AEcfUIdW
-# xgn1Dm999RPCTrsqMJCbBXgJTgsTLuMYZZv8KPRRg8n6puzaLL3OlblnM7ieO7gx
-# SBjr59HQgIHhn0N0WH+cFD9HeSEUePMxa7zszUxPk2WtvYSO3+KmvdvNIDnO0vQT
-# 5k6jlEAI2TNLh67gPfpA/SQp+hDltIEcq+6l8OgjqlCzJTash4RneqRWx8uxZPmV
-# anfMqGEbOo1Nnqia80hTz8hWhnn5V0jDBXq9CckrjnPAC6YFu+pMP+2j62EfDlLx
-# 3eKw6corGx4ibLMVE/F4qzWb0IN34gWnpW/wZ3L9CMgz0udGMptagrXUyBc7qX4t
-# ruWq3fqbuYxu5SiSDyp9sNnzKX880FjO+7QwMjsl5wniX5rmNdTPvwtLouK46Qwx
-# 6sp1dqnpgQZN82mqTUWCfvw3N9u1XoVm9SvVDIDjAvbweH6jOqGCAyYwggMiBgkq
+# BCCiVLcmTlYbl3mXTPoeQnYvuNqaAGKXsLVLfnSdh5wQ/TANBgkqhkiG9w0BAQEF
+# AASCAgCJyj0BeT0kcDvnvOuK1rbsiDaIyv0uO6KqbMl7bLH1QyHRywUVdqbq99YW
+# IrZhNYW+1vnkCA2PkZ2eRhtWr5n0+yBHxt3KoEkjd5bK/uIU9O00OZeAGOh8C6R+
+# HqfPcQy92oBtVOYscfWaAvm6ocsozTMKkMxrFxjqNv+fsQ49ALszzA5KgT4sG6NC
+# hS6f87mFBvTYSKEHFBH2/06Akx3H6NgpAb+7FPlPPMtzLE4rUxQAYAcNlIzkKbGC
+# CYeE8EXc5aAumvkWGks0yRofaaet6+mPbpc6FbTK030/aR+AfJLwMNFrpjmBnruc
+# rDKNJlh8uzuQT9Ems4b2T77BXLRwMbxp4Tj/CJdXRVPtKwMaJ6J/NQGY6zqYZW9Z
+# jhcBV6+tHjuAno+cAFfXe6hNSbjbCJ0uwkTqIoYUmerYhH6nwF4UHxFVYiHeG7o/
+# +Mak9cItAkB0RR1MwUvmRHbVe8xdBYEzP5+w3I+ObIzjbS1MX05A4QtpHLbCgIC6
+# cWNF+drDGBQAyJNb4RzJ4zDqXtHxvOsEygQ6K8SxW3+4CeOojxxr4c/LM+ALQ4Fa
+# 3YJA1tCu/Zmy8Cvc+hDvjNUUKN124g0JfOr0sl7W42huN8qekJOn8iOdXb5s+kw4
+# 2xeL4AGaeXQp1y1hK5aKgIZ+2DT3w44OBB27/7lex/31XBiI6KGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
 # dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA4MjgyMTI3NDRaMC8GCSqGSIb3DQEJBDEiBCDVYdft
-# ILZdecw4Xg5l3U+Qk6TXOZlfExdA3e+5KvnoZDANBgkqhkiG9w0BAQEFAASCAgBt
-# 7nObUznjE43zalQQDSQQZuXbAoepE2+0fdx5meMij5+jo59qS2HTz06tu/dA4bZ/
-# aCxj5FPfFgk7Axe2ejAZ/f+KDpseKE6izUBnoxmz/ZdltHoW5zX3b9qvBN0sT7jo
-# y7LPe4jMgSoKG23PdKHCGjiC1J2YxaSJyogX7xUAydvkTH0k7yZKzi8iZWCInLvR
-# tlTnAftjQO1CPiPXLBRdM1E5ucJ/XHNdFp3uKbA6IoBwBxb6LlsFcITLWlBXCeL1
-# eQCQixjK15GQ4BoYD01K69gQV7+a+UsbZTxiZb+AHF4QCQnyfuT+pBE2qB2oIwof
-# BQGHIKqKRZJQSJV32GWj2DjlYvtnz0hx9dV+Q5P7T0o7TG/byT+BwaRZxmcia+J4
-# JtUF4vcXRMACKjxkHTy7lMsdw6kW5PwZZP6Yi8sH7UfW7TYNFrSdqQf2ioWMcMBN
-# lnjRMZt7QajFcOAkU/VaggYiBNIXyVJJSWaEHnMW2C6d/fpdiXO7ctfSG9MugR+H
-# EKb/fBi8OFH0h4BYFFw6pSQQ/QWgJHzV8kePB0wgfIDwW5XR+Y4IBn9FrIhAh4sY
-# grdp2JW3GAhPzbpx4CcrVYSUxlCUiIM1NouI48JSEvBwDzELsyBvmdJ+tf+pvwYQ
-# ZQM/mznGnAytppnogWxshSMMxXRowuwCp71YqCwXUQ==
+# CSqGSIb3DQEJBTEPFw0yNjA4MjgyMjI1NDJaMC8GCSqGSIb3DQEJBDEiBCDd8Gw7
+# At737bKyYIfZ0Hq4tQPsboCxsddE0S6nlQe/ATANBgkqhkiG9w0BAQEFAASCAgB1
+# gnAR/5wPYAOuEdWqOGf5aF+7f/QzYSCVDBBmNEhxQKTDSmpAKr9N3xQxKuG1JGAA
+# VpTQXpSTxfIV3/nnKkUeRsUJlmwnO1Lx1t0Qd5BnM4h3B0VJZ++37CE8IOFez/tV
+# KxsCEhJ90pUHGjO68IMn2+iioQiM8k9CWbs3WzkHUbkKez4UIgzvLmkmBg1gac5k
+# ZZSyDHgrOJuFyJE+KaG3SjcVNdlQqxsMyBSByYUmHaTDW7HFbXL0P5dct2Q/uwz7
+# uEsmb33gG5Cw14Dbfah/QVHbt7CagV/8wQr74ZTp6W6O2WCTEPAz5UREiCPzYo9l
+# rcxIHhHS8lGeF1AwDnjWy4voCYVuHD0B+PgJxDlzzMY/ugoJt66psW7MBjp/0BUT
+# JtxogUvYBHWBe4lppXKu2VfmomkCrhsBCJnvGRtwRxzhRIsYbMdN2kRogymYv8lG
+# 4QjXYwJZjZn1/BlgVyhMThxwyWj6SMAAprpAeHZZ9lwVEo/LT/a7LzzKR4VLUpwh
+# asCt+8V/cft+ZuCTEVwW6o7mpykzvC904GQMlpXOugRuBngIwjOCmBvl1e2QRvCc
+# ObrX4pF2BvFzZhv0FzZ59c8VFaJATXw4CRPkmmG5qm0Lg5HgPXCb8hTadumrrjvm
+# vRja92/B/GKxM5fQebag2+Ttrco6+H5pAMBSt/uUmQ==
 # SIG # End signature block

@@ -1,87 +1,73 @@
-﻿function Get-SNMPTableSharp {
+﻿#requires -Version 5.1
+
+$script:LldpScriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
+
+function Get-LldpOidMap {
+    [ordered]@{
+        RemoteTable = '1.0.8802.1.1.2.1.4.1.1'
+        ChassisIdSubtype = '4'; ChassisId = '5'; PortIdSubtype = '6'; PortId = '7'
+        PortDescription = '8'; SystemName = '9'; SystemDescription = '10'
+        CapabilitiesSupported = '11'; CapabilitiesEnabled = '12'; ManagementAddressSubtype = '13'
+    }
+}
+
+function ConvertFrom-LldpTable {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][object[]]$Rows, [Parameter(Mandatory = $true)][hashtable]$OidMap)
+    $columns = @{}
+    foreach ($name in @('ChassisIdSubtype','ChassisId','PortIdSubtype','PortId','PortDescription','SystemName','SystemDescription','CapabilitiesSupported','CapabilitiesEnabled','ManagementAddressSubtype')) {
+        $columns[$name] = "$($OidMap.RemoteTable).$($OidMap[$name])"
+    }
+    $byIndex = @{}
+    foreach ($item in @($Rows)) {
+        $oid = [string]$item.OID
+        foreach ($name in $columns.Keys) {
+            $prefix = "$($columns[$name])."
+            if ($oid.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+                $index = $oid.Substring($prefix.Length)
+                if (-not $byIndex.ContainsKey($index)) { $byIndex[$index] = @{} }
+                $byIndex[$index][$name] = [string]$item.Value
+                break
+            }
+        }
+    }
+    $result = [System.Collections.Generic.List[object]]::new()
+    foreach ($index in @($byIndex.Keys)) {
+        $row = $byIndex[$index]
+        $result.Add([pscustomobject][ordered]@{
+            Source = 'SNMP'; RecordType = 'Neighbor'; Protocol = 'LLDP'; Index = $index
+            LocalInterface = (($index -split '\.')[1]); LocalInterfaceIndex = (($index -split '\.')[1]); RemoteIndex = (($index -split '\.')[2])
+            ChassisIdSubtype = $row.ChassisIdSubtype; ChassisId = $row.ChassisId
+            PortIdSubtype = $row.PortIdSubtype; RemotePort = $row.PortId
+            RemotePortDescription = $row.PortDescription; RemoteSystemName = $row.SystemName
+            RemoteSystemDescription = $row.SystemDescription; CapabilitiesSupported = $row.CapabilitiesSupported
+            CapabilitiesEnabled = $row.CapabilitiesEnabled; ManagementAddressSubtype = $row.ManagementAddressSubtype
+            State = 'Discovered'; Status = 'Healthy'
+        })
+    }
+    return @($result)
+}
+
+function Get-LldpNeighborInventory {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$Target,
-
-        [Parameter(Mandatory)]
-        [string]$BaseOid,
-
-        [string]$Community = 'public',
-
-        [ValidateSet('V1', 'V2')]
-        [string]$SnmpVersion = 'V2',
-
-        [int]$Port = 161,
-        [int]$Timeout = 5000,
-        [int]$MaxRepetitions = 10,
-
-        [switch]$UseWalk
+        [Parameter(Mandatory = $true)][string]$Target, [string]$Community = 'public',
+        [ValidateSet('V1','V2')][string]$SnmpVersion = 'V2', [int]$Port = 161,
+        [int]$Timeout = 5000, [int]$MaxRepetitions = 25, [hashtable]$OidMap = $(Get-LldpOidMap)
     )
-
-    if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
-        throw 'SharpSnmpLib is not loaded. Run Import-SharpSnmpLib first.'
-    }
-
-    $ip = [System.Net.IPAddress]::Parse($Target)
-    $endpoint = [System.Net.IPEndPoint]::new($ip, $Port)
-    $communityObj = [Lextm.SharpSnmpLib.OctetString]::new($Community)
-    $rootOid = [Lextm.SharpSnmpLib.ObjectIdentifier]::new($BaseOid)
-
-    $results = [System.Collections.Generic.List[Lextm.SharpSnmpLib.Variable]]::new()
-
-    $versionCode =
-        switch ($SnmpVersion) {
-            'V1' { [Lextm.SharpSnmpLib.VersionCode]::V1 }
-            'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
-        }
-
-    if ($UseWalk -or $SnmpVersion -eq 'V1') {
-        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            $rootOid,
-            $results,
-            $Timeout,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-        )
-    } else {
-        # BulkWalk is faster and less chatty -- preferred for V2c
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            ([Lextm.SharpSnmpLib.OctetString]::new('')),
-            $rootOid,
-            $results,
-            $Timeout,
-            $MaxRepetitions,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
-            $null,
-            $null
-        )
-    }
-
-    foreach ($item in $results) {
-        $value = $item.Data.ToString()
-        if ($item.Data.TypeCode.ToString() -eq 'OctetString' -and ($value -match '[^\x20-\x7E]' -or $value.Contains('?'))) {
-            $value = $item.Data.ToHexString()
-        }
-        [PSCustomObject]@{
-            OID   = $item.Id.ToString()
-            Type  = $item.Data.TypeCode.ToString()
-            Value = $value
-        }
-    }
+    $snmpRoot = Join-Path (Split-Path $script:LldpScriptDir -Parent) 'snmp\WhatsUpGoldPS.Snmp\Public'
+    . (Join-Path $snmpRoot 'Import-SharpSnmpLib.ps1')
+    . (Join-Path $snmpRoot 'Get-SNMPTableSharp.ps1')
+    Import-SharpSnmpLib -ErrorAction Stop | Out-Null
+    $raw = @(Get-SNMPTableSharp -Target $Target -BaseOid $OidMap.RemoteTable -Community $Community -SnmpVersion $SnmpVersion -Port $Port -Timeout $Timeout -MaxRepetitions $MaxRepetitions)
+    return @(ConvertFrom-LldpTable -Rows $raw -OidMap $OidMap)
 }
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBThAAjkJOp/Is1
-# HA8YibGX4cj3wnyhxiRA3zDsotvXLqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClJ4OwRt0UlVMd
+# wIV0hqvTETL3D2K2tN13M+E4pa6WnqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -181,17 +167,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHLASAHWpyazG3Pto9CBcggYvBy5eHOGM
-# 3f79yEXKPm8wDQYJKoZIhvcNAQEBBQAEggIA01qo08qNJvLEtW+7P+M7lqxOsfF4
-# lZC+k4qu1eTSMyBv5iDc17L7+S+wC786wJQu8gfjcyPLR/fLoifM/uMAn/P4wfgx
-# +5DpWmII7NcwTb3PtKElJzkQc0ppNisjKfTnue2WJ+JkCw0MKX7C42OIUaBzO4PP
-# //QGhoG5lkNAJOT1d2aurU9jOyj2Qanc26uauMZZPwRQcSOiwqwAL5nqfte7JxP+
-# vko+L6RkK4UURnHyDLqxZVaqyjmQl+IEYHDSjoN/3pYbjg1v+bBHyluZIR/R/Fnk
-# rkd9tqQCx+YWyHlK2hCMus5VdA4PjV0nTbDBF0NAGPT+pLspFeWhrD6FtPO6RCa7
-# q6YxzAZMfLFwqCfcg7lA3fRUmnn6j4xy2StL9YeMI12pZYJ2ZkyF9ur6JwjI7TD8
-# MQ7yA044hlftRyhOtlU1xZBJsyoyiswXm7t/Frs4cl6oz5QJOXDXKerJRJnj71Vs
-# doxArj6ddIMTRM+Vv/cirMvPxOSL/qGYp9GHxTn+IDYRYvJNQBXaGiCJYj3xEJXy
-# Nevw6WFxdonSzvZaaK8+n5ciVe2X80zwaCs3/cERGG0esogQqKTGZ+ZsWzSoJ8K7
-# s7q6a7PzuGsew8ETvBKEIJmIuqMgrabsUDGCSZVv/5mt/JDtu1EpAEt+ySLOvtrC
-# hLWN97XcpfLousU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgfdoKc0Z0OHFsjnuCdOpa9KgMQ1C/DFiq
+# UijTW/Sl+kMwDQYJKoZIhvcNAQEBBQAEggIAP+mQUNcYjkM6jkXxneTU1sqeLU5+
+# T5ZmPjXDP7BwceMrE8YygoozSLJg5ch4MWwpwyzbDd8V/R6hGToFW+Wc5Pr+0SwN
+# wyrkmvu1g0RHMAHgabU0ziNLNwgjeedFLvuVmY7i9mw2t3M7hiPHSwQwtcd1YcWZ
+# DqZsdntqC57FoGlpMpkxu850sYDChlGo7k3RTyg41TI7Bn4jnOd9BTLPxGZDcMYP
+# WXxVkWsYtw0l6YdPDBRQh/P5i2wK4lI7MkQdWpyFmHeyu+ADfiL86mJ6di2gqlU/
+# zLnHNSsuTlGKLZXGp2NU1u1EPHvP59+KQekqCbjilWghN6BawvC2ANY6WA8o3Ejl
+# 7jEoFOqyj7qkWEKRZVJSYM1EqXRYUs53G/h4ARzigdq0CQUrBrUd0GomHi0tJ8q1
+# 8cSSHb+Z66gIrl88whDmEJ5hB7O8Q63D4NQ0QcFPX8hBVVZPRfBqUZabT/lqHx3V
+# RrJ0JptDPr/Hw0GHMS3RK8+b+ZcDQAIz2qzlSyz2IRH2EzPmY7EPFS/T//7BJrLt
+# fMy87rT0CdXqP7h9eZmgLfDZ/WTybOCb1XhUc9IChpg7NjM52uNuUudF0JrkF2dq
+# EfKnKfeQHcDEOPBs+3T8sxnemvyCcCQVjam8N+hhjpIdejGwtIP8dDZepi6E+8vq
+# tXSm8jU/EQiHNvA=
 # SIG # End signature block

@@ -1,87 +1,95 @@
-﻿function Get-SNMPTableSharp {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$Target,
+﻿#requires -Version 5.1
 
-        [Parameter(Mandatory)]
-        [string]$BaseOid,
+$script:BgpScriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 
-        [string]$Community = 'public',
-
-        [ValidateSet('V1', 'V2')]
-        [string]$SnmpVersion = 'V2',
-
-        [int]$Port = 161,
-        [int]$Timeout = 5000,
-        [int]$MaxRepetitions = 10,
-
-        [switch]$UseWalk
-    )
-
-    if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
-        throw 'SharpSnmpLib is not loaded. Run Import-SharpSnmpLib first.'
-    }
-
-    $ip = [System.Net.IPAddress]::Parse($Target)
-    $endpoint = [System.Net.IPEndPoint]::new($ip, $Port)
-    $communityObj = [Lextm.SharpSnmpLib.OctetString]::new($Community)
-    $rootOid = [Lextm.SharpSnmpLib.ObjectIdentifier]::new($BaseOid)
-
-    $results = [System.Collections.Generic.List[Lextm.SharpSnmpLib.Variable]]::new()
-
-    $versionCode =
-        switch ($SnmpVersion) {
-            'V1' { [Lextm.SharpSnmpLib.VersionCode]::V1 }
-            'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
-        }
-
-    if ($UseWalk -or $SnmpVersion -eq 'V1') {
-        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            $rootOid,
-            $results,
-            $Timeout,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-        )
-    } else {
-        # BulkWalk is faster and less chatty -- preferred for V2c
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            ([Lextm.SharpSnmpLib.OctetString]::new('')),
-            $rootOid,
-            $results,
-            $Timeout,
-            $MaxRepetitions,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
-            $null,
-            $null
-        )
-    }
-
-    foreach ($item in $results) {
-        $value = $item.Data.ToString()
-        if ($item.Data.TypeCode.ToString() -eq 'OctetString' -and ($value -match '[^\x20-\x7E]' -or $value.Contains('?'))) {
-            $value = $item.Data.ToHexString()
-        }
-        [PSCustomObject]@{
-            OID   = $item.Id.ToString()
-            Type  = $item.Data.TypeCode.ToString()
-            Value = $value
-        }
+function Get-BgpOidMap {
+    [ordered]@{
+        PeerTable          = '1.3.6.1.2.1.15.3.1'
+        Identifier         = '1'
+        State              = '2'
+        AdminStatus        = '3'
+        NegotiatedVersion  = '4'
+        LocalAddress       = '5'
+        LocalPort          = '6'
+        RemotePort         = '7'
+        RemoteAs           = '8'
+        FsmEstablishedTime = '16'
+        InUpdates          = '9'
+        OutUpdates         = '10'
+        InTotalMessages    = '17'
+        OutTotalMessages   = '18'
     }
 }
 
+function ConvertFrom-BgpTable {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [object[]]$Rows,
+        [Parameter(Mandatory = $true)] [hashtable]$OidMap
+    )
+    $columns = @{}
+    foreach ($name in @('Identifier','State','AdminStatus','NegotiatedVersion','LocalAddress','LocalPort','RemotePort','RemoteAs','FsmEstablishedTime','InUpdates','OutUpdates','InTotalMessages','OutTotalMessages')) {
+        $columns[$name] = "$($OidMap.PeerTable).$($OidMap[$name])"
+    }
+    $byIndex = @{}
+    foreach ($item in @($Rows)) {
+        $oid = [string]$item.OID
+        foreach ($name in $columns.Keys) {
+            $prefix = "$($columns[$name])."
+            if ($oid.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+                $index = $oid.Substring($prefix.Length)
+                if (-not $byIndex.ContainsKey($index)) { $byIndex[$index] = @{} }
+                $byIndex[$index][$name] = [string]$item.Value
+                break
+            }
+        }
+    }
+    $inventory = [System.Collections.Generic.List[object]]::new()
+    foreach ($index in @($byIndex.Keys)) {
+        $row = $byIndex[$index]
+        $stateNumber = 0
+        $remoteAs = 0
+        $established = 0
+        [void][int]::TryParse([string]$row.State, [ref]$stateNumber)
+        [void][int]::TryParse([string]$row.RemoteAs, [ref]$remoteAs)
+        [void][int]::TryParse([string]$row.FsmEstablishedTime, [ref]$established)
+        $state = switch ($stateNumber) { 6 { 'Established' } 1 { 'Idle' } 2 { 'Connect' } 3 { 'Active' } 4 { 'OpenSent' } 5 { 'OpenConfirm' } default { 'Unknown' } }
+        $inventory.Add([pscustomobject][ordered]@{
+            Source = 'SNMP'; RecordType = 'Peer'; Index = $index; PeerAddress = $index
+            Identifier = $row.Identifier; RemoteAs = $remoteAs; LocalAddress = $row.LocalAddress
+            LocalPort = $row.LocalPort; RemotePort = $row.RemotePort; NegotiatedVersion = $row.NegotiatedVersion
+            State = $state; StateCode = $stateNumber; EstablishedSeconds = $established
+            InUpdates = $row.InUpdates; OutUpdates = $row.OutUpdates
+            InTotalMessages = $row.InTotalMessages; OutTotalMessages = $row.OutTotalMessages
+            Status = if ($state -eq 'Established') { 'Healthy' } else { 'Critical' }
+        })
+    }
+    return @($inventory)
+}
+
+function Get-BgpPeerInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$Target,
+        [string]$Community = 'public',
+        [ValidateSet('V1', 'V2')] [string]$SnmpVersion = 'V2',
+        [int]$Port = 161,
+        [int]$Timeout = 5000,
+        [int]$MaxRepetitions = 25,
+        [hashtable]$OidMap = $(Get-BgpOidMap)
+    )
+    $snmpRoot = Join-Path (Split-Path $script:BgpScriptDir -Parent) 'snmp\WhatsUpGoldPS.Snmp\Public'
+    . (Join-Path $snmpRoot 'Import-SharpSnmpLib.ps1')
+    . (Join-Path $snmpRoot 'Get-SNMPTableSharp.ps1')
+    Import-SharpSnmpLib -ErrorAction Stop | Out-Null
+    $raw = @(Get-SNMPTableSharp -Target $Target -BaseOid $OidMap.PeerTable -Community $Community -SnmpVersion $SnmpVersion -Port $Port -Timeout $Timeout -MaxRepetitions $MaxRepetitions)
+    return @(ConvertFrom-BgpTable -Rows $raw -OidMap $OidMap)
+}
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBThAAjkJOp/Is1
-# HA8YibGX4cj3wnyhxiRA3zDsotvXLqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCl5twcW6x1S2Zp
+# d0w23iB2jAB8+eOBr5KcqOGc2ZysvqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -181,17 +189,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHLASAHWpyazG3Pto9CBcggYvBy5eHOGM
-# 3f79yEXKPm8wDQYJKoZIhvcNAQEBBQAEggIA01qo08qNJvLEtW+7P+M7lqxOsfF4
-# lZC+k4qu1eTSMyBv5iDc17L7+S+wC786wJQu8gfjcyPLR/fLoifM/uMAn/P4wfgx
-# +5DpWmII7NcwTb3PtKElJzkQc0ppNisjKfTnue2WJ+JkCw0MKX7C42OIUaBzO4PP
-# //QGhoG5lkNAJOT1d2aurU9jOyj2Qanc26uauMZZPwRQcSOiwqwAL5nqfte7JxP+
-# vko+L6RkK4UURnHyDLqxZVaqyjmQl+IEYHDSjoN/3pYbjg1v+bBHyluZIR/R/Fnk
-# rkd9tqQCx+YWyHlK2hCMus5VdA4PjV0nTbDBF0NAGPT+pLspFeWhrD6FtPO6RCa7
-# q6YxzAZMfLFwqCfcg7lA3fRUmnn6j4xy2StL9YeMI12pZYJ2ZkyF9ur6JwjI7TD8
-# MQ7yA044hlftRyhOtlU1xZBJsyoyiswXm7t/Frs4cl6oz5QJOXDXKerJRJnj71Vs
-# doxArj6ddIMTRM+Vv/cirMvPxOSL/qGYp9GHxTn+IDYRYvJNQBXaGiCJYj3xEJXy
-# Nevw6WFxdonSzvZaaK8+n5ciVe2X80zwaCs3/cERGG0esogQqKTGZ+ZsWzSoJ8K7
-# s7q6a7PzuGsew8ETvBKEIJmIuqMgrabsUDGCSZVv/5mt/JDtu1EpAEt+ySLOvtrC
-# hLWN97XcpfLousU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgW8XTzpR4So8UmcVDqPz5XtMf33D6G4nu
+# YKMgJ7MB1/AwDQYJKoZIhvcNAQEBBQAEggIA0O3dBqoypZSIYf3TwunQ2aoh7EV2
+# 1p8y1BeVTeYxEMPPaGXNyeqMAdWBOCdiimc7XDYMQaU7xeibNlQ+Uyt2BhtTlvCF
+# QM91UxNJlTpMAj8eDcddW+8vj++aW6/uXhzsStBfppcGIz7IaDCyC466WcIE70VU
+# 3tQ0lg3yUpNB6LGxGZJ74dMljcvRBvbhAdPh1YVo+GfawrC+iBMndCis0gdnL/bJ
+# h4Js5ykCD6l8hQszvpvT9HsKs4MilM8SQhOA4kVar0EQrDaqqf7rGMICQVzfXz40
+# THhh6Tf5w+vjphsJrCnBXGtIVZAg+rGQUfiRLKfOa4+ayZag0jJNi01OUouO+aWo
+# r8QcxZ886bewjA/tMZfnPFjITOTGBa3ybiT5u38G7W1qQ8+RbsSdnPGqr+Elyw/3
+# DzZ2jeGHsB/wDoCozOOHCwj3oIdqKEHDjEcQkQfRdxrWD9mJTTydt6q0jHNhoEFw
+# Vw4HFQsRWERI8GMO51ziSKXWSLg1G1cOUrtjb9wiyexWL6DYTkZ8Pt0XYfANY7Iu
+# q45fie1AGwAvspYry9fUIRXvBxhL7K1+Mh13XQD0ji0omGot5MHJ1JiCs9g4ZhDd
+# MfMDhvAAMHdRQBkB+WVYJUSln+WKJAubFuqyfrd/V2u8oQVyBzp9F4awQ+5TdMBA
+# oA6rPJWiYxtt93w=
 # SIG # End signature block

@@ -1,87 +1,74 @@
-﻿function Get-SNMPTableSharp {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$Target,
+﻿#requires -Version 5.1
 
-        [Parameter(Mandatory)]
-        [string]$BaseOid,
+[CmdletBinding(SupportsShouldProcess = $true)]
+param(
+    [Parameter(Mandatory = $true)] [string]$Target,
+    [Parameter(Mandatory = $true)] [int]$DeviceId,
+    [string]$DeviceName = $Target,
+    [string]$Community,
+    [ValidateSet('V1', 'V2')] [string]$SnmpVersion = 'V2',
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot 'output'),
+    [switch]$UseSsh,
+    [PSCredential]$SshCredential,
+    [string]$SnmpCredentialName = 'Cisco.Snmp',
+    [string]$SshCredentialName = 'Cisco.Ssh',
+    [int]$SshPort = 22,
+    [int]$SshTimeoutSeconds = 30,
+    [switch]$CreateWugMonitors,
+    [hashtable]$OidMap
+)
 
-        [string]$Community = 'public',
+$scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
+. (Join-Path (Split-Path $scriptDir -Parent) 'neighbors\Resolve-NetworkNeighborCredentials.ps1')
+. (Join-Path $scriptDir 'Get-EigrpNeighborInventory.ps1')
+. (Join-Path $scriptDir 'New-EigrpMonitorPlan.ps1')
+. (Join-Path $scriptDir 'Export-EigrpDashboard.ps1')
+if (-not $OidMap) { $OidMap = Get-EigrpOidMap }
+$vaultCredentials = Resolve-NetworkNeighborCredentials -SnmpCredentialName $SnmpCredentialName -SshCredentialName $SshCredentialName -UseSsh:$UseSsh
+if ([string]::IsNullOrWhiteSpace($Community)) { $Community = $vaultCredentials.SnmpCommunity }
+$SnmpVersion = $vaultCredentials.SnmpVersion
+if ($UseSsh) { $SshCredential = $vaultCredentials.SshCredential }
 
-        [ValidateSet('V1', 'V2')]
-        [string]$SnmpVersion = 'V2',
+$neighbors = @(Get-EigrpNeighborInventory -Target $Target -Community $Community -SnmpVersion $SnmpVersion -OidMap $OidMap)
+$sshRows = @()
+if ($UseSsh) {
+    if (-not $SshCredential) { throw '-SshCredential is required when -UseSsh is specified.' }
+    . (Join-Path $scriptDir 'Get-EigrpSshInventory.ps1')
+    $sshRows = @(Get-EigrpSshInventory -Target $Target -Username $SshCredential.UserName -SecurePassword $SshCredential.Password -Port $SshPort -TimeoutSeconds $SshTimeoutSeconds)
+}
+$plan = @(New-EigrpMonitorPlan -DeviceId $DeviceId -DeviceName $DeviceName -OidMap $OidMap -Neighbors $neighbors)
+$dashboard = Export-EigrpDashboard -Neighbors $neighbors -AdditionalData $sshRows -OutputDirectory $OutputDirectory
 
-        [int]$Port = 161,
-        [int]$Timeout = 5000,
-        [int]$MaxRepetitions = 10,
-
-        [switch]$UseWalk
-    )
-
-    if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
-        throw 'SharpSnmpLib is not loaded. Run Import-SharpSnmpLib first.'
-    }
-
-    $ip = [System.Net.IPAddress]::Parse($Target)
-    $endpoint = [System.Net.IPEndPoint]::new($ip, $Port)
-    $communityObj = [Lextm.SharpSnmpLib.OctetString]::new($Community)
-    $rootOid = [Lextm.SharpSnmpLib.ObjectIdentifier]::new($BaseOid)
-
-    $results = [System.Collections.Generic.List[Lextm.SharpSnmpLib.Variable]]::new()
-
-    $versionCode =
-        switch ($SnmpVersion) {
-            'V1' { [Lextm.SharpSnmpLib.VersionCode]::V1 }
-            'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
-        }
-
-    if ($UseWalk -or $SnmpVersion -eq 'V1') {
-        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            $rootOid,
-            $results,
-            $Timeout,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-        )
-    } else {
-        # BulkWalk is faster and less chatty -- preferred for V2c
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            ([Lextm.SharpSnmpLib.OctetString]::new('')),
-            $rootOid,
-            $results,
-            $Timeout,
-            $MaxRepetitions,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
-            $null,
-            $null
-        )
-    }
-
-    foreach ($item in $results) {
-        $value = $item.Data.ToString()
-        if ($item.Data.TypeCode.ToString() -eq 'OctetString' -and ($value -match '[^\x20-\x7E]' -or $value.Contains('?'))) {
-            $value = $item.Data.ToHexString()
-        }
-        [PSCustomObject]@{
-            OID   = $item.Id.ToString()
-            Type  = $item.Data.TypeCode.ToString()
-            Value = $value
+if ($CreateWugMonitors) {
+    $moduleRoot = Split-Path (Split-Path $scriptDir -Parent) -Parent
+    . (Join-Path $moduleRoot 'functions\Add-WUGActiveMonitor.ps1')
+    . (Join-Path $moduleRoot 'functions\Add-WUGPerformanceMonitor.ps1')
+    foreach ($item in $plan) {
+        if (-not $PSCmdlet.ShouldProcess($item.Name, 'Create EIGRP monitor')) { continue }
+        if ($item.Type -eq 'SNMPTable') {
+            $monitorParams = $item.Parameters
+            Add-WUGActiveMonitor -DeviceId $item.DeviceId -Type SNMPTable -Name $item.Name @monitorParams
+        } else {
+            Add-WUGPerformanceMonitor -DeviceId $item.DeviceId -Type Snmp -Name $item.Name -SnmpOID $item.Oid -SnmpInstance $item.Instance
         }
     }
 }
 
+[pscustomobject][ordered]@{
+    Target = $Target
+    DeviceId = $DeviceId
+    NeighborCount = $neighbors.Count
+    SshRowCount = $sshRows.Count
+    UpCount = @($neighbors | Where-Object State -eq 'Up').Count
+    DownCount = @($neighbors | Where-Object State -eq 'Down').Count
+    MonitorCount = $plan.Count
+    Dashboard = $dashboard
+}
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBThAAjkJOp/Is1
-# HA8YibGX4cj3wnyhxiRA3zDsotvXLqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHO2MYdwRniJ7D
+# AX3bBSvb4JIm0ATdo3EoMUVuVkN6/6CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -181,17 +168,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHLASAHWpyazG3Pto9CBcggYvBy5eHOGM
-# 3f79yEXKPm8wDQYJKoZIhvcNAQEBBQAEggIA01qo08qNJvLEtW+7P+M7lqxOsfF4
-# lZC+k4qu1eTSMyBv5iDc17L7+S+wC786wJQu8gfjcyPLR/fLoifM/uMAn/P4wfgx
-# +5DpWmII7NcwTb3PtKElJzkQc0ppNisjKfTnue2WJ+JkCw0MKX7C42OIUaBzO4PP
-# //QGhoG5lkNAJOT1d2aurU9jOyj2Qanc26uauMZZPwRQcSOiwqwAL5nqfte7JxP+
-# vko+L6RkK4UURnHyDLqxZVaqyjmQl+IEYHDSjoN/3pYbjg1v+bBHyluZIR/R/Fnk
-# rkd9tqQCx+YWyHlK2hCMus5VdA4PjV0nTbDBF0NAGPT+pLspFeWhrD6FtPO6RCa7
-# q6YxzAZMfLFwqCfcg7lA3fRUmnn6j4xy2StL9YeMI12pZYJ2ZkyF9ur6JwjI7TD8
-# MQ7yA044hlftRyhOtlU1xZBJsyoyiswXm7t/Frs4cl6oz5QJOXDXKerJRJnj71Vs
-# doxArj6ddIMTRM+Vv/cirMvPxOSL/qGYp9GHxTn+IDYRYvJNQBXaGiCJYj3xEJXy
-# Nevw6WFxdonSzvZaaK8+n5ciVe2X80zwaCs3/cERGG0esogQqKTGZ+ZsWzSoJ8K7
-# s7q6a7PzuGsew8ETvBKEIJmIuqMgrabsUDGCSZVv/5mt/JDtu1EpAEt+ySLOvtrC
-# hLWN97XcpfLousU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg+TJ6sThDZv0Oy6/UmZnp4k1fc7hPhzTC
+# 5Xwgxu9v5FgwDQYJKoZIhvcNAQEBBQAEggIAgIpxn7lEXKbQsnQb4hv9jfs+wRor
+# 8t3SEYg68fAQyzi+5TfyvMmvD0cI7c5Wy+Pu28T4og8ik+YOh8RiyOQQOOROFN2z
+# eQus7kvuWT5Z4KuFN+NRE0h9dp/E5TOXxR1aoOcid1nHr0CYm8LFXxJwGYpPTHYg
+# a1rynslwpMxYXB8GWic7tpI/nAA0dAzW9ibf/F9UTIvRL8PHdjn4jzBudUKEvxMH
+# smL/htGKg8gT39uBrnwECNL6FRY/eiZhT6siEd8u37I6BgLhi7jYK43AAQdCtBY/
+# xPCRcSyuyggGaGexOjr5FeFWBs5BPRxGCOIB+9gOOdqJhVPGAUxvG4WsirTrO7nk
+# 6M5YxIVbIu6hugVNJOVAB5tIKc7OcJai+Y9Vtw7ymHR+r0tpxXvFUqX7y8KsPw8h
+# jyKVcr7RPfiv7icfE6t3LkxX6DHnonzej30s6AYtQDYdGvk6yf758B0pcRsxrzJC
+# r2dX2saNNkU8X4V1iBsM9DbtsXUaEJ9Utk5WFdXb6HE10m6z/ZNJLX9VB+wRsILC
+# /LwAVAL/cMa5Q/9aH2C7WOSFS0o/XiMPQEJipb+ziBzqKP7Xj/MfwV5BzJ3vBJ6k
+# Pg8EYdCCO/YOALASKp7y+hrH3D/tRLQ+BUxqCbZmdX1tVgxEA4497dgH17skYsLL
+# qqTz/uXAo++75Sk=
 # SIG # End signature block

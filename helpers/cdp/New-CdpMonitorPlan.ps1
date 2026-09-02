@@ -1,87 +1,28 @@
-﻿function Get-SNMPTableSharp {
+﻿#requires -Version 5.1
+
+function New-CdpMonitorPlan {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$Target,
-
-        [Parameter(Mandatory)]
-        [string]$BaseOid,
-
-        [string]$Community = 'public',
-
-        [ValidateSet('V1', 'V2')]
-        [string]$SnmpVersion = 'V2',
-
-        [int]$Port = 161,
-        [int]$Timeout = 5000,
-        [int]$MaxRepetitions = 10,
-
-        [switch]$UseWalk
+        [Parameter(Mandatory = $true)][int]$DeviceId,
+        [Parameter(Mandatory = $true)][string]$DeviceName,
+        [hashtable]$OidMap = $(Get-CdpOidMap)
     )
-
-    if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
-        throw 'SharpSnmpLib is not loaded. Run Import-SharpSnmpLib first.'
+    $tableParams = @{
+        SnmpTableDiscOID = "$($OidMap.CacheTable).$($OidMap.DeviceId)"
+        SnmpTableDiscOperator = 'ne'; SnmpTableDiscValue = '0'
+        SnmpTableDiscCommentOID = "$($OidMap.CacheTable).$($OidMap.DeviceId)"
+        SnmpTableDiscIndexOID = "$($OidMap.CacheTable).$($OidMap.DeviceIndex)"
+        SnmpTableDiscCreates = 'true'; SnmpTableMonitoredOID = "$($OidMap.CacheTable).$($OidMap.DeviceId)"
+        SnmpTableMonitorOperator = 'ne'; SnmpTableMonitoredValue = '0'; SnmpTableMonitorUpIfMatch = 'upifmatch'
     }
-
-    $ip = [System.Net.IPAddress]::Parse($Target)
-    $endpoint = [System.Net.IPEndPoint]::new($ip, $Port)
-    $communityObj = [Lextm.SharpSnmpLib.OctetString]::new($Community)
-    $rootOid = [Lextm.SharpSnmpLib.ObjectIdentifier]::new($BaseOid)
-
-    $results = [System.Collections.Generic.List[Lextm.SharpSnmpLib.Variable]]::new()
-
-    $versionCode =
-        switch ($SnmpVersion) {
-            'V1' { [Lextm.SharpSnmpLib.VersionCode]::V1 }
-            'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
-        }
-
-    if ($UseWalk -or $SnmpVersion -eq 'V1') {
-        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            $rootOid,
-            $results,
-            $Timeout,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-        )
-    } else {
-        # BulkWalk is faster and less chatty -- preferred for V2c
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            ([Lextm.SharpSnmpLib.OctetString]::new('')),
-            $rootOid,
-            $results,
-            $Timeout,
-            $MaxRepetitions,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
-            $null,
-            $null
-        )
-    }
-
-    foreach ($item in $results) {
-        $value = $item.Data.ToString()
-        if ($item.Data.TypeCode.ToString() -eq 'OctetString' -and ($value -match '[^\x20-\x7E]' -or $value.Contains('?'))) {
-            $value = $item.Data.ToHexString()
-        }
-        [PSCustomObject]@{
-            OID   = $item.Id.ToString()
-            Type  = $item.Data.TypeCode.ToString()
-            Value = $value
-        }
-    }
+    @([pscustomobject][ordered]@{ Name = "CDP Neighbor Discovery [$DeviceName]"; Type = 'SNMPTable'; Parameters = $tableParams; DeviceId = $DeviceId; Tags = @('cdp','snmp','neighbor') })
 }
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBThAAjkJOp/Is1
-# HA8YibGX4cj3wnyhxiRA3zDsotvXLqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACRUcuRVo8J30o
+# 8duDaHT8I86FOq2QrUHLY5wEBz8j56CCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -181,17 +122,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHLASAHWpyazG3Pto9CBcggYvBy5eHOGM
-# 3f79yEXKPm8wDQYJKoZIhvcNAQEBBQAEggIA01qo08qNJvLEtW+7P+M7lqxOsfF4
-# lZC+k4qu1eTSMyBv5iDc17L7+S+wC786wJQu8gfjcyPLR/fLoifM/uMAn/P4wfgx
-# +5DpWmII7NcwTb3PtKElJzkQc0ppNisjKfTnue2WJ+JkCw0MKX7C42OIUaBzO4PP
-# //QGhoG5lkNAJOT1d2aurU9jOyj2Qanc26uauMZZPwRQcSOiwqwAL5nqfte7JxP+
-# vko+L6RkK4UURnHyDLqxZVaqyjmQl+IEYHDSjoN/3pYbjg1v+bBHyluZIR/R/Fnk
-# rkd9tqQCx+YWyHlK2hCMus5VdA4PjV0nTbDBF0NAGPT+pLspFeWhrD6FtPO6RCa7
-# q6YxzAZMfLFwqCfcg7lA3fRUmnn6j4xy2StL9YeMI12pZYJ2ZkyF9ur6JwjI7TD8
-# MQ7yA044hlftRyhOtlU1xZBJsyoyiswXm7t/Frs4cl6oz5QJOXDXKerJRJnj71Vs
-# doxArj6ddIMTRM+Vv/cirMvPxOSL/qGYp9GHxTn+IDYRYvJNQBXaGiCJYj3xEJXy
-# Nevw6WFxdonSzvZaaK8+n5ciVe2X80zwaCs3/cERGG0esogQqKTGZ+ZsWzSoJ8K7
-# s7q6a7PzuGsew8ETvBKEIJmIuqMgrabsUDGCSZVv/5mt/JDtu1EpAEt+ySLOvtrC
-# hLWN97XcpfLousU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgcn3bjnNk2wVH/X8hmPjH6A+RvvVVxyWn
+# 2cJc0paM8cIwDQYJKoZIhvcNAQEBBQAEggIAkb6QC8y+34CXPKt/1pNMn51RRWSN
+# Zh1qgo0PDdPDjr3OlXXxNkgNFBu+brJO0IOuoj3HeLUEWjFZw5pJhnYb5mnYCn1N
+# Zv684WVHJfUK+hJE3+5g2a34nLdxZB+I1CsP3SH0M7D1UuNw+s/NbKLZZz8OeMv8
+# 2uQBG/vzeJCqtNk5DfHHSACPjoN91HZ8ehDAQcbFs1hJnU92t7bJOkzJHHOWQ8QP
+# cPIPo75JfFfLZqM3LBgqxEPRmyEhIK/TXrKSMMk69v2R7id03/OhIqBEjfWDbswc
+# Iij+VvtFdd1byJoVY+k1Qcrh3n9nuSwUJJxVtgLt6hr+5av60n8/k0ItLgB4yjdD
+# D53FGGyeAiQbscsh7OX2DsJdgxfqZwHn9MAPXJosQLq3RGnmYUkrXsMZkvTou3Ht
+# FgXCRP7g4kyaukt6qKzf3V6D9PZgmHySBcApQfHnHVAwnnE6kOr9UqjLU5EAuZSR
+# ZS5LzzUqPk/DxIsDnBWYihoymY+FXxDhJN6pGJY4M3NMS1SO48uP0ruOsfL+Rlw8
+# Re9E66bxUpCibRHuSPA4HoblApxyPyGQU7E51ushSpw2pMrHlDmh8uYQ+R3gqLjB
+# cDhgpqd1b0Rq/gizdvexcQvMLzdT92foGiHVZG5xRBVc+EUYyNY0YzGmlrNwsGIm
+# llSLjTbUsc+A9GA=
 # SIG # End signature block

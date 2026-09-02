@@ -1,87 +1,68 @@
-﻿function Get-SNMPTableSharp {
+﻿#requires -Version 5.1
+
+function Merge-NetworkNeighborData {
+    [CmdletBinding()]
+    param([object[]]$Rows = @())
+    $result = [System.Collections.Generic.List[object]]::new()
+    $groups = @{}
+    foreach ($inputRow in @($Rows)) {
+        if (-not $inputRow) { continue }
+        $row = [ordered]@{}
+        foreach ($property in $inputRow.PSObject.Properties) { $row[$property.Name] = $property.Value }
+        $address = [string]$inputRow.PeerAddress
+        if (-not $address) { $address = [string]$inputRow.NeighborAddress }
+        if (-not $address) { $address = [string]$inputRow.ManagementAddress }
+        $interface = [string]$inputRow.LocalInterface
+        if (-not $interface) { $interface = [string]$inputRow.Interface }
+        $identity = [string]$inputRow.RemoteDeviceId
+        if (-not $identity) { $identity = [string]$inputRow.RemoteSystemName }
+        if (-not $identity) { $identity = [string]$inputRow.ChassisId }
+        $key = if ($address) { "address:$address" } elseif ($identity) { "identity:$identity" } elseif ($interface) { "interface:$interface" } else { "row:$($result.Count)" }
+        $row['NeighborKey'] = $key
+        $row['CollectedSource'] = [string]$inputRow.Source
+        if (-not $groups.ContainsKey($key)) { $groups[$key] = [System.Collections.Generic.List[object]]::new() }
+        $groups[$key].Add([pscustomobject]$row)
+        $result.Add([pscustomobject]$row)
+    }
+    foreach ($row in $result) {
+        $matches = @($groups[$row.NeighborKey])
+        $protocols = @($matches | ForEach-Object { [string]$_.Protocol } | Where-Object { $_ } | Select-Object -Unique)
+        $sources = @($matches | ForEach-Object { [string]$_.Source } | Where-Object { $_ } | Select-Object -Unique)
+        $correlationStatus = 'SingleSource'
+        if ($matches.Count -gt 1) { $correlationStatus = 'Correlated' }
+        $row | Add-Member -NotePropertyName RelatedProtocols -NotePropertyValue ($protocols -join ', ') -Force
+        $row | Add-Member -NotePropertyName EvidenceSources -NotePropertyValue ($sources -join ', ') -Force
+        $row | Add-Member -NotePropertyName EvidenceCount -NotePropertyValue $matches.Count -Force
+        $row | Add-Member -NotePropertyName CorrelationStatus -NotePropertyValue $correlationStatus -Force
+    }
+    return @($result)
+}
+
+function Export-NetworkNeighborDashboard {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$Target,
-
-        [Parameter(Mandatory)]
-        [string]$BaseOid,
-
-        [string]$Community = 'public',
-
-        [ValidateSet('V1', 'V2')]
-        [string]$SnmpVersion = 'V2',
-
-        [int]$Port = 161,
-        [int]$Timeout = 5000,
-        [int]$MaxRepetitions = 10,
-
-        [switch]$UseWalk
+        [Parameter(Mandatory = $true)][object[]]$Rows,
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [string]$WhatsUpGoldPsRepoPath
     )
-
-    if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
-        throw 'SharpSnmpLib is not loaded. Run Import-SharpSnmpLib first.'
-    }
-
-    $ip = [System.Net.IPAddress]::Parse($Target)
-    $endpoint = [System.Net.IPEndPoint]::new($ip, $Port)
-    $communityObj = [Lextm.SharpSnmpLib.OctetString]::new($Community)
-    $rootOid = [Lextm.SharpSnmpLib.ObjectIdentifier]::new($BaseOid)
-
-    $results = [System.Collections.Generic.List[Lextm.SharpSnmpLib.Variable]]::new()
-
-    $versionCode =
-        switch ($SnmpVersion) {
-            'V1' { [Lextm.SharpSnmpLib.VersionCode]::V1 }
-            'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
-        }
-
-    if ($UseWalk -or $SnmpVersion -eq 'V1') {
-        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            $rootOid,
-            $results,
-            $Timeout,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-        )
-    } else {
-        # BulkWalk is faster and less chatty -- preferred for V2c
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            ([Lextm.SharpSnmpLib.OctetString]::new('')),
-            $rootOid,
-            $results,
-            $Timeout,
-            $MaxRepetitions,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
-            $null,
-            $null
-        )
-    }
-
-    foreach ($item in $results) {
-        $value = $item.Data.ToString()
-        if ($item.Data.TypeCode.ToString() -eq 'OctetString' -and ($value -match '[^\x20-\x7E]' -or $value.Contains('?'))) {
-            $value = $item.Data.ToHexString()
-        }
-        [PSCustomObject]@{
-            OID   = $item.Id.ToString()
-            Type  = $item.Data.TypeCode.ToString()
-            Value = $value
-        }
-    }
+    if ([string]::IsNullOrWhiteSpace($WhatsUpGoldPsRepoPath)) { $WhatsUpGoldPsRepoPath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }
+    if (-not (Test-Path -LiteralPath $OutputDirectory)) { New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null }
+    $jsonPath = Join-Path $OutputDirectory 'network-neighbors.json'
+    $htmlPath = Join-Path $OutputDirectory 'network-neighbor-dashboard.html'
+    . (Join-Path $WhatsUpGoldPsRepoPath 'helpers\reports\Export-DynamicDashboardHtml.ps1')
+    $merged = @(Merge-NetworkNeighborData -Rows $Rows)
+    $merged | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $jsonPath -Encoding UTF8
+    $reportData = @(Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json)
+    Set-StrictMode -Off
+    $reportData | Export-DynamicDashboardHtml -OutputPath $htmlPath -ReportTitle 'Network Neighbor Relationships' -CardField @('Status','Protocol','RelatedProtocols','CorrelationStatus') -StatusField 'Status' -ExportPrefix 'network_neighbors' -TemplatePath (Join-Path $WhatsUpGoldPsRepoPath 'helpers\reports\Dynamic-Dashboard-Template.html')
+    [pscustomobject][ordered]@{ JsonPath = $jsonPath; HtmlPath = $htmlPath; RowCount = $merged.Count; CorrelatedCount = @($merged | Where-Object CorrelationStatus -eq 'Correlated').Count }
 }
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBThAAjkJOp/Is1
-# HA8YibGX4cj3wnyhxiRA3zDsotvXLqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAuyqTbuIcUOaoq
+# YPoZlVfwZI9mJZimTShNtrq/GnbCrKCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -181,17 +162,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHLASAHWpyazG3Pto9CBcggYvBy5eHOGM
-# 3f79yEXKPm8wDQYJKoZIhvcNAQEBBQAEggIA01qo08qNJvLEtW+7P+M7lqxOsfF4
-# lZC+k4qu1eTSMyBv5iDc17L7+S+wC786wJQu8gfjcyPLR/fLoifM/uMAn/P4wfgx
-# +5DpWmII7NcwTb3PtKElJzkQc0ppNisjKfTnue2WJ+JkCw0MKX7C42OIUaBzO4PP
-# //QGhoG5lkNAJOT1d2aurU9jOyj2Qanc26uauMZZPwRQcSOiwqwAL5nqfte7JxP+
-# vko+L6RkK4UURnHyDLqxZVaqyjmQl+IEYHDSjoN/3pYbjg1v+bBHyluZIR/R/Fnk
-# rkd9tqQCx+YWyHlK2hCMus5VdA4PjV0nTbDBF0NAGPT+pLspFeWhrD6FtPO6RCa7
-# q6YxzAZMfLFwqCfcg7lA3fRUmnn6j4xy2StL9YeMI12pZYJ2ZkyF9ur6JwjI7TD8
-# MQ7yA044hlftRyhOtlU1xZBJsyoyiswXm7t/Frs4cl6oz5QJOXDXKerJRJnj71Vs
-# doxArj6ddIMTRM+Vv/cirMvPxOSL/qGYp9GHxTn+IDYRYvJNQBXaGiCJYj3xEJXy
-# Nevw6WFxdonSzvZaaK8+n5ciVe2X80zwaCs3/cERGG0esogQqKTGZ+ZsWzSoJ8K7
-# s7q6a7PzuGsew8ETvBKEIJmIuqMgrabsUDGCSZVv/5mt/JDtu1EpAEt+ySLOvtrC
-# hLWN97XcpfLousU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg5vhW37apAjm8Sz/J8OyR4f05AxIwMhNp
+# +OtDkLoygHEwDQYJKoZIhvcNAQEBBQAEggIA20RVIE6Wi47TMgKaeLed0P6l8ORp
+# VGgkxZc96ZqZI0AyL4w5Z4U8SKZ9ZpKP9PItqnQTRxVLtqAgur+++Z00BEkOU7fo
+# +N15rXe054KS4LMpy9+cGLmD70sfxVb/RxTKDEwAogtAy6dEe1Rek8iMokVzhZP/
+# CTk381PO5pVuvtqRbVXWmoHkzOgZ+4/ybnGUa/h0ntgAbit3M6WrCgQ2pg0pTKW5
+# /rdgdcVH54fUvxUccLp0JXeBMYpIxGDhH7gSjPagLBgyl9LhX9DriRCLGJDDerhL
+# Goiricp96lhZV/iRiv4FxaRocCTQmz+lPjeQLM0tpeMVjMDgh/PjYQ4P7p0+a9tG
+# quIzEhei8shm7/eiACddIpjVjuWcjoVYgWnJNLr3pPOfaYa7QKUs8bKOYJU0ReHO
+# NRQYuKL8Hfb5r35YQNTTp0AwVmidM12/ljIoiN6Flk+3mGExg/zldfty+VjXj3bG
+# 0plZxkcJnRT48d130/DyqjEIBeU4BOJM+rUF1oUyazvg5bfweNkFHwqWbND3pQqU
+# bmcPOGOp3qdLiTPeDhB0BxCdP0fTAhmtHRgQm7xrLitAUhPLggZrIj5VwNRWVbga
+# l2T0BSRueDDWoUN2u2keE8zy8gpL+cjiATCJofoOC5puFC3C8WV5mVG3QNLPbnvv
+# W9HUr77prhErYF8=
 # SIG # End signature block

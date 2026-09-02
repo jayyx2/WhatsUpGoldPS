@@ -1,87 +1,61 @@
-﻿function Get-SNMPTableSharp {
+﻿#requires -Version 5.1
+
+function ConvertFrom-LldpSshOutput {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Output, [Parameter(Mandatory = $true)][string]$Target)
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $current = $null
+    foreach ($line in @($Output -split "`r?`n")) {
+        $text = $line.Trim()
+        if ($text -match '^\S+\s+has\s+(\d+)\s+neighbor') { continue }
+        if ($text -match '^Chassis id:\s*(.+)$') {
+            if ($current) { $rows.Add([pscustomobject]$current) }
+            $current = [ordered]@{ Source = 'SSH'; Target = $Target; RecordType = 'Neighbor'; Protocol = 'LLDP'; ChassisId = $Matches[1].Trim(); Status = 'Healthy'; State = 'Discovered' }
+            continue
+        }
+        if (-not $current) { continue }
+        if ($text -match '^Port id:\s*(.+)$') { $current['RemotePort'] = $Matches[1].Trim(); continue }
+        if ($text -match '^Port Description:\s*(.+)$') { $current['RemotePortDescription'] = $Matches[1].Trim(); continue }
+        if ($text -match '^System Name:\s*(.+)$') { $current['RemoteSystemName'] = $Matches[1].Trim(); continue }
+        if ($text -match '^System Description:\s*(.+)$') { $current['RemoteSystemDescription'] = $Matches[1].Trim(); continue }
+        if ($text -match '^Time remaining:\s*(\d+)') { $current['TimeRemaining'] = [int]$Matches[1]; continue }
+        if ($text -match '^System Capabilities:\s*(.+)$') { $current['CapabilitiesSupported'] = $Matches[1].Trim(); continue }
+        if ($text -match '^Enabled Capabilities:\s*(.+)$') { $current['CapabilitiesEnabled'] = $Matches[1].Trim(); continue }
+        if ($text -match '^Management Addresses:\s*$') { continue }
+        if ($text -match '^IP address:\s*(\S+)$') { $current['ManagementAddress'] = $Matches[1]; continue }
+        if ($text -match '^Local Intf:\s*(.+)$') { $current['LocalInterface'] = $Matches[1].Trim(); continue }
+        if ($text -match '^----------------') { $rows.Add([pscustomobject]$current); $current = $null }
+    }
+    if ($current) { $rows.Add([pscustomobject]$current) }
+    return @($rows)
+}
+
+function Get-LldpSshInventory {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$Target,
-
-        [Parameter(Mandatory)]
-        [string]$BaseOid,
-
-        [string]$Community = 'public',
-
-        [ValidateSet('V1', 'V2')]
-        [string]$SnmpVersion = 'V2',
-
-        [int]$Port = 161,
-        [int]$Timeout = 5000,
-        [int]$MaxRepetitions = 10,
-
-        [switch]$UseWalk
+        [Parameter(Mandatory = $true)][string]$Target, [Parameter(Mandatory = $true)][string]$Username,
+        [string]$Password, [System.Security.SecureString]$SecurePassword, [int]$Port = 22,
+        [int]$TimeoutSeconds = 30,
+        [string]$SshModulePath = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'ssh\WhatsUpGoldPS.Ssh\WhatsUpGoldPS.Ssh.psm1')
     )
-
-    if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
-        throw 'SharpSnmpLib is not loaded. Run Import-SharpSnmpLib first.'
+    if (-not (Test-Path -LiteralPath $SshModulePath)) { throw "SSH module not found: $SshModulePath" }
+    Import-Module -Name $SshModulePath -Force -ErrorAction Stop
+    $splat = @{ HostName = $Target; Port = $Port; Username = $Username; TimeoutSeconds = $TimeoutSeconds }
+    if ($Password) { $splat['Password'] = $Password }
+    if ($SecurePassword) { $splat['SecurePassword'] = $SecurePassword }
+    $session = New-SshSession @splat
+    try {
+        $result = Invoke-SshCommand -Session $session -Command 'show lldp neighbors detail' -TimeoutSeconds $TimeoutSeconds
+        return @(ConvertFrom-LldpSshOutput -Output $result.Output -Target $Target)
     }
-
-    $ip = [System.Net.IPAddress]::Parse($Target)
-    $endpoint = [System.Net.IPEndPoint]::new($ip, $Port)
-    $communityObj = [Lextm.SharpSnmpLib.OctetString]::new($Community)
-    $rootOid = [Lextm.SharpSnmpLib.ObjectIdentifier]::new($BaseOid)
-
-    $results = [System.Collections.Generic.List[Lextm.SharpSnmpLib.Variable]]::new()
-
-    $versionCode =
-        switch ($SnmpVersion) {
-            'V1' { [Lextm.SharpSnmpLib.VersionCode]::V1 }
-            'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
-        }
-
-    if ($UseWalk -or $SnmpVersion -eq 'V1') {
-        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            $rootOid,
-            $results,
-            $Timeout,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-        )
-    } else {
-        # BulkWalk is faster and less chatty -- preferred for V2c
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            ([Lextm.SharpSnmpLib.OctetString]::new('')),
-            $rootOid,
-            $results,
-            $Timeout,
-            $MaxRepetitions,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
-            $null,
-            $null
-        )
-    }
-
-    foreach ($item in $results) {
-        $value = $item.Data.ToString()
-        if ($item.Data.TypeCode.ToString() -eq 'OctetString' -and ($value -match '[^\x20-\x7E]' -or $value.Contains('?'))) {
-            $value = $item.Data.ToHexString()
-        }
-        [PSCustomObject]@{
-            OID   = $item.Id.ToString()
-            Type  = $item.Data.TypeCode.ToString()
-            Value = $value
-        }
-    }
+    finally { Close-SshSession -Session $session }
 }
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBThAAjkJOp/Is1
-# HA8YibGX4cj3wnyhxiRA3zDsotvXLqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDwt0wEfyroBlhA
+# nZebuRCVFPiVZ6VtsqgvtAo9VbU8OaCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -181,17 +155,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHLASAHWpyazG3Pto9CBcggYvBy5eHOGM
-# 3f79yEXKPm8wDQYJKoZIhvcNAQEBBQAEggIA01qo08qNJvLEtW+7P+M7lqxOsfF4
-# lZC+k4qu1eTSMyBv5iDc17L7+S+wC786wJQu8gfjcyPLR/fLoifM/uMAn/P4wfgx
-# +5DpWmII7NcwTb3PtKElJzkQc0ppNisjKfTnue2WJ+JkCw0MKX7C42OIUaBzO4PP
-# //QGhoG5lkNAJOT1d2aurU9jOyj2Qanc26uauMZZPwRQcSOiwqwAL5nqfte7JxP+
-# vko+L6RkK4UURnHyDLqxZVaqyjmQl+IEYHDSjoN/3pYbjg1v+bBHyluZIR/R/Fnk
-# rkd9tqQCx+YWyHlK2hCMus5VdA4PjV0nTbDBF0NAGPT+pLspFeWhrD6FtPO6RCa7
-# q6YxzAZMfLFwqCfcg7lA3fRUmnn6j4xy2StL9YeMI12pZYJ2ZkyF9ur6JwjI7TD8
-# MQ7yA044hlftRyhOtlU1xZBJsyoyiswXm7t/Frs4cl6oz5QJOXDXKerJRJnj71Vs
-# doxArj6ddIMTRM+Vv/cirMvPxOSL/qGYp9GHxTn+IDYRYvJNQBXaGiCJYj3xEJXy
-# Nevw6WFxdonSzvZaaK8+n5ciVe2X80zwaCs3/cERGG0esogQqKTGZ+ZsWzSoJ8K7
-# s7q6a7PzuGsew8ETvBKEIJmIuqMgrabsUDGCSZVv/5mt/JDtu1EpAEt+ySLOvtrC
-# hLWN97XcpfLousU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgL7pjZmE3phPCwvSqvk43m9CCMqQ6N1xC
+# RPfdcMCoxy4wDQYJKoZIhvcNAQEBBQAEggIA1fFXfEUHO0fbKG7IupJ7kEGY5Qq5
+# tQybURRsFfNSI8DXfAoZMYmJd5M7/RKg7Y3CaEsCv9e2Z1iiOsGT2Zo0XUP8Sad9
+# S/fX4NtCis1QGiLoXdeyokPfmD5pqd4pIaYZuDmPEJ9wdMS3q3NxZmJdw+Wo6/Hs
+# /LD1Ae6IejRUdEGTsYfLoBxROSUYeym15ruhO39JRSbQagKWF9754GDwfZAZkjsn
+# Rq0N0V7ACK0KDUueTF/MGY4AUxr09TffyWnSo/38sjoo3d+kjhkOVyUrCL1xt4Ep
+# O4aXyjgdFJfW72xL21pdqLEk6o71Ci5IRyDR1054WXZf/ZERGeUsR6uADsqWzV2t
+# wR3DsJhMsnxbKbUfX+CWHFwSjyQn17E5Asnlo5Jo5+04aF8+vCP4epF/TPjVkJV4
+# uLxW2w7YgLRCLZLeXGDNNYLFyScIFxHFVoDX04D07fklSas4YDaPMiP3I3ebi/Cd
+# UPsWXai4bzXx781YKBIqzwAUfmzm7p/96jptQ3gkNE5DhW2DFEnC9YBUNcMJ1qQL
+# oBtS6JIAHofZDJ3+KByFVq5TdUlHzj/291T6J0yPKqUfRkjHeyShdjZXOhn1g3qy
+# mYT2MjTDuk/LI1ASU2SecVkeZME8pjhKXnL9JZt4zhjdZrlecM+fhI4tPXfTXaoG
+# GDHkSuwWjFD3jM4=
 # SIG # End signature block

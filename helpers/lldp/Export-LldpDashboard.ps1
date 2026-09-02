@@ -1,87 +1,29 @@
-﻿function Get-SNMPTableSharp {
+﻿#requires -Version 5.1
+
+function Export-LldpDashboard {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$Target,
-
-        [Parameter(Mandatory)]
-        [string]$BaseOid,
-
-        [string]$Community = 'public',
-
-        [ValidateSet('V1', 'V2')]
-        [string]$SnmpVersion = 'V2',
-
-        [int]$Port = 161,
-        [int]$Timeout = 5000,
-        [int]$MaxRepetitions = 10,
-
-        [switch]$UseWalk
+        [Parameter(Mandatory = $true)][object[]]$Neighbors,
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [string]$WhatsUpGoldPsRepoPath
     )
-
-    if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
-        throw 'SharpSnmpLib is not loaded. Run Import-SharpSnmpLib first.'
-    }
-
-    $ip = [System.Net.IPAddress]::Parse($Target)
-    $endpoint = [System.Net.IPEndPoint]::new($ip, $Port)
-    $communityObj = [Lextm.SharpSnmpLib.OctetString]::new($Community)
-    $rootOid = [Lextm.SharpSnmpLib.ObjectIdentifier]::new($BaseOid)
-
-    $results = [System.Collections.Generic.List[Lextm.SharpSnmpLib.Variable]]::new()
-
-    $versionCode =
-        switch ($SnmpVersion) {
-            'V1' { [Lextm.SharpSnmpLib.VersionCode]::V1 }
-            'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
-        }
-
-    if ($UseWalk -or $SnmpVersion -eq 'V1') {
-        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            $rootOid,
-            $results,
-            $Timeout,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-        )
-    } else {
-        # BulkWalk is faster and less chatty -- preferred for V2c
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            ([Lextm.SharpSnmpLib.OctetString]::new('')),
-            $rootOid,
-            $results,
-            $Timeout,
-            $MaxRepetitions,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
-            $null,
-            $null
-        )
-    }
-
-    foreach ($item in $results) {
-        $value = $item.Data.ToString()
-        if ($item.Data.TypeCode.ToString() -eq 'OctetString' -and ($value -match '[^\x20-\x7E]' -or $value.Contains('?'))) {
-            $value = $item.Data.ToHexString()
-        }
-        [PSCustomObject]@{
-            OID   = $item.Id.ToString()
-            Type  = $item.Data.TypeCode.ToString()
-            Value = $value
-        }
-    }
+    if ([string]::IsNullOrWhiteSpace($WhatsUpGoldPsRepoPath)) { $WhatsUpGoldPsRepoPath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }
+    if (-not (Test-Path -LiteralPath $OutputDirectory)) { New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null }
+    $jsonPath = Join-Path $OutputDirectory 'lldp-neighbors.json'
+    $htmlPath = Join-Path $OutputDirectory 'lldp-dashboard.html'
+    . (Join-Path $WhatsUpGoldPsRepoPath 'helpers\reports\Export-DynamicDashboardHtml.ps1')
+    @($Neighbors) | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $jsonPath -Encoding UTF8
+    $reportData = @(Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json)
+    Set-StrictMode -Off
+    $reportData | Export-DynamicDashboardHtml -OutputPath $htmlPath -ReportTitle 'LLDP Neighbor Health' -CardField @('Status','RemoteSystemName','LocalInterface') -StatusField 'Status' -ExportPrefix 'lldp_dashboard' -TemplatePath (Join-Path $WhatsUpGoldPsRepoPath 'helpers\reports\Dynamic-Dashboard-Template.html')
+    [pscustomobject][ordered]@{ JsonPath = $jsonPath; HtmlPath = $htmlPath; NeighborCount = $Neighbors.Count }
 }
 
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBThAAjkJOp/Is1
-# HA8YibGX4cj3wnyhxiRA3zDsotvXLqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCk5brckhBLzgO2
+# Qyn+2PLNmoCzBNrmOT0r9x8tGP60QqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -181,17 +123,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHLASAHWpyazG3Pto9CBcggYvBy5eHOGM
-# 3f79yEXKPm8wDQYJKoZIhvcNAQEBBQAEggIA01qo08qNJvLEtW+7P+M7lqxOsfF4
-# lZC+k4qu1eTSMyBv5iDc17L7+S+wC786wJQu8gfjcyPLR/fLoifM/uMAn/P4wfgx
-# +5DpWmII7NcwTb3PtKElJzkQc0ppNisjKfTnue2WJ+JkCw0MKX7C42OIUaBzO4PP
-# //QGhoG5lkNAJOT1d2aurU9jOyj2Qanc26uauMZZPwRQcSOiwqwAL5nqfte7JxP+
-# vko+L6RkK4UURnHyDLqxZVaqyjmQl+IEYHDSjoN/3pYbjg1v+bBHyluZIR/R/Fnk
-# rkd9tqQCx+YWyHlK2hCMus5VdA4PjV0nTbDBF0NAGPT+pLspFeWhrD6FtPO6RCa7
-# q6YxzAZMfLFwqCfcg7lA3fRUmnn6j4xy2StL9YeMI12pZYJ2ZkyF9ur6JwjI7TD8
-# MQ7yA044hlftRyhOtlU1xZBJsyoyiswXm7t/Frs4cl6oz5QJOXDXKerJRJnj71Vs
-# doxArj6ddIMTRM+Vv/cirMvPxOSL/qGYp9GHxTn+IDYRYvJNQBXaGiCJYj3xEJXy
-# Nevw6WFxdonSzvZaaK8+n5ciVe2X80zwaCs3/cERGG0esogQqKTGZ+ZsWzSoJ8K7
-# s7q6a7PzuGsew8ETvBKEIJmIuqMgrabsUDGCSZVv/5mt/JDtu1EpAEt+ySLOvtrC
-# hLWN97XcpfLousU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgXV9rCq2ix890kaX+mWKK7NMO5A0uOqLL
+# STT8L6YKy1wwDQYJKoZIhvcNAQEBBQAEggIAUjUB9quK+PlgZBY65MEivE7e43hX
+# rydGQl3cJ5iO437wLRDFOk7LVvmLeriokpbVVOssLDqPQ46v1add6M0PpbD+J0Ei
+# Xt1knMhqYe0ri0163Bz11Kt/hqbhIphWUaSTvAmL3O78I30FHvRIVwKO4zFL9Rkg
+# 8ljkDZ/rAds1v19rSBzvIcZGUR4IxTgU5OMJFNghBbEm+vBiC4Us72v0Xy+o9UZd
+# uAq3oZTlJSeWPxp7jkivnTJhYDRxX8oBLRNBGEtSw/MDBjtQbcQrrAwvJ4CAM0+c
+# L31O9LJO5b1RjLHVU0mF1Pb+AUxk7FpR+lFJgmK/SVINR6QF91lpbg1V5UhkfOrR
+# ljIREHH7wSGsin+02Czsbt8r/564mWi++Y4pG6tFL7jPNS6nEafuqZ2/fUzyTOwW
+# U4DoDrZfbvs/WcX+sjVTriMDFCasilL4hgUihe8nbG4TJ5uqxEy8Eq0VLbW0JH7e
+# Vj90t3Jy59Fzf8g2V4UaadbTCWS/s63KTtUEda1pbH7jc31DRG+maNo+Epz5CW9Z
+# UqjMy0WKSog5kltl9YCrPw80uRSAOBUsYiNQ1yNACVD3K/fuLXURsEyWD+R5gQ/e
+# XkJOnMB32VVXE1kicDR9pZoRL4aMX1dGz7SXCkv6R4o55NWvO6w47YvpaYa0a8dL
+# CBUnZl01aKx+H0U=
 # SIG # End signature block

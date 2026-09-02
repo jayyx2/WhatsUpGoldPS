@@ -1,87 +1,92 @@
-﻿function Get-SNMPTableSharp {
+﻿#requires -Version 5.1
+
+function ConvertFrom-EigrpSshOutput {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$Target,
-
-        [Parameter(Mandatory)]
-        [string]$BaseOid,
-
-        [string]$Community = 'public',
-
-        [ValidateSet('V1', 'V2')]
-        [string]$SnmpVersion = 'V2',
-
-        [int]$Port = 161,
-        [int]$Timeout = 5000,
-        [int]$MaxRepetitions = 10,
-
-        [switch]$UseWalk
+        [Parameter(Mandatory = $true)] [string]$Output,
+        [Parameter(Mandatory = $true)] [string]$Target
     )
 
-    if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
-        throw 'SharpSnmpLib is not loaded. Run Import-SharpSnmpLib first.'
-    }
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $section = ''
+    foreach ($line in @($Output -split "`r?`n")) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match 'show ip eigrp neighbors') { $section = 'Neighbors'; continue }
+        if ($trimmed -match 'show ip eigrp topology') { $section = 'Topology'; continue }
+        if ($trimmed -match 'show ip eigrp interfaces') { $section = 'Interfaces'; continue }
+        if ($trimmed -match 'show ip protocols') { $section = 'Protocols'; continue }
+        if ($trimmed -match 'show ip route eigrp') { $section = 'Routes'; continue }
+        if (-not $trimmed -or $trimmed -match '^(Codes:|P\s+Active|IP-EIGRP|EIGRP-IPv|Address|Interface|Routing Protocol|Gateway|Topology table)') { continue }
 
-    $ip = [System.Net.IPAddress]::Parse($Target)
-    $endpoint = [System.Net.IPEndPoint]::new($ip, $Port)
-    $communityObj = [Lextm.SharpSnmpLib.OctetString]::new($Community)
-    $rootOid = [Lextm.SharpSnmpLib.ObjectIdentifier]::new($BaseOid)
-
-    $results = [System.Collections.Generic.List[Lextm.SharpSnmpLib.Variable]]::new()
-
-    $versionCode =
-        switch ($SnmpVersion) {
-            'V1' { [Lextm.SharpSnmpLib.VersionCode]::V1 }
-            'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
+        if ($section -eq 'Neighbors' -and $trimmed -match '^\S+\s+(\S+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+\d+\s+\d+') {
+            $rows.Add([pscustomobject][ordered]@{
+                Source = 'SSH'; Target = $Target; RecordType = 'Neighbor'; Status = 'Up'
+            NeighborAddress = $Matches[1]; Interface = $Matches[2]; HoldTime = [int]$Matches[3]; Uptime = $Matches[4]
+            SrttMs = [int]$Matches[5]; RtoMs = [int]$Matches[6]; State = 'Up'
+            }); continue
         }
-
-    if ($UseWalk -or $SnmpVersion -eq 'V1') {
-        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            $rootOid,
-            $results,
-            $Timeout,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-        )
-    } else {
-        # BulkWalk is faster and less chatty -- preferred for V2c
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            ([Lextm.SharpSnmpLib.OctetString]::new('')),
-            $rootOid,
-            $results,
-            $Timeout,
-            $MaxRepetitions,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
-            $null,
-            $null
-        )
-    }
-
-    foreach ($item in $results) {
-        $value = $item.Data.ToString()
-        if ($item.Data.TypeCode.ToString() -eq 'OctetString' -and ($value -match '[^\x20-\x7E]' -or $value.Contains('?'))) {
-            $value = $item.Data.ToHexString()
+        if ($section -eq 'Interfaces' -and $trimmed -match '^([A-Za-z0-9./-]+)\s+(\d+)\s+(\d+)\s+(\d+)') {
+            $rows.Add([pscustomobject][ordered]@{
+                Source = 'SSH'; Target = $Target; RecordType = 'Interface'; Status = 'Healthy'
+                Interface = $Matches[1]; Peers = [int]$Matches[2]; XmitQueue = [int]$Matches[3]; MeanSrtt = [int]$Matches[4]
+            }); continue
         }
-        [PSCustomObject]@{
-            OID   = $item.Id.ToString()
-            Type  = $item.Data.TypeCode.ToString()
-            Value = $value
+        if ($section -eq 'Routes' -and $trimmed -match '^D\s+(\S+)\s+\[(\d+)/(\d+)\].*via\s+(\S+),\s+(.+)$') {
+            $rows.Add([pscustomobject][ordered]@{
+                Source = 'SSH'; Target = $Target; RecordType = 'Route'; Status = 'Installed'
+                Prefix = $Matches[1]; AdministrativeDistance = [int]$Matches[2]; Metric = [int]$Matches[3]
+                NextHop = $Matches[4]; Interface = $Matches[5]
+            }); continue
+        }
+        if ($section -eq 'Topology' -and $trimmed -match '^P\s+(\S+),\s+(\d+)\s+successors') {
+            $rows.Add([pscustomobject][ordered]@{
+                Source = 'SSH'; Target = $Target; RecordType = 'Topology'; Status = 'Active'
+                Prefix = $Matches[1]; Successors = [int]$Matches[2]
+            }); continue
+        }
+        if ($section -eq 'Protocols' -and $trimmed -match '^(EIGRP-IPv\S+|Routing Protocol is "[^"]+")') {
+            $rows.Add([pscustomobject][ordered]@{
+                Source = 'SSH'; Target = $Target; RecordType = 'Protocol'; Status = 'Enabled'; Detail = $trimmed
+            })
         }
     }
+    return @($rows)
 }
 
+function Get-EigrpSshInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$Target,
+        [Parameter(Mandatory = $true)] [string]$Username,
+        [string]$Password,
+        [System.Security.SecureString]$SecurePassword,
+        [int]$Port = 22,
+        [int]$TimeoutSeconds = 30,
+        [string]$SshModulePath = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'ssh\WhatsUpGoldPS.Ssh\WhatsUpGoldPS.Ssh.psm1')
+    )
+    if (-not (Test-Path -LiteralPath $SshModulePath)) { throw "SSH module not found: $SshModulePath" }
+    Import-Module -Name $SshModulePath -Force -ErrorAction Stop
+    $splat = @{ HostName = $Target; Port = $Port; Username = $Username; TimeoutSeconds = $TimeoutSeconds }
+    if ($Password) { $splat['Password'] = $Password }
+    if ($SecurePassword) { $splat['SecurePassword'] = $SecurePassword }
+    $session = New-SshSession @splat
+    try {
+        $commands = @('show ip eigrp neighbors', 'show ip eigrp topology', 'show ip eigrp interfaces', 'show ip protocols', 'show ip route eigrp')
+        $output = [System.Collections.Generic.List[string]]::new()
+        foreach ($command in $commands) {
+            $result = Invoke-SshCommand -Session $session -Command $command -TimeoutSeconds $TimeoutSeconds
+            [void]$output.Add($command)
+            [void]$output.Add($result.Output)
+        }
+        return @(ConvertFrom-EigrpSshOutput -Output ($output -join "`r`n") -Target $Target)
+    }
+    finally { Close-SshSession -Session $session }
+}
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBThAAjkJOp/Is1
-# HA8YibGX4cj3wnyhxiRA3zDsotvXLqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJOosNX37USxIH
+# DJTdYuCYGlJyOUqiQi+ThMv6XAuDWqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -181,17 +186,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHLASAHWpyazG3Pto9CBcggYvBy5eHOGM
-# 3f79yEXKPm8wDQYJKoZIhvcNAQEBBQAEggIA01qo08qNJvLEtW+7P+M7lqxOsfF4
-# lZC+k4qu1eTSMyBv5iDc17L7+S+wC786wJQu8gfjcyPLR/fLoifM/uMAn/P4wfgx
-# +5DpWmII7NcwTb3PtKElJzkQc0ppNisjKfTnue2WJ+JkCw0MKX7C42OIUaBzO4PP
-# //QGhoG5lkNAJOT1d2aurU9jOyj2Qanc26uauMZZPwRQcSOiwqwAL5nqfte7JxP+
-# vko+L6RkK4UURnHyDLqxZVaqyjmQl+IEYHDSjoN/3pYbjg1v+bBHyluZIR/R/Fnk
-# rkd9tqQCx+YWyHlK2hCMus5VdA4PjV0nTbDBF0NAGPT+pLspFeWhrD6FtPO6RCa7
-# q6YxzAZMfLFwqCfcg7lA3fRUmnn6j4xy2StL9YeMI12pZYJ2ZkyF9ur6JwjI7TD8
-# MQ7yA044hlftRyhOtlU1xZBJsyoyiswXm7t/Frs4cl6oz5QJOXDXKerJRJnj71Vs
-# doxArj6ddIMTRM+Vv/cirMvPxOSL/qGYp9GHxTn+IDYRYvJNQBXaGiCJYj3xEJXy
-# Nevw6WFxdonSzvZaaK8+n5ciVe2X80zwaCs3/cERGG0esogQqKTGZ+ZsWzSoJ8K7
-# s7q6a7PzuGsew8ETvBKEIJmIuqMgrabsUDGCSZVv/5mt/JDtu1EpAEt+ySLOvtrC
-# hLWN97XcpfLousU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgul4NufO5JmGrF9qy9Su1r41bTYvfVr2t
+# YxcdG771hTIwDQYJKoZIhvcNAQEBBQAEggIA7q4i7uD/+x2KxIrbLtP9bHx74D1E
+# 04w7Y6sZtA9U2vwP8umHRdUAiT/8qo9Ir6qgvSJlm7TYkuOZ7bxhpomXh5DR0Wu6
+# lq3c1UA77GkINYLE9E0u2jRSML89XclOx4Ztw0x01dCrvjF9lX/9OWuN6MZn+s0t
+# eowxZnTZh0j72QdQTrknL3z1Uofz8X2rrJGvgFzDbsG+fpZEf5ezSfQk6lTLKDvl
+# Y/6lTzvko3UFSi9I/7SBOzEnoEzEzb/XjXSJyMwQiVpN8DQeGjRT82PnlN8ZdvVf
+# YLsoniRGoSfP70EsGckSo53aF8NosN3JAhey1BQ4PyDNWKEOVPe0zWiITi4YkqkM
+# G7nYytXAguO0LBSW1Vzs7iC3FpaQH6RpG0qLAIGPtPVMqjvIz5DfZJgomjTbH0lF
+# gAEhBE1m4CmyFM43epFNe0cWwxqXe0OBtADVqCZl9SED140QTSKIGfCi2uurKm3u
+# gybfWoyJO/+X7RrJP/5afND1vAUMB+QL6LxCo9dAQ8eN4jB27pVG/zkejpnGa7+D
+# F9qg3LkQbTHeTVp2vCNM8ecFCAj01ShMiLzCiILdCmm+jfvov4Rdi+A4Cqa+QBtY
+# sMtfqrVUcoazsAFI4W/fjq5C5x/iV+b/0jf4r+U1NQQb/yOZ/CAI9eHyraklJxbB
+# Wi93Um7naSk5PjA=
 # SIG # End signature block

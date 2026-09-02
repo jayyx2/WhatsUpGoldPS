@@ -1,87 +1,32 @@
-﻿function Get-SNMPTableSharp {
+﻿#requires -Version 5.1
+
+function Export-BgpDashboard {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$Target,
-
-        [Parameter(Mandatory)]
-        [string]$BaseOid,
-
-        [string]$Community = 'public',
-
-        [ValidateSet('V1', 'V2')]
-        [string]$SnmpVersion = 'V2',
-
-        [int]$Port = 161,
-        [int]$Timeout = 5000,
-        [int]$MaxRepetitions = 10,
-
-        [switch]$UseWalk
+        [Parameter(Mandatory = $true)] [object[]]$Peers,
+        [Parameter(Mandatory = $true)] [string]$OutputDirectory,
+        [string]$WhatsUpGoldPsRepoPath,
+        [object[]]$AdditionalData = @()
     )
-
-    if (-not ('Lextm.SharpSnmpLib.Variable' -as [type])) {
-        throw 'SharpSnmpLib is not loaded. Run Import-SharpSnmpLib first.'
-    }
-
-    $ip = [System.Net.IPAddress]::Parse($Target)
-    $endpoint = [System.Net.IPEndPoint]::new($ip, $Port)
-    $communityObj = [Lextm.SharpSnmpLib.OctetString]::new($Community)
-    $rootOid = [Lextm.SharpSnmpLib.ObjectIdentifier]::new($BaseOid)
-
-    $results = [System.Collections.Generic.List[Lextm.SharpSnmpLib.Variable]]::new()
-
-    $versionCode =
-        switch ($SnmpVersion) {
-            'V1' { [Lextm.SharpSnmpLib.VersionCode]::V1 }
-            'V2' { [Lextm.SharpSnmpLib.VersionCode]::V2 }
-        }
-
-    if ($UseWalk -or $SnmpVersion -eq 'V1') {
-        # SNMPv1 does not support BulkWalk; also available as explicit opt-in
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::Walk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            $rootOid,
-            $results,
-            $Timeout,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree
-        )
-    } else {
-        # BulkWalk is faster and less chatty -- preferred for V2c
-        [Lextm.SharpSnmpLib.Messaging.Messenger]::BulkWalk(
-            $versionCode,
-            $endpoint,
-            $communityObj,
-            ([Lextm.SharpSnmpLib.OctetString]::new('')),
-            $rootOid,
-            $results,
-            $Timeout,
-            $MaxRepetitions,
-            [Lextm.SharpSnmpLib.Messaging.WalkMode]::WithinSubtree,
-            $null,
-            $null
-        )
-    }
-
-    foreach ($item in $results) {
-        $value = $item.Data.ToString()
-        if ($item.Data.TypeCode.ToString() -eq 'OctetString' -and ($value -match '[^\x20-\x7E]' -or $value.Contains('?'))) {
-            $value = $item.Data.ToHexString()
-        }
-        [PSCustomObject]@{
-            OID   = $item.Id.ToString()
-            Type  = $item.Data.TypeCode.ToString()
-            Value = $value
-        }
-    }
+    if ([string]::IsNullOrWhiteSpace($WhatsUpGoldPsRepoPath)) { $WhatsUpGoldPsRepoPath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }
+    if (-not (Test-Path -LiteralPath $OutputDirectory)) { New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null }
+    $jsonPath = Join-Path $OutputDirectory 'bgp-peers.json'
+    $htmlPath = Join-Path $OutputDirectory 'bgp-dashboard.html'
+    $exporter = Join-Path $WhatsUpGoldPsRepoPath 'helpers\reports\Export-DynamicDashboardHtml.ps1'
+    $templatePath = Join-Path $WhatsUpGoldPsRepoPath 'helpers\reports\Dynamic-Dashboard-Template.html'
+    if (-not (Test-Path -LiteralPath $exporter)) { throw "Dashboard function not found: $exporter" }
+    . $exporter
+    @($Peers) + @($AdditionalData) | ConvertTo-Json -Depth 10 | Out-File -LiteralPath $jsonPath -Encoding UTF8
+    $reportData = @(Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json)
+    Set-StrictMode -Off
+    $reportData | Export-DynamicDashboardHtml -OutputPath $htmlPath -ReportTitle 'BGP Peer Health' -CardField @('Status','State','RemoteAs') -StatusField 'Status' -ExportPrefix 'bgp_dashboard' -TemplatePath $templatePath
+    return [pscustomobject][ordered]@{ JsonPath = $jsonPath; HtmlPath = $htmlPath; PeerCount = $Peers.Count }
 }
-
 # SIG # Begin signature block
 # MIIVlwYJKoZIhvcNAQcCoIIViDCCFYQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBThAAjkJOp/Is1
-# HA8YibGX4cj3wnyhxiRA3zDsotvXLqCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9SNOaORAU7qmC
+# kXDG6Y4p6Zwx4cq24rX4o9PfCdk1baCCEdMwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -181,17 +126,17 @@
 # Y3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+FzTlzz3Yt
 # N+swDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZ
 # BgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYB
-# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHLASAHWpyazG3Pto9CBcggYvBy5eHOGM
-# 3f79yEXKPm8wDQYJKoZIhvcNAQEBBQAEggIA01qo08qNJvLEtW+7P+M7lqxOsfF4
-# lZC+k4qu1eTSMyBv5iDc17L7+S+wC786wJQu8gfjcyPLR/fLoifM/uMAn/P4wfgx
-# +5DpWmII7NcwTb3PtKElJzkQc0ppNisjKfTnue2WJ+JkCw0MKX7C42OIUaBzO4PP
-# //QGhoG5lkNAJOT1d2aurU9jOyj2Qanc26uauMZZPwRQcSOiwqwAL5nqfte7JxP+
-# vko+L6RkK4UURnHyDLqxZVaqyjmQl+IEYHDSjoN/3pYbjg1v+bBHyluZIR/R/Fnk
-# rkd9tqQCx+YWyHlK2hCMus5VdA4PjV0nTbDBF0NAGPT+pLspFeWhrD6FtPO6RCa7
-# q6YxzAZMfLFwqCfcg7lA3fRUmnn6j4xy2StL9YeMI12pZYJ2ZkyF9ur6JwjI7TD8
-# MQ7yA044hlftRyhOtlU1xZBJsyoyiswXm7t/Frs4cl6oz5QJOXDXKerJRJnj71Vs
-# doxArj6ddIMTRM+Vv/cirMvPxOSL/qGYp9GHxTn+IDYRYvJNQBXaGiCJYj3xEJXy
-# Nevw6WFxdonSzvZaaK8+n5ciVe2X80zwaCs3/cERGG0esogQqKTGZ+ZsWzSoJ8K7
-# s7q6a7PzuGsew8ETvBKEIJmIuqMgrabsUDGCSZVv/5mt/JDtu1EpAEt+ySLOvtrC
-# hLWN97XcpfLousU=
+# BAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgTTS+Me5RBqwQHl4Q5mkr9dqhOG1fTR0F
+# Czlf0Mlwx/0wDQYJKoZIhvcNAQEBBQAEggIAXCpq/kwrZfxPoqU3ehJFURvach6R
+# vZGq6smPIvKly9ciVE/0d8Jt/SfZAsyvefld9uZuyHBL4//OjtQekDnyPmlD0pg3
+# LPaeIu77WpDesYXQP0GuzAcZKcqbS4AgfTrzJpZLkQbMyxod5rsTLgYymb3OdCp7
+# 546HF+DmrCbUtjUEa59810jzae8JmtjjwRTNhrUmAIg377WTuvTYOBawCo/X3xAF
+# kJifHa0moe36coietpBJHxGUQhdA5v5uQdyyRqmx51h7wdeXRpaxxszTKYtL9zOj
+# oMuZ5jlzytUop6dJMunEavjEVlrvIZ9YwfWO0kPqO3SjiMP5VURs1O5XbG459mTg
+# BsPtUSt3QlkHR1M5SMJr4Kl6WyitQ2sy/eSFkVBUe7mu8F8H239MM6o8Ex4XMW/w
+# YIMZx81y5PP4Dv6lZ0HWJIXmncCsLlGCle+ekqAY1fSEXronAPnt5F2bk9zPOJ4T
+# rF/ikUy9WvTNoevR6AeA5dYC0zhVGxipDWazJ9sRMmzvMpeovK2hgvmjwJQV1q71
+# FqPPmmaWY6tnT15t398iXfZwG2BDGFg6EYATUtq5lWPu5hXdttr8oSfhugMvnSQ4
+# R9QA3TdFUrIogHlH5fvLRI3cC+/0ZBiPxyQ1Efvy2VbO0zwvGPKBSp3IDs8VqyAp
+# uQIJjE0aJAJCy+E=
 # SIG # End signature block

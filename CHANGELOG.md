@@ -4,6 +4,7 @@
 ### Updates since the original 0.1.22 release candidate
 * **Network neighbor monitoring helpers** -- Added BGP, CDP, EIGRP, and LLDP inventory/monitoring plans, SSH inventory collection, dashboard export, credential resolution, and focused README documentation.
 * **Microsoft Failover Cluster discovery** -- Added cluster topology discovery, cluster-qualified device keys, online IPv4 selection for multi-subnet roles, guarded property access across OS builds, retry handling for intermittent CIM failures, and SQL cluster setup support.
+* **Microsoft Failover Cluster WUG reconciliation** -- Reordered push processing so device roles and role-derived monitors are rescanned before display names and custom cluster monitors are synchronized; reruns now skip rescans for devices that already have performance monitors and only add missing service/role monitors.
 * **Discovery reliability** -- Updated SNMP table handling and discovery helpers, including current PowerShell 5.1 behavior and more reliable handling of cluster and provider data.
 * **Documentation and release hygiene** -- Updated repository text files to UTF-8 with BOM where required and refreshed signed release content.
 * **Interface traffic example** -- Added `Get-WUGInterfaceTrafficChart.ps1`, a standalone HTML chart generator for device or group interface traffic reports, including custom UTC ranges and browser launch support.
@@ -17,12 +18,15 @@
 * **SNMP version auto-reset** -- When the wizard passes a different SNMP version than what's saved in vault, the vault is automatically cleared and new credentials collected (no manual Reset needed)
 
 ### Changed
+* **MSCluster push order** -- Create or find devices, assign the Windows credential, apply Windows roles, rescan incomplete devices, restore intended display names, then reconcile custom cluster monitors. This prevents the rescan from overwriting names or disturbing custom monitor assignments.
+* **MSCluster reruns** -- A device with existing performance-monitor assignments is treated as already scanned. Complete devices avoid the rescan wait and reconcile only missing monitors.
 * **Scheduled tasks default to signed `-File` invocation** -- `Register-DiscoveryScheduledTask.ps1` and `Copy-WUGDashboardReports.ps1` now use `Invoke-DiscoveryTask.ps1` with `-File` by default instead of `-EncodedCommand`; `-ExecutionPolicy Bypass` eliminated from all paths (uses `RemoteSigned`); old behavior available via `-UseEncodedCommand` switch
 * **Default SNMP v3 protocols** -- Changed from SHA256/AES256 to SHA/AES128 (more commonly deployed)
 * **Task args serialization** -- Scheduled task parameters built directly from typed values (no string parsing); fixes multi-target quoting issues
 * **Display in Register output** -- Shows actual script path and args instead of legacy `$psArgs` format
 
 ### Fixed
+* **MSCluster interrupted pushes** -- A push interrupted after device creation can now be resumed safely: existing incomplete devices are rescanned, renamed after the scan completes, and then receive only the missing custom cluster monitors.
 * **CUCM wizard "API port" prompt removed** -- CUCM and CiscoWLC are SNMP-based; no longer ask for API port or pass `-ApiPort` (which didn't exist as a parameter)
 * **AuthMethod mapping for SNMP providers** -- Wizard, Register script, and elevated task scripts now correctly map `SnmpV2`/`SnmpV3` to `-SnmpVersion 2`/`3` for CUCM and CiscoWLC (previously passed invalid `-AuthMethod` parameter)
 * **Register-DiscoveryScheduledTask ValidateSet** -- Added `SnmpV2`, `SnmpV3`, and `NvidiaSmi` to `AuthMethod` and `Provider` validation sets

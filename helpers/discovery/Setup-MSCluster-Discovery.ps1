@@ -55,7 +55,7 @@
 
 .PARAMETER CounterClass
     Wildcard filter applied to the discovered cluster performance counter classes.
-    Example: '*ClusterCSV*','*ClusterDatabase*'. Default: all discovered classes.
+    Example: '*ClusterCSV*','*ClusterDatabase*'. Used with -IncludeClusterPerformanceCounters.
 
 .PARAMETER MaxPerfMonitorsPerNode
     Cap on performance monitors assigned to each node device. A cluster running S2D can
@@ -64,18 +64,48 @@
 .PARAMETER SkipRoleDevices
     Do not create or monitor the clustered role virtual IP devices. Node monitoring only.
 
+.PARAMETER IncludeClusterCore
+    Also create a device for the cluster core network name and its virtual IP. By default,
+    the cluster core is inventory-only; clustered application roles get their own devices.
+
 .PARAMETER SkipNodePerfMonitors
     Discover and report cluster counters but do not push them. Leaves the Cluster
     Service monitor on the nodes and role availability on the virtual IPs.
+
+.PARAMETER IncludeClusterPerformanceCounters
+    Include validated cluster performance counters. By default, MSCluster creates only
+    service monitors and clustered-role availability. Use this switch for extra cluster
+    counter monitoring; combine it with -CounterClass to select specific classes.
+
+.PARAMETER PrimaryRole
+    Primary device role applied to every cluster device before the rescan.
+    Default: 'Windows Server'.
+
+.PARAMETER SubRole
+    Sub-roles applied to every cluster device before the rescan. The 'Windows'
+    sub-role is what supplies the built-in CPU, Disk and Memory utilization
+    monitors, so the rescan adds them automatically.
+    Default: 'Windows', 'Windows Server'.
+
+.PARAMETER SkipRescan
+    Do not queue the post-push rescan. Roles are still applied.
+
+    By default a device is only rescanned when it has no performance monitors
+    yet, so reruns against an already-scanned cluster cost one read per device
+    and go straight to adding any missing cluster monitors.
+
+.PARAMETER RescanTimeoutMinutes
+    How long to wait for the queued rescan to finish before setting display
+    names. Default: 20. Ignored when nothing needed a rescan.
 
 .PARAMETER DeviceGroupName
     WUG device group that newly created cluster devices are placed into.
 
 .PARAMETER PollingIntervalMinutes
-    Polling interval for performance monitor assignments. Default: 5.
+    Polling interval for performance monitor assignments. Omit to use the WUG default.
 
 .PARAMETER PollingIntervalSeconds
-    Polling interval for active monitor assignments. Default: 300.
+    Polling interval for active monitor assignments. Omit to use the WUG default.
 
 .PARAMETER Action
     Skips the interactive menu.
@@ -143,15 +173,29 @@ param(
 
     [switch]$SkipRoleDevices,
 
+    [switch]$IncludeClusterCore,
+
     [switch]$SkipNodePerfMonitors,
+
+    [Alias('IncludeNodePerfMonitors')]
+    [switch]$IncludeClusterPerformanceCounters,
+
+    [string]$PrimaryRole = 'Windows Server',
+
+    [string[]]$SubRole = @('Windows', 'Windows Server'),
+
+    [switch]$SkipRescan,
+
+    [ValidateRange(1, 240)]
+    [int]$RescanTimeoutMinutes = 20,
 
     [string]$DeviceGroupName,
 
     [ValidateRange(1, 1440)]
-    [int]$PollingIntervalMinutes = 5,
+    [int]$PollingIntervalMinutes,
 
     [ValidateRange(60, 86400)]
-    [int]$PollingIntervalSeconds = 300,
+    [int]$PollingIntervalSeconds,
 
     [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
     [string]$Action,
@@ -159,6 +203,8 @@ param(
     [string]$WUGServer,
 
     [PSCredential]$WUGCredential,
+
+    [string]$WUGWindowsUser = 'wugninja\jason',
 
     [string]$OutputPath,
 
@@ -258,7 +304,11 @@ while ($pending.Count -gt 0) {
     $currentTarget = $pending[0]
     $pending.RemoveAt(0)
 
-    $result = @(Invoke-Discovery -ProviderName 'MSCluster' -Target @($currentTarget) -Credential $credHash)
+    $discoveryOptions = @{
+        SkipNodePerfMonitors = [bool]($SkipNodePerfMonitors -or -not $IncludeClusterPerformanceCounters)
+        CounterClass         = $CounterClass
+    }
+    $result = @(Invoke-Discovery -ProviderName 'MSCluster' -Target @($currentTarget) -Credential $credHash -Options $discoveryOptions)
     if ($result.Count -eq 0) { continue }
 
     $foundCluster = $result[0].Attributes['MSCluster.ClusterName']
@@ -310,7 +360,7 @@ $plan = @($uniquePlan.Values)
 # ==============================================================================
 # STEP 4: Apply counter filters, then group the plan into devices
 # ==============================================================================
-if ($SkipNodePerfMonitors) {
+if ($SkipNodePerfMonitors -or -not $IncludeClusterPerformanceCounters) {
     $plan = @($plan | Where-Object { $_.ItemType -ne 'PerformanceMonitor' })
 }
 elseif ($CounterClass) {
@@ -326,6 +376,12 @@ elseif ($CounterClass) {
 
 if ($SkipRoleDevices) {
     $plan = @($plan | Where-Object { $_.Attributes['MSCluster.DeviceType'] -ne 'Role' })
+}
+elseif (-not $IncludeClusterCore) {
+    $plan = @($plan | Where-Object {
+        $_.Attributes['MSCluster.DeviceType'] -ne 'Role' -or
+        $_.Attributes['MSCluster.RoleKind'] -ne 'ClusterCore'
+    })
 }
 
 $devicePlan = [ordered]@{}
@@ -356,6 +412,7 @@ foreach ($item in $plan) {
         $devicePlan[$key] = @{
             Name    = $name
             IP      = $ip
+            IPs     = @($item.Attributes['MSCluster.VirtualIP'] -split ',' | Where-Object { $_ })
             Type    = $devType
             Kind    = $kind
             Cluster = $itemCluster
@@ -401,6 +458,84 @@ if ($MaxPerfMonitorsPerNode -gt 0) {
 $nodeDevices = @($devicePlan.Values | Where-Object { $_.Type -eq 'Node' })
 $roleDevices = @($devicePlan.Values | Where-Object { $_.Type -eq 'Role' })
 $nodesNoIP   = @($nodeDevices | Where-Object { -not $_.IP })
+
+function Sync-MSClusterDeviceInterfaces {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][int]$DeviceId,
+        [Parameter(Mandatory = $true)][string]$DeviceName,
+        [Parameter(Mandatory = $true)][string[]]$Addresses
+    )
+
+    $desired = @($Addresses | Where-Object {
+        $_ -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
+    } | Select-Object -Unique)
+    if ($desired.Count -eq 0) { return }
+    $pollByName = $desired.Count -gt 1
+
+    $existingAddresses = @{}
+    $existingInterfaces = @{}
+    try {
+        foreach ($iface in @(Get-WUGDeviceInterface -DeviceId $DeviceId)) {
+            $address = if ($iface.address) { [string]$iface.address } else { [string]$iface.networkAddress }
+            if ($address) {
+                $existingAddresses[$address] = $true
+                $existingInterfaces[$address] = $iface
+            }
+        }
+    }
+    catch {
+        Write-Verbose "Could not list interfaces for '$DeviceName': $_"
+        return
+    }
+
+    foreach ($address in $desired) {
+        if ($existingAddresses.ContainsKey($address)) {
+            if ($pollByName -and $existingInterfaces[$address].pollUsingName -ne $true) {
+                $interfaceId = if ($existingInterfaces[$address].interfaceId) {
+                    [string]$existingInterfaces[$address].interfaceId
+                }
+                else { [string]$existingInterfaces[$address].id }
+                if ($interfaceId) {
+                    try {
+                        Set-WUGDeviceInterface -DeviceId $DeviceId -InterfaceId $interfaceId `
+                            -NetworkName $DeviceName -PollUsingName $true | Out-Null
+                        Write-Host "           Set interface $address to poll by hostname ($DeviceName)" -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Warning "  Failed to set interface $address to poll by hostname: $_"
+                    }
+                }
+            }
+            continue
+        }
+        try {
+            Add-WUGDeviceInterface -DeviceId $DeviceId -Address $address -HostName $DeviceName `
+                -PollUsingName $pollByName | Out-Null
+            Write-Host "           Added interface $address$(if ($pollByName) { ' (poll by hostname)' })" -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "  Failed to add interface $address to '$DeviceName': $_"
+        }
+    }
+}
+
+function Sync-MSClusterDevicePolling {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][int]$DeviceId,
+        [Parameter(Mandatory = $true)][string]$DeviceName,
+        [Parameter(Mandatory = $true)][bool]$PollByHostName
+    )
+
+    try {
+        Set-WUGDevicePollingConfig -DeviceId $DeviceId -PollByHostName $PollByHostName | Out-Null
+        Write-Host "           Device polling: $(if ($PollByHostName) { 'hostname' } else { 'address' })" -ForegroundColor Green
+    }
+    catch {
+        Write-Warning "  Failed to set device polling for '$DeviceName': $_"
+    }
+}
 
 # ==============================================================================
 # STEP 5: Show what was found
@@ -598,6 +733,11 @@ switch ($currentChoice) {
             $repoPsd1 = Join-Path $repoRoot 'WhatsUpGoldPS.psd1'
             if (Test-Path $repoPsd1) { Import-Module $repoPsd1 -Force -ErrorAction Stop }
             else { Import-Module WhatsUpGoldPS -ErrorAction Stop }
+
+            # The module loads a private copy of the discovery helpers. Reload
+            # the current standalone helper after module import so this setup
+            # script uses the same implementation that was just validated.
+            . $discoveryHelpersPath
         }
         catch {
             Write-Error "Could not load WhatsUpGoldPS module. Is it installed? $_"
@@ -607,7 +747,7 @@ switch ($currentChoice) {
         $apiResponsePath = Join-Path $PSScriptRoot '..\..\functions\Get-WUGAPIResponse.ps1'
         if (Test-Path $apiResponsePath) { . $apiResponsePath }
 
-        if (-not $global:WUGBearerHeaders -or -not $global:WhatsUpServerBaseURI) {
+        if ($WUGServer -or -not $global:WUGBearerHeaders -or -not $global:WhatsUpServerBaseURI) {
             try {
                 if ($WUGCredential -and $WUGServer) {
                     Connect-WUGServer -serverUri $WUGServer -Credential $WUGCredential -IgnoreSSLErrors
@@ -623,6 +763,12 @@ switch ($currentChoice) {
                 Write-Error "Failed to connect to WhatsUp Gold: $_"
                 return
             }
+        }
+
+        if ($global:ignoreSSLErrors -and $PSVersionTable.PSEdition -eq 'Core') {
+            if ($null -eq $script:PSDefaultParameterValues) { $script:PSDefaultParameterValues = @{} }
+            $script:PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+            $script:PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
         }
 
         Write-Host ""
@@ -664,7 +810,8 @@ switch ($currentChoice) {
             if ($existingDevice) {
                 $wugDeviceMap[$key] = $existingDevice.id
                 $devicesFound++
-                Write-Host "  [EXISTS] $($existingDevice.displayName) (ID: $($existingDevice.id)) [$($dev.Type)]" -ForegroundColor Gray
+                $existingLabel = if ($existingDevice.displayName) { $existingDevice.displayName } else { $dev.Name }
+                Write-Host "  [EXISTS] $existingLabel (ID: $($existingDevice.id)) [$($dev.Type)]" -ForegroundColor Gray
 
                 # A role can keep the same name while its VIP moves to a new
                 # subnet. Reconcile the default WUG interface so reruns follow
@@ -705,6 +852,8 @@ switch ($currentChoice) {
                         Write-Warning "  Existing device '$($dev.Name)' has no resolvable default interface; address remains $currentAddress (discovered $($dev.IP))."
                     }
                 }
+                $desiredAddresses = if (@($dev.IPs).Count -gt 0) { @($dev.IPs) } else { @($dev.IP) }
+                Sync-MSClusterDeviceInterfaces -DeviceId ([int]$existingDevice.id) -DeviceName $dev.Name -Addresses $desiredAddresses
                 continue
             }
 
@@ -740,6 +889,8 @@ switch ($currentChoice) {
                     $wugDeviceMap[$key] = $newDevice.id
                     $devicesCreated++
                     Write-Host "           Created (ID: $($newDevice.id))" -ForegroundColor Green
+                    $desiredAddresses = if (@($dev.IPs).Count -gt 0) { @($dev.IPs) } else { @($dev.IP) }
+                    Sync-MSClusterDeviceInterfaces -DeviceId ([int]$newDevice.id) -DeviceName $dev.Name -Addresses $desiredAddresses
                 }
                 else {
                     Write-Warning "  Created '$($dev.Name)' but could not resolve its device ID."
@@ -761,14 +912,225 @@ switch ($currentChoice) {
             }
         }
 
+        # Create or reuse the Windows credential used for WMI monitoring, then
+        # assign it to every node and role device in this cluster plan.
+        $wugWindowsCredentialId = $null
+        $wugWindowsCredentialName = "MSCluster WMI - $clusterName"
+        try {
+            $existingWindowsCredential = @(Get-WUGCredential -SearchValue $wugWindowsCredentialName -Type windows) |
+                Where-Object { $_.name -eq $wugWindowsCredentialName } |
+                Select-Object -First 1
+            if ($existingWindowsCredential) {
+                $wugWindowsCredentialId = if ($existingWindowsCredential.id) { $existingWindowsCredential.id } else { $existingWindowsCredential.resourceId }
+                Write-Host "Windows credential exists: $wugWindowsCredentialName (ID: $wugWindowsCredentialId)" -ForegroundColor Gray
+            }
+            else {
+                $wugCredentialResult = Add-WUGCredential `
+                    -Name $wugWindowsCredentialName `
+                    -Description "Windows WMI credential for cluster $clusterName" `
+                    -Type windows `
+                    -WindowsUser $WUGWindowsUser `
+                    -WindowsPassword $wmiCred.GetNetworkCredential().Password `
+                    -ErrorAction Stop
+                $wugWindowsCredentialId = if ($wugCredentialResult.id) { $wugCredentialResult.id } else { $wugCredentialResult.resourceId }
+
+                if (-not $wugWindowsCredentialId) {
+                    $wugWindowsCredentialId = @(
+                        Get-WUGCredential -SearchValue $wugWindowsCredentialName -Type windows
+                    ) | Where-Object { $_.name -eq $wugWindowsCredentialName } |
+                        Select-Object -ExpandProperty id -First 1
+                }
+                if (-not $wugWindowsCredentialId) {
+                    throw "WUG did not return an ID for Windows credential '$wugWindowsCredentialName'."
+                }
+                Write-Host "Created Windows credential: $wugWindowsCredentialName (ID: $wugWindowsCredentialId)" -ForegroundColor Green
+            }
+
+            $credentialUpdateUri = "$($global:WhatsUpServerBaseURI)/api/v1/credentials/$wugWindowsCredentialId"
+            $credentialUpdateBody = @{
+                name        = $wugWindowsCredentialName
+                description = "Windows WMI credential for cluster $clusterName"
+                propertyBags = @(
+                    @{ name = 'CredWindows:DomainAndUserid'; value = $WUGWindowsUser }
+                )
+            } | ConvertTo-Json -Depth 5
+            Get-WUGAPIResponse -Uri $credentialUpdateUri -Method PUT -Body $credentialUpdateBody -ErrorAction Stop | Out-Null
+            Write-Host "Windows credential $wugWindowsCredentialId configured for $WUGWindowsUser" -ForegroundColor Gray
+
+            foreach ($wugId in @($wugDeviceMap.Values | Select-Object -Unique)) {
+                try {
+                    Set-WUGDeviceCredential -DeviceId ([string]$wugId) -CredentialId ([string]$wugWindowsCredentialId) -Assign -ErrorAction Stop | Out-Null
+                    Write-Verbose "Assigned Windows credential $wugWindowsCredentialId to device $wugId"
+                }
+                catch {
+                    if ($_.Exception.Message -match 'already|assigned|exists|duplicate') {
+                        Write-Verbose "Windows credential already assigned to device $wugId"
+                    }
+                    else {
+                        Write-Warning "Failed to assign Windows credential to device $wugId`: $_"
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Warning "Windows WUG credential provisioning failed: $_"
+        }
+
         Write-Host ""
         Write-Host "Devices: $devicesCreated created, $devicesFound existing, $devicesSkipped skipped" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Syncing monitors..." -ForegroundColor Cyan
 
-        $result = Invoke-WUGDiscoverySync -Plan $plan `
-            -PollingIntervalSeconds $PollingIntervalSeconds `
-            -PerfPollingIntervalMinutes $PollingIntervalMinutes
+        # ------------------------------------------------------------------
+        # Scan first, then rename, then add the cluster monitors.
+        #
+        # A rescan is what pulls in the role-derived built-ins (CPU, Disk,
+        # Memory, Ping, interfaces), and it rewrites the display name from
+        # whatever the scan resolved - which for a role VIP is the node that
+        # currently owns it. Running it before the cluster monitors are
+        # attached means the scan can never disturb them and nothing has to
+        # wait on a scan after the fact.
+        # ------------------------------------------------------------------
+        $allDeviceIds = @($wugDeviceMap.Values | Select-Object -Unique | ForEach-Object { [int]$_ })
+
+        if ($allDeviceIds.Count -gt 0) {
+            Write-Host ""
+            Write-Host "Applying device roles..." -ForegroundColor Cyan
+            $roleDeviceList = @($allDeviceIds | ForEach-Object { [string]$_ })
+
+            try {
+                $primaryBody = @{ devices = $roleDeviceList; name = $PrimaryRole } | ConvertTo-Json -Depth 4
+                Set-WUGDeviceRole -BatchDeviceRole -RoleKind primary -Body $primaryBody -Confirm:$false -ErrorAction Stop | Out-Null
+                Write-Host "  Primary role '$PrimaryRole' applied to $($roleDeviceList.Count) device(s)." -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "  Failed to apply primary role '$PrimaryRole': $_"
+            }
+
+            if ($SubRole.Count -gt 0) {
+                try {
+                    $subRoleBody = @{
+                        devices   = $roleDeviceList
+                        operation = 'add'
+                        subroles  = @($SubRole)
+                    } | ConvertTo-Json -Depth 4
+                    Set-WUGDeviceRole -BatchDeviceRole -RoleKind sub-role -Body $subRoleBody -Confirm:$false -ErrorAction Stop | Out-Null
+                    Write-Host "  Sub-roles applied: $($SubRole -join ', ')" -ForegroundColor Green
+                }
+                catch {
+                    Write-Warning "  Failed to apply sub-roles: $_"
+                }
+            }
+
+            # Only scan what is actually incomplete. A device that already
+            # carries its role-derived performance monitors learned nothing
+            # from another scan, so a rerun against a healthy cluster costs
+            # one read per device instead of a full scan cycle.
+            $scanDeviceIds = [System.Collections.Generic.List[int]]::new()
+            if ($SkipRescan) {
+                Write-Host "  Rescan skipped (-SkipRescan)." -ForegroundColor DarkGray
+            }
+            else {
+                foreach ($devId in $allDeviceIds) {
+                    $perfCount = 0
+                    try {
+                        $perfUri = "$($global:WhatsUpServerBaseURI)/api/v1/devices/$devId/monitors/-?type=performance&view=basic"
+                        $perfCount = @((Get-WUGAPIResponse -Uri $perfUri -Method GET).data).Count
+                    }
+                    catch {
+                        Write-Verbose "Could not read performance monitors for device ${devId}: $_"
+                    }
+
+                    if ($perfCount -gt 0) {
+                        Write-Host "  Device $devId already scanned ($perfCount performance monitor(s)); no rescan needed." -ForegroundColor DarkGray
+                    }
+                    else {
+                        $scanDeviceIds.Add($devId)
+                    }
+                }
+            }
+
+            if ($scanDeviceIds.Count -gt 0) {
+                Write-Host ""
+                Write-Host "Queuing rescan for $($scanDeviceIds.Count) device(s)..." -ForegroundColor Cyan
+                try {
+                    $scanIds = @(Invoke-WUGDeviceRefresh -DeviceId @($scanDeviceIds) `
+                        -IncludeAssignedRoles 'true' `
+                        -AddUseInRescanActiveMonitor 'true' `
+                        -Confirm:$false -ErrorAction Stop)
+                    Write-Host "  Rescan queued for: $(@($scanDeviceIds) -join ', ')" -ForegroundColor Green
+                    if ($scanIds.Count -gt 0) { Write-Host "  Scan IDs: $($scanIds -join ', ')" -ForegroundColor Gray }
+                }
+                catch {
+                    Write-Warning "  Failed to queue rescan: $_"
+                }
+
+                # A rescan renames a role VIP to whichever node currently owns
+                # it, so names are corrected once the queue drains.
+                Write-Host "  Waiting for rescan to finish (up to $RescanTimeoutMinutes min)..." -ForegroundColor Gray
+                $scanDeadline = (Get-Date).AddMinutes($RescanTimeoutMinutes)
+                $scanUri = "$($global:WhatsUpServerBaseURI)/api/v1/device-scan/-/status"
+                while ((Get-Date) -lt $scanDeadline) {
+                    Start-Sleep -Seconds 20
+                    $active = @()
+                    try { $active = @((Get-WUGAPIResponse -Uri $scanUri -Method GET).data) } catch { }
+                    if ($active.Count -eq 0) { break }
+                }
+                if ((Get-Date) -ge $scanDeadline) {
+                    Write-Warning "  Rescan did not finish within $RescanTimeoutMinutes minutes; display names may be overwritten later."
+                }
+                else {
+                    Write-Host "  Rescan finished." -ForegroundColor Green
+                }
+            }
+            elseif (-not $SkipRescan) {
+                Write-Host ""
+                Write-Host "All devices are already scanned; skipping rescan." -ForegroundColor DarkGray
+            }
+
+            Write-Host ""
+            Write-Host "Setting display names..." -ForegroundColor Cyan
+            foreach ($key in $wugDeviceMap.Keys) {
+                $devId   = $wugDeviceMap[$key]
+                $devName = $devicePlan[$key].Name
+                if (-not $devName) { continue }
+                try {
+                    $nameSplat = @{
+                        DeviceId    = [int]$devId
+                        DisplayName = $devName
+                    }
+                    # A role VIP resolves to whichever node owns it, so stop WUG
+                    # renaming it from scan data on its own schedule.
+                    if ($devicePlan[$key].Type -eq 'Role') { $nameSplat['keepDetailsCurrent'] = $false }
+                    Set-WUGDeviceProperties @nameSplat -Confirm:$false -ErrorAction Stop | Out-Null
+                }
+                catch {
+                    Write-Warning "  Failed to set display name on device ${devId}: $_"
+                    continue
+                }
+
+                $actualName = $null
+                try {
+                    $actualName = (Get-WUGAPIResponse -Uri "$($global:WhatsUpServerBaseURI)/api/v1/devices/${devId}?view=card" -Method GET).data.name
+                }
+                catch { }
+
+                if ($actualName -eq $devName) {
+                    Write-Host "  $devId -> $devName" -ForegroundColor Gray
+                }
+                else {
+                    Write-Warning "  Device $devId shows '$actualName' but should be '$devName'."
+                }
+            }
+        }
+
+        # The cluster monitors go on last, after the scan and the rename, so
+        # nothing downstream can overwrite them.
+        Write-Host ""
+        Write-Host "Syncing cluster monitors..." -ForegroundColor Cyan
+
+        $syncSplat = @{ Plan = $plan }
+        if ($PSBoundParameters.ContainsKey('PollingIntervalSeconds')) { $syncSplat['PollingIntervalSeconds'] = $PollingIntervalSeconds }
+        if ($PSBoundParameters.ContainsKey('PollingIntervalMinutes')) { $syncSplat['PerfPollingIntervalMinutes'] = $PollingIntervalMinutes }
+        $result = Invoke-WUGDiscoverySync @syncSplat
 
         Write-Host ""
         Write-Host "=== Push Complete ===" -ForegroundColor Cyan
@@ -860,8 +1222,8 @@ Write-Host ""
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrX3eljDhltVdI
-# WVIXd8S4Z9839Go1KAE8zw7af8mTUKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrbyVccAu0PCUl
+# t7i2EQaEJKbqGS6Njia++2mddNGkc6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1022,25 +1384,25 @@ Write-Host ""
 # 7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+N
 # Jpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckT
 # etiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszW
-# kPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDANBgkqhkiG9w0B
+# kPZPubdcMIIG7TCCBNWgAwIBAgIQCE/cM09+RU7bww+P+ZIYNTANBgkqhkiG9w0B
 # AQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/
 # BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYg
-# U0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkwMzIzNTk1OVow
+# U0hBMjU2IDIwMjUgQ0ExMB4XDTI2MDgwNTAwMDAwMFoXDTM3MTEwNDIzNTk1OVow
 # YzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQD
 # EzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIw
-# MjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBGrC0Sxp7Q6q5g
-# VrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwBSOeLpvPnZ8ZN
-# +vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/4QhguSssp3qo
-# me7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3K3E0zz09ldQ/
-# /nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROUINDT98oksouT
-# MYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3w6ySSSu+3qU8
-# DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46YceNA0LfNsnqcnp
-# JeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d2sC26/PQPdP5
-# 1ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8xymLnjCbSLZ49
-# kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+AliL7ojTdS5P
-# WPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2bQhpp0IoKRR7Y
-# ufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
-# MB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSMEGDAWgBTvb1NK
+# MjYgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALZ7pvLJ/s1K+NSb
+# TGWz/TjGMPh8CQ6RucZCLv5anHzWJjF/NWJrFIhy24fcpKXlgRiky4WAawDfU3YP
+# 0BMxt9l3Dm5oCG5Z69AqEN1kgHg2epx+l+lZBcmJCcN0ASURML5uFIS80sZsDwO3
+# BSkUxDjLJhBI+qiZP3aixAC/qEGLjsBNlLol9VZ7pfGEXiMlneJIC5/YKuizVzNF
+# KZZEeoy/0B8Zm+nzKBgSWG52lCO1w+nCg6XpCtklTJXeIg283hw7TmmsZXR+SMbj
+# brEOvZ3fP2VxIgeR28Y90ZStd3F9VuA5RVynb/whITPAo9b75Zr4Ta6Mj3URm26Q
+# ZYMn/FnbuTegcoRcFEZ9FOqM5T6MTdtr/n74lIT/ug0eeOzmZ6QTFg33otX+bFRs
+# IolvykE1jive4PuESaT8zzVeFWDAMDtozNgLctkGD1ZjkEyZtJrLl5ya0m5doH/S
+# cpaZCZVl6pNUOCybMc/kxC6EAmSJY24L0yYKD1Nkddsnb/ItVKi/2nXpQNMu1PT5
+# prW83vV8d67WowuUs0HdY4H8AMLGvdL/WHEj3ZnqMqAQQP9u3Ai9t+5eQ02GDwy0
+# ODjdzi0xlp70W+ow63/0++YDEX1M0iwgUHwbrJvfpklkZQvw3+kv3vUPItdwrocz
+# k9icflf55W1zOEKAcJVAIXpcMCU9AgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
+# MB0GA1UdDgQWBBQUyWOKMC7USvtulPPm40B+9ezN4jAfBgNVHSMEGDAWgBTvb1NK
 # 6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYI
 # KwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8v
 # b2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRp
@@ -1048,49 +1410,49 @@ Write-Host ""
 # SEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5k
 # aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2
 # U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9
-# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESeY0ByIfjk9iJP
-# 2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FUFqNh+tshgb4O
-# 6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7YMTmqPO9mzskg
-# iC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0ziTN6R3ygQBHMU
-# BaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/QqvXnNb+YkDF
-# kxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlqAcuEVT0cKsb+
-# zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3Y50OHgaY7T/l
-# wd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roancJIFcbojBcxl
-# RcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/ndUlQ05oxYy2
-# zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7IRE2lskKPIJg
-# baP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdCvHlshtjdNXOC
-# IUjsarfNZzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQCNxTphHp1SCt+ZrAmAfn0oQLFr0mLywSLa
+# DXQIENoyKqxrFbJblzCVP/pkXmwXOdrOpWygLzlT12os5ipDCy35RBCg2UMeApEt
+# rfGhz45F4Wt4WGdNdIbRWt3YTYJmpR+b7lr4d7Uwn+H600u4D7RnOGf8Wj4UNgAd
+# ZkfHhHv1mx9EVh71SJelcEN/oORSjXzdjfw1iZH9d8Nh/thn6hH23d+VsPAr6GAY
+# yzSA02nXD1nYLI7Ijmiv+xLCiYC41DSFYL3GhTiy0PxpawPtGRyaBVGzq+UiTfM8
+# pD7KVyF5aQyWP4KhVGUUTnmm/RlYJoW3TiXA/+t0YcT2oRVBm3JETjajHug2AL+v
+# 5jhtKVnd3D0rbHXEu27o+Q8p4sEWPMqKDB+qbceb6T/6WcwTwXmQ9lOCLLYcsQeS
+# WmvKqzpAec9etE14jOQAzLKWdE3w/TCaKtLRaRT7LCkRYVnhA2D73FLje1O5b3HR
+# 5eHs0NzU/+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94lbUveOiJBI+xZ
+# EbGRsMNbXmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H5Mh7QfieAIjW
+# agkJNt68Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCyatf8R1hSjzSvd
+# N8yWQPT9gzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
 # Y3RpZ28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWdu
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCC9UsEkrA7wPlAE5wlCgj3Iy2DD9CtC++7v0iYPFgeqIzANBgkqhkiG9w0BAQEF
-# AASCAgCZi1tqYF3GGIBTD0OtAYBA7/z0HUJr1Yyuudh4S7WDwX9OsRDiIFX+jYrq
-# 1akjYYLx7wh4CGUkDM+z0XcTv8Y/VDGBRPbit+qZvAIM3RKVQNKjoHq6I0nVDVxU
-# dxfoMYfZO7OHuunkJ4m0vuZRzowZ/FQ3L9x9wQxwXtV40FSPQRb6Y+HbIt2Y+Cbd
-# S/ReeSCwLckimIoCCq1rMr6yu6TFlxkQtvnJv1XzymIIMp0VAZc+3q5nz70YdDXp
-# XHhM/ldAU3sl8JkW+0FwBA8YdgYAi8dFRQvZ/0+JBNnyikIfV3MtHfy+lbq/9/am
-# FzpFb58gjal9oJqUPM/yF0QvmsK7kb/cK6cdFbEn+8PrcLEZJIFPgS23G7TezL/+
-# pdEFaaDEE+v947v+Anyu/ImHPEverkYCv8RosceVEb0dCdiUWDnz31rSQjYqdxq1
-# U1MPLV2RDdMvlwJuLM/U0qSPRJJLTjI2vRjkB0obp7MM4Myv7h7vjeyH9hVTVxhc
-# pw5i1DcwAIRRoEOCIE7AOGzY7i5o9HDMilN39AnpkM5MyIPBA3uvqvvxP92t48Df
-# 66hjAAGV/P9pxOOMItYhOsMomxj9X9rSm9XDC0T9NfJG9V1EDXx0V5KBSIu52m12
-# MLIDNjh+KaetShUxRJxKcEKwjglh2vC1JYFqs13zkcORdmm+06GCAyYwggMiBgkq
+# BCDyQazw5T8mRIDlS4nm2bSkQmrkhy/Okm02BYXSgLd7nzANBgkqhkiG9w0BAQEF
+# AASCAgBC5MmKe/j+cz/88ctCjsqJjtG/4nBNS56J0bM0txsKC4nr1t+U4+w5u1pc
+# 7WxwKOexmeyNVDuLrvjIBhmKrPxgjl383ZZFL4wjSibQw0vyqYmlIkdx9LU98s8D
+# CIqD92/VAkMvB1cnfXWosO+BykJrre4jvQqKhJxcwnjeNitGLUDCZjWmrCFAyc7P
+# 9dglaxX+5dMqmyWL2jylyFVAGTZu5Mvfndn6yG5HpAP1TEXVB7p7eKcrjLXVBtYS
+# 2J5yI7L6o6SLzyOPR+Wb8BKSYYsELz4v0KCYua4LImEYY7ZH2q49BHmbup4RdWnd
+# AGLNTsSBZWn37NEPiM5wRdWXA62ye70GPGznHZuqi2am3JssbKTvW4+vkky+9ghZ
+# 72gf7+McZ+6tgw+ja/7L+hLLuBd/LdUD/drAxC4T3CrUuF2AdknOEIs8x3Of4Z04
+# cRswp7A75ZGhQ1gIncKkgtuPFnL3XNE86DpIPlr1UfOB/TQPevoIXYyJZFRoLXzA
+# uUoVLQFQnecc98mSzXEJGWo565K8UDndQxEldQcXLN55OlHIDi6WFlztw//i66bb
+# mK61eaOn1IKj1ldm6BG2wZA9SaZYbeYwpATPp9nFJq1UDseUtSXa8tbuhMHXCINp
+# HOfDDXQL9/V/ocPkoyVhKloSLijh/3VOHAdRCWwZqVvNjj7nPKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
-# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
-# dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA4MzAyMzI0NThaMC8GCSqGSIb3DQEJBDEiBCDgTN4e
-# PCtkHRou25qINaDEG4wGqtA/qs72XjtqGT2ZFjANBgkqhkiG9w0BAQEFAASCAgCM
-# L2J8hUdBcFrP1GFqYTF/BYJNk8/Oxy8nThKxr5l9LjDGo7FKl+F02uKt4ht6U60g
-# GaAozRLbfnVdaFHg6whAeXOI/yCVVpvCpXnRmu+uum7y9l5BfsIx/c0ZIoryItlM
-# Xoi9EK7u+Fg6yYtbDaZstE0xrGtqBSMDc/R7LDyuGSAxY1kaK7alMnB75ddXF80d
-# fZBfJYFWuHrfgMR4zdHQuFQpDk/cphAmegbB6mV7g97LPWD9XtK6yYUW7OpoC/2S
-# 6Xm79og7Dq1idcyQgaBxSdUsvGEpvpQrf/xoBVMgpWpL4qTlYKEEeGKYrbC2AJzq
-# Da6WOGqO9c0Ha8+PYsWcaKY3Fp7r3TZzpECFADGd6I9EA1b4FJb4A+9rVJF9L/t+
-# ZEPEOwibNAh7KYn5CM9WONak8k2svwDHk1SRTzhU5SLMZ8tYeHnh1bGIRsRAa69U
-# kYKzZgo4Q4p1mIFZRUTALsXMjVj9MwdddLMYV6qH/+KDUl6kpi4yIEZi3tGJbdQ6
-# K92vdjEzOeVyZ/ZNfvNGVjYtyI/OMYJIvFijN9rSuvhoulIk4SdgNjLd7BDpZ+do
-# /HR8N4msiiA5Snu8m2aot6KYh4m9YZlXZJ2KpYYQM3VMZ8g45wT0kej6WTIVJv5i
-# ioBdEkHvCQ5sCJL9hBJIhXOWm7dbrXou+sUybEBNSA==
+# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
+# GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
+# CSqGSIb3DQEJBTEPFw0yNjA5MjAxODA3MzRaMC8GCSqGSIb3DQEJBDEiBCBiYqq7
+# 4/Aqa12Gas2x3PWlL5jFZpO2zWMVp/pQXZZzAjANBgkqhkiG9w0BAQEFAASCAgBR
+# TiBG1PSjB4W2Hvh87jY5OOo/iVFencwkO85MK5PoaAngHekQnFjebICN7SssAvSn
+# Ur/SigLmhH2MGlbOfArBPsYi9owoDYny+56CLUldQ1Dt7xxuxYQu6sgSfbCV2P5+
+# Nc79urFwNt2qzOhrn3Cdzi1/Hc70JB+4oOH2PvJZ8PzcGqiv31pjLmxfXyEBWzvR
+# YWFjYHOf5puCWJCGUfm2UDYtNDEXPuiZfhdtHCQfhw6nxNIwGhFpuBpPCFH3TIG9
+# UiVFCHTER5/J6/gYAs/ojvx+vCADPw0p3shqWnSRrgHPcTh8f279b5fz0OsjPQ32
+# nqXLa9s/SmU6VguWLicmoYlWSb0/gxU+iz8fNgB1eRSsIMv3yxDUMylF5Iktc2FD
+# S0nQQlCmDeToXCBf7RroUefKSY+/JWgOi2JiGumrfI9/QeuJ69TeRO/aYXII4PYp
+# ALfgM9ofG99t03teGuwymGP4EAdksumVMxEja8GSsZ0Xa0RF+NVgmmhSRAu87yfd
+# sRxf3SyEzh74eoEavAJpBaa+1noUxZLcbVcWG1KlJwU1sSPC+8+vHtqVNbNgWBb6
+# n5HhFJviw5/6WebIO2YFBWpFs5tqKpJdZT+3OCD1eE2ENlF9U3VnOzejv/1aBhB1
+# DFOmvtEKdOMlKuj/XKi7uRYb73jurXeSDG0X8Z3y3Q==
 # SIG # End signature block

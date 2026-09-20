@@ -1,5 +1,12 @@
 ﻿﻿# WhatsUpGoldPS Release History
-## 0.1.22 - 2026-07-30
+## 0.1.22 - 2026-09-06
+
+### Updates since the original 0.1.22 release candidate
+* **Network neighbor monitoring helpers** -- Added BGP, CDP, EIGRP, and LLDP inventory/monitoring plans, SSH inventory collection, dashboard export, credential resolution, and focused README documentation.
+* **Microsoft Failover Cluster discovery** -- Added cluster topology discovery, cluster-qualified device keys, online IPv4 selection for multi-subnet roles, guarded property access across OS builds, retry handling for intermittent CIM failures, and SQL cluster setup support.
+* **Discovery reliability** -- Updated SNMP table handling and discovery helpers, including current PowerShell 5.1 behavior and more reliable handling of cluster and provider data.
+* **Documentation and release hygiene** -- Updated repository text files to UTF-8 with BOM where required and refreshed signed release content.
+* **Interface traffic example** -- Added `Get-WUGInterfaceTrafficChart.ps1`, a standalone HTML chart generator for device or group interface traffic reports, including custom UTC ranges and browser launch support.
 
 ### Added
 * **WhatsUpGoldPS.Ssh module** (`helpers/ssh/WhatsUpGoldPS.Ssh/`) -- SSH command execution via SSH.NET (Renci.SshNet) with PS 5.1 compatibility; framework-aware assembly loading (`netstandard2.0` preferred, `net40` fallback); functions: `Import-SshNet`, `New-SshSession`, `Invoke-SshCommand`, `Close-SshSession`, `Test-SshConnection`; supports password and private key authentication (Ed25519, RSA, DSA)

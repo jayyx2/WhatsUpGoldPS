@@ -737,8 +737,16 @@ Register-DiscoveryProvider -Name 'MSCluster' `
         # (S2D, CSV, SQL) add classes the other nodes may not have.
         $nodeCounters = @{}   # nodeName -> @( @{ Class; Property; Instances } )
 
+        $skipNodePerfMonitors = $false
+        $counterClassFilter = @()
+        if ($ctx.Options) {
+            $skipNodePerfMonitors = [bool]$ctx.Options['SkipNodePerfMonitors']
+            $counterClassFilter = @($ctx.Options['CounterClass'] | Where-Object { $_ })
+        }
+
         $nodeIndex = 0
         foreach ($nodeName in $nodeNames) {
+            if ($skipNodePerfMonitors) { continue }
             $nodeIndex++
             $nodeSw = [System.Diagnostics.Stopwatch]::StartNew()
             $probeTarget = if ($nodeIPs.ContainsKey($nodeName)) { $nodeIPs[$nodeName] } else { $nodeName }
@@ -758,6 +766,16 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             catch {
                 Write-Warning "    Could not enumerate performance classes on ${nodeName}: $($_.Exception.Message)"
                 continue
+            }
+
+            if ($counterClassFilter.Count -gt 0) {
+                $classNames = @($classNames | Where-Object {
+                    $candidateClass = $_
+                    foreach ($pattern in $counterClassFilter) {
+                        if ($candidateClass -like $pattern) { return $true }
+                    }
+                    return $false
+                })
             }
 
             if ($classNames.Count -eq 0) {
@@ -864,39 +882,46 @@ Register-DiscoveryProvider -Name 'MSCluster' `
         $vipRoleCount = @($roles | Where-Object { $_.PrimaryIP }).Count
         Write-Host "    Roles: $($roles.Count) total, $vipRoleCount with a virtual IP (own device), $($roles.Count - $vipRoleCount) without (live on their owner node)" -ForegroundColor Gray
 
+        # Cluster-wide facts stamped on every device in the cluster, so a node and
+        # a role VIP both identify the cluster they belong to.
+        $clusterAttrs = @{
+            'MSCluster.ClusterName' = "$clusterName"
+            'MSCluster.Nodes'       = "$($nodeNames -join ',')"
+            'MSCluster.NodeCount'   = "$($nodes.Count)"
+            'MSCluster.RoleCount'   = "$($roles.Count)"
+            'MSCluster.QuorumVotes' = "$quorumVotes"
+            'MSCluster.WitnessType' = "$(if ($witnessType) { $witnessType } else { 'None' })"
+        }
+        if ($quorumType)             { $clusterAttrs['MSCluster.QuorumType'] = "$quorumType" }
+        if ($quorumPath)             { $clusterAttrs['MSCluster.QuorumPath'] = "$quorumPath" }
+        if ($witnessState)           { $clusterAttrs['MSCluster.WitnessState'] = "$witnessState" }
+        if ($clusterFunctionalLevel) { $clusterAttrs['MSCluster.FunctionalLevel'] = "$clusterFunctionalLevel" }
+        if ($clusterFqdn)            { $clusterAttrs['MSCluster.Fqdn'] = "$clusterFqdn" }
+        if ($csvSummary)             { $clusterAttrs['MSCluster.SharedVolumes'] = "$csvSummary" }
+        if ($netSummary)             { $clusterAttrs['MSCluster.Networks'] = "$netSummary" }
+        if ($diskSummary)            { $clusterAttrs['MSCluster.ClusterDisks'] = "$diskSummary" }
+        if ($resTypeSummary)         { $clusterAttrs['MSCluster.ResourceTypes'] = "$resTypeSummary" }
+        if ($availDiskSummary)       { $clusterAttrs['MSCluster.AvailableDisks'] = "$availDiskSummary" }
+        if ($heartbeatSummary)       { $clusterAttrs['MSCluster.HeartbeatTuning'] = "$heartbeatSummary" }
+        if ($allRolesSummary)        { $clusterAttrs['MSCluster.AllRoles'] = "$allRolesSummary" }
+        if ($clusterCfg.Contains('DynamicQuorumEnable')) { $clusterAttrs['MSCluster.DynamicQuorum'] = "$($clusterCfg['DynamicQuorumEnable'])" }
+        if ($clusterCfg.Contains('S2DEnabled'))          { $clusterAttrs['MSCluster.S2DEnabled'] = "$($clusterCfg['S2DEnabled'])" }
+        if ($clusterCfg.Contains('SharedVolumesRoot'))   { $clusterAttrs['MSCluster.SharedVolumesRoot'] = "$($clusterCfg['SharedVolumesRoot'])" }
+
         # --- NODE devices: node-local resources ---
         foreach ($node in $nodes) {
             $nodeName  = [string]$node.Name
             $nodeIP    = if ($nodeIPs.ContainsKey($nodeName)) { $nodeIPs[$nodeName] } else { $null }
             $nodeState = ConvertTo-MSClusterStateText -Map $nodeStateMap -Value $node.State
 
-            $nodeAttrs = @{
-                'MSCluster.DeviceType'   = 'Node'
-                'MSCluster.ClusterName'  = "$clusterName"
-                'MSCluster.NodeName'     = "$nodeName"
-                'MSCluster.NodeState'    = "$nodeState"
-                'MSCluster.Nodes'        = "$($nodeNames -join ',')"
-                'MSCluster.Roles'        = "$roleSummary"
-                'MSCluster.NodeVote'     = "$(if ($nodeWeights.ContainsKey($nodeName)) { $nodeWeights[$nodeName] } else { 1 })"
-                'MSCluster.QuorumVotes'  = "$quorumVotes"
-            }
+            $nodeAttrs = @{}
+            foreach ($ak in $clusterAttrs.Keys) { $nodeAttrs[$ak] = $clusterAttrs[$ak] }
+            $nodeAttrs['MSCluster.DeviceType'] = 'Node'
+            $nodeAttrs['MSCluster.NodeName']   = "$nodeName"
+            $nodeAttrs['MSCluster.NodeState']  = "$nodeState"
+            $nodeAttrs['MSCluster.Roles']      = "$roleSummary"
+            $nodeAttrs['MSCluster.NodeVote']   = "$(if ($nodeWeights.ContainsKey($nodeName)) { $nodeWeights[$nodeName] } else { 1 })"
             if ($nodeIP)                 { $nodeAttrs['MSCluster.NodeIP'] = "$nodeIP" }
-            if ($quorumType)             { $nodeAttrs['MSCluster.QuorumType'] = "$quorumType" }
-            if ($quorumPath)             { $nodeAttrs['MSCluster.QuorumPath'] = "$quorumPath" }
-            if ($witnessType)            { $nodeAttrs['MSCluster.WitnessType'] = "$witnessType" }
-            if ($witnessState)           { $nodeAttrs['MSCluster.WitnessState'] = "$witnessState" }
-            if ($clusterFunctionalLevel) { $nodeAttrs['MSCluster.FunctionalLevel'] = "$clusterFunctionalLevel" }
-            if ($clusterFqdn)            { $nodeAttrs['MSCluster.Fqdn'] = "$clusterFqdn" }
-            if ($csvSummary)             { $nodeAttrs['MSCluster.SharedVolumes'] = "$csvSummary" }
-            if ($netSummary)             { $nodeAttrs['MSCluster.Networks'] = "$netSummary" }
-            if ($diskSummary)            { $nodeAttrs['MSCluster.ClusterDisks'] = "$diskSummary" }
-            if ($resTypeSummary)         { $nodeAttrs['MSCluster.ResourceTypes'] = "$resTypeSummary" }
-            if ($availDiskSummary)       { $nodeAttrs['MSCluster.AvailableDisks'] = "$availDiskSummary" }
-            if ($heartbeatSummary)       { $nodeAttrs['MSCluster.HeartbeatTuning'] = "$heartbeatSummary" }
-            if ($allRolesSummary)        { $nodeAttrs['MSCluster.AllRoles'] = "$allRolesSummary" }
-            if ($clusterCfg.Contains('DynamicQuorumEnable')) { $nodeAttrs['MSCluster.DynamicQuorum'] = "$($clusterCfg['DynamicQuorumEnable'])" }
-            if ($clusterCfg.Contains('S2DEnabled'))          { $nodeAttrs['MSCluster.S2DEnabled'] = "$($clusterCfg['S2DEnabled'])" }
-            if ($clusterCfg.Contains('SharedVolumesRoot'))   { $nodeAttrs['MSCluster.SharedVolumesRoot'] = "$($clusterCfg['SharedVolumesRoot'])" }
 
             $nd = $null
             if ($nodeDetail.ContainsKey($nodeName)) { $nd = $nodeDetail[$nodeName] }
@@ -964,18 +989,16 @@ Register-DiscoveryProvider -Name 'MSCluster' `
 
             $roleName = if ($role.VirtualName) { $role.VirtualName } else { $role.GroupName }
 
-            $roleAttrs = @{
-                'MSCluster.DeviceType'    = 'Role'
-                'MSCluster.ClusterName'   = "$clusterName"
-                'MSCluster.RoleKind'      = "$($role.Kind)"
-                'MSCluster.ResourceGroup' = "$($role.GroupName)"
-                'MSCluster.VirtualName'   = "$roleName"
-                'MSCluster.VirtualIP'     = "$($role.VirtualIPs -join ',')"
-                'MSCluster.PrimaryIP'     = "$($role.PrimaryIP)"
-                'MSCluster.RoleState'     = "$($role.State)"
-                'MSCluster.OwnerNode'     = "$($role.OwnerNode)"
-                'MSCluster.Nodes'         = "$($nodeNames -join ',')"
-            }
+            $roleAttrs = @{}
+            foreach ($ak in $clusterAttrs.Keys) { $roleAttrs[$ak] = $clusterAttrs[$ak] }
+            $roleAttrs['MSCluster.DeviceType']    = 'Role'
+            $roleAttrs['MSCluster.RoleKind']      = "$($role.Kind)"
+            $roleAttrs['MSCluster.ResourceGroup'] = "$($role.GroupName)"
+            $roleAttrs['MSCluster.VirtualName']   = "$roleName"
+            $roleAttrs['MSCluster.VirtualIP']     = "$($role.VirtualIPs -join ',')"
+            $roleAttrs['MSCluster.PrimaryIP']     = "$($role.PrimaryIP)"
+            $roleAttrs['MSCluster.RoleState']     = "$($role.State)"
+            $roleAttrs['MSCluster.OwnerNode']     = "$($role.OwnerNode)"
             if ($role.OnlineIPs -and $role.OnlineIPs.Count -gt 0) {
                 $roleAttrs['MSCluster.OnlineVirtualIP'] = "$($role.OnlineIPs -join ',')"
             }
@@ -1010,6 +1033,42 @@ Register-DiscoveryProvider -Name 'MSCluster' `
             }
 
             $roleTags = @('mscluster', 'role', $role.Kind, $roleName, $clusterName)
+
+            # SQL services are shared resources of the role. Poll them through the
+            # role name so the service checks follow the active cluster owner.
+            foreach ($instanceName in @($role.SqlInstances | Select-Object -Unique)) {
+                $serviceSuffix = if ($instanceName -eq 'MSSQLSERVER') { '' } else { "`$$instanceName" }
+                $displaySuffix = if ($instanceName -eq 'MSSQLSERVER') { '' } else { " ($instanceName)" }
+
+                $items += New-DiscoveredItem `
+                    -Name "MSCluster - SQL Server Service$displaySuffix" `
+                    -ItemType 'ActiveMonitor' `
+                    -MonitorType 'Service' `
+                    -MonitorParams @{
+                        ServiceDisplayName  = "SQL Server$displaySuffix"
+                        ServiceInternalName = "MSSQLSERVER$serviceSuffix"
+                        ServiceUseSNMP      = 'false'
+                        Description         = "SQL Server service for clustered role $roleName"
+                    } `
+                    -UniqueKey "mscluster:${clusterName}:role:$($role.GroupName):sql:${instanceName}:service" `
+                    -Attributes $roleAttrs `
+                    -Tags $roleTags
+
+                $agentServiceName = if ($instanceName -eq 'MSSQLSERVER') { 'SQLSERVERAGENT' } else { "SQLAgent`$$instanceName" }
+                $items += New-DiscoveredItem `
+                    -Name "MSCluster - SQL Server Agent Service$displaySuffix" `
+                    -ItemType 'ActiveMonitor' `
+                    -MonitorType 'Service' `
+                    -MonitorParams @{
+                        ServiceDisplayName  = "SQL Server Agent$displaySuffix"
+                        ServiceInternalName = $agentServiceName
+                        ServiceUseSNMP      = 'false'
+                        Description         = "SQL Server Agent service for clustered role $roleName"
+                    } `
+                    -UniqueKey "mscluster:${clusterName}:role:$($role.GroupName):sql:${instanceName}:agent" `
+                    -Attributes $roleAttrs `
+                    -Tags $roleTags
+            }
 
             $items += New-DiscoveredItem `
                 -Name 'MSCluster - Role Availability' `
@@ -1074,8 +1133,8 @@ function Export-MSClusterDashboardHtml {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJTk42gnUIVB8Q
-# x4pEhc3DYuvyNr7AK0kzKU+wjkUdJaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAa+ira4LY3hBad
+# PWqHiwjGTq2oa6eapg0rdF0+sfieHKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1236,25 +1295,25 @@ function Export-MSClusterDashboardHtml {
 # 7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+N
 # Jpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckT
 # etiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszW
-# kPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDANBgkqhkiG9w0B
+# kPZPubdcMIIG7TCCBNWgAwIBAgIQCE/cM09+RU7bww+P+ZIYNTANBgkqhkiG9w0B
 # AQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/
 # BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYg
-# U0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkwMzIzNTk1OVow
+# U0hBMjU2IDIwMjUgQ0ExMB4XDTI2MDgwNTAwMDAwMFoXDTM3MTEwNDIzNTk1OVow
 # YzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQD
 # EzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIw
-# MjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBGrC0Sxp7Q6q5g
-# VrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwBSOeLpvPnZ8ZN
-# +vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/4QhguSssp3qo
-# me7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3K3E0zz09ldQ/
-# /nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROUINDT98oksouT
-# MYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3w6ySSSu+3qU8
-# DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46YceNA0LfNsnqcnp
-# JeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d2sC26/PQPdP5
-# 1ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8xymLnjCbSLZ49
-# kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+AliL7ojTdS5P
-# WPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2bQhpp0IoKRR7Y
-# ufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
-# MB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSMEGDAWgBTvb1NK
+# MjYgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALZ7pvLJ/s1K+NSb
+# TGWz/TjGMPh8CQ6RucZCLv5anHzWJjF/NWJrFIhy24fcpKXlgRiky4WAawDfU3YP
+# 0BMxt9l3Dm5oCG5Z69AqEN1kgHg2epx+l+lZBcmJCcN0ASURML5uFIS80sZsDwO3
+# BSkUxDjLJhBI+qiZP3aixAC/qEGLjsBNlLol9VZ7pfGEXiMlneJIC5/YKuizVzNF
+# KZZEeoy/0B8Zm+nzKBgSWG52lCO1w+nCg6XpCtklTJXeIg283hw7TmmsZXR+SMbj
+# brEOvZ3fP2VxIgeR28Y90ZStd3F9VuA5RVynb/whITPAo9b75Zr4Ta6Mj3URm26Q
+# ZYMn/FnbuTegcoRcFEZ9FOqM5T6MTdtr/n74lIT/ug0eeOzmZ6QTFg33otX+bFRs
+# IolvykE1jive4PuESaT8zzVeFWDAMDtozNgLctkGD1ZjkEyZtJrLl5ya0m5doH/S
+# cpaZCZVl6pNUOCybMc/kxC6EAmSJY24L0yYKD1Nkddsnb/ItVKi/2nXpQNMu1PT5
+# prW83vV8d67WowuUs0HdY4H8AMLGvdL/WHEj3ZnqMqAQQP9u3Ai9t+5eQ02GDwy0
+# ODjdzi0xlp70W+ow63/0++YDEX1M0iwgUHwbrJvfpklkZQvw3+kv3vUPItdwrocz
+# k9icflf55W1zOEKAcJVAIXpcMCU9AgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
+# MB0GA1UdDgQWBBQUyWOKMC7USvtulPPm40B+9ezN4jAfBgNVHSMEGDAWgBTvb1NK
 # 6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYI
 # KwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8v
 # b2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRp
@@ -1262,49 +1321,49 @@ function Export-MSClusterDashboardHtml {
 # SEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5k
 # aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2
 # U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9
-# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESeY0ByIfjk9iJP
-# 2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FUFqNh+tshgb4O
-# 6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7YMTmqPO9mzskg
-# iC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0ziTN6R3ygQBHMU
-# BaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/QqvXnNb+YkDF
-# kxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlqAcuEVT0cKsb+
-# zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3Y50OHgaY7T/l
-# wd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roancJIFcbojBcxl
-# RcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/ndUlQ05oxYy2
-# zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7IRE2lskKPIJg
-# baP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdCvHlshtjdNXOC
-# IUjsarfNZzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQCNxTphHp1SCt+ZrAmAfn0oQLFr0mLywSLa
+# DXQIENoyKqxrFbJblzCVP/pkXmwXOdrOpWygLzlT12os5ipDCy35RBCg2UMeApEt
+# rfGhz45F4Wt4WGdNdIbRWt3YTYJmpR+b7lr4d7Uwn+H600u4D7RnOGf8Wj4UNgAd
+# ZkfHhHv1mx9EVh71SJelcEN/oORSjXzdjfw1iZH9d8Nh/thn6hH23d+VsPAr6GAY
+# yzSA02nXD1nYLI7Ijmiv+xLCiYC41DSFYL3GhTiy0PxpawPtGRyaBVGzq+UiTfM8
+# pD7KVyF5aQyWP4KhVGUUTnmm/RlYJoW3TiXA/+t0YcT2oRVBm3JETjajHug2AL+v
+# 5jhtKVnd3D0rbHXEu27o+Q8p4sEWPMqKDB+qbceb6T/6WcwTwXmQ9lOCLLYcsQeS
+# WmvKqzpAec9etE14jOQAzLKWdE3w/TCaKtLRaRT7LCkRYVnhA2D73FLje1O5b3HR
+# 5eHs0NzU/+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94lbUveOiJBI+xZ
+# EbGRsMNbXmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H5Mh7QfieAIjW
+# agkJNt68Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCyatf8R1hSjzSvd
+# N8yWQPT9gzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
 # Y3RpZ28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWdu
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCiVLcmTlYbl3mXTPoeQnYvuNqaAGKXsLVLfnSdh5wQ/TANBgkqhkiG9w0BAQEF
-# AASCAgCJyj0BeT0kcDvnvOuK1rbsiDaIyv0uO6KqbMl7bLH1QyHRywUVdqbq99YW
-# IrZhNYW+1vnkCA2PkZ2eRhtWr5n0+yBHxt3KoEkjd5bK/uIU9O00OZeAGOh8C6R+
-# HqfPcQy92oBtVOYscfWaAvm6ocsozTMKkMxrFxjqNv+fsQ49ALszzA5KgT4sG6NC
-# hS6f87mFBvTYSKEHFBH2/06Akx3H6NgpAb+7FPlPPMtzLE4rUxQAYAcNlIzkKbGC
-# CYeE8EXc5aAumvkWGks0yRofaaet6+mPbpc6FbTK030/aR+AfJLwMNFrpjmBnruc
-# rDKNJlh8uzuQT9Ems4b2T77BXLRwMbxp4Tj/CJdXRVPtKwMaJ6J/NQGY6zqYZW9Z
-# jhcBV6+tHjuAno+cAFfXe6hNSbjbCJ0uwkTqIoYUmerYhH6nwF4UHxFVYiHeG7o/
-# +Mak9cItAkB0RR1MwUvmRHbVe8xdBYEzP5+w3I+ObIzjbS1MX05A4QtpHLbCgIC6
-# cWNF+drDGBQAyJNb4RzJ4zDqXtHxvOsEygQ6K8SxW3+4CeOojxxr4c/LM+ALQ4Fa
-# 3YJA1tCu/Zmy8Cvc+hDvjNUUKN124g0JfOr0sl7W42huN8qekJOn8iOdXb5s+kw4
-# 2xeL4AGaeXQp1y1hK5aKgIZ+2DT3w44OBB27/7lex/31XBiI6KGCAyYwggMiBgkq
+# BCDhAFg5Otz4bgrAXPOJ6PsPKV6UL95lHLmfx4GbebaE1DANBgkqhkiG9w0BAQEF
+# AASCAgDGG9cVbCKz8vBf7ZYHA36aLbgR8PLiesSJaeQT7b3NT/7RR0r6xj8Ra3hj
+# X/mYkEynYiKF03yJZuReIm+UmE1lsQgwgKFmt/xMgxAAIzyfK3vEIYwYJJARY8q1
+# a0o5Y1ZPZtmFqtJ6su47wubA+w9O6gM8ShFkysMLOS2jwvvkwXCawKGisXcowGnw
+# Inzdgx6fzz/tPnfHW+5iAA9IjvU52hyNWRoUHkivgV3gSDSztzdQjS5eXb6xBcPX
+# LnoBewxf7mlJHKCoFEs+aX2C3w+1mQN8wjpqKslYx39suLTDv1cGC21aCfahWm80
+# QQeTzvN/pUnqm55LStXvOGcGOQkBIXxyS8f2nA+KiQ5X6fgdLdfa+1sP2aRQZbuh
+# h+yGboxefW/w2KtiXytOuvauCuFQMNgGWCoyng+l+/zzRZnUbcqHRHkc4qyZCKuZ
+# YOx/DmBDJ45RdSO9iOhK4yE35M9Ebf97y8gbju52BVVXkvUF77gmC1oeHuA/q/wS
+# CzEPmYR7VAKmpQw95vodwjaxY9ebFqnK9YKSD22OEJEsKzVU+Y5FsI0RaZUywzFa
+# YIJy5coKKAxLJq5MtSfOl5I3zfJxFXtaP+L/GTFdxsnyZD3t/myEJrqB0MPOr9oQ
+# swyp7wHJuoW3Mxh1InRBAvEJtzi2IjgQw1BnSmNKmHcsi3kipKGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
-# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
-# dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA4MjgyMjI1NDJaMC8GCSqGSIb3DQEJBDEiBCDd8Gw7
-# At737bKyYIfZ0Hq4tQPsboCxsddE0S6nlQe/ATANBgkqhkiG9w0BAQEFAASCAgB1
-# gnAR/5wPYAOuEdWqOGf5aF+7f/QzYSCVDBBmNEhxQKTDSmpAKr9N3xQxKuG1JGAA
-# VpTQXpSTxfIV3/nnKkUeRsUJlmwnO1Lx1t0Qd5BnM4h3B0VJZ++37CE8IOFez/tV
-# KxsCEhJ90pUHGjO68IMn2+iioQiM8k9CWbs3WzkHUbkKez4UIgzvLmkmBg1gac5k
-# ZZSyDHgrOJuFyJE+KaG3SjcVNdlQqxsMyBSByYUmHaTDW7HFbXL0P5dct2Q/uwz7
-# uEsmb33gG5Cw14Dbfah/QVHbt7CagV/8wQr74ZTp6W6O2WCTEPAz5UREiCPzYo9l
-# rcxIHhHS8lGeF1AwDnjWy4voCYVuHD0B+PgJxDlzzMY/ugoJt66psW7MBjp/0BUT
-# JtxogUvYBHWBe4lppXKu2VfmomkCrhsBCJnvGRtwRxzhRIsYbMdN2kRogymYv8lG
-# 4QjXYwJZjZn1/BlgVyhMThxwyWj6SMAAprpAeHZZ9lwVEo/LT/a7LzzKR4VLUpwh
-# asCt+8V/cft+ZuCTEVwW6o7mpykzvC904GQMlpXOugRuBngIwjOCmBvl1e2QRvCc
-# ObrX4pF2BvFzZhv0FzZ59c8VFaJATXw4CRPkmmG5qm0Lg5HgPXCb8hTadumrrjvm
-# vRja92/B/GKxM5fQebag2+Ttrco6+H5pAMBSt/uUmQ==
+# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
+# GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
+# CSqGSIb3DQEJBTEPFw0yNjA5MjAxNDQzMDFaMC8GCSqGSIb3DQEJBDEiBCC38Zt2
+# eQsfMv8UIjt2cGxUo50+nwIuUpZR0IP90dvGkTANBgkqhkiG9w0BAQEFAASCAgB2
+# NUN8g5jpkqQSZ+2MZWSDLBtkG0rePU0yxuH8IBhZlg7FhFwP3NpVY715LQelSgwY
+# jvqBCImHobG7910mkcM1OecAoMO8wzynBheoRdbfK2TSyzObzyMfVTrN0qzS/oCN
+# BfbU7sL9qk8ObcsCA0HNjwsdmkyLx0a/O88aIh215Nrc3UXgo3DPju+cVzJa2bp4
+# uEPSLNDOaa1kOsidol4eVIo9KwFF2B+0FZz/jRYF7dCZWk4qIMmoteKzpolPteFR
+# 2XpKTeXg1A3+DinfxTeXIwa+6e183JOmtESBu1p5i0dgPqKkAE3J6NEPXz2j4tP2
+# xFvaRB99PN6TxYSeCEgCPxZCtGR+T7Gxfdk+38B0faI6A1kJIKRv650Pjh9aDclA
+# 4a4pjpGWOp8rt+8ZSQTR+RBpVy3ESMpZkhEf29CRtcJJ3/n7q8pjTyhYmU9r7cZJ
+# UrBRLoOZ5+ivycebSLCd0JN4b6FsvykcXHJtqCjgvo7jzH+0IS++pvIhMfx6gfwX
+# SiCsI0gjSCJa2DfCbslxo+Ng54w8WzHWFRfnuw8C+1ksq3JHllytOTwvnTd8E7al
+# 1ux5B1bx01EVyKBGD6vEGbJ9jlhNtyf/D7W+6UAmvROzRxpGiB8UiXbLqx/MqTfr
+# OPgQVNT/Izaanb4LG8/b2THC8FvdZkFXWTKkMoV9Fg==
 # SIG # End signature block

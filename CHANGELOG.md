@@ -10,6 +10,10 @@
 * **Interface traffic example** -- Added `Get-WUGInterfaceTrafficChart.ps1`, a standalone HTML chart generator for device or group interface traffic reports, including custom UTC ranges and browser launch support.
 
 ### Added
+* **Cloud cost, quota, and waste analysis** -- Added opt-in Azure, AWS, and OCI collectors with normalized spend/budget, quota, reservation, and waste findings; optional unit prices allow estimates without inventing provider pricing. Findings can be converted to WUG monitor items or exported to a dashboard; AWS, Azure, and OCI discovery scripts expose the feature through `-IncludeCostAndQuota` and quota options.
+* **Linux fleet compliance dashboard** -- Added read-only SSH inventory and threshold checks for OS and patch age, failed systemd units, disk and inode use, NTP, listening ports, reboot status, and SSH settings; exports JSON and an interactive HTML report, with offline parsing and evaluation tests.
+* **Configuration drift auditing** -- Added versioned and approved golden baselines, normalized configuration diffs, vendor profiles and policy packs, peer consistency checks, and dashboard reporting from SSH targets, files, or WUG device groups; includes optional WUG publishing and scheduled execution.
+* **WhatsUp Gold self-audit example** -- Added a read-only audit for missing or unused credentials, missing active monitors, duplicate monitor names, stale devices, naming and attribute gaps, and orphaned assignments, with CSV and HTML output.
 * **WhatsUpGoldPS.Ssh module** (`helpers/ssh/WhatsUpGoldPS.Ssh/`) -- SSH command execution via SSH.NET (Renci.SshNet) with PS 5.1 compatibility; framework-aware assembly loading (`netstandard2.0` preferred, `net40` fallback); functions: `Import-SshNet`, `New-SshSession`, `Invoke-SshCommand`, `Close-SshSession`, `Test-SshConnection`; supports password and private key authentication (Ed25519, RSA, DSA)
 * **NvidiaSmi discovery provider** (`Setup-NvidiaSmi-Discovery.ps1`) -- SSH-based NVIDIA GPU discovery; connects to Linux hosts, runs nvidia-smi, discovers GPU inventory (model, VRAM, driver version, utilization, temperature, power); generates dashboards; creates 14 WUG SSH Script performance monitors (GPU utilization, memory, temperature, power, clocks, fan, encoder/decoder); vault-backed SSH credentials; integrated into wizard and scheduled tasks
 * **CiscoWLC in discovery wizard** -- `Start-WUGDiscoveryWizard` and `Start-WUGDiscoverySetup` now include Cisco Wireless LAN Controller as a selectable provider with SNMP v2/v3 auth choice
@@ -18,8 +22,11 @@
 * **SNMP version auto-reset** -- When the wizard passes a different SNMP version than what's saved in vault, the vault is automatically cleared and new credentials collected (no manual Reset needed)
 
 ### Changed
+* **Interactive SSH shell support** -- Added and exported `Invoke-SshShellCommand` for network devices that require a terminal, including enable mode, control-character steps, prompt matching, and automatic pager handling; registered in the SSH module manifest.
+* **Dashboard warning status formatting** -- The dynamic dashboard now recognizes the abbreviated `Warn` status in both table rows and summary cards.
 * **MSCluster push order** -- Create or find devices, assign the Windows credential, apply Windows roles, rescan incomplete devices, restore intended display names, then reconcile custom cluster monitors. This prevents the rescan from overwriting names or disturbing custom monitor assignments.
 * **MSCluster reruns** -- A device with existing performance-monitor assignments is treated as already scanned. Complete devices avoid the rescan wait and reconcile only missing monitors.
+* **Test reporting** -- The discovery helper test now registers its mock provider after defining it, and the community device-role importer returns a terminating error when an import fails instead of exiting successfully after printing a failed summary.
 * **Scheduled tasks default to signed `-File` invocation** -- `Register-DiscoveryScheduledTask.ps1` and `Copy-WUGDashboardReports.ps1` now use `Invoke-DiscoveryTask.ps1` with `-File` by default instead of `-EncodedCommand`; `-ExecutionPolicy Bypass` eliminated from all paths (uses `RemoteSigned`); old behavior available via `-UseEncodedCommand` switch
 * **Default SNMP v3 protocols** -- Changed from SHA256/AES256 to SHA/AES128 (more commonly deployed)
 * **Task args serialization** -- Scheduled task parameters built directly from typed values (no string parsing); fixes multi-target quoting issues
@@ -27,6 +34,8 @@
 
 ### Fixed
 * **MSCluster interrupted pushes** -- A push interrupted after device creation can now be resumed safely: existing incomplete devices are rescanned, renamed after the scan completes, and then receive only the missing custom cluster monitors.
+* **Community role import diagnostics** -- Failed device-role template imports are now observable by callers and E2E harnesses through a non-zero terminating error.
+* **Community role import request format** -- Wrap downloaded signed packages in the `PackageApply` envelope required by the WUG API; validated with a live import.
 * **CUCM wizard "API port" prompt removed** -- CUCM and CiscoWLC are SNMP-based; no longer ask for API port or pass `-ApiPort` (which didn't exist as a parameter)
 * **AuthMethod mapping for SNMP providers** -- Wizard, Register script, and elevated task scripts now correctly map `SnmpV2`/`SnmpV3` to `-SnmpVersion 2`/`3` for CUCM and CiscoWLC (previously passed invalid `-AuthMethod` parameter)
 * **Register-DiscoveryScheduledTask ValidateSet** -- Added `SnmpV2`, `SnmpV3`, and `NvidiaSmi` to `AuthMethod` and `Provider` validation sets

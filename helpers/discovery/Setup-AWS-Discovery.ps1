@@ -152,6 +152,13 @@ param(
 
     [string]$OutputPath,
 
+    # --- Opt-in cost, quota and waste analysis -------------------------------
+    [switch]$IncludeCostAndQuota,
+
+    [hashtable]$UnitPrice,
+
+    [string]$CostReportPath,
+
     [switch]$NonInteractive
 )
 
@@ -307,6 +314,56 @@ if (-not $plan -or $plan.Count -eq 0) {
         return
     }
     $plan = @()
+}
+
+# ==============================================================================
+# STEP 3b: Cost, quota and waste analysis (opt-in)
+# ==============================================================================
+$costFindings = @()
+if ($IncludeCostAndQuota) {
+    $costHelpers = Join-Path $scriptDir 'CloudCostHelpers.ps1'
+    if (-not (Test-Path $costHelpers)) {
+        Write-Warning "CloudCostHelpers.ps1 not found; skipping cost and quota analysis."
+    }
+    else {
+        . $costHelpers
+        Write-Host ""
+        Write-Host "Analyzing AWS cost, quota and waste..." -ForegroundColor Cyan
+
+        $costRegions = @($plan | ForEach-Object { $_.Attributes['AWS.Region'] } | Where-Object { $_ } | Sort-Object -Unique)
+        if ($costRegions.Count -eq 0) { $costRegions = @($connectRegion) }
+
+        foreach ($costRegion in $costRegions) {
+            Write-Host "  Region $costRegion..." -ForegroundColor DarkGray
+            try {
+                $costSplat = @{ Region = $costRegion; AccountName = "AWS $costRegion" }
+                if ($UnitPrice) { $costSplat['UnitPrice'] = $UnitPrice }
+                $costFindings += @(Get-AWSCostQuotaFinding @costSplat)
+            }
+            catch {
+                Write-Warning "  Cost analysis failed for ${costRegion}: $($_.Exception.Message)"
+            }
+        }
+
+        if ($costFindings.Count -gt 0) {
+            Get-CloudCostSummary -Finding $costFindings | Format-Table -AutoSize | Out-String -Width 160 | Write-Host
+            $costFindings | Where-Object { $_.Status -eq 'Fail' -or $_.Status -eq 'Warn' } |
+                Select-Object Category, Check, Status, Value, Resource |
+                Format-Table -AutoSize | Out-String -Width 160 | Write-Host
+
+            if (-not $CostReportPath) { $CostReportPath = Join-Path $OutputDir 'AWS-Cost-Quota.html' }
+            try {
+                Export-CloudCostDashboard -Finding $costFindings -OutputPath $CostReportPath -ReportTitle 'AWS Cost and Quota' | Out-Null
+                Write-Host "  Cost report: $CostReportPath" -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "  Could not render cost dashboard: $($_.Exception.Message)"
+            }
+        }
+        else {
+            Write-Host "  No cost or quota findings returned." -ForegroundColor DarkGray
+        }
+    }
 }
 
 # ==============================================================================
@@ -837,12 +894,12 @@ switch ($currentChoice) {
 } # end foreach actionsToRun
 
 Write-Host ""
-Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cy
+Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMoifAApOMtfTS
-# GXHgjr/aeHGeG41G/mAhoopdvziBIaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+YgDw1i10Oaa5
+# JMqLI2kkaNzR9A8tqfScO+T8B/oiKqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1003,25 +1060,25 @@ Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cy
 # 7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+N
 # Jpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckT
 # etiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszW
-# kPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDANBgkqhkiG9w0B
+# kPZPubdcMIIG7TCCBNWgAwIBAgIQCE/cM09+RU7bww+P+ZIYNTANBgkqhkiG9w0B
 # AQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/
 # BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYg
-# U0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkwMzIzNTk1OVow
+# U0hBMjU2IDIwMjUgQ0ExMB4XDTI2MDgwNTAwMDAwMFoXDTM3MTEwNDIzNTk1OVow
 # YzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQD
 # EzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIw
-# MjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBGrC0Sxp7Q6q5g
-# VrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwBSOeLpvPnZ8ZN
-# +vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/4QhguSssp3qo
-# me7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3K3E0zz09ldQ/
-# /nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROUINDT98oksouT
-# MYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3w6ySSSu+3qU8
-# DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46YceNA0LfNsnqcnp
-# JeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d2sC26/PQPdP5
-# 1ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8xymLnjCbSLZ49
-# kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+AliL7ojTdS5P
-# WPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2bQhpp0IoKRR7Y
-# ufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
-# MB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSMEGDAWgBTvb1NK
+# MjYgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALZ7pvLJ/s1K+NSb
+# TGWz/TjGMPh8CQ6RucZCLv5anHzWJjF/NWJrFIhy24fcpKXlgRiky4WAawDfU3YP
+# 0BMxt9l3Dm5oCG5Z69AqEN1kgHg2epx+l+lZBcmJCcN0ASURML5uFIS80sZsDwO3
+# BSkUxDjLJhBI+qiZP3aixAC/qEGLjsBNlLol9VZ7pfGEXiMlneJIC5/YKuizVzNF
+# KZZEeoy/0B8Zm+nzKBgSWG52lCO1w+nCg6XpCtklTJXeIg283hw7TmmsZXR+SMbj
+# brEOvZ3fP2VxIgeR28Y90ZStd3F9VuA5RVynb/whITPAo9b75Zr4Ta6Mj3URm26Q
+# ZYMn/FnbuTegcoRcFEZ9FOqM5T6MTdtr/n74lIT/ug0eeOzmZ6QTFg33otX+bFRs
+# IolvykE1jive4PuESaT8zzVeFWDAMDtozNgLctkGD1ZjkEyZtJrLl5ya0m5doH/S
+# cpaZCZVl6pNUOCybMc/kxC6EAmSJY24L0yYKD1Nkddsnb/ItVKi/2nXpQNMu1PT5
+# prW83vV8d67WowuUs0HdY4H8AMLGvdL/WHEj3ZnqMqAQQP9u3Ai9t+5eQ02GDwy0
+# ODjdzi0xlp70W+ow63/0++YDEX1M0iwgUHwbrJvfpklkZQvw3+kv3vUPItdwrocz
+# k9icflf55W1zOEKAcJVAIXpcMCU9AgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
+# MB0GA1UdDgQWBBQUyWOKMC7USvtulPPm40B+9ezN4jAfBgNVHSMEGDAWgBTvb1NK
 # 6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYI
 # KwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8v
 # b2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRp
@@ -1029,49 +1086,49 @@ Write-Host "Re-run anytime to discover new AWS resources." -ForegroundColor Cy
 # SEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5k
 # aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2
 # U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9
-# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESeY0ByIfjk9iJP
-# 2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FUFqNh+tshgb4O
-# 6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7YMTmqPO9mzskg
-# iC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0ziTN6R3ygQBHMU
-# BaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/QqvXnNb+YkDF
-# kxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlqAcuEVT0cKsb+
-# zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3Y50OHgaY7T/l
-# wd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roancJIFcbojBcxl
-# RcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/ndUlQ05oxYy2
-# zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7IRE2lskKPIJg
-# baP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdCvHlshtjdNXOC
-# IUjsarfNZzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQCNxTphHp1SCt+ZrAmAfn0oQLFr0mLywSLa
+# DXQIENoyKqxrFbJblzCVP/pkXmwXOdrOpWygLzlT12os5ipDCy35RBCg2UMeApEt
+# rfGhz45F4Wt4WGdNdIbRWt3YTYJmpR+b7lr4d7Uwn+H600u4D7RnOGf8Wj4UNgAd
+# ZkfHhHv1mx9EVh71SJelcEN/oORSjXzdjfw1iZH9d8Nh/thn6hH23d+VsPAr6GAY
+# yzSA02nXD1nYLI7Ijmiv+xLCiYC41DSFYL3GhTiy0PxpawPtGRyaBVGzq+UiTfM8
+# pD7KVyF5aQyWP4KhVGUUTnmm/RlYJoW3TiXA/+t0YcT2oRVBm3JETjajHug2AL+v
+# 5jhtKVnd3D0rbHXEu27o+Q8p4sEWPMqKDB+qbceb6T/6WcwTwXmQ9lOCLLYcsQeS
+# WmvKqzpAec9etE14jOQAzLKWdE3w/TCaKtLRaRT7LCkRYVnhA2D73FLje1O5b3HR
+# 5eHs0NzU/+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94lbUveOiJBI+xZ
+# EbGRsMNbXmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H5Mh7QfieAIjW
+# agkJNt68Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCyatf8R1hSjzSvd
+# N8yWQPT9gzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
 # Y3RpZ28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWdu
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAaZILihPiZwDXjsuWUvrv4conpi8XgGBU7q+9jk1OrfDANBgkqhkiG9w0BAQEF
-# AASCAgAUuG6kFo/+1xuO8sqwdvVNZt4BNE+aTRl3cNnYL9QFFTB41qQoXpWFjGqs
-# L1VKsiZMga13fKPt+r7LQBlPXZDVPkBWVOLfAoXbnD8qCY9N3rru6HF5iHWNnHgn
-# Nc4/aP2qS2tVbdUCBtUib7luvPW1OBqpo/hBbdP5zJPDvrmKuyEHEc8mFSRwAq9/
-# YazNi5KMxZzxgqTU4C4EVMsj9x3TDkfWkNtTJXKFVPuSp0gVbRSFzXa4ZW3P2WpE
-# 9ycjvWuuLKLaQjYtIQjk0ZN/zgv00PA15azd4rmThE11IKrtQ4OcxyEI+ZBgj3oy
-# a89Ze+pIPljpX9eNHtpQJd9jHmqbL9pkDqnKjwMvnqIbtFXImkMObuK+87ese0WQ
-# fD1zZQuflK2zM0z/PkVOxXe5IA2RsF3aP9RONldvTGZD9I1YZXnKh+hlz3hPdHyt
-# 9UWadPcxtNV1K1Oyw02f1P7eaSnZBdK5BeTOZ4w82LS/B2GpuvELQ67pcTjdNXXI
-# Wxk3UvH1xuBLP7IcK1cuwUC57hsF7/hAdh5ndnkCZ6Q/jRS53l4u5Vi2WBz21Pbe
-# 8SpcYWJfDWVh942X7SSxUOfl99VTC9uE2M7QYeyoMIKNqx8qeIN0k1z8LaEy3nN0
-# 1K3lh5S/yju92Gn19YROcOWViId/lb89JTD9hmmjEnSuyH+tK6GCAyYwggMiBgkq
+# BCDBu6scXorH0p2sypSJowJ876ksQrOdLL1t9Ck3Nm/VPzANBgkqhkiG9w0BAQEF
+# AASCAgCOB+zYIBIvGarb6+AIxG0tR8ghC+gXgGjnkotDKTIUCXoO2GhsRrW1o5pD
+# 1ydCa10mwmaIJJMjQHgVzBqxWKNxd4UGO0FQ4GW5dZglxNnI3kLl3prvNQQsKqs9
+# 0Tq3Mr2SCgWU8wMe6y1Aa3rz/rdZT7wwNr5+SElxfkbLrC9mX3vW8wIN3cIYNr6O
+# 3Aqmco3z/xDCeCoZqvpvdOaY2XsTOhudyiVK+QJlGwFDSSrmLMxesO7O2bM+Aejv
+# rtkWf820ucudG1CzTcoMIS4Gc2VEMiRAqH/0NcOD8IQ499gtHpWW1+W5V1TQLdKK
+# FA6mYmCeHJ6BebooBru9LpSgkYQRI93efxJW05spjGRTIRIMtPh4roiIapE/Yz3F
+# +x+TWJv5KaksczxxZohCkhoaP3vaQIU3mAPS8UcNX+h9yU1wQJOxftXL2u/fpGum
+# SjKJEQ5sb3x76MShnqB1KK34PX/nKDvJ/2nnaEuGYql+p8ZNASuPhSdx5BOWWKTf
+# E8acx0GbfCy0ecQt7iePBuRdvLdk+Uhohs4zhaDu1h/S7S8NUBjYfqyZOl4Pv0eW
+# QYZvoEHNLunonWG3O7cInbR60tklmBMCxRt3vaf22Dc2HyvtA7JPKCkscqX5Ou53
+# Vned80mu3VLC+I9X9t37wycddzJV0cbNvoQaywFak7PhvOH6Z6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
-# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
-# dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMjQ1MDJaMC8GCSqGSIb3DQEJBDEiBCBt+IDM
-# XwAcAbyQG8FmUi+xI8CtL3LaGW4wri6ysuMkwzANBgkqhkiG9w0BAQEFAASCAgCL
-# witAp0I9X8KEPkT+r9Z9RAS4+NGEj4bLnxo9IQQpgFLrxdNe/IZzVPtqjHKs5Gwd
-# qjb6M3DZpOB0I9XbppfvdOfkh5/DCqvQIb8JF5MalhkurUM0jgiYWkGRuxoO/s39
-# eWbIfquZFXMjPbwZU/T/VlrZHpkMIqofL57Ax7KvoCdnHADPNGcmdIDfJF54OpHd
-# wObuRId2ypFWCD2euQA47E/hgAyEjuBcZnqQirnRJ+r0Fl1x5jyzBI42/YOImbLN
-# 06xV2bUxX61i/D5QvzMVJEWSOeeJe0JPb+G6AscFCsbCCQ/ZTqGl8cO+SzGfPxki
-# bqMUy839KfDFEM6BUTWXjnTj0i+lebnKNdRjvI0hVdvBmRmSbZbXbDXMPYmgUGXb
-# sW0K6AiBF5UaH7xA+ehZ7TCvDY71UrErCwXdhLqtVonNO3K93/Qr3sII+THmVWST
-# 9nLUKV2ozzlCrn9y3zqcffNRtgT3jy3W4UqeBCiSGcnBJIjRRchc/vOqYEeKjUyi
-# zlJYtMVxCaKmNDwz6nIJcm49y5MvvS5ak8Tc3PKOBP3gQOPWMVhRlgeVvCwZ9uGV
-# F0Pd8y7Fpsj2tIw/qbDzVP0SbqJk+OHfdhkC+VwdW6rmu1EyA755GXUBlQlyXzvS
-# z/dE0DafKeuNS9HmFkQaJhmD/4P0HVUrceGKKLqUSw==
+# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
+# GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
+# CSqGSIb3DQEJBTEPFw0yNjA5MjkyMTEzMDdaMC8GCSqGSIb3DQEJBDEiBCAebgQw
+# /kAa8Ns46yH8Vo47rW0h/DQrE/B4eb8t+Vqo8jANBgkqhkiG9w0BAQEFAASCAgAU
+# igHzj6xqdsyYvNDZtAWUvnwbZI9TNY8KzLBzE0sWMpXFcseqdLZ+/84pAUgAru5Z
+# aDKntX7qLZ91zziOQP4y/DSea1Vf/5KjP0yHrn0bD3plq+sXpWd2wKrCL8ik7Dgr
+# 7N+vTNgkBVV64Nb4hTK3Fdnq0wTk+zPHx12TgilCzHajsJf4K1X4bbnaWqFHK822
+# RplZH74/khmtxuJsCpMvPy00Z95ZupdN92Obz8I58dT4CgEx/hBlGZZ5SviRSP8q
+# GB2M85R6Io11B7yfC7lwge1ht1tXQFCHBKPWlVn6k1f/Dhr5Wrpa/oCO08pts2bN
+# YhRW4q4Ht7tr7VkJbbT0Z2Y9qtbN0dhmwl+Vd4I+Bor2Pz61QdJgjlODGx2nqOMk
+# 52eUKQydObQcYgmOFQKPT2nkeIoFGxdZikd9XkaEvQdJashKs7lZ5/dEwu4OfcVK
+# BRRUdDmlXPt9BeybCvQGaOis1dC5bxc8rH54VIqd0FV6pRypyia07d9f6XoXhT82
+# Fypb0yeieB5oOOzeYzp2c9pjbDcMtD+sq1+RnFUd7vxgvzRLH6mm1xR0dJEXV8Rx
+# 0sjdU/IF0yNgl3fe5ByexZbINcUZ0Epc2jI8Txtxphw6fDgIuYbu51frigNrUlax
+# cBuUI39dYVerSoTa/QYnyloHGSW1o7/FQyxgg9D95Q==
 # SIG # End signature block

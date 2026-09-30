@@ -1,32 +1,229 @@
-﻿@{
-    RootModule        = 'WhatsUpGoldPS.Ssh.psm1'
-    ModuleVersion     = '0.1.0'
-    GUID              = 'a7c3e1f8-9d24-4b6a-8e5f-1c2d3e4f5a6b'
-    Author            = 'Jason Alberino'
-    CompanyName       = 'Jason Alberino'
-    Copyright         = '(c) 2026 Jason Alberino. All rights reserved.'
-    Description       = 'SSH command execution helpers powered by SSH.NET (Renci.SshNet).'
-    PowerShellVersion = '5.1'
+﻿<#
+.SYNOPSIS
+    Produces a read-only health and hygiene audit of a WhatsUp Gold server.
 
-    FunctionsToExport = @(
-        'Import-SshNet',
-        'New-SshSession',
-        'Invoke-SshCommand',
-        'Invoke-SshShellCommand',
-        'Close-SshSession',
-        'Test-SshConnection'
+.DESCRIPTION
+    Finds devices without credentials or active monitors, duplicate active monitor
+    names, monitor assignments that reference missing devices, unused credentials,
+    stale devices, devices that have not polled recently, and naming or attribute
+    inconsistencies.
+
+    The script never changes WhatsUp Gold. Use -OutputPath to write CSV findings,
+    or -HtmlPath to create a standalone report.
+
+.PARAMETER StaleDays
+    Devices not seen in this many days are reported as stale. Default is 30.
+
+.PARAMETER NameRegex
+    Optional regular expression that every device display name must match.
+
+.PARAMETER RequiredAttribute
+    Optional device attribute names that every device must have.
+
+.PARAMETER OutputPath
+    Optional path for a CSV export of all findings.
+
+.PARAMETER HtmlPath
+    Optional path for an HTML report.
+
+.EXAMPLE
+    .\Invoke-WUGSelfAudit.ps1 -StaleDays 45 -OutputPath .\wug-audit.csv
+
+.EXAMPLE
+    .\Invoke-WUGSelfAudit.ps1 -NameRegex '^(PROD|DEV)-' -RequiredAttribute Owner -HtmlPath .\wug-audit.html
+
+.NOTES
+    Requires an authenticated session created by Connect-WUGServer.
+#>
+[CmdletBinding()]
+param(
+    [ValidateRange(1, 3650)]
+    [int]$StaleDays = 30,
+
+    [string]$NameRegex,
+
+    [string[]]$RequiredAttribute,
+
+    [string]$OutputPath,
+
+    [string]$HtmlPath
+)
+
+Set-StrictMode -Version 2.0
+
+function Get-PropertyValue {
+    param(
+        [Parameter(Mandatory = $true)]$InputObject,
+        [Parameter(Mandatory = $true)][string[]]$Names
     )
 
-    CmdletsToExport   = @()
-    VariablesToExport  = @()
-    AliasesToExport    = @()
+    foreach ($name in $Names) {
+        if ($null -ne $InputObject.PSObject.Properties[$name]) {
+            return $InputObject.PSObject.Properties[$name].Value
+        }
+    }
+    return $null
 }
 
+function Add-Finding {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.Generic.List[object]]$List,
+        [Parameter(Mandatory = $true)][string]$Severity,
+        [Parameter(Mandatory = $true)][string]$Category,
+        [Parameter(Mandatory = $true)][string]$Subject,
+        [Parameter(Mandatory = $true)][string]$Detail,
+        [string]$DeviceId,
+        [string]$CredentialId,
+        [string]$MonitorId
+    )
+
+    $List.Add([PSCustomObject]@{
+        Severity     = $Severity
+        Category     = $Category
+        Subject      = $Subject
+        Detail       = $Detail
+        DeviceId     = $DeviceId
+        CredentialId = $CredentialId
+        MonitorId    = $MonitorId
+    })
+}
+
+if (-not (Get-Command Get-WUGDevice -ErrorAction SilentlyContinue)) {
+    throw 'The WhatsUpGoldPS module is not loaded. Import it and run Connect-WUGServer first.'
+}
+
+$findings = [System.Collections.Generic.List[object]]::new()
+$devices = @(Get-WUGDevice -View card -Limit 250)
+$credentials = @(Get-WUGCredential -View basic -Limit 250)
+$monitorTemplates = @(Get-WUGActiveMonitor -AllMonitors 'true' -View info -Limit 250)
+$activeAssignments = @(Get-WUGActiveMonitor -IncludeAssignments -View info -AssignmentView basic -DeviceView basic -Limit 250)
+$credentialAssignments = @(Get-WUGCredential -AllAssignments -View basic -DeviceView basic -Limit 250)
+$deviceIds = @{}
+
+foreach ($device in $devices) {
+    $deviceId = [string](Get-PropertyValue -InputObject $device -Names @('id', 'deviceId'))
+    if ($deviceId) { $deviceIds[$deviceId] = $true }
+}
+
+$credentialUse = @{}
+foreach ($assignment in $credentialAssignments) {
+    $credentialId = [string](Get-PropertyValue -InputObject $assignment -Names @('credentialId', 'id'))
+    if ($credentialId) { $credentialUse[$credentialId] = $true }
+}
+
+foreach ($credential in $credentials) {
+    $credentialId = [string](Get-PropertyValue -InputObject $credential -Names @('id', 'credentialId'))
+    $credentialName = [string](Get-PropertyValue -InputObject $credential -Names @('name', 'displayName'))
+    if ($credentialId -and -not $credentialUse.ContainsKey($credentialId)) {
+        Add-Finding -List $findings -Severity 'Warning' -Category 'UnusedCredential' `
+            -Subject $credentialName -CredentialId $credentialId `
+            -Detail 'Credential is not assigned to any device.'
+    }
+}
+
+$monitorNames = @{}
+foreach ($monitor in $monitorTemplates) {
+    $monitorName = [string](Get-PropertyValue -InputObject $monitor -Names @('Name', 'name', 'Description', 'description'))
+    $monitorId = [string](Get-PropertyValue -InputObject $monitor -Names @('MonitorTypeId', 'monitorId', 'id'))
+    if (-not $monitorName) { continue }
+    if (-not $monitorNames.ContainsKey($monitorName)) { $monitorNames[$monitorName] = @() }
+    $monitorNames[$monitorName] += $monitor
+}
+
+foreach ($monitorName in @($monitorNames.Keys)) {
+    $matchingMonitors = @($monitorNames[$monitorName])
+    if ($matchingMonitors.Count -gt 1) {
+        Add-Finding -List $findings -Severity 'Warning' -Category 'DuplicateMonitorName' `
+            -Subject $monitorName -MonitorId ([string](Get-PropertyValue -InputObject $matchingMonitors[0] -Names @('MonitorTypeId', 'monitorId', 'id'))) `
+            -Detail "Found $($matchingMonitors.Count) active monitor templates with the same name."
+    }
+}
+
+$assignedMonitorDeviceIds = @{}
+foreach ($monitor in $activeAssignments) {
+    $assignedDeviceId = [string](Get-PropertyValue -InputObject $monitor -Names @('DeviceId', 'deviceId'))
+    if ($assignedDeviceId) {
+        $assignedMonitorDeviceIds[$assignedDeviceId] = $true
+        if (-not $deviceIds.ContainsKey($assignedDeviceId)) {
+            Add-Finding -List $findings -Severity 'Critical' -Category 'OrphanedMonitorAssignment' `
+                -Subject ([string](Get-PropertyValue -InputObject $monitor -Names @('Name', 'name', 'Description'))) `
+                -DeviceId $assignedDeviceId `
+                -MonitorId ([string](Get-PropertyValue -InputObject $monitor -Names @('MonitorTypeId', 'monitorId', 'id'))) `
+                -Detail 'Active monitor assignment references a device that was not returned by the device inventory.'
+        }
+    }
+}
+
+$cutoff = (Get-Date).AddDays(-$StaleDays)
+foreach ($device in $devices) {
+    $deviceId = [string](Get-PropertyValue -InputObject $device -Names @('id', 'deviceId'))
+    $deviceName = [string](Get-PropertyValue -InputObject $device -Names @('displayName', 'name', 'hostName'))
+
+    $assignedCredentials = @()
+    try { $assignedCredentials = @(Get-WUGDeviceCredential -DeviceId $deviceId -View basic) } catch { }
+    if ($assignedCredentials.Count -eq 0) {
+        Add-Finding -List $findings -Severity 'Critical' -Category 'MissingCredential' -Subject $deviceName `
+            -DeviceId $deviceId -Detail 'Device has no assigned credentials.'
+    }
+
+    $assignedActive = @()
+    try { $assignedActive = @(Get-WUGActiveMonitor -DeviceId $deviceId -EnabledOnly 'true' -AssignmentView basic -Limit 250) } catch { }
+    if ($assignedActive.Count -eq 0) {
+        Add-Finding -List $findings -Severity 'Critical' -Category 'MissingActiveMonitor' -Subject $deviceName `
+            -DeviceId $deviceId -Detail 'Device has no enabled active monitor assignments.'
+    }
+
+    if ($NameRegex -and $deviceName -notmatch $NameRegex) {
+        Add-Finding -List $findings -Severity 'Warning' -Category 'NamingInconsistency' -Subject $deviceName `
+            -DeviceId $deviceId -Detail "Device name does not match '$NameRegex'."
+    }
+
+    $properties = @()
+    try { $properties = @(Get-WUGDeviceProperties -DeviceId ([int]$deviceId)) } catch { }
+    foreach ($requiredName in @($RequiredAttribute)) {
+        $attribute = $properties | Where-Object {
+            $attributeName = [string](Get-PropertyValue -InputObject $_ -Names @('name', 'key', 'attributeName'))
+            $attributeName -eq $requiredName
+        } | Select-Object -First 1
+        $attributeValue = if ($attribute) { Get-PropertyValue -InputObject $attribute -Names @('value', 'Value', 'attributeValue') } else { $null }
+        if ($null -eq $attributeValue -or [string]::IsNullOrWhiteSpace([string]$attributeValue)) {
+            Add-Finding -List $findings -Severity 'Warning' -Category 'MissingAttribute' -Subject $deviceName `
+                -DeviceId $deviceId -Detail "Required attribute '$requiredName' is missing or empty."
+        }
+    }
+
+    $lastPoll = Get-PropertyValue -InputObject $device -Names @('lastPollTime', 'lastPoll', 'lastPollDate', 'lastActivity')
+    if ($lastPoll) {
+        try {
+            $lastPollDate = [datetime]$lastPoll
+            if ($lastPollDate -lt $cutoff) {
+                Add-Finding -List $findings -Severity 'Warning' -Category 'StaleDevice' -Subject $deviceName `
+                    -DeviceId $deviceId -Detail "Last poll was $($lastPollDate.ToString('s')); threshold is $StaleDays days."
+            }
+        } catch { }
+    }
+}
+
+$findings = @($findings | Sort-Object @{Expression = { switch ($_.Severity) { 'Critical' { 0 } 'Warning' { 1 } default { 2 } } } }, Category, Subject)
+
+if ($OutputPath) {
+    $findings | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
+    Write-Verbose "Wrote CSV findings to $OutputPath"
+}
+
+if ($HtmlPath) {
+    $title = 'WhatsUp Gold Self-Audit'
+    $html = $findings | ConvertTo-Html -Title $title -PreContent "<h1>$title</h1><p>Generated $(Get-Date)</p>" | Out-String
+    $html | Set-Content -Path $HtmlPath -Encoding UTF8
+    Write-Verbose "Wrote HTML report to $HtmlPath"
+}
+
+$findings
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDbRUneEZdtUBb
-# jklBLaYL0eHAivmcNeY89Ydo060jlKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDOO2r/rV2Akmsd
+# /Dltj7F37Cym6IYJNQ5gjxa2tm41saCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -229,33 +426,33 @@
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCR3S5K97MRNtdLnf+1S2NAQCEJOun9caaXtoMIBS/QdjANBgkqhkiG9w0BAQEF
-# AASCAgDE++WPriZlocl5L9YZQY0VQ7ZhLCdItS/EkQHE9u7rvYd2W/m0bBYy58gY
-# 2+FeZTJaBcf8CKwPAEmNO1beuLAXRlCN3yv+NnKxVxCvAnAOQBp+Y0RvWfFj36fA
-# Om2b5x7/pEUjA7qYi1hW12KpvY6DDVuPhGSTeNz3Qv+2X8jhfhf/+YaRlBROLHwh
-# Tf21UhEaTday5xEEZsFFoIIACkeV1NPm1qRsbetaVY6r3mCMwvt/B0mNuye5Jom/
-# v/5MUYE376r/NMMNaDKS6TL/SY1dna872YwI4kgMaGuCXLKLb812Fk0bfY7ggxJF
-# kiL+v8KFi1KMZTim6Qx62d3nUFshrEIM7JcKQcS2Q/NPAiiMHU+bjHjnw7Uo+Ipb
-# lv6HryPGD5cWT69Cfrw+FtPUaNN6yyzwF+8oxSJtAkw4JD3XPVNDLQh6y8POTBj5
-# ix0w5B+7pLrr+h3fcg6HrFw8RUHY3+r9gSc8Segsj9ArqjhR0ZafiJfPS9PLiUXj
-# VmJd0Ia6TqeB6qMw5wnza7/5Htp1+oO0NMsV2HRwUE0KVYBVrZSKl7YKXxzs62dP
-# W6pHXgE0ayTGmznPtYusovwub8kPwRw3+AHI9hWXHeUO7Tv0r1g0nGbx/sI6Muos
-# VZvhdHye0WCjGfmdnreBD4YyRh4aMmBnou5xUh3IoloNTplyk6GCAyYwggMiBgkq
+# BCA5+AjTovTC7A7yLbef4mzi1F5TB9Dml6xMEbEWz8vRLzANBgkqhkiG9w0BAQEF
+# AASCAgAiETvmoqRccucuVNKm9ul+a2jQIyGAoEDy/ibNkke7zZ0LuI8G0btvJKcH
+# 8hQArALl8mkvoqwCXhpMoH5vGCsdlNKTol/6h7sHRdytVhN6J30xJ/2CI2PAWBDr
+# Q/+eRv1JQK8OqG62jZokhSVW7SyIZxRX5UAcBMnA/CJJ7/3ZAOAKmgO0BtyYVgPn
+# ogwi4bFhljjcocZ1u6wJESAKbT2d26l4sWdpkyP9ip6c3AjYH9IZwFJLIRRvlYgx
+# QcZUt8pPRX2967KibPg6YfJIppQWfCMtMGcFhBxx8RhX1LRzeSKR7vmOcs5ME1NK
+# cYVC6x58c94shrCotaYFxY01b93AhDFy/8S/vjOwalB+Qw60FepsA3tcWFnWInww
+# h659SreiaEJkpMulXlYtqBU0K1yjcQyx3yQHDNyXFmxB0JGR9KITKUDXEIi2J2hg
+# y061Bj+xSC76CikklYmFZolvJDteNNuNDknjiFXjrEimvW3bb7QGDOZ2gyL+dvvF
+# FoFX61IwFzxz48uXBgBZQoXywL27jVeMy+CVZ1T479wrhNjhIY5OvfCek40dGowX
+# 3CLzZyH37iv8OTQCcj6zTLAFk1MSAgVTMbJeR60aqW/21J1H9kdCZGq+ao3cBGkh
+# ML3dM2vh1ibaNrIfDELQd6xdVfeI9MVh/QJRzRl5Tyat+ReIKqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
 # GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA5MjkxOTM3MzNaMC8GCSqGSIb3DQEJBDEiBCBdkyj4
-# qyV2PAkPtUS5ft+aDIiJK3FXSe5WX21tvn6TaDANBgkqhkiG9w0BAQEFAASCAgBy
-# Ch3xuwVedulkvfEz5wpJ7qwXKmS8UBWGant37D9zJviUGSbPwcTj0C1W5upLQPKe
-# H4gf3UiYhNlAw3iCaOlRCVhL/x+6O/sNWAEwhDxDYQ7bD5k3gWvBW6h+IvX2TiFN
-# gueddbvxxTtn4CUfNuzM2exb1+rIq7Qc2NXzT/xo04aOxyKdVvo9TlH6Ln90qyuT
-# H1cbZ8IkhAqp75iP7atYn6CgHcvmU0Dz8PIjTR6Pd5eVWAVJ0v5ZFoWZ+S6tSDo+
-# Ew0GhhDguzUq6yLdvLlrdE/4Lp6uDbrGgRYGh1oteo0hNSdqGepma/Wc3yn0qIbT
-# +zaBA/sC1JGDpzzPHHb8NfJXO2RhZpUkkv9mxuXOCPbdeBswkYi3uDX5ISFOVhXj
-# 6jr+1qt9opvIOSgHXT1v2nR3kb+agtluUfo6PcPA+mFB6A2+y8cmlYnZRGDebyqM
-# t7RZLA0aB96DX+jUBxQHzkn5uISFtJlpDuXjyzK1c+vyI4HW/M8fwL/ASCMCtQ9o
-# QgZMViR0o8UxcOgdyLEElG659JMsnMMGIXd5wRK99W3fyF/bQaCWvsjgi8Bg+TgU
-# fHpnWYh6y5Q/fDS/lD3l/ZBOH7HUpNGMQoS3XbcZ0KOMJoMxe4Sc5NkwpzL/yzw9
-# BPk6jlg9nnHCGTwpm2k8LuIO55IsC6jzZHCZ6JdQkg==
+# CSqGSIb3DQEJBTEPFw0yNjA5MjkxODEyMTZaMC8GCSqGSIb3DQEJBDEiBCBl7A8m
+# HaVkeq3gKRE7ve1JwAXSA7qB5IWPuLm7nHtYvjANBgkqhkiG9w0BAQEFAASCAgA/
+# 1qx4UJwi1DORQnXj4ACOs2SPneCOWb4Yirh0rcvcsOcpn+Tj3gNJaGGmJO41Q7vR
+# FeOoGA0Ig+86bSREWpPi3xPqN5lr6CLmt4H5Q5shVipx543Hz9eOK1aMuvS+FwAM
+# 6r/Xak+6zco2soElOZVwyeG0fEpg5AJHoFBsysFPZV/HAgWgEaEDKwbeBZqoZS2v
+# k7nDjOqVaPN/9NllAAlmntz+wBtIU2rPnXHi0s5hXYd1YvBoyGEpp8ZF58k03HJI
+# VsEDIMHFBy98QsjLCAj2uvkHk0V4G2UK9QGo8p31XhwKvpXxRMyOfUycbwrtC7jd
+# QN/QCPHysng5uNKGxbR5/K2eHZ3vD6ANUwUZtX7Ok2jiGkrFSSCRN2bBGUNc9su0
+# O6TlWch9wh6ODnSISQmHUcebmzg9ueHvBU8KsM2k4WihdFpB5NB/f/fU/JOHrJh1
+# APd9De/45jC/Y5hZH/7nIdX79oo6a1uEnxC6yID+o1Sdcbk3Nhh4Zv6GXNdhTi3+
+# nuDS+yrD/Dmc2FQYCc4znfoy/Mz1UswCIRFsL1kybH9sLiXSE05s1T9U32yLhQYl
+# PM5ir39PxhVsz+5+VWHrJK7yz6hqCjZcnkPWxfgDvB4Rjv0j9CBc0EXloc2PMY1j
+# LDnwSTNlkacoOBXwbpznx38HnbTSlvzhe4+KeI/4Ng==
 # SIG # End signature block

@@ -109,6 +109,15 @@ param(
     [ValidateSet('PT1H', 'PT6H', 'PT12H', 'P1D', 'P7D')]
     [string]$MetricsTimespan = 'P1D',
 
+    # --- Opt-in cost, quota and waste analysis -------------------------------
+    [switch]$IncludeCostAndQuota,
+
+    [string[]]$QuotaLocation = @('eastus'),
+
+    [hashtable]$UnitPrice,
+
+    [string]$CostReportPath,
+
     [switch]$NonInteractive
 )
 
@@ -288,6 +297,66 @@ $plan = Invoke-Discovery -ProviderName 'Azure' `
 if (-not $plan -or $plan.Count -eq 0) {
     Write-Warning "No items discovered. Check service principal permissions and connectivity."
     return
+}
+
+# ==============================================================================
+# STEP 3b: Cost, quota and waste analysis (opt-in)
+# ==============================================================================
+$costFindings = @()
+if ($IncludeCostAndQuota) {
+    $costHelpers = Join-Path $scriptDir 'CloudCostHelpers.ps1'
+    if (-not (Test-Path $costHelpers)) {
+        Write-Warning "CloudCostHelpers.ps1 not found; skipping cost and quota analysis."
+    }
+    else {
+        . $costHelpers
+        Write-Host ""
+        Write-Host "Analyzing Azure cost, quota and waste..." -ForegroundColor Cyan
+
+        $subScopes = @{}
+        foreach ($item in $plan) {
+            $subId = $item.Attributes['Azure Subscription ID']
+            if (-not $subId -or $subScopes.ContainsKey($subId)) { continue }
+            $subName = $item.Attributes['Azure Subscription']
+            if (-not $subName) { $subName = $subId }
+            $subScopes[$subId] = $subName
+        }
+
+        foreach ($subId in @($subScopes.Keys)) {
+            Write-Host "  Subscription $($subScopes[$subId])..." -ForegroundColor DarkGray
+            try {
+                $costSplat = @{
+                    SubscriptionId   = $subId
+                    SubscriptionName = $subScopes[$subId]
+                    QuotaLocation    = $QuotaLocation
+                }
+                if ($UnitPrice) { $costSplat['UnitPrice'] = $UnitPrice }
+                $costFindings += @(Get-AzureCostQuotaFinding @costSplat)
+            }
+            catch {
+                Write-Warning "  Cost analysis failed for $($subScopes[$subId]): $($_.Exception.Message)"
+            }
+        }
+
+        if ($costFindings.Count -gt 0) {
+            Get-CloudCostSummary -Finding $costFindings | Format-Table -AutoSize | Out-String -Width 160 | Write-Host
+            $costFindings | Where-Object { $_.Status -eq 'Fail' -or $_.Status -eq 'Warn' } |
+                Select-Object Category, Check, Status, Value, Resource |
+                Format-Table -AutoSize | Out-String -Width 160 | Write-Host
+
+            if (-not $CostReportPath) { $CostReportPath = Join-Path $OutputDir 'Azure-Cost-Quota.html' }
+            try {
+                Export-CloudCostDashboard -Finding $costFindings -OutputPath $CostReportPath -ReportTitle 'Azure Cost and Quota' | Out-Null
+                Write-Host "  Cost report: $CostReportPath" -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "  Could not render cost dashboard: $($_.Exception.Message)"
+            }
+        }
+        else {
+            Write-Host "  No cost or quota findings returned." -ForegroundColor DarkGray
+        }
+    }
 }
 
 # ==============================================================================
@@ -1520,12 +1589,12 @@ switch ($currentChoice) {
 } # end foreach actionsToRun
 
 Write-Host ""
-Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cy
+Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsQIEbxc/RpPg+
-# yupHpBP5Fob8G8hpv73enYZ4dydnq6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaXeyUwg/uqKqY
+# 2iIPMQOd8HvLiu9Kt+8HkliCXCqX/qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1686,25 +1755,25 @@ Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cy
 # 7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+N
 # Jpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckT
 # etiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszW
-# kPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDANBgkqhkiG9w0B
+# kPZPubdcMIIG7TCCBNWgAwIBAgIQCE/cM09+RU7bww+P+ZIYNTANBgkqhkiG9w0B
 # AQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/
 # BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYg
-# U0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkwMzIzNTk1OVow
+# U0hBMjU2IDIwMjUgQ0ExMB4XDTI2MDgwNTAwMDAwMFoXDTM3MTEwNDIzNTk1OVow
 # YzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQD
 # EzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIw
-# MjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBGrC0Sxp7Q6q5g
-# VrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwBSOeLpvPnZ8ZN
-# +vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/4QhguSssp3qo
-# me7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3K3E0zz09ldQ/
-# /nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROUINDT98oksouT
-# MYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3w6ySSSu+3qU8
-# DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46YceNA0LfNsnqcnp
-# JeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d2sC26/PQPdP5
-# 1ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8xymLnjCbSLZ49
-# kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+AliL7ojTdS5P
-# WPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2bQhpp0IoKRR7Y
-# ufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
-# MB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSMEGDAWgBTvb1NK
+# MjYgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALZ7pvLJ/s1K+NSb
+# TGWz/TjGMPh8CQ6RucZCLv5anHzWJjF/NWJrFIhy24fcpKXlgRiky4WAawDfU3YP
+# 0BMxt9l3Dm5oCG5Z69AqEN1kgHg2epx+l+lZBcmJCcN0ASURML5uFIS80sZsDwO3
+# BSkUxDjLJhBI+qiZP3aixAC/qEGLjsBNlLol9VZ7pfGEXiMlneJIC5/YKuizVzNF
+# KZZEeoy/0B8Zm+nzKBgSWG52lCO1w+nCg6XpCtklTJXeIg283hw7TmmsZXR+SMbj
+# brEOvZ3fP2VxIgeR28Y90ZStd3F9VuA5RVynb/whITPAo9b75Zr4Ta6Mj3URm26Q
+# ZYMn/FnbuTegcoRcFEZ9FOqM5T6MTdtr/n74lIT/ug0eeOzmZ6QTFg33otX+bFRs
+# IolvykE1jive4PuESaT8zzVeFWDAMDtozNgLctkGD1ZjkEyZtJrLl5ya0m5doH/S
+# cpaZCZVl6pNUOCybMc/kxC6EAmSJY24L0yYKD1Nkddsnb/ItVKi/2nXpQNMu1PT5
+# prW83vV8d67WowuUs0HdY4H8AMLGvdL/WHEj3ZnqMqAQQP9u3Ai9t+5eQ02GDwy0
+# ODjdzi0xlp70W+ow63/0++YDEX1M0iwgUHwbrJvfpklkZQvw3+kv3vUPItdwrocz
+# k9icflf55W1zOEKAcJVAIXpcMCU9AgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
+# MB0GA1UdDgQWBBQUyWOKMC7USvtulPPm40B+9ezN4jAfBgNVHSMEGDAWgBTvb1NK
 # 6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYI
 # KwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8v
 # b2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRp
@@ -1712,49 +1781,49 @@ Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cy
 # SEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5k
 # aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2
 # U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9
-# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESeY0ByIfjk9iJP
-# 2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FUFqNh+tshgb4O
-# 6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7YMTmqPO9mzskg
-# iC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0ziTN6R3ygQBHMU
-# BaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/QqvXnNb+YkDF
-# kxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlqAcuEVT0cKsb+
-# zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3Y50OHgaY7T/l
-# wd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roancJIFcbojBcxl
-# RcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/ndUlQ05oxYy2
-# zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7IRE2lskKPIJg
-# baP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdCvHlshtjdNXOC
-# IUjsarfNZzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQCNxTphHp1SCt+ZrAmAfn0oQLFr0mLywSLa
+# DXQIENoyKqxrFbJblzCVP/pkXmwXOdrOpWygLzlT12os5ipDCy35RBCg2UMeApEt
+# rfGhz45F4Wt4WGdNdIbRWt3YTYJmpR+b7lr4d7Uwn+H600u4D7RnOGf8Wj4UNgAd
+# ZkfHhHv1mx9EVh71SJelcEN/oORSjXzdjfw1iZH9d8Nh/thn6hH23d+VsPAr6GAY
+# yzSA02nXD1nYLI7Ijmiv+xLCiYC41DSFYL3GhTiy0PxpawPtGRyaBVGzq+UiTfM8
+# pD7KVyF5aQyWP4KhVGUUTnmm/RlYJoW3TiXA/+t0YcT2oRVBm3JETjajHug2AL+v
+# 5jhtKVnd3D0rbHXEu27o+Q8p4sEWPMqKDB+qbceb6T/6WcwTwXmQ9lOCLLYcsQeS
+# WmvKqzpAec9etE14jOQAzLKWdE3w/TCaKtLRaRT7LCkRYVnhA2D73FLje1O5b3HR
+# 5eHs0NzU/+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94lbUveOiJBI+xZ
+# EbGRsMNbXmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H5Mh7QfieAIjW
+# agkJNt68Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCyatf8R1hSjzSvd
+# N8yWQPT9gzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
 # Y3RpZ28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWdu
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAskcwylSgZiAYvC3mEeGITMognX36e4I7D0oRfU7TAvzANBgkqhkiG9w0BAQEF
-# AASCAgBGaAFq9iZoSuLohi2LubkyJNbSaXqepjVAu2Ofr6nyklosbk9KRzqe7a0Q
-# vGPaWcH6WsoOYeTzzum+9m9hzrBP4XBYVKIB8hXUFz4s6V0W5LVKMmdt1afSehm2
-# QJX13mVUHsPfNHP9c0bAEE1A3aDjdiARlJ/LdjzwEzYRelEMzrtjboeWNgKrKosx
-# DNEsNiDr6mG8Wp5A7E8Z2uHE9vJGKLC7dfu5iNIGMAEDSx4v1o+IeGmSYcS1Icp6
-# BSNMM1X3WPBRSYQ1dI8RTdqP/oiH3+vBQjvifi15rSqapUZ92t91JHNjB+1qlf+9
-# 0Y5jaODaZEE9kZWIXx1UtMmdBWNoCeYANmqQhoPu2jTN+59qhHhssLZ3LqVT01Pg
-# w4i5HEAFuQyh41NAGmcfTbG/+NPd/wRZGNQbLdVNkItPDnPXKLaRnnUDG9AtWYM5
-# 8ScSF3Le+wLz0+OzOopDtKCC5XeMS30u5OKSsUoitoPz7DsC67m5xzfOK/xRdz0x
-# v51+jsGQQikOiarL6VA5daHl2miDzXeABHW8iyoTMpREXl5B4FZllVyRC5tgHDGt
-# 90MIXf/G5HPWrL1dUyGI596LymxoflppKMw6EY/f8CXkO08F829qWAp51F3mNH3H
-# zh6uqnSACcVdDx9Y69MNbJuzvYwLuSyESz97uDc5KfkRKni9T6GCAyYwggMiBgkq
+# BCAbbkkvK6hsWLkfZV/FyKosoLS+jIXWh2Gi0eDzUdPq/DANBgkqhkiG9w0BAQEF
+# AASCAgBfddWgFh33HRW50I2SU0ty6bg4exSlXhYjb47N2ejAHy87YutbRB0BJM/u
+# 1sgFmwMNSRIc/tSIBc47ct7f6iEEThjx5HI42t9alulayHibbWK24VfKCXcZVcI1
+# 9Irnhl20s/kxYyHjj/TJDZgDhNi1lGG4mZd+JdEwnqwL4rGZsQ7fKmf64hGiMhlt
+# F2nO10WJX6eCh1ny43qByfeGovX0y/4BxiMZA31DFqEUUvWjHfMj7VHIbQmzt/SG
+# 4CFIg4FIVZu4xWO+ex0f7MlnXS022Rfs7IPYmTqQrJxjDs2+X+C5oilP8fLIkiYX
+# CiwtwuqeZMKRZ8ZSfvhdUBQeQt4cTD7iKHQx7H6zon6BQelu4rsMnTjzCDPGDoYk
+# 27r/Fo/Anw+r0AfG1Dl7cP5foHyhy2hQNLRzt7+x/K2CQ1PibVgf3npm38ZSEynu
+# arLmNlWR4oYcIdHXycudQEhgtfBgSL8HRaSDXqb6Y7wEuIZtk24KyDFqv7JYGmVS
+# BVRj+nUlHQe2sj10O7k+gwsv+eKAI+VuPbilagNC2rPhb2WOvnSvZC4qM/1Ppw21
+# D4trN2kMwvmXYrFKsWCjvWQMAOWIFO2Wr3h54lH+bllbuUxBj161UiVDx5YnNR4S
+# XxqTZNioN0WIOqYg8Bm8IaPfhbIf2FfkgVAg/X+UWd3W2DbP56GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
-# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
-# dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMjQ1MDRaMC8GCSqGSIb3DQEJBDEiBCC6JhS5
-# 9Kdea9qi0OEW5ecZclAcfPRwXl0zOI5yZvck6DANBgkqhkiG9w0BAQEFAASCAgCe
-# sRnPUvgFsTkOvCXdQ22ANtLSUXhIPOJi0IMBVuXl/OtjvWNhgU6iHJMPmL0Vf9Sa
-# EOWtx2dikIjqM0nYbxraDK2Ruig/gfesWos1k3kpGdnfphCHw1SWhRHXHs8QRXKQ
-# oRuQ0ejqpf5YUUIevt2pV7hsmhMF8QgV98iZ5ohRiGn3aHaoh2JxErRymrB7ejX6
-# R2tDoUPCVj9aD8H0TtswPxSDbNsV/fgWPKe4a4ERv9kF9lAjSj8Xw5tslo/U3ES/
-# rbCpBDMSVoudwR4uyujQvZTbjS5LcNxuRFE42wr9OGaK/ZtVFUMSgFGQt/W4z7pA
-# W8AUvYGUcnyKDMFgsimN2Y4MU4CrCeE0/gb4UYgKddqjR8wM4dkU7ed0z2+opOyY
-# jR4NwkqNnObSv6OTyapLhBp1m0PIMjIToa/cqTMFBroDwBhp4D2t2vysLH5iCKVn
-# X2pz70StDwVsZ0uaienQGoJTR+x5D5juu3x0KXS2fdLO/S+nTlWzVpw05n/CdTf7
-# ysIBwHtN4N7Ao3COnO9awsyYQApiYsXSfumKY5NYc9WhH4DPXH2osVq9uAIo4sef
-# AmENl7hYi3YhCP68gtCXRcvNkCP28IFvRsC+UOhB6EjrEM6AvLkVnxVbu7ZQXLrO
-# +w0egixvdw0xL1/DuAiA6vYNWDsK+GjKw/+GdVTTiQ==
+# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
+# GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
+# CSqGSIb3DQEJBTEPFw0yNjA5MjkyMTEzMDlaMC8GCSqGSIb3DQEJBDEiBCDN33/y
+# Wa5NfTQLPYRa4l0nx33PzHZpOy7GRshPyUhpszANBgkqhkiG9w0BAQEFAASCAgAP
+# 2Y0yyE/11t+fa0teMXViohOTIV/4/bESCMmKii7TW8WyxjeRcF3jUvG2gzDa6U2j
+# BFdtlf5jB/uaZTGbiuvMDIv2nMdO7Qn/sHUE6VAWvBvFMRXFdOuagzpkOEbeFmMM
+# Muf5QXTSCbH4+agU4x2KDQezULBaf9XvvOnF4Ju0c1l/dhdNtVWUmVMulwUiXZlm
+# DCnPONqF95wM/DcBPiALaBylFABA7bhWDl3IhxPgGRNXv18DZCTDm/ymnN6FjXYA
+# YrwJFx408S5j2Yks0U89mNbckFjekJkVB1TyuqLfyxHeY2GTD5TDFs1I4rWIhCic
+# sUQ+KyfAn0sLxvu6QzpU/sJ1kT2uXMk4GtALQX5haLP2FcKtbkQyQy1uJFNJH97F
+# icR5Zhx3Diwvza8DzWeRwodOoG7SkqqDQ47/kw2Y9uh+fLATnd3Niw4S4ebN0fTq
+# ZRwnwmx1YAJ/mjVCz4oSq4yJuZIOJ7ujttMrXcURqxx2Hn5Wzi4u3rtdQ/8Lj/gn
+# BeLvghfNJrQT3mGWBvXUlQOArVjIKu/pjHeTZtezOI9Ty+l80HZmQvF4Bk0+iWsN
+# jHi+BslOzNEw9LwSa5s+JbtWqoDWekTbaz8qS1b2qtOWEEy5U8iMI6Jq6di7qu1W
+# QlNSiIfLkMQcyAkwV9OczTHBb48O7VwrVnA3g/9fnA==
 # SIG # End signature block

@@ -1,32 +1,166 @@
-﻿@{
-    RootModule        = 'WhatsUpGoldPS.Ssh.psm1'
-    ModuleVersion     = '0.1.0'
-    GUID              = 'a7c3e1f8-9d24-4b6a-8e5f-1c2d3e4f5a6b'
-    Author            = 'Jason Alberino'
-    CompanyName       = 'Jason Alberino'
-    Copyright         = '(c) 2026 Jason Alberino. All rights reserved.'
-    Description       = 'SSH command execution helpers powered by SSH.NET (Renci.SshNet).'
-    PowerShellVersion = '5.1'
+﻿#requires -Version 5.1
+<#
+.SYNOPSIS
+    Generates an HTML compliance dashboard for a fleet of Linux hosts over SSH.
+.DESCRIPTION
+    Connects to each target with SSH, collects OS, patch, systemd, disk, inode,
+    NTP, listening port, reboot and SSH baseline facts, evaluates them against
+    thresholds, and writes a self-contained HTML report plus a JSON data file.
 
-    FunctionsToExport = @(
-        'Import-SshNet',
-        'New-SshSession',
-        'Invoke-SshCommand',
-        'Invoke-SshShellCommand',
-        'Close-SshSession',
-        'Test-SshConnection'
-    )
+    This script only reads from the target hosts and never modifies WhatsUp Gold.
+.PARAMETER Target
+    One or more Linux hostnames or IP addresses. Prompts when omitted.
+.PARAMETER Username
+    SSH username used for every target. Prompts when omitted.
+.PARAMETER KeyFile
+    Private key path. When omitted, the script prompts for a password securely.
+.PARAMETER AllowedPort
+    Optional list of expected listening ports; anything else is flagged as a warning.
+.PARAMETER OutputPath
+    HTML report path. Defaults to Linux-Compliance-Dashboard.html in the temp directory.
+.PARAMETER JsonPath
+    JSON data path. Defaults to linux_compliance.json in the temp directory.
+.PARAMETER NoLaunch
+    Do not open the report in the default browser.
+.EXAMPLE
+    .\Get-LinuxDashboard.ps1 -Target web01,web02 -Username audit -KeyFile ~\.ssh\id_ed25519
+.EXAMPLE
+    .\Get-LinuxDashboard.ps1 -Target 10.0.0.10 -Username audit -AllowedPort 22,80,443
+.NOTES
+    Author  : jason@wug.ninja
+    Requires: PowerShell 5.1+, LinuxHelpers.ps1 in the same directory.
+.LINK
+    https://github.com/jayyx2/WhatsUpGoldPS
+#>
+[CmdletBinding()]
+param(
+    [string[]]$Target,
+    [string]$Username,
+    [string]$KeyFile,
+    [string]$KeyPassphrase,
+    [int]$Port = 22,
+    [int]$TimeoutSeconds = 60,
+    [int]$DiskWarnPercent = 85,
+    [int]$DiskFailPercent = 95,
+    [int]$InodeWarnPercent = 85,
+    [int]$InodeFailPercent = 95,
+    [int]$PatchWarnDays = 30,
+    [int]$PatchFailDays = 90,
+    [int[]]$AllowedPort,
+    [string]$OutputPath,
+    [string]$JsonPath,
+    [switch]$NoLaunch
+)
 
-    CmdletsToExport   = @()
-    VariablesToExport  = @()
-    AliasesToExport    = @()
+$helpersPath = Join-Path $PSScriptRoot 'LinuxHelpers.ps1'
+if (-not (Test-Path -LiteralPath $helpersPath)) {
+    throw "LinuxHelpers.ps1 not found at $helpersPath. Ensure it is in the same directory."
+}
+. $helpersPath
+
+if (-not $Target -or $Target.Count -eq 0) {
+    $targetInput = Read-Host -Prompt 'Enter Linux host(s) - hostname or IP (comma-separated)'
+    $Target = @($targetInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+}
+if (-not $Target -or $Target.Count -eq 0) {
+    throw 'At least one target must be specified.'
+}
+
+if (-not $Username) {
+    $Username = Read-Host -Prompt 'Enter SSH username'
+}
+if (-not $Username) {
+    throw 'An SSH username is required.'
+}
+
+$securePassword = $null
+if (-not $KeyFile) {
+    $securePassword = Read-Host -Prompt "Enter SSH password for $Username" -AsSecureString
+}
+
+if (-not $OutputPath) { $OutputPath = Join-Path $env:TEMP 'Linux-Compliance-Dashboard.html' }
+if (-not $JsonPath) { $JsonPath = Join-Path $env:TEMP 'linux_compliance.json' }
+
+$results = [System.Collections.Generic.List[object]]::new()
+$allChecks = [System.Collections.Generic.List[object]]::new()
+$index = 0
+
+foreach ($item in $Target) {
+    $index++
+    Write-Progress -Activity 'Collecting Linux compliance data' -Status $item -PercentComplete (($index / $Target.Count) * 100)
+
+    $splat = @{
+        Target           = $item
+        Username         = $Username
+        Port             = $Port
+        TimeoutSeconds   = $TimeoutSeconds
+        DiskWarnPercent  = $DiskWarnPercent
+        DiskFailPercent  = $DiskFailPercent
+        InodeWarnPercent = $InodeWarnPercent
+        InodeFailPercent = $InodeFailPercent
+        PatchWarnDays    = $PatchWarnDays
+        PatchFailDays    = $PatchFailDays
+    }
+    if ($KeyFile) { $splat['KeyFile'] = $KeyFile }
+    if ($KeyPassphrase) { $splat['KeyPassphrase'] = $KeyPassphrase }
+    if ($securePassword) { $splat['SecurePassword'] = $securePassword }
+    if ($AllowedPort) { $splat['AllowedPort'] = $AllowedPort }
+
+    try {
+        $inventory = Get-LinuxComplianceInventory @splat
+        $results.Add($inventory)
+        foreach ($check in @($inventory.Checks)) { $allChecks.Add($check) }
+    }
+    catch {
+        Write-Warning "Collection failed for ${item}: $($_.Exception.Message)"
+        $failure = New-LinuxComplianceCheck -Target $item -Category 'Collection' -Check 'SSH collection' -Status 'Fail' `
+            -Value 'error' -Detail $_.Exception.Message
+        $allChecks.Add($failure)
+        $results.Add([pscustomobject]@{
+            Target      = $item
+            CollectedAt = (Get-Date)
+            Status      = 'Fail'
+            Facts       = $null
+            Checks      = @($failure)
+        })
+    }
+}
+
+Write-Progress -Activity 'Collecting Linux compliance data' -Completed
+
+$summary = @(Get-LinuxComplianceSummary -Checks @($allChecks))
+
+$results | ConvertTo-Json -Depth 8 | Set-Content -Path $JsonPath -Encoding UTF8
+
+$repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$exporter = Join-Path $repoRoot 'helpers\reports\Export-DynamicDashboardHtml.ps1'
+$templatePath = Join-Path $repoRoot 'helpers\reports\Dynamic-Dashboard-Template.html'
+if (-not (Test-Path -LiteralPath $exporter)) {
+    throw "Dashboard generator not found: $exporter"
+}
+. $exporter
+
+Set-StrictMode -Off
+$allChecks | Export-DynamicDashboardHtml -OutputPath $OutputPath -ReportTitle 'Linux Fleet Compliance' `
+    -CardField @('Status', 'Category', 'Target') -StatusField 'Status' `
+    -ExportPrefix 'linux_compliance' -TemplatePath $templatePath | Out-Null
+
+Write-Host "JSON data : $JsonPath"
+Write-Host "HTML report: $OutputPath"
+
+foreach ($row in $summary) {
+    Write-Host ("{0,-24} {1,-8} pass={2} warn={3} fail={4} unknown={5}" -f $row.Target, $row.Status, $row.Pass, $row.Warn, $row.Fail, $row.Unknown)
+}
+
+if (-not $NoLaunch) {
+    Start-Process $OutputPath
 }
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDbRUneEZdtUBb
-# jklBLaYL0eHAivmcNeY89Ydo060jlKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIx/qUX4a6WeMD
+# x63ZRXgEpKtIUUdXY3M2atWFjk67ZqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -229,33 +363,33 @@
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCR3S5K97MRNtdLnf+1S2NAQCEJOun9caaXtoMIBS/QdjANBgkqhkiG9w0BAQEF
-# AASCAgDE++WPriZlocl5L9YZQY0VQ7ZhLCdItS/EkQHE9u7rvYd2W/m0bBYy58gY
-# 2+FeZTJaBcf8CKwPAEmNO1beuLAXRlCN3yv+NnKxVxCvAnAOQBp+Y0RvWfFj36fA
-# Om2b5x7/pEUjA7qYi1hW12KpvY6DDVuPhGSTeNz3Qv+2X8jhfhf/+YaRlBROLHwh
-# Tf21UhEaTday5xEEZsFFoIIACkeV1NPm1qRsbetaVY6r3mCMwvt/B0mNuye5Jom/
-# v/5MUYE376r/NMMNaDKS6TL/SY1dna872YwI4kgMaGuCXLKLb812Fk0bfY7ggxJF
-# kiL+v8KFi1KMZTim6Qx62d3nUFshrEIM7JcKQcS2Q/NPAiiMHU+bjHjnw7Uo+Ipb
-# lv6HryPGD5cWT69Cfrw+FtPUaNN6yyzwF+8oxSJtAkw4JD3XPVNDLQh6y8POTBj5
-# ix0w5B+7pLrr+h3fcg6HrFw8RUHY3+r9gSc8Segsj9ArqjhR0ZafiJfPS9PLiUXj
-# VmJd0Ia6TqeB6qMw5wnza7/5Htp1+oO0NMsV2HRwUE0KVYBVrZSKl7YKXxzs62dP
-# W6pHXgE0ayTGmznPtYusovwub8kPwRw3+AHI9hWXHeUO7Tv0r1g0nGbx/sI6Muos
-# VZvhdHye0WCjGfmdnreBD4YyRh4aMmBnou5xUh3IoloNTplyk6GCAyYwggMiBgkq
+# BCDVzTqurIkXJvgf78V2B07oYYPLTVG7HA/ZKUj7zICd7TANBgkqhkiG9w0BAQEF
+# AASCAgAgQ0NMNd5vx58Ee8ZubgIwdHQu0/vFPpsJn54f17L29YdRCBe2IV4cx1df
+# 1JJlg2IQ0FYnaSXGKs8pvgNiUg9R4356hy+jPrI5fpEmdafaqgJO5PlodqiPFDE3
+# jCh4m4eqY0yNmItt3awxSEcNnxFTBRgp+NMh4ygKUzeur3NnI8Wdb7THwsPusEZf
+# a/pGQYWTbpZXBeJTabzS3Rx3ujPsGc1KopQVsd0JkSVmBtCZEepZm3v/MbnOUWe1
+# sd+zlRVUNLc8r0mZZthnKt2sPqDKpXG4h8mdamfwDtCoKLLbrU4RJNl6TEK8E6sq
+# exmwnAQqijZKhD1el/oiUFR+P3a/Mxk9ztEEsTfyd1Qh6QvIZeyxcanRiOi0ioZR
+# wBg73CRb5o/EfYSqZ8iWAHfvWgocu0LZwmEImxJ5iiwpLOBg6Z5CrHHwHPVsEVjy
+# RpvFY6aKYdQvA1SwKHXIFsmubwP408Vy8cpXGrK2EBP3kIirbSxW9/ZIWbRD7vT9
+# f8rCK5WK5cTIBdH3WoYPFqOEFohitV8sB7T7y5OqneD44zdfjoQA7NnuofzzOHJD
+# Tc3Huv72tbNPw/QsGE43ptazooiwAsl9aJ+1FXBlw3XsaFayGKB56NPTjme/QCy8
+# kHkwFOcJWAYjujh8pHs6gLCAnKLzQ2+V52/x6a0xLnT2LvRKHaGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
 # GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA5MjkxOTM3MzNaMC8GCSqGSIb3DQEJBDEiBCBdkyj4
-# qyV2PAkPtUS5ft+aDIiJK3FXSe5WX21tvn6TaDANBgkqhkiG9w0BAQEFAASCAgBy
-# Ch3xuwVedulkvfEz5wpJ7qwXKmS8UBWGant37D9zJviUGSbPwcTj0C1W5upLQPKe
-# H4gf3UiYhNlAw3iCaOlRCVhL/x+6O/sNWAEwhDxDYQ7bD5k3gWvBW6h+IvX2TiFN
-# gueddbvxxTtn4CUfNuzM2exb1+rIq7Qc2NXzT/xo04aOxyKdVvo9TlH6Ln90qyuT
-# H1cbZ8IkhAqp75iP7atYn6CgHcvmU0Dz8PIjTR6Pd5eVWAVJ0v5ZFoWZ+S6tSDo+
-# Ew0GhhDguzUq6yLdvLlrdE/4Lp6uDbrGgRYGh1oteo0hNSdqGepma/Wc3yn0qIbT
-# +zaBA/sC1JGDpzzPHHb8NfJXO2RhZpUkkv9mxuXOCPbdeBswkYi3uDX5ISFOVhXj
-# 6jr+1qt9opvIOSgHXT1v2nR3kb+agtluUfo6PcPA+mFB6A2+y8cmlYnZRGDebyqM
-# t7RZLA0aB96DX+jUBxQHzkn5uISFtJlpDuXjyzK1c+vyI4HW/M8fwL/ASCMCtQ9o
-# QgZMViR0o8UxcOgdyLEElG659JMsnMMGIXd5wRK99W3fyF/bQaCWvsjgi8Bg+TgU
-# fHpnWYh6y5Q/fDS/lD3l/ZBOH7HUpNGMQoS3XbcZ0KOMJoMxe4Sc5NkwpzL/yzw9
-# BPk6jlg9nnHCGTwpm2k8LuIO55IsC6jzZHCZ6JdQkg==
+# CSqGSIb3DQEJBTEPFw0yNjA5MjkxODMwMzlaMC8GCSqGSIb3DQEJBDEiBCALEazx
+# nSpjETiUwPrRDsoUDWGiJluzeomFyvfxd6EgQzANBgkqhkiG9w0BAQEFAASCAgCN
+# xtYad8JVF7GEwHTEyWspXIvUrrqld4JeTAj9sBtPeNSLFpgNipTHVRyTtexGxxFt
+# sUWsc1l1DYeYHIFDukAby9+vWyc82cOLfGa/TO4A1CJsWgVwWss4kWZWBqs0G8mx
+# hY1UsQa5jd3W+uQhAJAFV42S8D3+XSfIV37sDfpJSoz9h4DEfeTLfgj3PYHxBbnr
+# diLB6TUx2avkjzLKfVtEkzHKIn8o5NE+44hV1xR7TJxuVOOsnllFdH4b/QU8/4fM
+# jrG0I4FO/Mhf/2Fbfs3QytOPrBv6d4dksYCPlCjemkCYS0plD6sxeZye4v8t+3kY
+# mh/HXMRIvQNri7pcs8Cznbekbmz4zlFiAo/zBKe6OWMxVF1K8O8128C6/zi8bI1X
+# 8PSGvgsmUnuIoVaUUfKdu4PjPB04qIJEOGgs50jSBOoutB+bKj9Ebm4BkAhCeFar
+# D1zHIyBSeOnxV1Lfl5AqnXKGRbFR9J5YUItC7/exHAioVuFHe5nvRUs4TE4Dz7nS
+# XizZepkd87F+9m9zfXn5ghNcxBNhABITtveBLKZI7jXOuuu5oJ/sp6ohq89fjzrs
+# gi7186tIBDKEM7gCu2GJklRTfOcXmhK3RDg06l4W44TCGnFwdDaBlWVTXEbC7DdY
+# j/hQKjVGt35/Mxiymsq/gOdpe9KfyLe7jzFDqGOCyw==
 # SIG # End signature block

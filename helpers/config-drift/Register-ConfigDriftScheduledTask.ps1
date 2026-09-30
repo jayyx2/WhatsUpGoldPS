@@ -1,32 +1,243 @@
-﻿@{
-    RootModule        = 'WhatsUpGoldPS.Ssh.psm1'
-    ModuleVersion     = '0.1.0'
-    GUID              = 'a7c3e1f8-9d24-4b6a-8e5f-1c2d3e4f5a6b'
-    Author            = 'Jason Alberino'
-    CompanyName       = 'Jason Alberino'
-    Copyright         = '(c) 2026 Jason Alberino. All rights reserved.'
-    Description       = 'SSH command execution helpers powered by SSH.NET (Renci.SshNet).'
-    PowerShellVersion = '5.1'
+﻿#requires -Version 5.1
+<#
+.SYNOPSIS
+    Registers a Windows Scheduled Task that runs configuration drift audits.
+.DESCRIPTION
+    Creates a scheduled task that runs Get-ConfigDriftDashboard.ps1 unattended,
+    using DPAPI vault credentials so nothing is prompted and no secret is stored
+    in the task definition.
 
-    FunctionsToExport = @(
-        'Import-SshNet',
-        'New-SshSession',
-        'Invoke-SshCommand',
-        'Invoke-SshShellCommand',
-        'Close-SshSession',
-        'Test-SshConnection'
-    )
+    IMPORTANT -- DPAPI constraint:
+      The task must run as the same Windows user that saved the vault credential,
+      on the same machine. DPAPI keys are tied to the user profile and machine.
 
-    CmdletsToExport   = @()
-    VariablesToExport  = @()
-    AliasesToExport    = @()
+    Typical workflow:
+      1. Save-DiscoveryCredential -Name 'NetworkAdmin' -Fields @{ Username = $u; Password = $p }
+      2. Run Get-ConfigDriftDashboard.ps1 once interactively with -ApproveBaseline
+      3. Register the task with this script
+.PARAMETER TaskName
+    Task Scheduler name. Defaults to ConfigDrift-<group or targets>.
+.PARAMETER FromWUGGroup
+    WhatsUp Gold device group to audit. Mutually exclusive with -Target.
+.PARAMETER Target
+    Explicit device list to audit.
+.PARAMETER VaultCredential
+    Name of the DPAPI vault credential holding the SSH username and password.
+.PARAMETER Profile
+    Vendor profile passed to the audit.
+.PARAMETER PolicyPack
+    Policy packs to evaluate.
+.PARAMETER PublishToWUG
+    Write ConfigDrift.* attributes back to WhatsUp Gold after each run.
+.PARAMETER TriggerType
+    Daily, Hourly, AtStartup, or Once. Default Daily.
+.PARAMETER TimeOfDay
+    Start time in HH:mm. Default 02:00.
+.PARAMETER RepeatIntervalMinutes
+    Repeat interval for the Hourly trigger. Default 60.
+.PARAMETER RunNow
+    Run the audit immediately in the current console after registering.
+.PARAMETER Show
+    List existing drift tasks and exit.
+.PARAMETER Remove
+    Remove the named task and exit.
+.EXAMPLE
+    .\Register-ConfigDriftScheduledTask.ps1 -FromWUGGroup 'Routers' -VaultCredential NetworkAdmin `
+        -Profile cisco-ios -PolicyPack cisco-hardening -PublishToWUG -TriggerType Daily -TimeOfDay '03:00'
+.EXAMPLE
+    .\Register-ConfigDriftScheduledTask.ps1 -Show
+.EXAMPLE
+    .\Register-ConfigDriftScheduledTask.ps1 -Remove -TaskName 'ConfigDrift-Routers'
+.NOTES
+    Author  : jason@wug.ninja
+    Requires: PowerShell 5.1+, scheduled task rights for the current user.
+.LINK
+    https://github.com/jayyx2/WhatsUpGoldPS
+#>
+[CmdletBinding(DefaultParameterSetName = 'Register', SupportsShouldProcess = $true)]
+param(
+    [Parameter(ParameterSetName = 'Register')]
+    [Parameter(ParameterSetName = 'Remove', Mandatory = $true)]
+    [string]$TaskName,
+
+    [Parameter(ParameterSetName = 'Register')][string]$FromWUGGroup,
+    [Parameter(ParameterSetName = 'Register')][string[]]$Target,
+    [Parameter(ParameterSetName = 'Register')][string]$VaultCredential,
+    [Parameter(ParameterSetName = 'Register')][string]$Username,
+
+    [Parameter(ParameterSetName = 'Register')]
+    [ValidateSet('cisco-ios', 'cisco-nxos', 'cisco-asa', 'linux', 'generic')]
+    [string]$Profile = 'generic',
+
+    [Parameter(ParameterSetName = 'Register')]
+    [ValidateSet('cisco-hardening', 'cisco-snmp', 'linux-ssh')]
+    [string[]]$PolicyPack,
+
+    [Parameter(ParameterSetName = 'Register')][string]$StorePath,
+    [Parameter(ParameterSetName = 'Register')][string]$OutputPath,
+    [Parameter(ParameterSetName = 'Register')][switch]$UseGolden,
+    [Parameter(ParameterSetName = 'Register')][switch]$PublishToWUG,
+    [Parameter(ParameterSetName = 'Register')][switch]$ComparePeers,
+
+    [Parameter(ParameterSetName = 'Register')]
+    [ValidateSet('Daily', 'Hourly', 'AtStartup', 'Once')]
+    [string]$TriggerType = 'Daily',
+
+    [Parameter(ParameterSetName = 'Register')][string]$TimeOfDay = '02:00',
+    [Parameter(ParameterSetName = 'Register')][int]$RepeatIntervalMinutes = 60,
+    [Parameter(ParameterSetName = 'Register')][string]$TaskFolder = '\WhatsUpGoldPS',
+    [Parameter(ParameterSetName = 'Register')][switch]$RunNow,
+
+    [Parameter(ParameterSetName = 'Show', Mandatory = $true)][switch]$Show,
+    [Parameter(ParameterSetName = 'Remove', Mandatory = $true)][switch]$Remove
+)
+
+$dashboardScript = Join-Path $PSScriptRoot 'Get-ConfigDriftDashboard.ps1'
+if (-not (Test-Path -LiteralPath $dashboardScript)) {
+    throw "Get-ConfigDriftDashboard.ps1 not found at $dashboardScript."
+}
+
+if ($Show) {
+    $tasks = @(Get-ScheduledTask -TaskPath "$($TaskFolder.TrimEnd('\'))\*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.TaskName -like 'ConfigDrift-*' })
+    if ($tasks.Count -eq 0) {
+        Write-Host 'No configuration drift tasks registered.'
+        return
+    }
+    $tasks | ForEach-Object {
+        $info = Get-ScheduledTaskInfo -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue
+        [pscustomobject]@{
+            TaskName  = $_.TaskName
+            State     = $_.State
+            LastRun   = $info.LastRunTime
+            LastResult = $info.LastTaskResult
+            NextRun   = $info.NextRunTime
+        }
+    } | Format-Table -AutoSize
+    return
+}
+
+if ($Remove) {
+    if ($PSCmdlet.ShouldProcess($TaskName, 'Unregister scheduled task')) {
+        Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskFolder -Confirm:$false -ErrorAction Stop
+        Write-Host "Removed scheduled task '$TaskName'."
+    }
+    return
+}
+
+if (-not $FromWUGGroup -and (-not $Target -or $Target.Count -eq 0)) {
+    throw 'Specify -FromWUGGroup or -Target.'
+}
+if (-not $VaultCredential) {
+    throw 'Specify -VaultCredential so the task can run without prompting. Save one with Save-DiscoveryCredential.'
+}
+
+if (-not $TaskName) {
+    $suffix = if ($FromWUGGroup) { $FromWUGGroup } else { ($Target -join '-') }
+    $suffix = [regex]::Replace($suffix, '[^A-Za-z0-9._-]', '_')
+    if ($suffix.Length -gt 40) { $suffix = $suffix.Substring(0, 40) }
+    $TaskName = "ConfigDrift-$suffix"
+}
+
+if (-not $StorePath) { $StorePath = Join-Path $PSScriptRoot 'config-baselines' }
+if (-not $OutputPath) { $OutputPath = Join-Path $env:ProgramData "WhatsUpGoldPS\Config-Drift-$TaskName.html" }
+
+$argumentList = [System.Collections.Generic.List[string]]::new()
+$argumentList.Add('-NoProfile')
+$argumentList.Add('-ExecutionPolicy')
+$argumentList.Add('Bypass')
+$argumentList.Add('-File')
+$argumentList.Add('"{0}"' -f $dashboardScript)
+
+if ($FromWUGGroup) {
+    $argumentList.Add('-FromWUGGroup')
+    $argumentList.Add('"{0}"' -f $FromWUGGroup)
+}
+else {
+    $argumentList.Add('-Target')
+    $argumentList.Add(($Target | ForEach-Object { '"{0}"' -f $_ }) -join ',')
+}
+
+$argumentList.Add('-VaultCredential')
+$argumentList.Add('"{0}"' -f $VaultCredential)
+if ($Username) {
+    $argumentList.Add('-Username')
+    $argumentList.Add('"{0}"' -f $Username)
+}
+$argumentList.Add('-Profile')
+$argumentList.Add($Profile)
+$argumentList.Add('-StorePath')
+$argumentList.Add('"{0}"' -f $StorePath)
+$argumentList.Add('-OutputPath')
+$argumentList.Add('"{0}"' -f $OutputPath)
+if ($PolicyPack) {
+    $argumentList.Add('-PolicyPack')
+    $argumentList.Add(($PolicyPack -join ','))
+}
+if ($UseGolden) { $argumentList.Add('-UseGolden') }
+if ($ComparePeers) { $argumentList.Add('-ComparePeers') }
+if ($PublishToWUG) { $argumentList.Add('-PublishToWUG') }
+$argumentList.Add('-NoLaunch')
+
+$arguments = $argumentList -join ' '
+
+switch ($TriggerType) {
+    'Daily' { $trigger = New-ScheduledTaskTrigger -Daily -At $TimeOfDay }
+    'Once' { $trigger = New-ScheduledTaskTrigger -Once -At $TimeOfDay }
+    'AtStartup' { $trigger = New-ScheduledTaskTrigger -AtStartup }
+    'Hourly' {
+        $trigger = New-ScheduledTaskTrigger -Once -At $TimeOfDay `
+            -RepetitionInterval (New-TimeSpan -Minutes $RepeatIntervalMinutes) `
+            -RepetitionDuration ([TimeSpan]::FromDays(3650))
+    }
+}
+
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments -WorkingDirectory $PSScriptRoot
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 4)
+
+if ($PSCmdlet.ShouldProcess($TaskName, 'Register scheduled task')) {
+    if (-not (Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskFolder -ErrorAction SilentlyContinue)) {
+        Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskFolder -Action $action -Trigger $trigger `
+            -Principal $principal -Settings $settings -Description 'WhatsUpGoldPS configuration drift audit' | Out-Null
+    }
+    else {
+        Set-ScheduledTask -TaskName $TaskName -TaskPath $TaskFolder -Action $action -Trigger $trigger `
+            -Principal $principal -Settings $settings | Out-Null
+    }
+
+    Write-Host "Registered scheduled task '$TaskName' in '$TaskFolder'."
+    Write-Host "  Runs as  : $env:USERDOMAIN\$env:USERNAME (required for DPAPI vault access)"
+    Write-Host "  Trigger  : $TriggerType $(if ($TriggerType -ne 'AtStartup') { "at $TimeOfDay" })"
+    Write-Host "  Report   : $OutputPath"
+    Write-Host "  Baselines: $StorePath"
+}
+
+if ($RunNow) {
+    Write-Host ''
+    Write-Host 'Running the audit now...'
+    $runArgs = @{}
+    if ($FromWUGGroup) { $runArgs['FromWUGGroup'] = $FromWUGGroup } else { $runArgs['Target'] = $Target }
+    $runArgs['VaultCredential'] = $VaultCredential
+    if ($Username) { $runArgs['Username'] = $Username }
+    $runArgs['Profile'] = $Profile
+    $runArgs['StorePath'] = $StorePath
+    $runArgs['OutputPath'] = $OutputPath
+    if ($PolicyPack) { $runArgs['PolicyPack'] = $PolicyPack }
+    if ($UseGolden) { $runArgs['UseGolden'] = $true }
+    if ($ComparePeers) { $runArgs['ComparePeers'] = $true }
+    if ($PublishToWUG) { $runArgs['PublishToWUG'] = $true }
+    $runArgs['NoLaunch'] = $true
+
+    & $dashboardScript @runArgs
 }
 
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDbRUneEZdtUBb
-# jklBLaYL0eHAivmcNeY89Ydo060jlKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBPUZF+bNniWWV
+# Rc7I4AxGOfzuH7F1t4/sgsQ8jQ+RB6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -229,33 +440,33 @@
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCR3S5K97MRNtdLnf+1S2NAQCEJOun9caaXtoMIBS/QdjANBgkqhkiG9w0BAQEF
-# AASCAgDE++WPriZlocl5L9YZQY0VQ7ZhLCdItS/EkQHE9u7rvYd2W/m0bBYy58gY
-# 2+FeZTJaBcf8CKwPAEmNO1beuLAXRlCN3yv+NnKxVxCvAnAOQBp+Y0RvWfFj36fA
-# Om2b5x7/pEUjA7qYi1hW12KpvY6DDVuPhGSTeNz3Qv+2X8jhfhf/+YaRlBROLHwh
-# Tf21UhEaTday5xEEZsFFoIIACkeV1NPm1qRsbetaVY6r3mCMwvt/B0mNuye5Jom/
-# v/5MUYE376r/NMMNaDKS6TL/SY1dna872YwI4kgMaGuCXLKLb812Fk0bfY7ggxJF
-# kiL+v8KFi1KMZTim6Qx62d3nUFshrEIM7JcKQcS2Q/NPAiiMHU+bjHjnw7Uo+Ipb
-# lv6HryPGD5cWT69Cfrw+FtPUaNN6yyzwF+8oxSJtAkw4JD3XPVNDLQh6y8POTBj5
-# ix0w5B+7pLrr+h3fcg6HrFw8RUHY3+r9gSc8Segsj9ArqjhR0ZafiJfPS9PLiUXj
-# VmJd0Ia6TqeB6qMw5wnza7/5Htp1+oO0NMsV2HRwUE0KVYBVrZSKl7YKXxzs62dP
-# W6pHXgE0ayTGmznPtYusovwub8kPwRw3+AHI9hWXHeUO7Tv0r1g0nGbx/sI6Muos
-# VZvhdHye0WCjGfmdnreBD4YyRh4aMmBnou5xUh3IoloNTplyk6GCAyYwggMiBgkq
+# BCDbO9KwP7MUe0P6r83+nuiF3VunaUuExhdyWb9SIGzXZjANBgkqhkiG9w0BAQEF
+# AASCAgBoeqBvRPL6Pn3FJhLhWRV0apwJFuD8829GeXsbmIHBsag1h2DWASHKvihJ
+# hPT8Wlfx8+AoaskeUbRbxDjUw38fVu+sGJnpkv16yz91kABBiEdfohU0BHJf8+HL
+# rO4/8OJ9xGycwW1bSfoiWjNQK9cw6ahV6AJsn1mjlGDyyctf9lyRub7Tymv986/r
+# tosDLrkxUjYW0TLDag12vbISLHCuPeNK9xr2C336umMFhvTkEg0wrYmo+upZorh1
+# Ol48g7SiwSPAteLDI2AorvmoDhACF2QPOpn5LHTQ5T7G0HA7NaBCgU4MEJbKETap
+# gd+pc0UMqQ9zPLDUgIT/JbkACttnNXEnFpDphS9b3SnEHuH5ADbUp8ZmOsJo5mJS
+# YXi4g9dGHZv4/7uuYcDQ3GfmCiW8N4IIzFi1QqDCooiJboxQk2alcGY62JN2mYQv
+# 5rQuCR5EVNAHQ+Gnlr2LyytkkaFZv+jj9EFHwml4respk3IjaGMb9xj0OyrinqTA
+# jQ8subSCtEOTFZTVcrMRNFIRINjgs4QTbCykQgd3eN3hgmYMxyqJ/h4fP7AdLyKR
+# 4oCgovuSy9IIPf48XWvtKsHIoPJN3oPMQmAkHf7VJiw5eku0zjUZeXZLr9AsWTQv
+# VLZMUYyTZbd7KVHJv1kYgD+MMHID6G//G9H+1YrGawLde7BksqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
 # GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA5MjkxOTM3MzNaMC8GCSqGSIb3DQEJBDEiBCBdkyj4
-# qyV2PAkPtUS5ft+aDIiJK3FXSe5WX21tvn6TaDANBgkqhkiG9w0BAQEFAASCAgBy
-# Ch3xuwVedulkvfEz5wpJ7qwXKmS8UBWGant37D9zJviUGSbPwcTj0C1W5upLQPKe
-# H4gf3UiYhNlAw3iCaOlRCVhL/x+6O/sNWAEwhDxDYQ7bD5k3gWvBW6h+IvX2TiFN
-# gueddbvxxTtn4CUfNuzM2exb1+rIq7Qc2NXzT/xo04aOxyKdVvo9TlH6Ln90qyuT
-# H1cbZ8IkhAqp75iP7atYn6CgHcvmU0Dz8PIjTR6Pd5eVWAVJ0v5ZFoWZ+S6tSDo+
-# Ew0GhhDguzUq6yLdvLlrdE/4Lp6uDbrGgRYGh1oteo0hNSdqGepma/Wc3yn0qIbT
-# +zaBA/sC1JGDpzzPHHb8NfJXO2RhZpUkkv9mxuXOCPbdeBswkYi3uDX5ISFOVhXj
-# 6jr+1qt9opvIOSgHXT1v2nR3kb+agtluUfo6PcPA+mFB6A2+y8cmlYnZRGDebyqM
-# t7RZLA0aB96DX+jUBxQHzkn5uISFtJlpDuXjyzK1c+vyI4HW/M8fwL/ASCMCtQ9o
-# QgZMViR0o8UxcOgdyLEElG659JMsnMMGIXd5wRK99W3fyF/bQaCWvsjgi8Bg+TgU
-# fHpnWYh6y5Q/fDS/lD3l/ZBOH7HUpNGMQoS3XbcZ0KOMJoMxe4Sc5NkwpzL/yzw9
-# BPk6jlg9nnHCGTwpm2k8LuIO55IsC6jzZHCZ6JdQkg==
+# CSqGSIb3DQEJBTEPFw0yNjA5MjkxOTM3NDFaMC8GCSqGSIb3DQEJBDEiBCB8h2dC
+# sWd5sF8/zq6ehf+pdrGFFF4esIlWUPdIGGMGCDANBgkqhkiG9w0BAQEFAASCAgBP
+# S0OW5JTMhgkgZCPDh3GLUUTmpCxQ6RTXvgJ5SDLrdwSRtpKY4GAe2ngStetzhflQ
+# LIwzdHW0K/C7Jz6AeKT3iJRPK6pqi5F3sY5LyrdIuIwQfgWAfBC2Pg0xRLlAvo8M
+# IMovuoiXdzv5dA/vfNjvhdwHf34Zkdb/VBkhkK/yVhacN8TEFiBwjpeyXZkSOB+P
+# 7FXHGnLT55yoO/Fey7vAIJOg61167XGHhCRktdLfE+GvGQyzC/7D7n6Eiz1ySMtx
+# 4jy16T5UfNyxhvv8yZih34pGHO087nht8dDFqjoJm2wsRbTGlHEir3dPid5n26Kt
+# Es2bh9pjellLGJ9IelkfdYed8ODcZFocLhjnbiGddJQ0u/Nh98DjVK7jEw0GnUtd
+# Ommv1OIrbhcbn6E8BHlI0MPpYhyd6+W9O65SlxZPQTbE4aFAzM/i04clXH4N+SFw
+# lD+cS68dBNiuUlzFnb672PaCZFK7d49TyOl355W0Xk5D5VAqKOTStu5X9AcJaR8J
+# LXxzlqG33t3Dj2oCcLtt8knOSNECTv1pgyn2kivJsEEaQ2qnF0Q5pHb4xFZ4LhMR
+# PLsSoB7MyIKwZxr31l71Nv+mla95AjcuwOq5/mg2cCoS65RtJivBdTojTeUsV4vj
+# TcAN7L/RN6i1fOJ8YpQ76o/R+9dVsJmWanQ2FQRt5Q==
 # SIG # End signature block

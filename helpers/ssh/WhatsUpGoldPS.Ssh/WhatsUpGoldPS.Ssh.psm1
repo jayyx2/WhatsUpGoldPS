@@ -349,6 +349,168 @@ function Test-SshConnection {
     }
 }
 
+function Invoke-SshShellCommand {
+    <#
+    .SYNOPSIS
+        Runs commands through an interactive SSH shell instead of the exec channel.
+    .DESCRIPTION
+        Many network operating systems refuse exec-channel commands and require a
+        real terminal: enable mode, menu systems, control characters such as
+        Ctrl+Z, and pager prompts like --More--. This function allocates a shell,
+        waits for prompts, answers the pager automatically, and returns the
+        collected output.
+
+        Each entry in -Step is either a plain string (sent followed by Enter) or a
+        hashtable supporting:
+          Send       Text or control character to transmit.
+          NoNewline  Send without a trailing Enter (use for Ctrl+Z and menu keys).
+          WaitFor    Regex to wait for instead of the normal prompt.
+          DelayMs    Extra pause after sending.
+          Collect    Set to $false to discard this step's output (setup commands).
+    .PARAMETER PromptPattern
+        Regex identifying the device prompt. Default matches a trailing > or #.
+    .PARAMETER MorePattern
+        Regex for pager prompts. A space is sent whenever it matches.
+    .EXAMPLE
+        Invoke-SshShellCommand -Session $s -Step 'terminal length 0','show running-config'
+    .EXAMPLE
+        # Escape a menu with Ctrl+Z, then collect the config
+        Invoke-SshShellCommand -Session $s -Step @(
+            @{ Send = [char]26; NoNewline = $true; Collect = $false },
+            'show running-config'
+        )
+    .EXAMPLE
+        # Enter enable mode first
+        Invoke-SshShellCommand -Session $s -EnablePassword $secure -Step 'show running-config'
+    .OUTPUTS
+        PSCustomObject with Output and Steps.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $Session,
+
+        [Parameter(Mandatory = $true)]
+        [object[]]$Step,
+
+        [string]$PromptPattern = '(?m)^[^\r\n]*[>#]\s*$',
+
+        [string]$MorePattern = '--\s?More\s?--|---- More ----|<--- More --->',
+
+        [System.Security.SecureString]$EnablePassword,
+
+        [string]$EnableCommand = 'enable',
+
+        [int]$TimeoutSeconds = 60,
+
+        [int]$SettleMilliseconds = 400
+    )
+
+    if (-not $Session.IsConnected) { throw 'SSH session is not connected.' }
+
+    $stream = $Session.CreateShellStream('vt100', 240, 200, 1024, 768, 131072)
+    try {
+        $readUntil = {
+            param([string]$Pattern, [int]$Seconds)
+
+            $builder = New-Object System.Text.StringBuilder
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            $lastData = Get-Date
+
+            while ((Get-Date) -lt $deadline) {
+                $chunk = $stream.Read()
+                if ($chunk) {
+                    [void]$builder.Append($chunk)
+                    $lastData = Get-Date
+                    $text = $builder.ToString()
+
+                    if ($MorePattern -and [regex]::IsMatch($text, $MorePattern)) {
+                        $stream.Write(' ')
+                        $stream.Flush()
+                        $cleaned = [regex]::Replace($text, $MorePattern, '')
+                        [void]$builder.Clear()
+                        [void]$builder.Append($cleaned)
+                        continue
+                    }
+                    if ($Pattern -and [regex]::IsMatch($text, $Pattern)) { break }
+                }
+                else {
+                    # No prompt match but the device stopped talking: treat as done.
+                    if ($Pattern -and ((Get-Date) - $lastData).TotalMilliseconds -gt ($SettleMilliseconds * 6)) { break }
+                    Start-Sleep -Milliseconds 100
+                }
+            }
+            return $builder.ToString()
+        }
+
+        $null = & $readUntil $PromptPattern 10
+
+        if ($EnablePassword) {
+            $stream.WriteLine($EnableCommand)
+            $stream.Flush()
+            $null = & $readUntil '(?i)password' 15
+            $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($EnablePassword)
+            try { $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+            finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+            $stream.WriteLine($plain)
+            $stream.Flush()
+            $plain = $null
+            $null = & $readUntil $PromptPattern 15
+        }
+
+        $collected = New-Object System.Text.StringBuilder
+        $stepResults = [System.Collections.Generic.List[object]]::new()
+
+        foreach ($item in $Step) {
+            $send = $null
+            $noNewline = $false
+            $waitFor = $PromptPattern
+            $delayMs = 0
+            $collect = $true
+
+            if ($item -is [System.Collections.IDictionary]) {
+                $send = [string]$item['Send']
+                if ($item.Contains('NoNewline')) { $noNewline = [bool]$item['NoNewline'] }
+                if ($item['WaitFor']) { $waitFor = [string]$item['WaitFor'] }
+                if ($item['DelayMs']) { $delayMs = [int]$item['DelayMs'] }
+                if ($item.Contains('Collect')) { $collect = [bool]$item['Collect'] }
+            }
+            else {
+                $send = [string]$item
+            }
+
+            if ($noNewline) { $stream.Write($send) } else { $stream.WriteLine($send) }
+            $stream.Flush()
+            if ($delayMs -gt 0) { Start-Sleep -Milliseconds $delayMs }
+
+            $output = & $readUntil $waitFor $TimeoutSeconds
+
+            $lines = @($output -split "`r?`n")
+            if ($lines.Count -gt 0 -and $send -and $lines[0].Trim() -eq $send.Trim()) {
+                $lines = @($lines[1..($lines.Count - 1)])
+            }
+            if ($lines.Count -gt 0 -and $lines[-1] -match '[>#]\s*$') {
+                $lines = @($lines[0..($lines.Count - 2)])
+            }
+            $clean = ($lines -join "`n")
+
+            $stepResults.Add([pscustomobject]@{ Command = $send; Output = $clean })
+            if ($collect) {
+                if ($collected.Length -gt 0) { [void]$collected.Append("`n") }
+                [void]$collected.Append($clean)
+            }
+        }
+
+        return [pscustomobject]@{
+            Output = $collected.ToString()
+            Steps  = @($stepResults)
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
 # ============================================================================
 # Export
 # ============================================================================
@@ -356,6 +518,7 @@ Export-ModuleMember -Function @(
     'Import-SshNet',
     'New-SshSession',
     'Invoke-SshCommand',
+    'Invoke-SshShellCommand',
     'Close-SshSession',
     'Test-SshConnection'
 )
@@ -363,8 +526,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDiqQFRNsSQ9f02
-# WzwsG1tkj4IhH5pEkLWjVkGi+o7y4qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA25ZwZQ5Cbarea
+# +n0qGzhPYXMrQcvm8CQ0oRVmKeAxuKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -525,25 +688,25 @@ Export-ModuleMember -Function @(
 # 7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+N
 # Jpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckT
 # etiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszW
-# kPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDANBgkqhkiG9w0B
+# kPZPubdcMIIG7TCCBNWgAwIBAgIQCE/cM09+RU7bww+P+ZIYNTANBgkqhkiG9w0B
 # AQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/
 # BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYg
-# U0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkwMzIzNTk1OVow
+# U0hBMjU2IDIwMjUgQ0ExMB4XDTI2MDgwNTAwMDAwMFoXDTM3MTEwNDIzNTk1OVow
 # YzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQD
 # EzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIw
-# MjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBGrC0Sxp7Q6q5g
-# VrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwBSOeLpvPnZ8ZN
-# +vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/4QhguSssp3qo
-# me7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3K3E0zz09ldQ/
-# /nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROUINDT98oksouT
-# MYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3w6ySSSu+3qU8
-# DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46YceNA0LfNsnqcnp
-# JeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d2sC26/PQPdP5
-# 1ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8xymLnjCbSLZ49
-# kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+AliL7ojTdS5P
-# WPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2bQhpp0IoKRR7Y
-# ufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
-# MB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSMEGDAWgBTvb1NK
+# MjYgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALZ7pvLJ/s1K+NSb
+# TGWz/TjGMPh8CQ6RucZCLv5anHzWJjF/NWJrFIhy24fcpKXlgRiky4WAawDfU3YP
+# 0BMxt9l3Dm5oCG5Z69AqEN1kgHg2epx+l+lZBcmJCcN0ASURML5uFIS80sZsDwO3
+# BSkUxDjLJhBI+qiZP3aixAC/qEGLjsBNlLol9VZ7pfGEXiMlneJIC5/YKuizVzNF
+# KZZEeoy/0B8Zm+nzKBgSWG52lCO1w+nCg6XpCtklTJXeIg283hw7TmmsZXR+SMbj
+# brEOvZ3fP2VxIgeR28Y90ZStd3F9VuA5RVynb/whITPAo9b75Zr4Ta6Mj3URm26Q
+# ZYMn/FnbuTegcoRcFEZ9FOqM5T6MTdtr/n74lIT/ug0eeOzmZ6QTFg33otX+bFRs
+# IolvykE1jive4PuESaT8zzVeFWDAMDtozNgLctkGD1ZjkEyZtJrLl5ya0m5doH/S
+# cpaZCZVl6pNUOCybMc/kxC6EAmSJY24L0yYKD1Nkddsnb/ItVKi/2nXpQNMu1PT5
+# prW83vV8d67WowuUs0HdY4H8AMLGvdL/WHEj3ZnqMqAQQP9u3Ai9t+5eQ02GDwy0
+# ODjdzi0xlp70W+ow63/0++YDEX1M0iwgUHwbrJvfpklkZQvw3+kv3vUPItdwrocz
+# k9icflf55W1zOEKAcJVAIXpcMCU9AgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
+# MB0GA1UdDgQWBBQUyWOKMC7USvtulPPm40B+9ezN4jAfBgNVHSMEGDAWgBTvb1NK
 # 6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYI
 # KwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8v
 # b2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRp
@@ -551,49 +714,49 @@ Export-ModuleMember -Function @(
 # SEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5k
 # aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2
 # U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9
-# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESeY0ByIfjk9iJP
-# 2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FUFqNh+tshgb4O
-# 6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7YMTmqPO9mzskg
-# iC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0ziTN6R3ygQBHMU
-# BaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/QqvXnNb+YkDF
-# kxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlqAcuEVT0cKsb+
-# zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3Y50OHgaY7T/l
-# wd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roancJIFcbojBcxl
-# RcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/ndUlQ05oxYy2
-# zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7IRE2lskKPIJg
-# baP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdCvHlshtjdNXOC
-# IUjsarfNZzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQCNxTphHp1SCt+ZrAmAfn0oQLFr0mLywSLa
+# DXQIENoyKqxrFbJblzCVP/pkXmwXOdrOpWygLzlT12os5ipDCy35RBCg2UMeApEt
+# rfGhz45F4Wt4WGdNdIbRWt3YTYJmpR+b7lr4d7Uwn+H600u4D7RnOGf8Wj4UNgAd
+# ZkfHhHv1mx9EVh71SJelcEN/oORSjXzdjfw1iZH9d8Nh/thn6hH23d+VsPAr6GAY
+# yzSA02nXD1nYLI7Ijmiv+xLCiYC41DSFYL3GhTiy0PxpawPtGRyaBVGzq+UiTfM8
+# pD7KVyF5aQyWP4KhVGUUTnmm/RlYJoW3TiXA/+t0YcT2oRVBm3JETjajHug2AL+v
+# 5jhtKVnd3D0rbHXEu27o+Q8p4sEWPMqKDB+qbceb6T/6WcwTwXmQ9lOCLLYcsQeS
+# WmvKqzpAec9etE14jOQAzLKWdE3w/TCaKtLRaRT7LCkRYVnhA2D73FLje1O5b3HR
+# 5eHs0NzU/+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94lbUveOiJBI+xZ
+# EbGRsMNbXmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H5Mh7QfieAIjW
+# agkJNt68Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCyatf8R1hSjzSvd
+# N8yWQPT9gzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
 # Y3RpZ28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWdu
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCD8cMsPjNxRM65ULzNSOKLjc3UDZdhAKjiG3ffRkqwIyjANBgkqhkiG9w0BAQEF
-# AASCAgACfMnH7nXG8JDQuOEjVx1+PReNdIfEbw4PQoOxWMEH7LWnqO/k9AUp2g1I
-# j0Gj+yq1xLKJRwyOeLWoUmfDBnDOIpPVyWqcOIN/cMudESayx7jQIoN7CtdntFYz
-# FR+vod1kLQGEr163CCgcFTeonWv3BVm3cLiL1pm4piZC0jPKbM4+176klPIdBYjl
-# TJJFUNu3ZfN8rH5XtSeEXxzEA/Xmymp9vgUEVy0qUWRVX32gtsY2EJPfgmhy/cUz
-# dQ9jsaImKa3wwMlkyKCn+HmDIYAfADAVVaMhBqeko6Wo4qSr5wIS+1/TAFJV5sq0
-# j+bWG0ul9iboMfVcbEBolxCrt3GQF/mBWpp7+ylMhFDxNJKJhs+TIqeaDYD0E3pc
-# aqhbQok2yDShkxUHayHOGkeoFYb8B72MXPaCiwKm4lH2zvBr0voZtP47hixlqLKC
-# sbnWiakUQw64hvXuVmbLwZpapzK3lDqNXQzaXrERerKMGyXgGE4rzLGnwCNRlsJQ
-# ysj9TMDptVb02bDZwA0i9CL8WtdN2zJTxJz7Z6BfwikTc26J0+tmOcU8InfnGj0y
-# 6uQYsctmGjAIWRl9BHEZMeSW26kvDcBDxXthpnBa0InPvJ2ytSiz+8EgBOP+YDrT
-# +6qim0tOBk6oPzwisHD8/xOG0QDyxsnkX3WM/cuXdzQ1HIp0GaGCAyYwggMiBgkq
+# BCDz8ULwIJqYefwrI8k4zwaHp5KZfPzxH1MSH4mIHUw0SDANBgkqhkiG9w0BAQEF
+# AASCAgAFg5HDgbcTMjGZ+132g71UzgZCe0cNxE0tQxwmbIXFObWlDLaYCf8P+cmb
+# pMsLbQJPecXLcCt+yXEPWhg6wNpd86bUDbc+S4uGV1rIPgf8C5l8IjD+CInPnN2Q
+# Vyw6aYkUxV6E7I8n1cvCX/yTbLJgX3vLwS/JsJju4tdNYv77Or6c7s8XxSOhLA2T
+# 9IEZBpJ0HntBKShsmThrqCMlLIdLdiPRUQso7GNFZJyq67xyFo5i5dBrQ9+dW+/8
+# wplsalSgFVhkRXktDyMZrvwtsjTu4WHtv0p+4H1Zp0BE/9m3QlE6TvD8fBImS3lF
+# Um2XGd3WsaOzH5JiLlDbY4Q8AKb9wxj0QLCtIO9ColbjGo4oibvqMj93o1sjOKgy
+# D1O3++WD3H75865GepUply0PbtD8R6X/W35tS6QaKjbHj1DTE0+259lUILSEDh5U
+# F1qVC1QB8JQAVlvkcvTHyIf4ViQ1DwnifVvBy2Ft81ELu/cwBD53JuXtB4RKx17H
+# Bu9PzLnbHGDMdTyeH0sK8zAPvtINff34NG+8Y00jQ1LYPbQpKnrFyOJOSy0UKvv8
+# MvIArtNGsxPR7RgqMVojThgdYBaXtOItWq/TSt9mH12NU6wns1I69GmXkYUx3U/S
+# Q8Gfd+qwVHOlODBwZ04rEtgO8wREezsWfPrn1A7mxTZSoMNm9qGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
-# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
-# dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MjkyMTEzMDhaMC8GCSqGSIb3DQEJBDEiBCA4wS5C
-# BRDec6Wj3S8Ez6dcxtIKHsyNNCsAEMGKVv1sPzANBgkqhkiG9w0BAQEFAASCAgCc
-# xWqCu9jHuP65dt/L7b195eOB4iGZYKUfvASIZc6H4fI4Ygr3qgU/SOnYoN/ZRay6
-# Q8lt0DAcAKcLEEU11wBcag8k6OY/2i0JTR6JNCh4LGMgRM86agp+yXIOBgZX3t5I
-# 13OpAWJbBV2JTCrdT21sJEZt+xhMknBimWnniNsr8BsuhJfZ79C1Q+gCxYNFymZU
-# kiFd1UKi3BnCADnTqkWKPyd8tHoM2zWI0ZCU//rQhwhapLuT6T1oIaDA9RO1GrJV
-# YL4QTbHxKDjIpgQHJLIn5elrWpVH5RYArPIF5/fFVYgtPTlNxYePZydjzQmYd7cN
-# nmYS4hQGdFBiC8OHTCNprrWN+s3ZCPLnNAB42HcUzbDY7iKsRFMK9VcbrgVxfD+S
-# OUeDch2X8tT2aJ3DWHI30lMh/vQ45xX2Fl9MXwKW2cF0Kz9Xp12kXefYmLU20VIW
-# 6JgNovRV2IKEsszIwjI7ONyCrsqO5IF9AbG6847KtN/QcUvvyvA84EGW0cjQBGBU
-# +BIuQBJkJlabsDEkGADT344m6pvIntHeS7ZANKT93JeyO31GmCOmgopkcc5Fc3Wh
-# SpSTfLCEZ8ONlExwtB1vDQg4r7EBZ14hj92H1yyGWYbL65TwUAYwB0ZvhDVuHs39
-# edpBdpbe3zit4dcIoYIbbDSWRoBdQANJUvWeQQTZ4g==
+# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
+# GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
+# CSqGSIb3DQEJBTEPFw0yNjA5MjkxOTM3MzBaMC8GCSqGSIb3DQEJBDEiBCAH2pAY
+# I6eWMvLOaRXGL4Wivk0KAIwcadAzT4B3RmfyPTANBgkqhkiG9w0BAQEFAASCAgAp
+# uWFcGC+N8XlqWW3GTPaqVEA4Iu8kJ91GzNpqbZOI+SjfaZpyoE28eVPLl4KKji3A
+# 0jrKRzHLs3TSJgzdzFiZfIbo40Z/GNUx04RTdEETFJN9hVfs9T94e3uzA/glaFJ7
+# /U2zZkoVMhQSJryhGD10TQVO2PLDQMz+651JBwY50zQ8mGaloGdfxIvDI+HDvqgI
+# khyrHoplhYWVhYQEvz+9plLs+AOGjZio/2U+Awh40tX8wNUnpfUI9rk8fnbTklUM
+# qd1/WnEjtHlDE1xspwNCCKZkk0OBKl7YUC84mddx9kURlqn6IMTSAWIYKcn3zZ5p
+# ExIUxxuZtsNx1yqhpefdkC2/Xp5jtPJ0fn6tNjG5TqacL1m2bbSEAg1Nsv/QoNgC
+# kh3N6oNymk9cpFrj7UubsDlhT5FdJnjSEqWZtQW5RPsm7FdkH67uDj9I7aUiO/YM
+# JEugqrADdRaGPeEWQLIpT8VBpJBwQshCESq3r25uLeVONQF8oPCxMXjVATpoZLc7
+# fnmr+HEl/atrkoh0oyY7xKsH9f1AXiD+83bn0UQ0QaEDLd/CrJhCsRU3Y0okP3WV
+# 7dfoJ8Tz235Gdy9XNBLa1VCAKLuQtluERxkE39Y7mH2w8QeLv9/Nhm9KNDoIOOcy
+# GZYqpz6d2EDpMaqcrFoLkHHnCHHQEJs15bNiKb4zKQ==
 # SIG # End signature block

@@ -111,6 +111,13 @@ param(
 
     [string]$OutputPath,
 
+    # --- Opt-in cost, quota and waste analysis -------------------------------
+    [switch]$IncludeCostAndQuota,
+
+    [hashtable]$UnitPrice,
+
+    [string]$CostReportPath,
+
     [switch]$NonInteractive
 )
 
@@ -234,6 +241,56 @@ $plan = Invoke-Discovery -ProviderName 'OCI' `
 if (-not $plan -or $plan.Count -eq 0) {
     Write-Warning "No cloud resources discovered in tenancy."
     $plan = @()
+}
+
+# ==============================================================================
+# STEP 3b: Cost, quota and waste analysis (opt-in)
+# ==============================================================================
+$costFindings = @()
+if ($IncludeCostAndQuota) {
+    $costHelpers = Join-Path $scriptDir 'CloudCostHelpers.ps1'
+    if (-not (Test-Path $costHelpers)) {
+        Write-Warning "CloudCostHelpers.ps1 not found; skipping cost and quota analysis."
+    }
+    else {
+        . $costHelpers
+        Write-Host ""
+        Write-Host "Analyzing OCI cost, quota and waste..." -ForegroundColor Cyan
+
+        $compartments = @($plan | ForEach-Object { $_.Attributes['OCI.CompartmentId'] } | Where-Object { $_ } | Sort-Object -Unique)
+        if ($compartments.Count -eq 0 -and $TenancyId) { $compartments = @($TenancyId) }
+
+        foreach ($compartmentId in $compartments) {
+            Write-Host "  Compartment $compartmentId..." -ForegroundColor DarkGray
+            try {
+                $costSplat = @{ CompartmentId = $compartmentId; CompartmentName = $compartmentId; Region = $Region }
+                if ($UnitPrice) { $costSplat['UnitPrice'] = $UnitPrice }
+                $costFindings += @(Get-OCICostQuotaFinding @costSplat)
+            }
+            catch {
+                Write-Warning "  Cost analysis failed for ${compartmentId}: $($_.Exception.Message)"
+            }
+        }
+
+        if ($costFindings.Count -gt 0) {
+            Get-CloudCostSummary -Finding $costFindings | Format-Table -AutoSize | Out-String -Width 160 | Write-Host
+            $costFindings | Where-Object { $_.Status -eq 'Fail' -or $_.Status -eq 'Warn' } |
+                Select-Object Category, Check, Status, Value, Resource |
+                Format-Table -AutoSize | Out-String -Width 160 | Write-Host
+
+            if (-not $CostReportPath) { $CostReportPath = Join-Path $OutputDir 'OCI-Cost-Quota.html' }
+            try {
+                Export-CloudCostDashboard -Finding $costFindings -OutputPath $CostReportPath -ReportTitle 'OCI Cost and Quota' | Out-Null
+                Write-Host "  Cost report: $CostReportPath" -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "  Could not render cost dashboard: $($_.Exception.Message)"
+            }
+        }
+        else {
+            Write-Host "  No cost or quota findings returned." -ForegroundColor DarkGray
+        }
+    }
 }
 
 # ==============================================================================
@@ -623,8 +680,8 @@ Write-Host "Re-run anytime to discover new OCI resources." -ForegroundColor Cyan
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAEecJ1zpOiMcec
-# 1Yqs58fOHTkaXvyEmMsBcdgwi8pfqaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCMAxDFgs6NxIX9
+# oOYPdRy1C9l0fD09d58313l1p5ZNfaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -785,25 +842,25 @@ Write-Host "Re-run anytime to discover new OCI resources." -ForegroundColor Cyan
 # 7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+N
 # Jpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckT
 # etiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszW
-# kPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDANBgkqhkiG9w0B
+# kPZPubdcMIIG7TCCBNWgAwIBAgIQCE/cM09+RU7bww+P+ZIYNTANBgkqhkiG9w0B
 # AQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/
 # BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYg
-# U0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkwMzIzNTk1OVow
+# U0hBMjU2IDIwMjUgQ0ExMB4XDTI2MDgwNTAwMDAwMFoXDTM3MTEwNDIzNTk1OVow
 # YzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQD
 # EzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIw
-# MjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBGrC0Sxp7Q6q5g
-# VrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwBSOeLpvPnZ8ZN
-# +vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/4QhguSssp3qo
-# me7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3K3E0zz09ldQ/
-# /nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROUINDT98oksouT
-# MYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3w6ySSSu+3qU8
-# DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46YceNA0LfNsnqcnp
-# JeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d2sC26/PQPdP5
-# 1ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8xymLnjCbSLZ49
-# kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+AliL7ojTdS5P
-# WPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2bQhpp0IoKRR7Y
-# ufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
-# MB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSMEGDAWgBTvb1NK
+# MjYgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALZ7pvLJ/s1K+NSb
+# TGWz/TjGMPh8CQ6RucZCLv5anHzWJjF/NWJrFIhy24fcpKXlgRiky4WAawDfU3YP
+# 0BMxt9l3Dm5oCG5Z69AqEN1kgHg2epx+l+lZBcmJCcN0ASURML5uFIS80sZsDwO3
+# BSkUxDjLJhBI+qiZP3aixAC/qEGLjsBNlLol9VZ7pfGEXiMlneJIC5/YKuizVzNF
+# KZZEeoy/0B8Zm+nzKBgSWG52lCO1w+nCg6XpCtklTJXeIg283hw7TmmsZXR+SMbj
+# brEOvZ3fP2VxIgeR28Y90ZStd3F9VuA5RVynb/whITPAo9b75Zr4Ta6Mj3URm26Q
+# ZYMn/FnbuTegcoRcFEZ9FOqM5T6MTdtr/n74lIT/ug0eeOzmZ6QTFg33otX+bFRs
+# IolvykE1jive4PuESaT8zzVeFWDAMDtozNgLctkGD1ZjkEyZtJrLl5ya0m5doH/S
+# cpaZCZVl6pNUOCybMc/kxC6EAmSJY24L0yYKD1Nkddsnb/ItVKi/2nXpQNMu1PT5
+# prW83vV8d67WowuUs0HdY4H8AMLGvdL/WHEj3ZnqMqAQQP9u3Ai9t+5eQ02GDwy0
+# ODjdzi0xlp70W+ow63/0++YDEX1M0iwgUHwbrJvfpklkZQvw3+kv3vUPItdwrocz
+# k9icflf55W1zOEKAcJVAIXpcMCU9AgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
+# MB0GA1UdDgQWBBQUyWOKMC7USvtulPPm40B+9ezN4jAfBgNVHSMEGDAWgBTvb1NK
 # 6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYI
 # KwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8v
 # b2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRp
@@ -811,49 +868,49 @@ Write-Host "Re-run anytime to discover new OCI resources." -ForegroundColor Cyan
 # SEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5k
 # aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2
 # U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9
-# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESeY0ByIfjk9iJP
-# 2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FUFqNh+tshgb4O
-# 6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7YMTmqPO9mzskg
-# iC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0ziTN6R3ygQBHMU
-# BaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/QqvXnNb+YkDF
-# kxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlqAcuEVT0cKsb+
-# zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3Y50OHgaY7T/l
-# wd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roancJIFcbojBcxl
-# RcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/ndUlQ05oxYy2
-# zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7IRE2lskKPIJg
-# baP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdCvHlshtjdNXOC
-# IUjsarfNZzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQCNxTphHp1SCt+ZrAmAfn0oQLFr0mLywSLa
+# DXQIENoyKqxrFbJblzCVP/pkXmwXOdrOpWygLzlT12os5ipDCy35RBCg2UMeApEt
+# rfGhz45F4Wt4WGdNdIbRWt3YTYJmpR+b7lr4d7Uwn+H600u4D7RnOGf8Wj4UNgAd
+# ZkfHhHv1mx9EVh71SJelcEN/oORSjXzdjfw1iZH9d8Nh/thn6hH23d+VsPAr6GAY
+# yzSA02nXD1nYLI7Ijmiv+xLCiYC41DSFYL3GhTiy0PxpawPtGRyaBVGzq+UiTfM8
+# pD7KVyF5aQyWP4KhVGUUTnmm/RlYJoW3TiXA/+t0YcT2oRVBm3JETjajHug2AL+v
+# 5jhtKVnd3D0rbHXEu27o+Q8p4sEWPMqKDB+qbceb6T/6WcwTwXmQ9lOCLLYcsQeS
+# WmvKqzpAec9etE14jOQAzLKWdE3w/TCaKtLRaRT7LCkRYVnhA2D73FLje1O5b3HR
+# 5eHs0NzU/+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94lbUveOiJBI+xZ
+# EbGRsMNbXmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H5Mh7QfieAIjW
+# agkJNt68Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCyatf8R1hSjzSvd
+# N8yWQPT9gzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
 # Y3RpZ28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWdu
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCB/nG9ZoTzV0FphXmFQh3SVhTugcnwtfC1/1a6fspmc1DANBgkqhkiG9w0BAQEF
-# AASCAgAgQR1eJnneCSCgat3YedqUrUTGv2aVq/1JBjhpjJGBG9wpaRa9LXZmgOfs
-# CGQFMssjyEDpcIxzoNXAInxLqMCnZyw3QDLs4sVd6FAocK7aFHciIfiYQ4QGNh1B
-# 0DIalYJJWmcOSlHVEinBvh4lTOtv03wd9Ww6z/XP/J78NjPEUuffrZIicZWcESnu
-# lT/41lpDgGOHq+WF5FlRmp5aapZraUZliJN+WkpL6Ec8EDc+yrYkKuUJ9ibfQ13K
-# 4/VZnd3q0ONZdjcCsbqrZalOLX01NZBaYlBQ8DBvgZ3ATWdBWKezKVy/v8abCzbF
-# 5hUopYN7iMFFqTnU1ZklSlQXckDRhII2kSJD0iqW2+GOf4olraU4gOrRvTd24ui9
-# 22gT0BVSDO4gWvadsM8ijTud887IsOHsV7C6ZXQi7C0WVcJwzbjTRfeUQdDDokek
-# a/z0Qt5z1auLEVO8O4k5RPtWzlb6P/jde4uaQXKb//95p08b5UWSnDvjF6QlgTry
-# bRl0HXVuzq//Mi9hz1iSJgJSf/Q3eHMggOUiNxaJG29I8/stEQl4u9jjGDduB0Ya
-# s+gM1XAw3/KwpvpUDYXv+zmkI+aul2aFsmyJ6ASm9NdNoTpf+Jj3DrwpWSCOrcCx
-# dSSy1SqL3WYyp+uz08Kr11yCVSCjqMRqR602wOa675irS+EJEKGCAyYwggMiBgkq
+# BCAKCbXVviuKV2q30KCPro6/QG7QmzICHSeWjR2WOqz6SDANBgkqhkiG9w0BAQEF
+# AASCAgAICleU8GKXU9hPmDENYQK6Bdqlko7DJjuc88KTxCKryHdV+aSsCBSSu//h
+# xHE3giBuwHAOGt4zlved3X0uMDeLi/PX3hS0b4IHgBTW3Gu37JEB6XIQdngbMz6j
+# tvObghNxD0HBEQ7JbHb/vyFaPU4cwMwiMEa0Adtfl9mbQpYqqCcNSDAoBoHaeTm6
+# WM2doZgm3vIzia/K2M56bibC1gD+9eSavmJPGANxop0PB8ZOTVtOXV2Fkc2N+Vor
+# TeEDJuYdv2wXnohC90jqX33CQRaYxedHGg5NXgKvE2AhyBA2K7YOaU19pefACSri
+# hA4PJ78mZmGfSwzs/gG1IDLJ1VrwExwzqqjkcmaPAP+q3j8e04AUReO3HUbTBMC8
+# JqM51j8iPJc+M6ecZvY5lfRe59V7uBdmn8cVKdu6pUir6tW5MuBsTZUPSdjYsymD
+# tcatb9pB1E7o+66nIVzeJKJ7lpYG2BdGf+y+NFVQhlBqxCLnOzZcnjiGfwmAaJ4u
+# qrmByggt8zbsldlaAs1wzyTnWjpWOReU4vU48CpT/pTDYBaJkpx5DJU1XONnVRbi
+# nUb1IqQyS36YqIdEDgNL5/YUb5KD3sUVitetdQQHwr4cmlovkhKiLxBjhO+gGVW4
+# 3n3YoZZ/g413KY/c67yVzF92qJNCg4W75Szu5sl2lTK7Rd/X5aGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
-# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
-# dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA3MDcwMDQ1MDVaMC8GCSqGSIb3DQEJBDEiBCDPDXU9
-# 3LCK/KjX5tZAOhw5p0xgj7EftBlJKxge+SLgbzANBgkqhkiG9w0BAQEFAASCAgA2
-# yzA7i/jsWxeiHm7JfimUAgvjC96vAVM3Xj/K6reVVH84mX3WiiKgr3HRbJIvdg4W
-# Dg1UfARDlRBMY0ei0lBBo0GeNj8XCzvEcV5N7jmZtZpQn7iJ6lNfvXnHZGc48zXt
-# QYPm5ALtrI5kB9+AQU0obB4XdUoQr0QEy652T2VjKpPEqUdRjwowpjx0zR6FxOXT
-# N74RaaG1SHIIWGkDgSpTX1vxDKTmJn0maQyt/Ko2pSqJE/o3nl+B0OyI053fpJvR
-# RgfsOoWAQLQicLKLjK2ViQ9fu29yftmRSVJWuCdPOQ/yvDwJvrwzqoyAasSgfdez
-# WBIYD3dXLxbiMXzmgZCPjB8W5Fk3jAWnFA/G6oa5pAdyDAdivRXOaJqbDI8Cg7aE
-# Zqt3f7hlgqnv7ga7Qwy0vzSy7RSfMIU1KCADoPFzRL/N4g58tAMV0aeLtA2hIkRR
-# rZO2bWSkePyKfBDGe1I0dZgyhG7dYNjbEv7kqasO6Dci+l++AWdpAVXBHoHc4dkG
-# FHjFTjwQk9Pk88+KFDUkHQqwK2j2mU0EVyi6p2Dvw+aNGmUFzaEjBTCtyJ3g/Vqw
-# RYcTUzh3ZDPk48QzhyDeFkpr4L6BefA0MFligjnhRC/EocuRBJUleEgoGy8Tkgwk
-# 9F1v1ILzH+bBtOjZvOlSxkYzx4/dMATYrxVeqGymyQ==
+# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
+# GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
+# CSqGSIb3DQEJBTEPFw0yNjA5MjkxOTUxMDJaMC8GCSqGSIb3DQEJBDEiBCCm9EpF
+# vq8/aN5+iPOfsfNXHstH1e3inJYCrME7te2b/zANBgkqhkiG9w0BAQEFAASCAgCn
+# iqCycpP+a4EtjcqRZAP2M1Tcrg/NYKXsUZrgajmSfoyHBCB9WVScNOQ/C0StKuDL
+# b9AP6ybsTpwc3Z0hUgZjPXgrJB7B6ZQhrRkCbSG4I7gKdgTi8Hm0YzVcBXIji5Lo
+# 9AalWPIIciwK98ePPeBlEnBUGqyKsbji8PpUmd8EgyWU1hXtnpKERjr6Z/VItIau
+# qsCK4h+ly2DegH0xrVANhCyIWzZSQplO9CQX7p6LFwY1BYbCwni1b0FGf/htjEgO
+# ET2BygnoWFUqGpYO+Fxj6Au7rWFIyIBVhv7kKa5vY9NGTIkqtMUJlzPO0h8WiCNy
+# SdFiI74GH6QUALNI405BXWBttMyxn4V9PXQ/SVYgTDvABbTIcKp2LUE8QtPS+Iuu
+# fANNbFDuXW5T98b/z7vO0UJKa5bXz9GZxeepsyEfeWUcu9u3FPmkCPS7OZiIWIjJ
+# KleTiu2pVAFWzbpV+NiSEkd7mFsp2sEPNxXT23/l+KCdmizkFG0kBvj4X087mlbl
+# QnkoI8FchdgWACpTcWvQV/G2wRrrj8pZNYD/U8/BtvejNxSIfcRNH7Cm0WTLC/dr
+# Hg/LwwO8Qmbn2Ei384AEMpAq3Rb8ovNqP5174nrVZMS9X5ZXmIX3pN/BsgccW8UL
+# SyE3la0kiWd/sJ9e3O2gPPMUQt7A0+qSAd3LRGMa7A==
 # SIG # End signature block

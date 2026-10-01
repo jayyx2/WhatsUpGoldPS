@@ -25,6 +25,11 @@
     If the authentication token is set to expire within this timeframe, the function will refresh it before making the API call.
     Default is 5 minutes.
 
+    .PARAMETER MaxRetries
+    The number of times to retry a request that fails for a transient reason, such as a dropped
+    connection or an HTTP 408/429/500/502/503/504 response. Retries use exponential backoff
+    (2, 4, 8... seconds, capped at 30). Set to 0 to disable retries. Default is 3.
+
     .EXAMPLE
     # Example 1: Send a GET request to retrieve information about the API
     Get-WUGAPIResponse -Uri "https://192.168.1.212:9644/api/v1/product/api" -Method GET
@@ -33,7 +38,7 @@
     *** This function should be used within all other functions when making API calls
     Author: Jason Alberino (jason@wug.ninja)
     Created: 2023-03-24
-    Last Modified: 2024-09-28
+    Last Modified: 2026-09-30
 
     This function requires prior authentication using `Connect-WUGServer` to set up necessary global variables.
     The function also handles SSL certificate validation based on the `$global:ignoreSSLErrors` flag set in Connect-WUGServer
@@ -46,7 +51,10 @@ function Get-WUGAPIResponse {
         [Parameter(Mandatory = $true)][ValidateSet('GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH')][string] $Method,
         [Parameter()][string] $Body = $null,
         [Parameter()]
-        [int] $RefreshMinutes = 5  # Number of minutes before expiry to refresh the token
+        [int] $RefreshMinutes = 5,  # Number of minutes before expiry to refresh the token
+        [Parameter()]
+        [ValidateRange(0, 10)]
+        [int] $MaxRetries = 3  # Retries for transient network/HTTP failures
     )
 
     begin {
@@ -110,9 +118,7 @@ function Get-WUGAPIResponse {
                 Write-Verbose "Refreshed authorization token. Expires at $($global:expiry.ToUniversalTime()) UTC."
             }
             catch {
-                $errorMessage = "Error refreshing token: $($_.Exception.Message)"
-                Write-Error -Message $errorMessage
-                throw $errorMessage
+                throw "Error refreshing token: $($_.Exception.Message)"
             }
         }
         else {
@@ -121,12 +127,15 @@ function Get-WUGAPIResponse {
     }
 
     process {
-        $retryCount = 0
-        $maxRetries = 1  # Number of retries after token refresh
+        $authRetryCount = 0
+        $maxAuthRetries = 1  # Number of retries after token refresh
+        $transientRetryCount = 0
+        # A dropped send surfaces as a WebException with no response at all, so it is retried too.
+        $transientStatusCodes = @(408, 429, 500, 502, 503, 504)
 
         do {
             try {
-                Write-Debug "Attempting to invoke REST method. Retry attempt: $retryCount"
+                Write-Debug "Attempting to invoke REST method. Auth retries: $authRetryCount, transient retries: $transientRetryCount"
                 if (-not $Body) {
                     $response = Invoke-RestMethod -Uri $Uri -Method $Method -Headers $global:WUGBearerHeaders -ErrorAction Stop
                     Write-Debug "Invoked REST Method without body."
@@ -152,9 +161,8 @@ function Get-WUGAPIResponse {
                     $stream.Close()
 
                     $errorMessage = "HTTP Error $statusCode ($statusDescription): $responseBody`nURI: $Uri`nMethod: $Method"
-                    Write-Error $errorMessage
 
-                    if ($statusCode -eq 401 -and $retryCount -lt $maxRetries) {
+                    if ($statusCode -eq 401 -and $authRetryCount -lt $maxAuthRetries) {
                         Write-Verbose "Received 401 Unauthorized. Attempting to refresh the auth token and retry."
                         # Refresh the auth token immediately
                         try {
@@ -175,34 +183,53 @@ function Get-WUGAPIResponse {
 
                             Write-Verbose "Refreshed authorization token. Expires at $($global:expiry.ToUniversalTime()) UTC."
                             # Update retry count and continue
-                            $retryCount++
+                            $authRetryCount++
                             continue  # Retry the request
                         }
                         catch {
-                            $refreshError = "Error refreshing token after 401 Unauthorized: $($_.Exception.Message)"
-                            Write-Error -Message $refreshError
-                            throw $refreshError
+                            throw "Error refreshing token after 401 Unauthorized: $($_.Exception.Message)"
                         }
                     }
-                    else {
-                        # Other HTTP errors
-                        throw $errorMessage
+
+                    if ($transientStatusCodes -contains $statusCode -and $transientRetryCount -lt $MaxRetries) {
+                        $transientRetryCount++
+                        $delaySeconds = [int][Math]::Min(30, [Math]::Pow(2, $transientRetryCount))
+                        Write-Verbose "HTTP $statusCode from $Uri. Retry $transientRetryCount of $MaxRetries in $delaySeconds second(s)."
+                        Start-Sleep -Seconds $delaySeconds
+                        continue
                     }
+
+                    throw $errorMessage
                 }
                 else {
-                    # No response from server
-                    $errorMessage = "Network error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method"
-                    Write-Error $errorMessage
-                    throw $errorMessage
+                    # No response object means the socket/TLS layer failed before any reply arrived.
+                    if ($transientRetryCount -lt $MaxRetries) {
+                        $transientRetryCount++
+                        $delaySeconds = [int][Math]::Min(30, [Math]::Pow(2, $transientRetryCount))
+                        Write-Verbose "Network error calling $Uri ($($_.Exception.Message)). Retry $transientRetryCount of $MaxRetries in $delaySeconds second(s)."
+                        Start-Sleep -Seconds $delaySeconds
+                        continue
+                    }
+
+                    throw "Network error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method"
                 }
             }
             catch {
-                # Other exceptions
-                $errorMessage = "Error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method"
-                Write-Error $errorMessage
-                throw $errorMessage
+                # PowerShell 7 raises HttpRequestException rather than WebException for dropped sends.
+                $exceptionTypes = $_.Exception.GetType().FullName
+                if ($_.Exception.InnerException) { $exceptionTypes += " $($_.Exception.InnerException.GetType().FullName)" }
+
+                if ($exceptionTypes -match 'HttpRequestException|SocketException|IOException|TimeoutException' -and $transientRetryCount -lt $MaxRetries) {
+                    $transientRetryCount++
+                    $delaySeconds = [int][Math]::Min(30, [Math]::Pow(2, $transientRetryCount))
+                    Write-Verbose "Network error calling $Uri ($($_.Exception.Message)). Retry $transientRetryCount of $MaxRetries in $delaySeconds second(s)."
+                    Start-Sleep -Seconds $delaySeconds
+                    continue
+                }
+
+                throw "Error: $($_.Exception.Message)`nURI: $Uri`nMethod: $Method"
             }
-        } while ($retryCount -le $maxRetries)
+        } while ($true)
     }
 
     end {
@@ -213,8 +240,8 @@ function Get-WUGAPIResponse {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfBQEtcVaOoxVA
-# zGr8/Rawduojv32zXr7Wkdv/G91iIaCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA5AsFYDVazePMR
+# MA6Bcxf9B7SzPpNB63qEC9hqEW+LUKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -417,33 +444,33 @@ function Get-WUGAPIResponse {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCCgNVvYj4a2mMdLbE2Ve42VB9L5LgIa8Qb2JnBZ06K6gzANBgkqhkiG9w0BAQEF
-# AASCAgDr/d3rOo7GGWTPyjevDF3WFoIwzh4opbIhEQIXMPyihptf/u+C5SPpcxuw
-# 1lzBDBMIxLXGwtBxeqcX1fguofwFrnG7JSUvZIZjWjFA7X0cD1dXxJNtwxCoSSw4
-# xB6VoabxHgFKMR3X/+ODl8O3NvRKsuE52sZefQuiLXYJu6oVJvA5JyzTcZelvBAc
-# VASwXVaVRrPPgn9pv1KqJHq+3j3JBqdeHBOIWviiWwydfN6oLJfqDfD6cisnvuEj
-# 88FVgXAc/ac/DD4iAjk97GAFyneOrteI8PjW+1d+mOxtFvI9/tXHp6UXs0noTnxw
-# M0twd6q2F+6aQq7CL6iC6TZaKa8I8hxmlTwhnIoyTL5Qbz+7ljmsVEJ8X5tyvlfu
-# JhREvddfg0f1ybgHq0kEqO6pwlMru5C1lyUEX9rjQwP1p1ONCo2xQ55lKvkl7dGA
-# Hp2V7x2hfka+HAFKqmnGXaehixcbF1ow4HDHsM87WRbN+uoIOyNt8sSZzi+xfXUK
-# 4UsQEx7i+ci91bzWrTQOef4Qc4o/8TG4lRHU/pIvTgppADRNV1+c7bzyD3kAmx0x
-# BhKWYw8nUkYOBK9J69Z1O5Ub4DN+CkDmja4FXq4UjpCOIyOa8924J9U3NfTcEHIl
-# azZo1UsrBHZO1Hgh156daGJIARzEOGvBqrV0Hw610UkVJEnaNKGCAyYwggMiBgkq
+# BCAsAL3kATi59jlUFMRwiAMbYgLY3TJ80wig9AlaGZ6fXDANBgkqhkiG9w0BAQEF
+# AASCAgBtw7kLkbEhyZi3puIIuLefMkQC9KYklZKzGlB+UnpQw9NvQ5toi2EZoq/t
+# GmcFtl6Ny0XE4huTC91vgONYKP+TQ5+iCsVwTAZ9Jfme27ZB9UjsUJcU0Jowp9yH
+# It0WeREdDr/UndPfwjptHMWMfKQuTJI3cSnK4gXJNvTwHhIhNmrdUhu9pHo4Jbqs
+# Gs3Euf4nyMqwg3Bo5L86tCKIkN9lb8zNVWayWgSMVndPRN/oOhO7ts8S/ug5WaOm
+# tVgr1Ekzm3yvh8cy9lPhrt6CHaMgo6nCoHqIUTatyw7ojddQ1lNjH8LVYmqLp+vV
+# mGU+wvfIS077zBQvYmUS8pNcw9JAQ66g3IOyX+YlOfuzD10phRbIWCLNpQyjl1nr
+# P6iMe6tnAwALEj+xRd8fmYbfp5qAxBbNb/NOwgyuWtc2rl5RxJF1wcT/fRPrjmvP
+# mAmwsqYVhdLeVTZR4YLN6SFlFit9zwg3TR4kl/f8mek1WbXWZCuqc66UGJt0yYhZ
+# ubtRcGzNTrTP5UtLtlKbtT65t6Cey7BMfUQ4cZN+J1RyhhJogDbB6nKbhNOKE+iR
+# g9OXOPWrQ8t5n9YR2te707ysVgpnVlTw0MAAUPYXP5YjuQTJo8Mwe/+65ztTkIyA
+# NXGqGWqCpX3DDlkw0NZ+uuVdzSeQuO9ePZ1DS0oJvQScI8Xch6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
 # GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA5MjAxODE1NDFaMC8GCSqGSIb3DQEJBDEiBCCSX6k6
-# +P2MfX00/8YgmSkZ+YJaUh7WeYJKeOhRMslENTANBgkqhkiG9w0BAQEFAASCAgAb
-# 5XtEizx8J92+4M/D02eYwxYPb3BJXNcCU0jG5brCtH2aDq/u/d14NhR2UgCQY+bs
-# varUkpvTPftnRncP65HdqNkjxRUSqRSeL3rpU3JsZAyeiGM6olFpHx7/VYlkawky
-# GGx+CGKTPdlh8LDCCc+sTUgp2txRHwV1u2nQ1dAtomlUlHH4EoVolFa0YDLQT6x3
-# HNz0ZqQYQ4pnTAN+FskQBDZszgtGn6eQQ+qDbkGOteEGB8VLYyYe/pqlyMSgqr59
-# mibfc2w7LyaPW19GlJLtTzCI8iqElJuI1jXeCamz4psixMAkdAGeB90LUlYHJC/4
-# l4cvhose/uZqsnZAPbZ+Mb1vdeDi0ouHHb4ldLcPK7Fr5lMweQM/pvocQQDxz4eC
-# /C6eIgvEFP1MjXojrYMAWyIGmynpx4pCYKUVdW04MLbvU2ZRBpqS2iAt3RgzUJo2
-# 7/NTmo3lVh7UNsx6MIb7zRfzhKNH8W0/ZzQVFP1BWdMzKGkxm6SHReomoMPgk/ha
-# EiFMoG5RQCA9wQrB9+ZMcZWWBzGefAXjjow2RxjlfUn+wDJd7YIxbIJzDg0ze2ie
-# KKSXtbp0wQuXPXtinNIyhC3Y0deI4fju0g/QhvMN1MTntg9vnqFSKsSZ4LmRZ7/U
-# mlV+z+wMC5DlMljWz5VVYPHCrtNgm+lpLwC3tYSCwg==
+# CSqGSIb3DQEJBTEPFw0yNjA5MzAxMzMzMzNaMC8GCSqGSIb3DQEJBDEiBCDFLu67
+# P68aU6sreiWnfON+p2bG+5PgWl6tzz+MBrAuWTANBgkqhkiG9w0BAQEFAASCAgBX
+# VmjLis1SfPUMlThmPfEKWF//EvSWPcZYMoNs4nCs/fIrhqvGxFgYV1lhdHjRcuLO
+# fDl0JyPp3OXDvayWigZaVw81BZ2KGSXytqqBhab8aj6DQCh5gzVFjAbDVLSG0T02
+# XklyNtEfxNuZ4FrDWmF35Y50eRI1Ay8IeA+/yLJYuf185/KTG3gxPbwGHkMAerGv
+# OCkqf9UpEf6/aaszmoADfH3/GU5t8QbfodVgai4CPW5SXWIqqr+yKTFrpdaLRX+/
+# IRPYAuepC4pMJRL2f7xT9yCZKFuspiqkuyDHdOBCbopRxr9aQqBbA8exop84Vj3S
+# kuleI/q8RFodGlK+VncdBord88O4f7BTm6iplDFaFGKJZmMd2eI/k4ZJ5U4Z6A72
+# YMVRzGDQ/Y1sNEbEjtgN8GMwHmEvgfhLjRYdzvdYu4LgZJDP6GcxkC2lhv8/utqN
+# mTYdKFZfGaXJoAg1Atigugzu8swcgKx2Tc4uri2Z34fQ+HYZKO4X5S6mkr7dfGh9
+# x314oBK/n4xKxQfpBM5RKJ2+SxUMBDXv9OSCpI1/Z424asthUhSw7goRe62n2cy/
+# 3/S/ksJ83zqshWoNtfbAnM5IKKTNcmUdgKEN7xHZX4N31LuYLyQ7+Dlo95s9z6Kb
+# sPdIG6iA8VTeAIxETplx8a3hiQBn9copOfMKkaQOdw==
 # SIG # End signature block

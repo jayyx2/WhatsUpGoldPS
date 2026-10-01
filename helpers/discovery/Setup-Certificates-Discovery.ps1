@@ -1,29 +1,235 @@
-﻿#requires -Version 5.1
+﻿<#
+.SYNOPSIS
+    Certificate Discovery - Find TLS certificates and create WhatsUp Gold certificate monitors.
 
-function New-CdpMonitorPlan {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][int]$DeviceId,
-        [Parameter(Mandatory = $true)][string]$DeviceName,
-        [hashtable]$OidMap = $(Get-CdpOidMap)
-    )
-    # cdpCacheAddressType is a positive integer on every cache row; the row vanishes when the neighbor is lost.
-    $tableParams = @{
-        SnmpTableDiscOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscOperator = 'gt'; SnmpTableDiscValue = '0'
-        SnmpTableDiscCommentOID = "$($OidMap.CacheTable).$($OidMap.DeviceId)"
-        SnmpTableDiscIndexOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscCreates = 'true'; SnmpTableMonitoredOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableMonitorOperator = 'gt'; SnmpTableMonitoredValue = '0'; SnmpTableMonitorUpIfMatch = 'upifmatch'
+.DESCRIPTION
+    Probes each target on the requested TCP ports, reads the presented certificate,
+    and lets you choose what to do with the results:
+
+      [1] Push to WhatsUp Gold (one Certificate monitor per TLS endpoint + expiry attributes)
+      [2] Export inventory and monitor plan to JSON
+      [3] Export inventory and monitor plan to CSV
+      [4] Show certificate table
+      [5] Generate certificate dashboard
+      [6] Exit
+      [7] Dashboard + Push to WUG
+
+    No credentials are needed; certificates are read during the TLS handshake.
+
+.PARAMETER Target
+    Host names or IPv4 addresses to probe. Prompts when omitted in interactive mode.
+
+.PARAMETER UseWUGDevices
+    Probe every device address already in WhatsUp Gold instead of -Target.
+
+.PARAMETER Ports
+    TCP ports to probe on each target. Default: 443, 8443.
+
+.PARAMETER ConnectTimeoutMs
+    TCP connect timeout per endpoint. Default: 5000.
+
+.PARAMETER WarningDays
+    Dashboard warning threshold. Default: 90.
+
+.PARAMETER CriticalDays
+    Dashboard critical threshold and default WUG alert window. Default: 30.
+
+.PARAMETER AlertDays
+    Days before expiry at which the WUG Certificate monitor goes down. Default: CriticalDays.
+
+.PARAMETER Action
+    PushToWUG, ExportJSON, ExportCSV, ShowTable, Dashboard, DashboardAndPush, or None.
+
+.PARAMETER WUGServer
+    WhatsUp Gold server address. Omit to reuse the current session or the vault.
+
+.PARAMETER WUGCredential
+    PSCredential for WhatsUp Gold admin login.
+
+.PARAMETER OutputPath
+    Directory for dashboards and exports.
+
+.PARAMETER NonInteractive
+    Suppress prompts.
+
+.EXAMPLE
+    .\Setup-Certificates-Discovery.ps1 -Target web01,10.0.0.5 -Ports 443,8443,9644 -Action Dashboard
+
+.EXAMPLE
+    .\Setup-Certificates-Discovery.ps1 -UseWUGDevices -Action DashboardAndPush -NonInteractive
+#>
+[CmdletBinding()]
+param(
+    [string[]]$Target,
+
+    [switch]$UseWUGDevices,
+
+    [int[]]$Ports = @(443, 8443),
+
+    [ValidateRange(500, 60000)]
+    [int]$ConnectTimeoutMs = 5000,
+
+    [ValidateRange(1, 3650)]
+    [int]$WarningDays = 90,
+
+    [ValidateRange(1, 3650)]
+    [int]$CriticalDays = 30,
+
+    [ValidateRange(1, 3650)]
+    [int]$AlertDays,
+
+    [ValidateSet('PushToWUG', 'ExportJSON', 'ExportCSV', 'ShowTable', 'Dashboard', 'DashboardAndPush', 'None')]
+    [string]$Action,
+
+    [string]$WUGServer,
+
+    [PSCredential]$WUGCredential,
+
+    [string]$OutputPath,
+
+    [switch]$NonInteractive
+)
+
+if (-not $OutputPath) {
+    if ($NonInteractive) { $OutputPath = Join-Path $env:LOCALAPPDATA 'WhatsUpGoldPS\DiscoveryHelpers\Output' }
+    else { $OutputPath = $env:TEMP }
+}
+if (-not (Test-Path $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null }
+if (-not $AlertDays) { $AlertDays = $CriticalDays }
+
+$scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
+$repoRoot = Split-Path (Split-Path $scriptDir -Parent) -Parent
+. (Join-Path $scriptDir 'DiscoveryHelpers.ps1')
+. (Join-Path $scriptDir 'DiscoveryProvider-Certificates.ps1')
+
+Write-Host '=== Certificate Discovery ===' -ForegroundColor Cyan
+
+$wugLoaded = $false
+function Initialize-CertificateWUG {
+    if ($script:wugLoaded) { return }
+    Import-Module (Join-Path $repoRoot 'WhatsUpGoldPS.psd1') -Force -ErrorAction Stop
+    if (-not (Connect-WUGDiscoveryServer -WUGServer $WUGServer -WUGCredential $WUGCredential)) { throw 'Could not connect to WhatsUp Gold.' }
+    $script:wugLoaded = $true
+}
+
+if ($UseWUGDevices) {
+    Write-Host 'Targets: reading device addresses from WhatsUp Gold ...' -ForegroundColor Cyan
+    Initialize-CertificateWUG
+    $targets = @(Get-WUGDevice -View overview | ForEach-Object { $_.networkAddress } | Where-Object { $_ } | Select-Object -Unique)
+}
+elseif ($Target) {
+    $targets = @($Target | ForEach-Object { $_ -split '\s*,\s*' } | Where-Object { $_ })
+}
+elseif ($NonInteractive) {
+    throw 'Target or -UseWUGDevices is required in non-interactive mode.'
+}
+else {
+    $targetInput = Read-Host -Prompt 'Host name(s) or IP address(es), comma-separated'
+    $targets = @($targetInput -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $portInput = Read-Host -Prompt "TCP ports [default: $($Ports -join ',')]"
+    if ($portInput) { $Ports = @($portInput -split '\s*,\s*' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ }) }
+}
+if ($targets.Count -eq 0) { throw 'At least one target is required.' }
+Write-Host "  Targets: $($targets.Count)  Ports: $($Ports -join ', ')  Alert: $AlertDays days before expiry"
+
+$options = @{ Ports = $Ports; ConnectTimeoutMs = $ConnectTimeoutMs; WarningDays = $WarningDays; CriticalDays = $CriticalDays; AlertDays = $AlertDays }
+$plan = @(Invoke-Discovery -ProviderName 'Certificates' -Target $targets -Options $options)
+$rows = @($plan | Where-Object { $_.PSObject.Properties['CertificateRows'] } | ForEach-Object { @($_.CertificateRows) })
+$monitorItems = @($plan | Where-Object ItemType -eq 'ActiveMonitor')
+
+Write-Host ''
+Write-Host "Discovery complete: $($rows.Count) certificate(s) on $(@($rows | Select-Object -ExpandProperty IPAddress -Unique).Count) host(s)." -ForegroundColor Green
+foreach ($group in @($rows | Group-Object Status | Sort-Object Name)) {
+    $color = switch ($group.Name) { 'Expired' { 'Red' } 'Critical' { 'Red' } 'Warning' { 'Yellow' } default { 'Gray' } }
+    Write-Host ('  {0,-9} {1,5}' -f $group.Name, $group.Count) -ForegroundColor $color
+}
+if ($rows.Count -eq 0) { Write-Warning 'No TLS endpoints answered; check targets and ports.' }
+
+$choice = $null
+if ($Action) {
+    $choice = switch ($Action) {
+        'PushToWUG' { '1' } 'ExportJSON' { '2' } 'ExportCSV' { '3' } 'ShowTable' { '4' }
+        'Dashboard' { '5' } 'None' { '6' } 'DashboardAndPush' { '7' }
     }
-    @([pscustomobject][ordered]@{ Name = "CDP Neighbor Discovery [$DeviceName]"; Type = 'SNMPTable'; Parameters = $tableParams; DeviceId = $DeviceId; Tags = @('cdp','snmp','neighbor') })
+}
+if (-not $choice -and $NonInteractive) { $choice = '5' }
+if (-not $choice) {
+    Write-Host ''
+    Write-Host 'What would you like to do?' -ForegroundColor Cyan
+    Write-Host '  [1] Push certificate monitors to WhatsUp Gold'
+    Write-Host '  [2] Export inventory and monitor plan to JSON'
+    Write-Host '  [3] Export inventory and monitor plan to CSV'
+    Write-Host '  [4] Show certificate table'
+    Write-Host '  [5] Generate certificate dashboard'
+    Write-Host '  [6] Exit'
+    Write-Host '  [7] Dashboard + Push to WUG'
+    Write-Host ''
+    $choice = Read-Host -Prompt 'Choice [1-7]'
+}
+$actionsToRun = if ($choice -eq '7') { @('5', '1') } else { @($choice) }
+
+foreach ($currentChoice in $actionsToRun) {
+    switch ($currentChoice) {
+        '2' {
+            $jsonPath = Join-Path $OutputPath 'Certificates-Inventory.json'
+            $export = [ordered]@{ GeneratedAt = (Get-Date).ToString('o'); Certificates = $rows; MonitorPlan = @($monitorItems | Export-DiscoveryPlan -Format Object) }
+            [System.IO.File]::WriteAllText($jsonPath, ($export | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($true)))
+            Write-Host "Exported to $jsonPath" -ForegroundColor Green
+        }
+        '3' {
+            $rows | Export-Csv -Path (Join-Path $OutputPath 'Certificates-Inventory.csv') -NoTypeInformation -Encoding UTF8
+            if ($monitorItems.Count) { $monitorItems | Export-DiscoveryPlan -Format CSV -Path (Join-Path $OutputPath 'Certificates-Monitor-Plan.csv') }
+            Write-Host "Exported certificate inventory and monitor plan to $OutputPath" -ForegroundColor Green
+        }
+        '4' {
+            $rows | Select-Object IPAddress, Port, Status, DaysUntilExpiry, ExpirationDate, Subject, Issuer, SelfSigned | Format-Table -AutoSize
+        }
+        '5' {
+            if ($rows.Count -eq 0) { Write-Warning 'No certificates to render.'; continue }
+            $htmlPath = Join-Path $OutputPath 'Certificate-Dashboard.html'
+            Export-CertificateDashboardHtml -DashboardData $rows -OutputPath $htmlPath -ReportTitle 'Certificate Dashboard'
+            Write-Host "Dashboard: $htmlPath" -ForegroundColor Green
+        }
+        '6' { Write-Host 'No action taken.' -ForegroundColor Gray }
+        '1' {
+            Write-Host ''
+            Write-Host 'WUG push: connecting ...' -ForegroundColor Cyan
+            Initialize-CertificateWUG
+            $wugDeviceIds = New-Object 'System.Collections.Generic.List[int]'
+            $pushPlan = New-Object 'System.Collections.Generic.List[object]'
+            foreach ($targetAddress in $targets) {
+                $targetItems = @($plan | Where-Object { $_.DeviceIP -eq $targetAddress })
+                if (-not @($targetItems | Where-Object ItemType -eq 'ActiveMonitor').Count) { continue }
+                $wugDeviceId = Resolve-WUGDiscoveryTargetDevice -Target $targetAddress -Note 'Added by WhatsUpGoldPS certificate discovery.'
+                if (-not $wugDeviceId) { continue }
+                if (-not $wugDeviceIds.Contains($wugDeviceId)) { [void]$wugDeviceIds.Add($wugDeviceId) }
+                foreach ($item in $targetItems) { $item.DeviceId = $wugDeviceId; [void]$pushPlan.Add($item) }
+            }
+            if ($pushPlan.Count -eq 0) { Write-Warning 'Nothing to push.'; continue }
+
+            Write-Host "WUG push: syncing $($pushPlan.Count) certificate item(s) ..." -ForegroundColor Cyan
+            $sync = Invoke-WUGDiscoverySync -Plan $pushPlan.ToArray() -PollingIntervalSeconds 3600
+            $group = Sync-WUGDiscoveryDeviceGroup -Name 'Certificates-WhatsUpGoldPS' -DeviceId $wugDeviceIds.ToArray() `
+                -Description 'Devices with TLS certificates monitored by WhatsUpGoldPS certificate discovery.' -Confirm:$false
+            Write-Host ''
+            Write-Host 'Push complete.' -ForegroundColor Green
+            Write-Host "  Devices:            $($wugDeviceIds.Count)"
+            Write-Host "  Monitors created:   $($sync.ActiveCreated)"
+            Write-Host "  Assigned:           $($sync.Assigned)"
+            Write-Host "  Skipped (existing): $($sync.Skipped)"
+            Write-Host "  Attributes set:     $($sync.AttrsUpdated)"
+            if ($sync.Failed) { Write-Host "  Failed:             $($sync.Failed)" -ForegroundColor Red }
+            if ($group.GroupId) { Write-Host "  Group: Certificates-WhatsUpGoldPS (ID $($group.GroupId)); added $($group.Added)." -ForegroundColor Gray }
+        }
+        default { Write-Warning "Unrecognised choice '$currentChoice'." }
+    }
 }
 
 # SIG # Begin signature block
 # MIIr1gYJKoZIhvcNAQcCoIIrxzCCK8MCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUKpZ2y1ETwKA39D8qJPqGbXZG
-# esmggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUSmDbl/gD/An86U5vfQzZzshN
+# D9WggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
 # AQwFADB7MQswCQYDVQQGEwJHQjEbMBkGA1UECAwSR3JlYXRlciBNYW5jaGVzdGVy
 # MRAwDgYDVQQHDAdTYWxmb3JkMRowGAYDVQQKDBFDb21vZG8gQ0EgTGltaXRlZDEh
 # MB8GA1UEAwwYQUFBIENlcnRpZmljYXRlIFNlcnZpY2VzMB4XDTIxMDUyNTAwMDAw
@@ -225,33 +431,33 @@ function New-CdpMonitorPlan {
 # BAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+F
 # zTlzz3YtN+swCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAw
 # GQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisG
-# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFIFxHaRDoFInfSQpeaDMhnMTqXdkMA0G
-# CSqGSIb3DQEBAQUABIICAFupnzYDSxFEb6v7/9mNCd6+L/hLAoxd5MX6LAlhHjWH
-# 3fUPZUuUVIetoPRPEOCjd4ALp2yTPESBFOU6LQdhIpKpeWYEI9ey3c+ShY7bKO5a
-# vTVlxDeFUCxlY16GUtLQcaTCm4dmgCdys0lZqnQQ5DKcM8g9XYPCScdqWhlSVTpz
-# XJrWBmFwoEnx/o6NWYLEBQHcWk4X2xT54pKF2wRqcs0HQKUdy8t7660/Uqyb24s5
-# OVMOt1aXLXD/wUCTjuPK5ytHrNMq3fpr7ymU9DsJ95I3m1CIJgTmsrZuZCdJCCr2
-# AIt2c5hAY7LhumeTlAYaDNef72RCZsw07cWg3Kxgjrm00uBPyQ5npHnEbSg77AMv
-# sTi6Ijjh69T3oTQLeQE9W+zzxSH+Q192pAhcPxss6Hjp2fDcLt/V82j/Qe2+EZ2l
-# nXA3uyeBtp+DZIdPP51MjBzdojxRIJanaTniOLQ/GEsiOvmPI4SXb33SopG8vDk4
-# j6aooXU94Uw63Pv20wpF8D2q7FhIzpBKxwLXdwqLXTOy095PJYjxRhfRZDjUsFKA
-# Y0yvxCq89hwEJi/MtXZVKYJ2O/zrhyoYCLvRK9g9iGmnKc7zLJkPTqDJCjRZgovk
-# wBwoCFZKFeh8A8ulyRQ8DbVl7+9HbbbAXOZiWpJ8nCccjbvLBISMvl6j63btJEQ8
+# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFMfjrZ62f1IKTxkq3xDwQbKEAQ60MA0G
+# CSqGSIb3DQEBAQUABIICAI216xx0RxOTKYLxNwldvix3BQH0l36CwrGRpf5FX7iZ
+# kMvEm+gT+aZqZWAhlcMb0IBpOylSOh4S55qWOKkgv7gJHfOP/n1ZMKk6VcqwCqSN
+# A0hfnV/2MyiytdOL3Y8Dm8s/XQnsXa0r3m7/gEJT/oS/WxvP4SmZN7RYAzre2HhE
+# Ta/2WpvVLaedbGDcOTe5Tt1wBwMwhIX3UHl3h59XLhd7Sp9+7LGCNb+5va9Aydwi
+# mtc/OvU4aAgwAM06JBLDGeGIUdtO1A2mg2VGHhjpCBwo3xv9apM/fMcZZGHlDpMD
+# i7CqObMvoTQe7FaxKLU6zF17JlmLz7/phw2PWfOiZdTYw1uzqyIV4fYxkrWIQjs/
+# LUdHEfjINm1NrgJ/xLNC+i0VnT7H1QSV3L9imfUPcVhiT5iQOeEmCv7YEwyMV13M
+# XHRGqo+GhUgvqGs5eEM2EFK8FZ43ACLVyz3N9srZQsEWF6MDWuCvSccqdEHfzDiH
+# ctbn5W2KulztykJ/KMuUqlE5xmnZQDKDWT7A5GrONOrBUcqx2H+aXYGvbAVLYoO5
+# TS1Tslga5xDNjb6huaKmR9YFCzWlfMoYTDzepbNCtD3Ln02Zg+wC2nNyHm1TmIij
+# pBC0NB35NWt1O4Bkkj4pmieUBOUq/uzc+5W1sWPsP/3W10/tFhITUECcy0cSAoe2
 # oYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UEBhMCVVMx
 # FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVz
 # dGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMQIQCE/c
 # M09+RU7bww+P+ZIYNTANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJAzELBgkq
-# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDIwMlowLwYJKoZIhvcN
-# AQkEMSIEIGI/2xEx1S1uEpgie0IhnUx87MyJyfou71SgM2ABe9J9MA0GCSqGSIb3
-# DQEBAQUABIICAB7xcEgas1zn70hpQCDCCsvwaijpPlntlbNAIN+KPqG5lTYcwXOT
-# KBcri6yNaOQbmSWFPVrRwtARAf11QXIopMyEyh1vLhVmR7UtT56zUth7D/57XSDV
-# yhx8CFbdbkDsqW0QjU2KRuwe5S2NABaWLzTmQYyMqcEcNpZWPFNjIFhT+88Oi7eS
-# 2ZvpuWUlpiuklcrbDVPuBO4ccDVE+wUfUoNUyuO/LOS/OEeC+ex4rOflbMVsHQ01
-# bSC0h7BRhgt8J7arOcBjx1hb73KxsS1IzeyfQmOovt7HoKqxL5DXZjLdVEcyC+7V
-# U9HVsgaUI03SR1HBO8crrZrSnm/Psnoiv0j/hRdRFgL2B0mDh6EcYRJPrdwZ6DEe
-# xdfJKqroCmv2Xq+GEXbEDntnkUKs2bq9k36sXoR5r4Xx6zJIr175LLEZrycJ0K3W
-# BIYzeAyUJ5t/w9UB8ufCHHxgsVfPnjjoBcuI8q5Bo1VFrCkfqeR9V+LPoj2FymhF
-# GZeWMhoVapuoA4jJflaRWNKPgIFasupxvcZwnyd9irJ3kOnj0wMnocGpP2rK4fDI
-# sF+nFFBDyat3JSMRl3Gp/7LiQRh1o5PBVp1tDIBKe7bkE6yibnFFZUWd/xEu4Ho8
-# vJiYhdRP62vTsGZWI+V1TpGnvcbCBgHRB+ZOeG0H9bbEmwQkjM1K2KR5
+# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDI0NVowLwYJKoZIhvcN
+# AQkEMSIEICGHeU5+gOHgQ31urHA2YAgl9lJ66BE3/om7ocbnJABtMA0GCSqGSIb3
+# DQEBAQUABIICAF6VA50eMJJ8i+yMaXoiDPhTav5eOQUrRA5eHan9ffAyuZu8VT6O
+# CT+EogppNm6pjU4u/ZskDxu8xgSiIFXd7TXyVS3DCkvbqCoLiW1S2qDaijp2WKd9
+# tZJZgMHThRK1ZmnBcFOwGQqhnbNAYsMNxycKIkIrLRF0dMocIovf7xL8cSIuUEtj
+# ugOqGKaw2CUS4a79UwozW3dxr9TAYTRUDHwe/FVMWOdJAEa+O9k3S0JzVXW4zYM4
+# L+VSWsv0nvlQbZKdZyGZ2jAX9KXdWs8iE6YGnimCyw0CmVZWpfCbZiiU8DlSgY7N
+# dxIZnobcYE7X3eVBFyzQX4grWwYl2GZavfSX/lXDrXkC0uq9J5GPBaGdldc8z9kw
+# y0YXLDn5uOjHZxrMXYT03eSid6EZ5HzkLxMS7TqAkrMAK8b1ZQYPBCt2fBF91YWm
+# ElQFLB2Kbb69Bv+UKAaWhvAIdoEIpim/GiJEfIkArGto8rBhYmwyiU2YhNHK6PUI
+# ef2AX5rgNOXOOnHdUQrTe3FVSgjp9wXH1PCTINj6tqu7cmI9xeoE0ZxzsN0Q1HVR
+# wK5xaTSzOnrRjsiql+lJDhwlMwF6d7N0CzhNN8DbSC7Iu17aB2CvVt4dDpalEQi+
+# Za47kwJYjdtCeqp8MpoQtdWn8PiAaISUZwqkvxVXnxc3UIPPBtJDDIyR
 # SIG # End signature block

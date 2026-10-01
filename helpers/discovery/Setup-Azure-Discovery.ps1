@@ -681,18 +681,19 @@ switch ($currentChoice) {
             }
         }
 
-        # Check which already exist in library
+        # One library read: per-name search returns device assignments, which never match by name.
         $existingActiveNames = @{}  # name -> monitor library id
-        foreach ($actName in @($uniqueActiveMonitors.Keys)) {
-            try {
-                $found = @(Get-WUGActiveMonitor -Search $actName)
-                $exact = $found | Where-Object { $_.name -eq $actName } | Select-Object -First 1
-                if ($exact) {
-                    $existingActiveNames[$actName] = [int]$exact.id
+        try {
+            $activeLibrary = Get-WUGMonitorLibraryMap -Type active
+            foreach ($actName in @($uniqueActiveMonitors.Keys)) {
+                if ($activeLibrary.ContainsKey($actName)) {
+                    $existingActiveNames[$actName] = [int]$activeLibrary[$actName]
                     $stats.HealthSkipped++
                 }
             }
-            catch { }
+        }
+        catch {
+            Write-Warning "    Could not read the active monitor library: $($_.Exception.Message). Monitors may be created again."
         }
 
         # Create missing active monitors via bulk Add-WUGMonitorTemplate
@@ -812,13 +813,13 @@ switch ($currentChoice) {
         }
         Write-Host "    Active monitors: $($stats.HealthCreated) created, $($stats.HealthSkipped) existing, $($stats.HealthFailed) failed" -ForegroundColor DarkGray
 
-        # Reconcile: re-query library to catch monitors the bulk creation tracking may have missed
+        # Reconcile: re-read the library to catch monitors the bulk creation tracking may have missed
         try {
-            $allAzureHealth = @(Get-WUGActiveMonitor -Search 'Azure Health -')
+            $activeLibrary = Get-WUGMonitorLibraryMap -Type active
             $reconciled = 0
-            foreach ($am in $allAzureHealth) {
-                if ($am.name -and -not $existingActiveNames.ContainsKey($am.name)) {
-                    $existingActiveNames[$am.name] = [int]$am.id
+            foreach ($libName in @($activeLibrary.Keys | Where-Object { $_ -like 'Azure Health -*' })) {
+                if (-not $existingActiveNames.ContainsKey($libName)) {
+                    $existingActiveNames[$libName] = [int]$activeLibrary[$libName]
                     $reconciled++
                 }
             }
@@ -826,7 +827,7 @@ switch ($currentChoice) {
                 Write-Host "    Reconciled $reconciled active monitors from library" -ForegroundColor DarkGray
             }
         }
-        catch { Write-Verbose "Active monitor reconciliation query failed: $_" }
+        catch { Write-Warning "    Active monitor reconciliation failed: $($_.Exception.Message)" }
 
         # ---- 2b: Create perf monitors in library (no DeviceId) -----------------
         Write-Host "  Creating performance monitors in library..." -ForegroundColor Cyan
@@ -843,12 +844,12 @@ switch ($currentChoice) {
         # Check which already exist in library
         $existingPerfNames = @{}  # name -> monitor library id
         try {
-            $libPerf = @(Get-WUGPerformanceMonitor -Search 'Azure -')
-            foreach ($lp in $libPerf) {
-                if ($lp.name) { $existingPerfNames[$lp.name] = $lp.id }
+            $perfLibrary = Get-WUGMonitorLibraryMap -Type performance
+            foreach ($libName in @($perfLibrary.Keys | Where-Object { $_ -like 'Azure -*' })) {
+                $existingPerfNames[$libName] = $perfLibrary[$libName]
             }
         }
-        catch { Write-Verbose "Could not query perf monitor library: $_" }
+        catch { Write-Warning "    Could not read the performance monitor library: $($_.Exception.Message)" }
 
         $toCreatePerf = @($uniquePerfMonitors.Keys | Where-Object { -not $existingPerfNames.ContainsKey($_) })
         $perfAlreadyExist = $uniquePerfMonitors.Count - $toCreatePerf.Count
@@ -971,13 +972,13 @@ switch ($currentChoice) {
         }
         Write-Host "    Perf monitors: $($stats.PerfCreated) created, $($stats.PerfSkipped) existing, $($stats.PerfFailed) failed" -ForegroundColor DarkGray
 
-        # Reconcile: re-query library to catch perf monitors the bulk creation tracking may have missed
+        # Reconcile: re-read the library to catch perf monitors the bulk creation tracking may have missed
         try {
-            $libPerfAll = @(Get-WUGPerformanceMonitor -Search 'Azure -')
+            $perfLibraryAll = Get-WUGMonitorLibraryMap -Type performance
             $reconciledPerf = 0
-            foreach ($lp in $libPerfAll) {
-                if ($lp.name -and -not $existingPerfNames.ContainsKey($lp.name)) {
-                    $existingPerfNames[$lp.name] = "$($lp.id)"
+            foreach ($libName in @($perfLibraryAll.Keys | Where-Object { $_ -like 'Azure -*' })) {
+                if (-not $existingPerfNames.ContainsKey($libName)) {
+                    $existingPerfNames[$libName] = "$($perfLibraryAll[$libName])"
                     $reconciledPerf++
                 }
             }
@@ -985,7 +986,7 @@ switch ($currentChoice) {
                 Write-Host "    Reconciled $reconciledPerf perf monitors from library" -ForegroundColor DarkGray
             }
         }
-        catch { Write-Verbose "Perf monitor reconciliation query failed: $_" }
+        catch { Write-Warning "    Perf monitor reconciliation failed: $($_.Exception.Message)" }
 
         # ---- 2c: Identify existing vs new devices ------------------------------
         Write-Host "  Checking for existing devices..." -ForegroundColor Cyan
@@ -1593,8 +1594,8 @@ Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cy
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaXeyUwg/uqKqY
-# 2iIPMQOd8HvLiu9Kt+8HkliCXCqX/qCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDttML5fPWlRZaF
+# EGGRo1apSARibcOYepTk6I7fJBZPrqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1797,33 +1798,33 @@ Write-Host "Re-run anytime to discover new Azure resources." -ForegroundColor Cy
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAbbkkvK6hsWLkfZV/FyKosoLS+jIXWh2Gi0eDzUdPq/DANBgkqhkiG9w0BAQEF
-# AASCAgBfddWgFh33HRW50I2SU0ty6bg4exSlXhYjb47N2ejAHy87YutbRB0BJM/u
-# 1sgFmwMNSRIc/tSIBc47ct7f6iEEThjx5HI42t9alulayHibbWK24VfKCXcZVcI1
-# 9Irnhl20s/kxYyHjj/TJDZgDhNi1lGG4mZd+JdEwnqwL4rGZsQ7fKmf64hGiMhlt
-# F2nO10WJX6eCh1ny43qByfeGovX0y/4BxiMZA31DFqEUUvWjHfMj7VHIbQmzt/SG
-# 4CFIg4FIVZu4xWO+ex0f7MlnXS022Rfs7IPYmTqQrJxjDs2+X+C5oilP8fLIkiYX
-# CiwtwuqeZMKRZ8ZSfvhdUBQeQt4cTD7iKHQx7H6zon6BQelu4rsMnTjzCDPGDoYk
-# 27r/Fo/Anw+r0AfG1Dl7cP5foHyhy2hQNLRzt7+x/K2CQ1PibVgf3npm38ZSEynu
-# arLmNlWR4oYcIdHXycudQEhgtfBgSL8HRaSDXqb6Y7wEuIZtk24KyDFqv7JYGmVS
-# BVRj+nUlHQe2sj10O7k+gwsv+eKAI+VuPbilagNC2rPhb2WOvnSvZC4qM/1Ppw21
-# D4trN2kMwvmXYrFKsWCjvWQMAOWIFO2Wr3h54lH+bllbuUxBj161UiVDx5YnNR4S
-# XxqTZNioN0WIOqYg8Bm8IaPfhbIf2FfkgVAg/X+UWd3W2DbP56GCAyYwggMiBgkq
+# BCD4YlRL/a7IEzdBx/70oyyThncVUtfN2uBpLzcotm4lyTANBgkqhkiG9w0BAQEF
+# AASCAgDrlBrlDKKz09kOVI8lPvwTTMVo+tfIxY4QRk+P46M0vGeRgJs432bvZ9j/
+# 2O3gFQTEtgt3T4q7PGQ1bdcThS7i106RzYL0hWKerWDcLu6aAGq+7VOCP1iJzdJB
+# fvBBX0p06cElAt4UZkDvvj9/UZodYvryKkPl7p5Hs0w2YQnnDPdc4hdx6YuxcqNt
+# FdPwMA8Cazfx8Uko2jZC8QXP/97p7tnR5nm2lupYN7uQsWDoYOKFLQM06PzEfvF2
+# nlcTyZhsNU5SwultpymDXkHCIyK2fBwcYsQz+RA48RzzOCWst/rwFIQDJfZAevyW
+# PzHsTnEn4XPou+wSHTI48dAoy9YsuPlG8TcPjrJ/Zri73746V1IIq8klWqSASwqw
+# 6duV3X1JBOrHR8DdgEWfhW81ej78AuRAK/O61ZNcyrEDlvyOWUZTeghar2om+8OV
+# WPus6RgUZL0mpsHdk5Y+mM6KqD8dc7Wa6+zOgqKvPY5UOwVWX8R7iZTDbsRgZaiW
+# 24o4lN4UnCylVptB1W5DAoAoVoi8lvEykGdO7wp5OVJ5t7GmTfVqrqlmK+YXbnfA
+# bTlVLrq6ffPvRbaVpHXiOcfs89UlozUJB/sIg0UZwAB9jI7OAvUdIo7CYEcLoEKV
+# kbPAM/CQRtL+GEO91lMJ9luYiPUTn58QVWLNGyPv/+/XWMC5O6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
 # GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA5MjkyMTEzMDlaMC8GCSqGSIb3DQEJBDEiBCDN33/y
-# Wa5NfTQLPYRa4l0nx33PzHZpOy7GRshPyUhpszANBgkqhkiG9w0BAQEFAASCAgAP
-# 2Y0yyE/11t+fa0teMXViohOTIV/4/bESCMmKii7TW8WyxjeRcF3jUvG2gzDa6U2j
-# BFdtlf5jB/uaZTGbiuvMDIv2nMdO7Qn/sHUE6VAWvBvFMRXFdOuagzpkOEbeFmMM
-# Muf5QXTSCbH4+agU4x2KDQezULBaf9XvvOnF4Ju0c1l/dhdNtVWUmVMulwUiXZlm
-# DCnPONqF95wM/DcBPiALaBylFABA7bhWDl3IhxPgGRNXv18DZCTDm/ymnN6FjXYA
-# YrwJFx408S5j2Yks0U89mNbckFjekJkVB1TyuqLfyxHeY2GTD5TDFs1I4rWIhCic
-# sUQ+KyfAn0sLxvu6QzpU/sJ1kT2uXMk4GtALQX5haLP2FcKtbkQyQy1uJFNJH97F
-# icR5Zhx3Diwvza8DzWeRwodOoG7SkqqDQ47/kw2Y9uh+fLATnd3Niw4S4ebN0fTq
-# ZRwnwmx1YAJ/mjVCz4oSq4yJuZIOJ7ujttMrXcURqxx2Hn5Wzi4u3rtdQ/8Lj/gn
-# BeLvghfNJrQT3mGWBvXUlQOArVjIKu/pjHeTZtezOI9Ty+l80HZmQvF4Bk0+iWsN
-# jHi+BslOzNEw9LwSa5s+JbtWqoDWekTbaz8qS1b2qtOWEEy5U8iMI6Jq6di7qu1W
-# QlNSiIfLkMQcyAkwV9OczTHBb48O7VwrVnA3g/9fnA==
+# CSqGSIb3DQEJBTEPFw0yNjA5MzAxNjA5MTVaMC8GCSqGSIb3DQEJBDEiBCBdJDLD
+# MSshMNaL7xak2yKVFzlpQ1x+vQz9x9U+KK8XlDANBgkqhkiG9w0BAQEFAASCAgBu
+# XGmoVkqKtrHtESMOXcej96XYAdd5iWPnkuv6fatgjfyHjQFaUjR1gkxf9uwFwEC8
+# i326c6NlWReCbn7X7zOAZV+lfO+AlrluORYrHOPo9f/Obb5JXP8OSfj1VGPT0vOx
+# tfPT6ui8kUGYAkUR5gwAZZsOCuSnOU2bkPo9tHFaSlq76p/7+BHfw4HU2vMhGlWr
+# HXnDxDAyo9cgtseIxczolamB+Qm8zwA240vUuIIAjIRlribusk7gIQVUIyZxhoSl
+# m/MPJrYSwk5ebpYXSjcAd6tGEplS5OnuIDGRSyq8j/6TxT6vHAi4cVkBVI/Y9i69
+# /NEAfKS6ccD26KiQ9QoOxToAPZDrrvzMfR4M4zqw0GDE/4gH31phMEzYgaF61QUn
+# SYP938p4b8QY1kCouWACzgKvTpVkF7SF/aFKfndvWL8VJrX3O0VnqoYbR93hWqYa
+# zcgNluka5EwvCOOAHu1KPaQcAbiMhD3WE7wjG5ga80H1wmwF0cYQLsOaZ9+uH/Rj
+# 9ew1fR5xTE51nGf6J5DWK3muCiJVt0b24aHpibJsyARdqE1v1nBZwjbrKq8S0/P+
+# qc8gNDvoM+pcMG3AaMZ60sg/zrANEDcmQYMbtBuuEjJe7DU2q7q/CnHmilUQYHjW
+# vR94tSvpXiWK02Qj41uHNZsvjFDo2Mzhexc4Roy2yg==
 # SIG # End signature block

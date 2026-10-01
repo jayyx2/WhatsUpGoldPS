@@ -1,29 +1,167 @@
-﻿#requires -Version 5.1
+﻿<#
+.SYNOPSIS
+    Collects Linux compliance facts over SSH and plans WUG SSH monitors and attributes.
 
-function New-CdpMonitorPlan {
+.DESCRIPTION
+    Wraps helpers\linux\LinuxHelpers.ps1. One SSH round trip per host gathers OS,
+    patch, systemd, disk, inode, NTP, listening-port, reboot and sshd facts, which
+    are evaluated into Pass/Warn/Fail checks.
+
+    Monitor plan (all use the device's assigned WUG SSH credential):
+      Active (shared library entries):
+        Linux - NTP Synchronized, Linux - No Reboot Pending, Linux - No Failed Systemd Units
+      Performance (per host):
+        Disk used % per mount, failed systemd unit count, days since last package change
+
+    Context options (ctx.Options):
+      Credential (PSCredential), KeyFile, KeyPassphrase, SshPort, TimeoutSeconds,
+      DiskWarnPercent, DiskFailPercent, InodeWarnPercent, InodeFailPercent,
+      PatchWarnDays, PatchFailDays, AllowedPort (int[]), MaxDiskMonitors
+#>
+
+$script:LinuxHelpersPath = Join-Path (Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent) 'linux\LinuxHelpers.ps1'
+if (-not (Test-Path -LiteralPath $script:LinuxHelpersPath)) { throw "Linux helpers not found: $script:LinuxHelpersPath" }
+. $script:LinuxHelpersPath
+
+if (-not (Get-Command -Name 'Register-DiscoveryProvider' -ErrorAction SilentlyContinue)) {
+    $helpersPath = Join-Path $PSScriptRoot 'DiscoveryHelpers.ps1'
+    if (-not (Test-Path $helpersPath)) { throw 'DiscoveryHelpers.ps1 is required.' }
+    . $helpersPath
+}
+
+function Get-LinuxMonitorCommand {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][int]$DeviceId,
-        [Parameter(Mandatory = $true)][string]$DeviceName,
-        [hashtable]$OidMap = $(Get-CdpOidMap)
+        [Parameter(Mandatory = $true)][ValidateSet('Ntp', 'Reboot', 'FailedUnits', 'FailedUnitCount', 'PatchAge', 'DiskUsed')][string]$Kind,
+        [string]$MountPoint
     )
-    # cdpCacheAddressType is a positive integer on every cache row; the row vanishes when the neighbor is lost.
-    $tableParams = @{
-        SnmpTableDiscOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscOperator = 'gt'; SnmpTableDiscValue = '0'
-        SnmpTableDiscCommentOID = "$($OidMap.CacheTable).$($OidMap.DeviceId)"
-        SnmpTableDiscIndexOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscCreates = 'true'; SnmpTableMonitoredOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableMonitorOperator = 'gt'; SnmpTableMonitoredValue = '0'; SnmpTableMonitorUpIfMatch = 'upifmatch'
+
+    switch ($Kind) {
+        'Ntp' { return 'timedatectl show -p NTPSynchronized --value 2>/dev/null' }
+        'Reboot' { return 'if [ -f /var/run/reboot-required ]; then echo REBOOT-PENDING; elif command -v needs-restarting >/dev/null 2>&1 && ! needs-restarting -r >/dev/null 2>&1; then echo REBOOT-PENDING; else echo OK; fi' }
+        'FailedUnits' { return 'n=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null | wc -l); if [ "$n" -eq 0 ]; then echo OK; else echo FAILED=$n; fi' }
+        'FailedUnitCount' { return 'systemctl list-units --state=failed --no-legend --plain 2>/dev/null | wc -l' }
+        'PatchAge' { return 'if command -v rpm >/dev/null 2>&1; then t=$(rpm -qa --qf "%{INSTALLTIME}\n" 2>/dev/null | sort -n | tail -1); else t=$(stat -c %Y /var/lib/dpkg/status 2>/dev/null); fi; echo $(( ($(date +%s) - ${t:-0}) / 86400 ))' }
+        'DiskUsed' {
+            # Single-quote the mount for the shell; escape embedded quotes.
+            $quoted = "'" + ($MountPoint -replace "'", "'\''") + "'"
+            return "df -P $quoted 2>/dev/null | awk 'NR==2{gsub(""%"","""",`$5);print `$5}'"
+        }
     }
-    @([pscustomobject][ordered]@{ Name = "CDP Neighbor Discovery [$DeviceName]"; Type = 'SNMPTable'; Parameters = $tableParams; DeviceId = $DeviceId; Tags = @('cdp','snmp','neighbor') })
 }
+
+Register-DiscoveryProvider -Name 'Linux' `
+    -MatchAttribute 'DiscoveryHelper.Linux' `
+    -AuthType 'BasicAuth' `
+    -DefaultPort 22 `
+    -DefaultProtocol 'ssh' `
+    -IgnoreCertErrors $true `
+    -DiscoverScript {
+        param($ctx)
+
+        $options = if ($ctx.Options) { $ctx.Options } else { @{} }
+        $target = [string]$ctx.DeviceIP
+        $deviceId = [int]$ctx.DeviceId
+        $credential = $options.Credential
+        if (-not $credential -and -not $options.KeyFile) { throw 'Linux discovery needs a PSCredential or a key file.' }
+
+        $splat = @{ Target = $target }
+        if ($credential) {
+            $splat['Username'] = $credential.UserName
+            $splat['SecurePassword'] = $credential.Password
+        }
+        if ($options.KeyFile) {
+            $splat['KeyFile'] = [string]$options.KeyFile
+            if (-not $splat.ContainsKey('Username')) { $splat['Username'] = [string]$options.Username }
+        }
+        foreach ($name in 'KeyPassphrase', 'TimeoutSeconds', 'DiskWarnPercent', 'DiskFailPercent', 'InodeWarnPercent', 'InodeFailPercent', 'PatchWarnDays', 'PatchFailDays', 'AllowedPort') {
+            if ($options.ContainsKey($name) -and $null -ne $options[$name]) { $splat[$name] = $options[$name] }
+        }
+        if ($options.SshPort) { $splat['Port'] = [int]$options.SshPort }
+        $maxDisks = if ($options.MaxDiskMonitors) { [int]$options.MaxDiskMonitors } else { 20 }
+
+        Write-Host "Linux: collecting compliance facts from $target over SSH ..." -ForegroundColor Cyan
+        $inventory = Get-LinuxComplianceInventory @splat
+        $facts = $inventory.Facts
+        $checks = @($inventory.Checks)
+        $pass = @($checks | Where-Object Status -eq 'Pass').Count
+        $warn = @($checks | Where-Object Status -eq 'Warn').Count
+        $fail = @($checks | Where-Object Status -eq 'Fail').Count
+        Write-Host "  $($facts.OsName) / $($facts.Kernel); compliance $($inventory.Status) (pass=$pass warn=$warn fail=$fail)" -ForegroundColor Gray
+
+        $activeBase = @{ SshContains = '1'; SshUseRegex = 'False'; SshEOLChars = 'None'; SshCredentialID = -1 }
+        $perfBase = @{ SshCommandType = 'SingleCommand'; SshUseCustomRegex = '0'; SshEOLChars = 'None'; SshCredentialID = '-1' }
+        $items = New-Object 'System.Collections.Generic.List[object]'
+
+        if ($null -ne $facts.NtpSynchronized) {
+            [void]$items.Add((New-DiscoveredItem -Name 'Linux - NTP Synchronized' -ItemType 'ActiveMonitor' -MonitorType 'Ssh' `
+                -MonitorParams (@{ SshCommand = (Get-LinuxMonitorCommand -Kind Ntp); SshExpectedOutput = 'yes' } + $activeBase) `
+                -UniqueKey 'Linux:ntp' -DeviceId $deviceId -Tags @('linux', 'ssh', 'time')))
+        }
+        if ($null -ne $facts.RebootRequired) {
+            [void]$items.Add((New-DiscoveredItem -Name 'Linux - No Reboot Pending' -ItemType 'ActiveMonitor' -MonitorType 'Ssh' `
+                -MonitorParams (@{ SshCommand = (Get-LinuxMonitorCommand -Kind Reboot); SshExpectedOutput = 'OK' } + $activeBase) `
+                -UniqueKey 'Linux:reboot' -DeviceId $deviceId -Tags @('linux', 'ssh', 'patching')))
+        }
+        $hasSystemd = @($checks | Where-Object { $_.Check -eq 'Failed systemd units' }).Count -gt 0
+        if ($hasSystemd) {
+            [void]$items.Add((New-DiscoveredItem -Name 'Linux - No Failed Systemd Units' -ItemType 'ActiveMonitor' -MonitorType 'Ssh' `
+                -MonitorParams (@{ SshCommand = (Get-LinuxMonitorCommand -Kind FailedUnits); SshExpectedOutput = 'OK' } + $activeBase) `
+                -UniqueKey 'Linux:failedunits' -DeviceId $deviceId -Tags @('linux', 'ssh', 'services')))
+            [void]$items.Add((New-DiscoveredItem -Name "Linux - Failed Systemd Units - $target" -ItemType 'PerformanceMonitor' -MonitorType 'Ssh' `
+                -MonitorParams (@{ SshCommand = (Get-LinuxMonitorCommand -Kind FailedUnitCount) } + $perfBase) `
+                -UniqueKey "Linux:${target}:failedunitcount" -DeviceId $deviceId -Tags @('linux', 'ssh', 'services')))
+        }
+        if ($null -ne $facts.PatchAgeDays) {
+            [void]$items.Add((New-DiscoveredItem -Name "Linux - Patch Age Days - $target" -ItemType 'PerformanceMonitor' -MonitorType 'Ssh' `
+                -MonitorParams (@{ SshCommand = (Get-LinuxMonitorCommand -Kind PatchAge) } + $perfBase) `
+                -UniqueKey "Linux:${target}:patchage" -DeviceId $deviceId -Tags @('linux', 'ssh', 'patching')))
+        }
+        foreach ($disk in @($facts.Disks | Select-Object -First $maxDisks)) {
+            [void]$items.Add((New-DiscoveredItem -Name "Linux - Disk Used % $($disk.MountPoint) - $target" -ItemType 'PerformanceMonitor' -MonitorType 'Ssh' `
+                -MonitorParams (@{ SshCommand = (Get-LinuxMonitorCommand -Kind DiskUsed -MountPoint $disk.MountPoint) } + $perfBase) `
+                -UniqueKey "Linux:${target}:disk:$($disk.MountPoint)" -DeviceId $deviceId -Tags @('linux', 'ssh', 'disk')))
+        }
+
+        $failedCheckNames = @($checks | Where-Object Status -eq 'Fail' | ForEach-Object { $_.Check }) -join '; '
+        $attributes = [ordered]@{
+            'Linux.LastScan'           = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            'Linux.Hostname'           = [string]$facts.Hostname
+            'Linux.OS'                 = [string]$facts.OsName
+            'Linux.OSId'               = [string]$facts.OsId
+            'Linux.OSVersion'          = [string]$facts.OsVersion
+            'Linux.Kernel'             = [string]$facts.Kernel
+            'Linux.Architecture'       = [string]$facts.Architecture
+            'Linux.UptimeDays'         = [string]$facts.UptimeDays
+            'Linux.PatchAgeDays'       = [string]$facts.PatchAgeDays
+            'Linux.RebootRequired'     = [string]$facts.RebootRequired
+            'Linux.NtpSynchronized'    = [string]$facts.NtpSynchronized
+            'Linux.FailedUnits'        = [string]@($facts.FailedUnits).Count
+            'Linux.ListeningPorts'     = [string]@($facts.ListeningPorts).Count
+            'Linux.ComplianceStatus'   = [string]$inventory.Status
+            'Linux.ComplianceFailed'   = [string]$fail
+            'Linux.ComplianceWarnings' = [string]$warn
+            'Linux.FailedChecks'       = $failedCheckNames
+        }
+        $cleanAttributes = @{}
+        foreach ($key in $attributes.Keys) { if (-not [string]::IsNullOrWhiteSpace($attributes[$key])) { $cleanAttributes[$key] = $attributes[$key] } }
+
+        if ($items.Count -eq 0) {
+            [void]$items.Add([PSCustomObject]@{ Name = "Linux - inventory - $target"; ItemType = 'Inventory'; MonitorType = ''; MonitorParams = @{}; UniqueKey = "Linux:${target}:inventory"; DeviceId = $deviceId; Attributes = @{}; Tags = @('inventory') })
+        }
+        $items[0].Attributes = $cleanAttributes
+        $items[0] | Add-Member -NotePropertyName 'LinuxChecks' -NotePropertyValue $checks -Force
+        $items[0] | Add-Member -NotePropertyName 'LinuxFacts' -NotePropertyValue $facts -Force
+
+        Write-Host "Linux: $target -> $(@($items | Where-Object ItemType -ne 'Inventory').Count) monitor item(s), $($cleanAttributes.Count) attribute(s)." -ForegroundColor Green
+        return $items.ToArray()
+    }
 
 # SIG # Begin signature block
 # MIIr1gYJKoZIhvcNAQcCoIIrxzCCK8MCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUKpZ2y1ETwKA39D8qJPqGbXZG
-# esmggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUt2eEIPvnKfAFTitd9vvZP+WL
+# 6uKggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
 # AQwFADB7MQswCQYDVQQGEwJHQjEbMBkGA1UECAwSR3JlYXRlciBNYW5jaGVzdGVy
 # MRAwDgYDVQQHDAdTYWxmb3JkMRowGAYDVQQKDBFDb21vZG8gQ0EgTGltaXRlZDEh
 # MB8GA1UEAwwYQUFBIENlcnRpZmljYXRlIFNlcnZpY2VzMB4XDTIxMDUyNTAwMDAw
@@ -225,33 +363,33 @@ function New-CdpMonitorPlan {
 # BAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+F
 # zTlzz3YtN+swCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAw
 # GQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisG
-# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFIFxHaRDoFInfSQpeaDMhnMTqXdkMA0G
-# CSqGSIb3DQEBAQUABIICAFupnzYDSxFEb6v7/9mNCd6+L/hLAoxd5MX6LAlhHjWH
-# 3fUPZUuUVIetoPRPEOCjd4ALp2yTPESBFOU6LQdhIpKpeWYEI9ey3c+ShY7bKO5a
-# vTVlxDeFUCxlY16GUtLQcaTCm4dmgCdys0lZqnQQ5DKcM8g9XYPCScdqWhlSVTpz
-# XJrWBmFwoEnx/o6NWYLEBQHcWk4X2xT54pKF2wRqcs0HQKUdy8t7660/Uqyb24s5
-# OVMOt1aXLXD/wUCTjuPK5ytHrNMq3fpr7ymU9DsJ95I3m1CIJgTmsrZuZCdJCCr2
-# AIt2c5hAY7LhumeTlAYaDNef72RCZsw07cWg3Kxgjrm00uBPyQ5npHnEbSg77AMv
-# sTi6Ijjh69T3oTQLeQE9W+zzxSH+Q192pAhcPxss6Hjp2fDcLt/V82j/Qe2+EZ2l
-# nXA3uyeBtp+DZIdPP51MjBzdojxRIJanaTniOLQ/GEsiOvmPI4SXb33SopG8vDk4
-# j6aooXU94Uw63Pv20wpF8D2q7FhIzpBKxwLXdwqLXTOy095PJYjxRhfRZDjUsFKA
-# Y0yvxCq89hwEJi/MtXZVKYJ2O/zrhyoYCLvRK9g9iGmnKc7zLJkPTqDJCjRZgovk
-# wBwoCFZKFeh8A8ulyRQ8DbVl7+9HbbbAXOZiWpJ8nCccjbvLBISMvl6j63btJEQ8
+# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFBxlqVHludBcEtBKJvbj8ibl9FJWMA0G
+# CSqGSIb3DQEBAQUABIICAOXx0mwTpqMG+v62HQfKW3+gF2m50lJ2lF8GssTsQGVN
+# RvsRDacOl+hkDTOUYMVX5/nFXcjkXNyuLKAHw90Hxd+Xt27wTYueaevDU+IBVucK
+# xzjlUTCG5iCzzGERHG2RtWMMyGAmjGQT6u7UdEvxE7SguuGS04NJPyrQq6bKWfqF
+# ESFvDxarH80SjQxePcUPeR0uuFWJrmj6bVSOgVs54Fnf92Tnj03Bam7TK8hyCypV
+# X8RgmJN2AnhnNh5eI1GoHQl+GYv4EMRQAd2M23EkyZ4j/jX5OSZJ34Y/rarUXTwK
+# ZT54fHy5B1CoyVR1hzB7J2yGtHFdcy/UTcmg5pKEmjM93BBGMiw5Xdz1d8oQdr1z
+# vA5yG+9OytGPhB7bgQkfCQK04H6t4UTyieLSriDKmtlOeaQ5Kysmz7MpObig3rnh
+# pdPhmS1yX5FxTZJC1bnD7WvyOROL5BT67FCqdmwMoo8E6oJeF5jx/5SUk9xfa6mF
+# eZnp3J6drfoQ7ZsvtE/BminXe9DTxx/mR7knTqDi4sEbPHCZHX4yVM7atoB1ytjG
+# eSQTXStiU34rk5tZpRUKSGQ87nHzZAUEShjJkmH8UCynxvlfXOerOHpPVvRBBs+D
+# a/I3AlQnksj1xshv+JixHA7gu0VdQXBBNJb3LzHjaE0Q7vjurze9PiXQ2iAYfkIA
 # oYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UEBhMCVVMx
 # FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVz
 # dGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMQIQCE/c
 # M09+RU7bww+P+ZIYNTANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJAzELBgkq
-# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDIwMlowLwYJKoZIhvcN
-# AQkEMSIEIGI/2xEx1S1uEpgie0IhnUx87MyJyfou71SgM2ABe9J9MA0GCSqGSIb3
-# DQEBAQUABIICAB7xcEgas1zn70hpQCDCCsvwaijpPlntlbNAIN+KPqG5lTYcwXOT
-# KBcri6yNaOQbmSWFPVrRwtARAf11QXIopMyEyh1vLhVmR7UtT56zUth7D/57XSDV
-# yhx8CFbdbkDsqW0QjU2KRuwe5S2NABaWLzTmQYyMqcEcNpZWPFNjIFhT+88Oi7eS
-# 2ZvpuWUlpiuklcrbDVPuBO4ccDVE+wUfUoNUyuO/LOS/OEeC+ex4rOflbMVsHQ01
-# bSC0h7BRhgt8J7arOcBjx1hb73KxsS1IzeyfQmOovt7HoKqxL5DXZjLdVEcyC+7V
-# U9HVsgaUI03SR1HBO8crrZrSnm/Psnoiv0j/hRdRFgL2B0mDh6EcYRJPrdwZ6DEe
-# xdfJKqroCmv2Xq+GEXbEDntnkUKs2bq9k36sXoR5r4Xx6zJIr175LLEZrycJ0K3W
-# BIYzeAyUJ5t/w9UB8ufCHHxgsVfPnjjoBcuI8q5Bo1VFrCkfqeR9V+LPoj2FymhF
-# GZeWMhoVapuoA4jJflaRWNKPgIFasupxvcZwnyd9irJ3kOnj0wMnocGpP2rK4fDI
-# sF+nFFBDyat3JSMRl3Gp/7LiQRh1o5PBVp1tDIBKe7bkE6yibnFFZUWd/xEu4Ho8
-# vJiYhdRP62vTsGZWI+V1TpGnvcbCBgHRB+ZOeG0H9bbEmwQkjM1K2KR5
+# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDIzOFowLwYJKoZIhvcN
+# AQkEMSIEIF5eSLQsOmfI89+P8bVl6aYU+wD3P9uqPL2QqQj2UZQyMA0GCSqGSIb3
+# DQEBAQUABIICAJTxxiibIPVNQ8Xs8nX8Xm9gCYu9eWo5+jeyeJPzY0xD6+BbPkuX
+# ebm6VVU9KlZeGyHt9BT9tK/qD/rEfpPF6O6j1ycz9DujVorSAhq6j4gWImPP8Ocn
+# APt/nUs/JBqSWqHXWdGWDy1fG6a7kPmtZzA8czSgBlCyCT6qCDIskPN8m131SYtv
+# PYW34/VdtO495YgqbPHvn3+5qx8QfDiBlsc2oZ0IM3fHNUiereSM3PH73BSu7ha0
+# znHlewUp99/HIHahtYselmL5WJmZHB35mXPW4fh44cysN5GuDQYxo4wFmWxFHnFJ
+# K9lAR5YSh6xgNgh5ujf0JzHxI1tBcLiP1NaS+BYwPjYRg4Y4yUv56B1jMHX0GTNH
+# m6v7rodkhVybkhOhuO02qP6oIwT9h/spD4mzqXngv7AR1rduRMyQ+m5tYX40Tzv9
+# vVEFZdKbYfZA9CxGba9YiQYIv189gP9XQKDkKKUrgcO76Xp/pKjnDMJvoN8iF335
+# ULFXo3Xhj1MSMYYz4Q4U9N6GpF7qV/WZS+Q5cuO2zj9j3QLo7/U/Ilgn2zDWMNfv
+# U5cEAR1R7frgLI6KHueSGhzlpj1rBgNsvbnYYcsiw0aTbztUqZKv/slayhkFxK4O
+# 8CTcwPri4f1Sdqb+M2IvFmvPEYljBFlrF0uZlRF/MJeMsf34LCQ5jwKy
 # SIG # End signature block

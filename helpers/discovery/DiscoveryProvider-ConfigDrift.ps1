@@ -1,29 +1,126 @@
-﻿#requires -Version 5.1
+﻿<#
+.SYNOPSIS
+    Audits device configurations for drift and policy compliance; plans ConfigDrift.* WUG attributes.
 
-function New-CdpMonitorPlan {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][int]$DeviceId,
-        [Parameter(Mandatory = $true)][string]$DeviceName,
-        [hashtable]$OidMap = $(Get-CdpOidMap)
-    )
-    # cdpCacheAddressType is a positive integer on every cache row; the row vanishes when the neighbor is lost.
-    $tableParams = @{
-        SnmpTableDiscOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscOperator = 'gt'; SnmpTableDiscValue = '0'
-        SnmpTableDiscCommentOID = "$($OidMap.CacheTable).$($OidMap.DeviceId)"
-        SnmpTableDiscIndexOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscCreates = 'true'; SnmpTableMonitoredOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableMonitorOperator = 'gt'; SnmpTableMonitoredValue = '0'; SnmpTableMonitorUpIfMatch = 'upifmatch'
-    }
-    @([pscustomobject][ordered]@{ Name = "CDP Neighbor Discovery [$DeviceName]"; Type = 'SNMPTable'; Parameters = $tableParams; DeviceId = $DeviceId; Tags = @('cdp','snmp','neighbor') })
+.DESCRIPTION
+    Wraps helpers\config-drift\ConfigDriftHelpers.ps1. Each target's configuration is
+    pulled over SSH, normalized for its vendor profile, diffed against the local
+    baseline store, and evaluated against policy packs.
+
+    WhatsUp Gold has no configuration-diff monitor, so results are published as
+    device attributes (ConfigDrift.Status, .Added, .Removed, .PolicyFailed, ...).
+    Build a WUG dynamic group on ConfigDrift.Status = Drift to alert on changes.
+
+    Context options (ctx.Options):
+      Credential (PSCredential), KeyFile, KeyPassphrase, SshPort, TimeoutSeconds,
+      Profile, Command, SetupCommand, Shell, EnablePassword (SecureString),
+      StorePath, PolicyPack (string[]), IgnorePattern, UseGolden,
+      UpdateBaseline, ApproveBaseline, SeedMissingBaseline (default $true)
+#>
+
+$script:ConfigDriftHelpersPath = Join-Path (Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent) 'config-drift\ConfigDriftHelpers.ps1'
+if (-not (Test-Path -LiteralPath $script:ConfigDriftHelpersPath)) { throw "Config drift helpers not found: $script:ConfigDriftHelpersPath" }
+. $script:ConfigDriftHelpersPath
+
+if (-not (Get-Command -Name 'Register-DiscoveryProvider' -ErrorAction SilentlyContinue)) {
+    $helpersPath = Join-Path $PSScriptRoot 'DiscoveryHelpers.ps1'
+    if (-not (Test-Path $helpersPath)) { throw 'DiscoveryHelpers.ps1 is required.' }
+    . $helpersPath
 }
+
+Register-DiscoveryProvider -Name 'ConfigDrift' `
+    -MatchAttribute 'DiscoveryHelper.ConfigDrift' `
+    -AuthType 'BasicAuth' `
+    -DefaultPort 22 `
+    -DefaultProtocol 'ssh' `
+    -IgnoreCertErrors $true `
+    -DiscoverScript {
+        param($ctx)
+
+        $options = if ($ctx.Options) { $ctx.Options } else { @{} }
+        $target = [string]$ctx.DeviceIP
+        $deviceId = [int]$ctx.DeviceId
+        $profileName = if ($options.Profile) { [string]$options.Profile } else { 'generic' }
+        if (-not $options.StorePath) { throw 'ConfigDrift discovery needs a StorePath for baselines.' }
+        $storePath = [string]$options.StorePath
+
+        $sshSplat = @{ Target = $target; Profile = $profileName }
+        if ($options.Credential) {
+            $sshSplat['Username'] = $options.Credential.UserName
+            $sshSplat['SecurePassword'] = $options.Credential.Password
+        }
+        elseif ($options.Username) { $sshSplat['Username'] = [string]$options.Username }
+        else { throw 'ConfigDrift discovery needs a PSCredential or Username with KeyFile.' }
+        if ($options.KeyFile) { $sshSplat['KeyFile'] = [string]$options.KeyFile }
+        if ($options.KeyPassphrase) { $sshSplat['KeyPassphrase'] = [string]$options.KeyPassphrase }
+        if ($options.SshPort) { $sshSplat['Port'] = [int]$options.SshPort }
+        if ($options.TimeoutSeconds) { $sshSplat['TimeoutSeconds'] = [int]$options.TimeoutSeconds }
+        if ($options.Command) { $sshSplat['Command'] = @($options.Command) }
+        if ($options.ContainsKey('SetupCommand')) { $sshSplat['SetupCommand'] = @($options.SetupCommand) }
+        if ($options.Shell) { $sshSplat['Shell'] = $true }
+        if ($options.EnablePassword) { $sshSplat['EnablePassword'] = $options.EnablePassword }
+
+        Write-Host "ConfigDrift: retrieving $profileName configuration from $target ..." -ForegroundColor Cyan
+        $config = Get-ConfigViaSsh @sshSplat
+
+        $rules = @()
+        foreach ($pack in @($options.PolicyPack)) { if ($pack) { $rules += @(Get-ConfigPolicyPack -Name $pack) } }
+
+        Initialize-ConfigBaselineStore -StorePath $storePath | Out-Null
+        $hasBaseline = $null -ne (Get-ConfigBaseline -StorePath $storePath -DeviceKey $target -Golden:([bool]$options.UseGolden))
+        $seed = if ($options.ContainsKey('SeedMissingBaseline')) { [bool]$options.SeedMissingBaseline } else { $true }
+
+        $auditSplat = @{ Target = $target; Config = $config; StorePath = $storePath; Profile = $profileName }
+        if ($options.IgnorePattern) { $auditSplat['IgnorePattern'] = @($options.IgnorePattern) }
+        if ($rules.Count) { $auditSplat['Rule'] = $rules }
+        if ($options.UseGolden) { $auditSplat['UseGolden'] = $true }
+        if ($options.UpdateBaseline -or ($seed -and -not $hasBaseline)) { $auditSplat['UpdateBaseline'] = $true }
+        if ($options.ApproveBaseline -or ($seed -and -not $hasBaseline -and $options.UseGolden)) { $auditSplat['ApproveBaseline'] = $true }
+
+        $audit = Invoke-ConfigDriftAudit @auditSplat
+        $checks = @($audit.Checks)
+        $policyChecks = @($checks | Where-Object Category -eq 'Policy')
+        $policyFailed = @($policyChecks | Where-Object Status -eq 'Fail')
+        $policyWarn = @($policyChecks | Where-Object Status -eq 'Warn')
+
+        $status = if (-not $hasBaseline) { 'Baselined' } elseif ($audit.DriftDetected) { 'Drift' } else { 'Clean' }
+        $attributes = [ordered]@{
+            'ConfigDrift.Status'         = $status
+            'ConfigDrift.LastChecked'    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            'ConfigDrift.Profile'        = $profileName
+            'ConfigDrift.Added'          = [string]$audit.AddedLines
+            'ConfigDrift.Removed'        = [string]$audit.RemovedLines
+            'ConfigDrift.Lines'          = [string]$audit.LineCount
+            'ConfigDrift.Hash'           = [string]$audit.Hash
+            'ConfigDrift.PolicyFailed'   = [string]$policyFailed.Count
+            'ConfigDrift.PolicyWarnings' = [string]$policyWarn.Count
+        }
+        if ($audit.BaselineHash) { $attributes['ConfigDrift.BaselineHash'] = [string]$audit.BaselineHash }
+        if ($policyFailed.Count) { $attributes['ConfigDrift.FailedPolicies'] = (($policyFailed | ForEach-Object { $_.Check }) -join '; ') }
+
+        $color = switch ($status) { 'Drift' { 'Yellow' } 'Baselined' { 'Gray' } default { 'Green' } }
+        Write-Host "  $target -> $status (+$($audit.AddedLines)/-$($audit.RemovedLines)); policy fail=$($policyFailed.Count) warn=$($policyWarn.Count)" -ForegroundColor $color
+
+        $carrier = [PSCustomObject]@{
+            Name          = "ConfigDrift - $target"
+            ItemType      = 'Inventory'
+            MonitorType   = ''
+            MonitorParams = @{}
+            UniqueKey     = "ConfigDrift:$target"
+            DeviceId      = $deviceId
+            Attributes    = $attributes
+            Tags          = @('config-drift')
+        }
+        $carrier | Add-Member -NotePropertyName 'ConfigDriftAudit' -NotePropertyValue $audit -Force
+        $carrier | Add-Member -NotePropertyName 'ConfigDriftChecks' -NotePropertyValue $checks -Force
+        return @($carrier)
+    }
 
 # SIG # Begin signature block
 # MIIr1gYJKoZIhvcNAQcCoIIrxzCCK8MCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUKpZ2y1ETwKA39D8qJPqGbXZG
-# esmggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU4xYE3WiaP+yjF8/gYW0cfJ2i
+# KkCggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
 # AQwFADB7MQswCQYDVQQGEwJHQjEbMBkGA1UECAwSR3JlYXRlciBNYW5jaGVzdGVy
 # MRAwDgYDVQQHDAdTYWxmb3JkMRowGAYDVQQKDBFDb21vZG8gQ0EgTGltaXRlZDEh
 # MB8GA1UEAwwYQUFBIENlcnRpZmljYXRlIFNlcnZpY2VzMB4XDTIxMDUyNTAwMDAw
@@ -225,33 +322,33 @@ function New-CdpMonitorPlan {
 # BAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+F
 # zTlzz3YtN+swCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAw
 # GQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisG
-# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFIFxHaRDoFInfSQpeaDMhnMTqXdkMA0G
-# CSqGSIb3DQEBAQUABIICAFupnzYDSxFEb6v7/9mNCd6+L/hLAoxd5MX6LAlhHjWH
-# 3fUPZUuUVIetoPRPEOCjd4ALp2yTPESBFOU6LQdhIpKpeWYEI9ey3c+ShY7bKO5a
-# vTVlxDeFUCxlY16GUtLQcaTCm4dmgCdys0lZqnQQ5DKcM8g9XYPCScdqWhlSVTpz
-# XJrWBmFwoEnx/o6NWYLEBQHcWk4X2xT54pKF2wRqcs0HQKUdy8t7660/Uqyb24s5
-# OVMOt1aXLXD/wUCTjuPK5ytHrNMq3fpr7ymU9DsJ95I3m1CIJgTmsrZuZCdJCCr2
-# AIt2c5hAY7LhumeTlAYaDNef72RCZsw07cWg3Kxgjrm00uBPyQ5npHnEbSg77AMv
-# sTi6Ijjh69T3oTQLeQE9W+zzxSH+Q192pAhcPxss6Hjp2fDcLt/V82j/Qe2+EZ2l
-# nXA3uyeBtp+DZIdPP51MjBzdojxRIJanaTniOLQ/GEsiOvmPI4SXb33SopG8vDk4
-# j6aooXU94Uw63Pv20wpF8D2q7FhIzpBKxwLXdwqLXTOy095PJYjxRhfRZDjUsFKA
-# Y0yvxCq89hwEJi/MtXZVKYJ2O/zrhyoYCLvRK9g9iGmnKc7zLJkPTqDJCjRZgovk
-# wBwoCFZKFeh8A8ulyRQ8DbVl7+9HbbbAXOZiWpJ8nCccjbvLBISMvl6j63btJEQ8
+# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFFOuqoCycc0cJxHByVG5PI57/bSeMA0G
+# CSqGSIb3DQEBAQUABIICABKX3b58EWz4JAojNb+phRnnFN3ve2UUh8eyTxeLCUoI
+# RTc7KvLG/XlEPlz9g3ptSS7BTtncVAAIb7Z9HDndu1mxMLMCuXtD1tOsb8AcvJWw
+# HuwiUbnlQ0Qy8gzC5SMv5OCOr+Veoi+lMwA1+Aczb63zlgY4d6c1pkvG6N4MhNbl
+# oNx6oxgC4WD2VG0TaBxGl6QAyU0b/fRDzx+Nm/GMJf3DFxzdnAmZYRjWpHQowEm9
+# GU3UqNxEkWZnsAeKOYX9M5ijMgbEXPtMZQ5+aSryc3SSENwriZyi5VQfM4kJdiQw
+# wHmg89KYwDkoB+a/miU5+8DXwOirOMKjqE5Zo41aspZv+DySTpM8m20IEJ1Ls1Op
+# y7CT8VhNDw2TvNwiyKsNG14gHGSJLJfZIraDeNDVHq0Cy3QkXWSbqxKZEOSIfQQU
+# LiLn7fXzqlLfMn1ojRIZzDNym7goXSj+kzidN0p2OzA77oVrWmpp7s7wLFFpvywo
+# g6r/SIrshSohHjl09o2jJK5IFJc3eLAn+f3LYrrlbPCGKnpLrjl85yU02R1+tRaP
+# t6OvctDV8Vd1nmIe1e4N5/IauX5iryiPXcCQC6GX1kYBEzoFNE9mqroDZyG4Hj8v
+# qMgDn076WB9BTV3jTfI1zKheod5rUImNGwW4pdtfGBHwjWdSL0FDbm2FUzWSRRki
 # oYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UEBhMCVVMx
 # FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVz
 # dGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMQIQCE/c
 # M09+RU7bww+P+ZIYNTANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJAzELBgkq
-# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDIwMlowLwYJKoZIhvcN
-# AQkEMSIEIGI/2xEx1S1uEpgie0IhnUx87MyJyfou71SgM2ABe9J9MA0GCSqGSIb3
-# DQEBAQUABIICAB7xcEgas1zn70hpQCDCCsvwaijpPlntlbNAIN+KPqG5lTYcwXOT
-# KBcri6yNaOQbmSWFPVrRwtARAf11QXIopMyEyh1vLhVmR7UtT56zUth7D/57XSDV
-# yhx8CFbdbkDsqW0QjU2KRuwe5S2NABaWLzTmQYyMqcEcNpZWPFNjIFhT+88Oi7eS
-# 2ZvpuWUlpiuklcrbDVPuBO4ccDVE+wUfUoNUyuO/LOS/OEeC+ex4rOflbMVsHQ01
-# bSC0h7BRhgt8J7arOcBjx1hb73KxsS1IzeyfQmOovt7HoKqxL5DXZjLdVEcyC+7V
-# U9HVsgaUI03SR1HBO8crrZrSnm/Psnoiv0j/hRdRFgL2B0mDh6EcYRJPrdwZ6DEe
-# xdfJKqroCmv2Xq+GEXbEDntnkUKs2bq9k36sXoR5r4Xx6zJIr175LLEZrycJ0K3W
-# BIYzeAyUJ5t/w9UB8ufCHHxgsVfPnjjoBcuI8q5Bo1VFrCkfqeR9V+LPoj2FymhF
-# GZeWMhoVapuoA4jJflaRWNKPgIFasupxvcZwnyd9irJ3kOnj0wMnocGpP2rK4fDI
-# sF+nFFBDyat3JSMRl3Gp/7LiQRh1o5PBVp1tDIBKe7bkE6yibnFFZUWd/xEu4Ho8
-# vJiYhdRP62vTsGZWI+V1TpGnvcbCBgHRB+ZOeG0H9bbEmwQkjM1K2KR5
+# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDIzNVowLwYJKoZIhvcN
+# AQkEMSIEIJ1ntQduPhnqehtGKfaLtGCWatzdV7psPT+tmtQaHv+QMA0GCSqGSIb3
+# DQEBAQUABIICAG0Wx8IlQYj8VtVMPsE1Fgoekxc9vd8ueuuqhaJzE3B1YrsQwceT
+# ulSnasx6UCHXe0r62jNIBybnhcHavGoIHZUD6ZzLCdzRy8lXDrvzF5AjioxVS7MS
+# Y911kZn6E9kWvLpxWtlgkse+rEMmpmCjimkq8wjM3yvhSKNPmsuWcW4dShPUrFyU
+# jkS5dZqNurj5Ugrko3lm+OUSUr6qMKuLmGHdg0HwUuxsIGkr6TDqJIL8pp+oghlO
+# 6mh494ZQEshNSzNHu8C1gWxcj4pGLnX1Ce8WJnn+O1mdZfhGI3/nm2XpoL2HRiQO
+# z3YbO5AZEjEBrwdCm9ehpDT4Umg4dHsakxmmUOM2hbK09JK/R5t9LDeJmEvXafWa
+# nJ/wT4HHiNTaqa25Oi9/GsoX4AFCju7pNtL95/YVW5bjldLJz7l5SZFbwFqKtPPa
+# LQi11NVwCFqhuf+T40jqVoLuv4sDp4eHZofAOZCSQuV6c4rn833/lQ3yrwjjq7dW
+# cLFzg4993Ux+ePdlsDhJynA4sEMsFIFflkGo0+vmLVfTxI2Bc8Sy9bYfBgeA0924
+# +MH/jNJZGnBeEeV5HooIJvEce/MCU1pjgMu61ziQz23fan5YcxcRJA39BF6Sqa53
+# 72Lq0pD+536kRXXT7ftRFn/jtties9T6GuP+opzp25trpzIuTy0kWDoD
 # SIG # End signature block

@@ -303,7 +303,9 @@ switch ($currentChoice) {
                     $match = $recheck | Where-Object { $_.name -eq $credName } | Select-Object -First 1
                     if ($match) { $bigleafCredId = $match.id; Write-Host "  Found credential after creation (ID: $bigleafCredId)" -ForegroundColor Green }
                 }
-                catch { }
+                catch {
+                    Write-Warning "  Credential re-check failed for '$credName': $($_.Exception.Message)"
+                }
             }
 
             if (-not $bigleafCredId) {
@@ -324,14 +326,16 @@ switch ($currentChoice) {
             }
         }
 
+        # One library read: per-name search returns device assignments, which never match by name.
         $existingActiveNames = @{}
-        foreach ($actName in @($uniqueActiveMonitors.Keys)) {
-            try {
-                $found = @(Get-WUGActiveMonitor -Search $actName)
-                $exact = $found | Where-Object { $_.name -eq $actName } | Select-Object -First 1
-                if ($exact) { $existingActiveNames[$actName] = [int]$exact.id }
+        try {
+            $activeLibrary = Get-WUGMonitorLibraryMap -Type active
+            foreach ($actName in @($uniqueActiveMonitors.Keys)) {
+                if ($activeLibrary.ContainsKey($actName)) { $existingActiveNames[$actName] = [int]$activeLibrary[$actName] }
             }
-            catch { }
+        }
+        catch {
+            Write-Warning "    Could not read the active monitor library: $($_.Exception.Message). Monitors may be created again."
         }
 
         $toCreateActive = @($uniqueActiveMonitors.Keys | Where-Object { -not $existingActiveNames.ContainsKey($_) })
@@ -412,7 +416,9 @@ switch ($currentChoice) {
                     if ($match) { $deviceId = $match.id }
                 }
             }
-            catch { }
+            catch {
+                Write-Warning "    Device lookup failed for '$($dev.Name)': $($_.Exception.Message). A duplicate may be created."
+            }
 
             if ($deviceId) {
                 $existingDevices[$key] = $deviceId
@@ -497,7 +503,11 @@ switch ($currentChoice) {
 
                 if ($bigleafCredId) {
                     try { $null = Set-WUGDeviceCredential -DeviceId $deviceId -CredentialId $bigleafCredId -Assign; $stats.CredsAssigned++ }
-                    catch { }
+                    catch {
+                        if ($_.Exception.Message -notmatch 'already|assigned|exists|duplicate') {
+                            Write-Warning "    Could not assign credential to device ${deviceId}: $($_.Exception.Message)"
+                        }
+                    }
                 }
 
                 $actMonitorIds = @()
@@ -508,7 +518,11 @@ switch ($currentChoice) {
                 }
                 if ($actMonitorIds.Count -gt 0) {
                     try { Add-WUGActiveMonitorToDevice -DeviceId $deviceId -MonitorId $actMonitorIds -ErrorAction Stop }
-                    catch { }
+                    catch {
+                        if ($_.Exception.Message -notmatch 'already|assigned|exists|duplicate') {
+                            Write-Warning "    Could not assign active monitors to device ${deviceId}: $($_.Exception.Message)"
+                        }
+                    }
                 }
             }
         }
@@ -619,8 +633,8 @@ Write-Host "Re-run anytime to discover new Bigleaf sites/circuits." -ForegroundC
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJ5n6ZoZx55G7q
-# uQsOIOptY7NwYfJAxPOW1iEnsb25jKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBt8IIaUdJIRL89
+# 4R4ZZ9XEWrj/jRfhWIuw7zfkIq2JFqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -781,25 +795,25 @@ Write-Host "Re-run anytime to discover new Bigleaf sites/circuits." -ForegroundC
 # 7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+N
 # Jpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckT
 # etiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszW
-# kPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDANBgkqhkiG9w0B
+# kPZPubdcMIIG7TCCBNWgAwIBAgIQCE/cM09+RU7bww+P+ZIYNTANBgkqhkiG9w0B
 # AQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/
 # BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYg
-# U0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkwMzIzNTk1OVow
+# U0hBMjU2IDIwMjUgQ0ExMB4XDTI2MDgwNTAwMDAwMFoXDTM3MTEwNDIzNTk1OVow
 # YzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQD
 # EzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIw
-# MjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBGrC0Sxp7Q6q5g
-# VrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwBSOeLpvPnZ8ZN
-# +vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/4QhguSssp3qo
-# me7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3K3E0zz09ldQ/
-# /nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROUINDT98oksouT
-# MYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3w6ySSSu+3qU8
-# DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46YceNA0LfNsnqcnp
-# JeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d2sC26/PQPdP5
-# 1ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8xymLnjCbSLZ49
-# kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+AliL7ojTdS5P
-# WPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2bQhpp0IoKRR7Y
-# ufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
-# MB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSMEGDAWgBTvb1NK
+# MjYgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALZ7pvLJ/s1K+NSb
+# TGWz/TjGMPh8CQ6RucZCLv5anHzWJjF/NWJrFIhy24fcpKXlgRiky4WAawDfU3YP
+# 0BMxt9l3Dm5oCG5Z69AqEN1kgHg2epx+l+lZBcmJCcN0ASURML5uFIS80sZsDwO3
+# BSkUxDjLJhBI+qiZP3aixAC/qEGLjsBNlLol9VZ7pfGEXiMlneJIC5/YKuizVzNF
+# KZZEeoy/0B8Zm+nzKBgSWG52lCO1w+nCg6XpCtklTJXeIg283hw7TmmsZXR+SMbj
+# brEOvZ3fP2VxIgeR28Y90ZStd3F9VuA5RVynb/whITPAo9b75Zr4Ta6Mj3URm26Q
+# ZYMn/FnbuTegcoRcFEZ9FOqM5T6MTdtr/n74lIT/ug0eeOzmZ6QTFg33otX+bFRs
+# IolvykE1jive4PuESaT8zzVeFWDAMDtozNgLctkGD1ZjkEyZtJrLl5ya0m5doH/S
+# cpaZCZVl6pNUOCybMc/kxC6EAmSJY24L0yYKD1Nkddsnb/ItVKi/2nXpQNMu1PT5
+# prW83vV8d67WowuUs0HdY4H8AMLGvdL/WHEj3ZnqMqAQQP9u3Ai9t+5eQ02GDwy0
+# ODjdzi0xlp70W+ow63/0++YDEX1M0iwgUHwbrJvfpklkZQvw3+kv3vUPItdwrocz
+# k9icflf55W1zOEKAcJVAIXpcMCU9AgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAA
+# MB0GA1UdDgQWBBQUyWOKMC7USvtulPPm40B+9ezN4jAfBgNVHSMEGDAWgBTvb1NK
 # 6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYI
 # KwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8v
 # b2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRp
@@ -807,49 +821,49 @@ Write-Host "Re-run anytime to discover new Bigleaf sites/circuits." -ForegroundC
 # SEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5k
 # aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2
 # U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9
-# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESeY0ByIfjk9iJP
-# 2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FUFqNh+tshgb4O
-# 6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7YMTmqPO9mzskg
-# iC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0ziTN6R3ygQBHMU
-# BaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/QqvXnNb+YkDF
-# kxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlqAcuEVT0cKsb+
-# zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3Y50OHgaY7T/l
-# wd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roancJIFcbojBcxl
-# RcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/ndUlQ05oxYy2
-# zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7IRE2lskKPIJg
-# baP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdCvHlshtjdNXOC
-# IUjsarfNZzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQCNxTphHp1SCt+ZrAmAfn0oQLFr0mLywSLa
+# DXQIENoyKqxrFbJblzCVP/pkXmwXOdrOpWygLzlT12os5ipDCy35RBCg2UMeApEt
+# rfGhz45F4Wt4WGdNdIbRWt3YTYJmpR+b7lr4d7Uwn+H600u4D7RnOGf8Wj4UNgAd
+# ZkfHhHv1mx9EVh71SJelcEN/oORSjXzdjfw1iZH9d8Nh/thn6hH23d+VsPAr6GAY
+# yzSA02nXD1nYLI7Ijmiv+xLCiYC41DSFYL3GhTiy0PxpawPtGRyaBVGzq+UiTfM8
+# pD7KVyF5aQyWP4KhVGUUTnmm/RlYJoW3TiXA/+t0YcT2oRVBm3JETjajHug2AL+v
+# 5jhtKVnd3D0rbHXEu27o+Q8p4sEWPMqKDB+qbceb6T/6WcwTwXmQ9lOCLLYcsQeS
+# WmvKqzpAec9etE14jOQAzLKWdE3w/TCaKtLRaRT7LCkRYVnhA2D73FLje1O5b3HR
+# 5eHs0NzU/+xX7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94lbUveOiJBI+xZ
+# EbGRsMNbXmMREUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H5Mh7QfieAIjW
+# agkJNt68Yfim6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCyatf8R1hSjzSvd
+# N8yWQPT9gzGCBkQwggZAAgEBMGgwVDELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
 # Y3RpZ28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWdu
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDKaTUH0mn3AQBI9iPNtVtMxu48QLpLAogjpkLwHVpyhTANBgkqhkiG9w0BAQEF
-# AASCAgApy2/9M11z9BVrHXO0Q85XhWLxMfRkD2b0L/PPfbZRtu2SaOyqCLgyf/Nd
-# NWtzqCyxgfBIewmtpqWCPg+5tybLXhzEOLtFuVLijg1wkVY78omRErkFt6TUxRqo
-# 2Z5OcPcREYqXeUk+0vkMoHSj8IzCOqL6mXM4ZTaudpKgm2exCOGoRLc6lSyk9h3d
-# d8pcgC09EqUcUrdFLqzsUetAm1VNqfTeJCQo6FAph3KzdpoLHFaMVK+prHaw3Yf5
-# W7XnHLiZ7+yZvyx5qKdH6B16gP81Vahbgl+8k3iwpdttuNZvWRjbSAhiLyj+MZEV
-# 6UTFeQcZKfv/EgdG03tph8jbw6m3+9ODaw9zYHh2/diUG9SPeq36KOcSRdp8hGvY
-# aY764356ZehjN9EPaAlQJvGgx2ff5NmxgggWSMXe88Qyx6Bi/AQhb+f8stigfpBt
-# jAKAJ6JXRs646MVxRkvGiog85AHh5FCCTxahfALjJSqZqN8KdXRIXw8sVEkE+WMk
-# b7CG9cEA2JoBTg/fXUBL+bYDCuYLmwUEirc/9q3NSlx5fn+aUdhZjKBD+dOpj0zA
-# dxpXBwcZBWYtEPNXXQtB6Rl0Rhr/RwFUBvZardozZnMrvaUjB3dtgI5jlG6UQycH
-# jKS89uhJgXigcr50q4UEloESMa7mG4Kf4A/J/68s3MKgu7ehdqGCAyYwggMiBgkq
+# BCCtOU5GlMt4gqDaiYpl9ncNyeif3Ha1TZGxMIht/8f77zANBgkqhkiG9w0BAQEF
+# AASCAgAXGHoBKy847gkcQlvG/kgLxo9KzOjlwIRrkG8tAqbwSqy+52fKLa2DaEm2
+# ZKwj1YgVHmEUm0/POcLXC8w2mhxrWK1HTNkjGvPlS9o6k4o/8u/3TOfzH7g3fZ+h
+# rBlPfEVU6iOJmSdb9SuQ3t///rXVbSXSKr6saddnwax+UDQBa8AlW5iYcG8BTiDU
+# yZwKHLRSe6ILGZSQsJ6KDmjtd2QAH8MISIPPa5XMvBhk++cor4cvTXjl/pmT9RQj
+# eEXa5jIdmsqntr+kIHTGyts69fPao4OREv/5e/EmJaCJy/Bu+bJ6ZMIRR+He3srR
+# GS7pvhMZ5oEWqlaPnaPiQu9SRVg6vPHG0HdKVd/FXTn2e4dWRCOWUQsLJZaIPmLJ
+# KzgNCGaeO9wDSocbawxiT0/NT0+OeJbDuJzjKYPTFDWq5BmRikPWBr42oS/byK24
+# hIqyV3lgnE55HbmyL6t8lgPjpW6Ufr1Whgp7EiHzY+MChBc0wJQ+wp1VbDLDR7qn
+# CvjkIG2az+7wRR2DWQl1+Y5jrOulY1Qr6AfFjmvGO/qCoI5WxYa1ulVVdOv+U1nb
+# GsExVqhGejvvf0xVyaAHXfyyejZZgyC3tK2NCKRM7eqHzIEwjQTdthyAjKc2aSQw
+# 5ZauQmwVeiIIhk/Bdy/mG6DlDfPqpeW/4WLFMH/bC2zbAffJn6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
-# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeV
-# dGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA1MjgyMDA4MDdaMC8GCSqGSIb3DQEJBDEiBCA7XhjW
-# GmlpaaBrAIyqmB4KvrB+XgiI9eQqTiWGHUQ8RTANBgkqhkiG9w0BAQEFAASCAgB1
-# 1RQl3tHZbgTsdXy23YTUZ+6P9vofzvh+FvVYmLajo5QJu/rWl9kq8Vs2g8evLBAm
-# bzXbUeQ3K4AyVqVJjSKdkbSja8etrtEVs/rd78QcHDMPA7S4b++laj+vdGWZhT7H
-# xZ1yR1SMYfxDq8FRhcR24TTPOvm09gkAUYjJ/5slJ+ExZiaTNlgNFSN7Jj+5eJFX
-# RCHtEA6BUx44khwCYZSkwXYJXOwtG8PwSKatQm3Yd32EO5kWHRerNDB2l0qTcQf3
-# NvRqcurbmmLzw6hqyBfE0wN+HWRHoe6RwO6u4WQ6P94F+LT5YyU9aslyh76e+OZT
-# p389+52e6ebAmBDlnfacJfJLd4TOBw26qbywuY+tzRIZ0BmxAYalCOnIMXsOMUQn
-# uxkBxseqRFdEt3A9m+KOj8YDJx7gDht6u4TMN3m2seIj2Qo7tMKAKa/wFg5Ej3bj
-# DwISkWaFDBLpfzq23iAlwD0ptkNIFpTUQ3e8kmQTJMtnSdELYF2N+KjURyJG0w3L
-# 2s3EY+EXTTspLdPCv6zvKI8YopCpNcnVz+KwQilNVdmtHsa1a2p40CwO8y57L2XM
-# bzP3T+AbDLiyl7wrlqq57ZR8BLjDk/aSXuyBpytwIOFFImYEeMXe13E+2OuD7d+5
-# L/4EoCDSjdXGe7t/AbeIVIqKMH85r6PLlre2iEYOOg==
+# U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
+# GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
+# CSqGSIb3DQEJBTEPFw0yNjA5MzAxNTU2NDBaMC8GCSqGSIb3DQEJBDEiBCBox89B
+# vdzLWzsyGqSN371lwsj+Gzueam0fY4dK4jFMDzANBgkqhkiG9w0BAQEFAASCAgAQ
+# /+/G3gp6dXRdujXTfEyBRRBLFKJ10jb1WBtWkx8CNCKplmDTlGiTujpeBBRP3tdb
+# C6MEiDPBTYp5kETtcCwVg/MumK1mahHR1Q+nl9jM0KVwfIUJy8F2Xp1cCZRz47ue
+# utLpXKhP78FoUnrcaEWbaiGI5IoSePLUNvJNaHzF+yrz6KpLnbt7I1WHr82HBDdc
+# FhpmN2xzw8/mHP9pJ/dcQymvMfGFgy5JLr0Y43nYERQKPDHEDP7zo8C2gdiRh/oS
+# FfuptZ6grlOtFpyO9jbXKOi8zQ4oxCWMlGh3GutI7fEX2QfPDpIU+ZPtqN+o4W4A
+# mTajeT3e6yQLF/Y9o9NL83mkphJPWBi8bE5Wurfs9L9GbjX2RpidM6dUlM7ZmhY3
+# 49XuNsg25ruw9Td49w3qlTwEcGuiQn0liN/65asWpOKWvZ8pKsDsyDAufKt9EmIN
+# cpfXeMc3ctFFdimReE1OQKEsveg717wTPuchTCXsaxMNMoqvx1cIM+OjaVa4gTxJ
+# kipamvPNx/UrkoBqpxooTxVWElPzKpERoB9fRKqeSNKBexlda1c7mkjJSOVCNH2p
+# H25+v/mgRKoxBm9yrGLv3Y1YcCr9XBMktlGOvTJfTVqf28ql3CAN5w3fp/2/5g2c
+# 6ctQqwcOj3TveIX9d+Y7Y1I6tixc05m96F8dWB3AzQ==
 # SIG # End signature block

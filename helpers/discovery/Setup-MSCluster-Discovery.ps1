@@ -98,6 +98,9 @@
     How long to wait for the queued rescan to finish before setting display
     names. Default: 20. Ignored when nothing needed a rescan.
 
+    Rescans are issued once for the dedicated MSCluster-WhatsUpGoldPS group;
+    when any device needs a rescan, all devices in that group are refreshed.
+
 .PARAMETER DeviceGroupName
     WUG device group that newly created cluster devices are placed into.
 
@@ -771,6 +774,9 @@ switch ($currentChoice) {
             $script:PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
         }
 
+        $msClusterGroupName = 'MSCluster-WhatsUpGoldPS'
+        $msClusterGroupId = $null
+
         Write-Host ""
         Write-Host "Reconciling cluster devices in WUG..." -ForegroundColor Cyan
 
@@ -992,6 +998,16 @@ switch ($currentChoice) {
         $allDeviceIds = @($wugDeviceMap.Values | Select-Object -Unique | ForEach-Object { [int]$_ })
 
         if ($allDeviceIds.Count -gt 0) {
+            $clusterGroup = Sync-WUGDiscoveryDeviceGroup -Name $msClusterGroupName -DeviceId $allDeviceIds `
+                -Description 'Devices managed by WhatsUpGoldPS Microsoft Failover Cluster discovery.' -Confirm:$false
+            $msClusterGroupId = $clusterGroup.GroupId
+            if ($msClusterGroupId) {
+                Write-Host "  Using WUG device group '$msClusterGroupName' (ID: $msClusterGroupId); added $($clusterGroup.Added) device(s)." -ForegroundColor Gray
+            }
+            else {
+                Write-Warning "  Device refreshes will use the per-device endpoint."
+            }
+
             Write-Host ""
             Write-Host "Applying device roles..." -ForegroundColor Cyan
             $roleDeviceList = @($allDeviceIds | ForEach-Object { [string]$_ })
@@ -1050,13 +1066,32 @@ switch ($currentChoice) {
 
             if ($scanDeviceIds.Count -gt 0) {
                 Write-Host ""
-                Write-Host "Queuing rescan for $($scanDeviceIds.Count) device(s)..." -ForegroundColor Cyan
+                $refreshTarget = if ($msClusterGroupId) { "group '$msClusterGroupName'" } else { "$($scanDeviceIds.Count) device(s)" }
+                Write-Host "Queuing rescan for $refreshTarget..." -ForegroundColor Cyan
                 try {
-                    $scanIds = @(Invoke-WUGDeviceRefresh -DeviceId @($scanDeviceIds) `
-                        -IncludeAssignedRoles 'true' `
-                        -AddUseInRescanActiveMonitor 'true' `
-                        -Confirm:$false -ErrorAction Stop)
-                    Write-Host "  Rescan queued for: $(@($scanDeviceIds) -join ', ')" -ForegroundColor Green
+                    if ($msClusterGroupId) {
+                        $groupRefreshResult = Invoke-WUGDeviceRefresh -GroupId $msClusterGroupId `
+                            -IncludeAssignedRoles 'true' `
+                            -AddUseInRescanActiveMonitor 'true' `
+                            -Confirm:$false -ErrorAction Stop
+                        if ($groupRefreshResult -is [string]) {
+                            $scanIds = @($groupRefreshResult)
+                        }
+                        elseif ($groupRefreshResult.data.id) {
+                            $scanIds = @($groupRefreshResult.data.id)
+                        }
+                        else {
+                            $scanIds = @()
+                        }
+                        Write-Host "  Group rescan queued for '$msClusterGroupName'." -ForegroundColor Green
+                    }
+                    else {
+                        $scanIds = @(Invoke-WUGDeviceRefresh -DeviceId @($scanDeviceIds) `
+                            -IncludeAssignedRoles 'true' `
+                            -AddUseInRescanActiveMonitor 'true' `
+                            -Confirm:$false -ErrorAction Stop)
+                        Write-Host "  Rescan queued for: $(@($scanDeviceIds) -join ', ')" -ForegroundColor Green
+                    }
                     if ($scanIds.Count -gt 0) { Write-Host "  Scan IDs: $($scanIds -join ', ')" -ForegroundColor Gray }
                 }
                 catch {
@@ -1222,8 +1257,8 @@ Write-Host ""
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrbyVccAu0PCUl
-# t7i2EQaEJKbqGS6Njia++2mddNGkc6CCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA229mXM8dID6Eh
+# rstGX7EMi7E2o8YDmODJZ0jiR6sxsqCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1426,33 +1461,33 @@ Write-Host ""
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDyQazw5T8mRIDlS4nm2bSkQmrkhy/Okm02BYXSgLd7nzANBgkqhkiG9w0BAQEF
-# AASCAgBC5MmKe/j+cz/88ctCjsqJjtG/4nBNS56J0bM0txsKC4nr1t+U4+w5u1pc
-# 7WxwKOexmeyNVDuLrvjIBhmKrPxgjl383ZZFL4wjSibQw0vyqYmlIkdx9LU98s8D
-# CIqD92/VAkMvB1cnfXWosO+BykJrre4jvQqKhJxcwnjeNitGLUDCZjWmrCFAyc7P
-# 9dglaxX+5dMqmyWL2jylyFVAGTZu5Mvfndn6yG5HpAP1TEXVB7p7eKcrjLXVBtYS
-# 2J5yI7L6o6SLzyOPR+Wb8BKSYYsELz4v0KCYua4LImEYY7ZH2q49BHmbup4RdWnd
-# AGLNTsSBZWn37NEPiM5wRdWXA62ye70GPGznHZuqi2am3JssbKTvW4+vkky+9ghZ
-# 72gf7+McZ+6tgw+ja/7L+hLLuBd/LdUD/drAxC4T3CrUuF2AdknOEIs8x3Of4Z04
-# cRswp7A75ZGhQ1gIncKkgtuPFnL3XNE86DpIPlr1UfOB/TQPevoIXYyJZFRoLXzA
-# uUoVLQFQnecc98mSzXEJGWo565K8UDndQxEldQcXLN55OlHIDi6WFlztw//i66bb
-# mK61eaOn1IKj1ldm6BG2wZA9SaZYbeYwpATPp9nFJq1UDseUtSXa8tbuhMHXCINp
-# HOfDDXQL9/V/ocPkoyVhKloSLijh/3VOHAdRCWwZqVvNjj7nPKGCAyYwggMiBgkq
+# BCDOIg8dOhETAN+sZhoHMRHg85urOHVHDK6+VIDwbujBATANBgkqhkiG9w0BAQEF
+# AASCAgDxfMnMhu5SQ4GM5N51L/3iq4WSW+nOckFBNeSDkA9o8I1EwfzsjisugNAG
+# hzjxmMV2ks60GE9AavLW35VSV5wYst4/VGE+FTBHUmHPY1LQS7lM7IbVJPaXoRvn
+# 4M8DWoB+T0Lw86cC6wKAptTdVOz8NKwUTBMQ5EjgUUm/VpmieembfsfDjpaEPRTN
+# 72pdwUQ7ZeVRbnxYhTB/xnYgvbbIjHCazFRcR7zfc19lG7YNXmIV4lSc9sjOZBuH
+# 7IF8JRZmENjkuXgZy3llofZ52PtahbimgTqNfkeVAbb397INXIEkxkDtGycSAI47
+# Gynz78S3W35/VJiB4U2VQgkV0Aubh/vGmNFKc7Vu8kJaazt7N4Vq+/zAcnK++omu
+# sX8pRWF9T6usdnVrfgG3IMoZpL7Pp12bomC0huU7QZKDis63fZeA/0gTEBwqINyQ
+# cZDx8X+dF89oOi2XTKljLEVSKvtm5E2KWDALIQwXszh1y6Rylvy+DDWycD+h5BrC
+# JIRun85IEl4gMdLK9Bow6RkZQ/GiFeWpb1b7ciCOgjJV+E66vCc+uQzKxa7oUH7W
+# WRKJwmPIKI7H3jcmddCR5PEYbw4srLGc99hHG5ALjb6b1IG+105qZ1mtF8Jpwvul
+# H7tbMfW2SgioAaREHjhIhvlVo1byDgyL1GU3Iaveu5eYrsJwwqGCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
 # GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA5MjAxODA3MzRaMC8GCSqGSIb3DQEJBDEiBCBiYqq7
-# 4/Aqa12Gas2x3PWlL5jFZpO2zWMVp/pQXZZzAjANBgkqhkiG9w0BAQEFAASCAgBR
-# TiBG1PSjB4W2Hvh87jY5OOo/iVFencwkO85MK5PoaAngHekQnFjebICN7SssAvSn
-# Ur/SigLmhH2MGlbOfArBPsYi9owoDYny+56CLUldQ1Dt7xxuxYQu6sgSfbCV2P5+
-# Nc79urFwNt2qzOhrn3Cdzi1/Hc70JB+4oOH2PvJZ8PzcGqiv31pjLmxfXyEBWzvR
-# YWFjYHOf5puCWJCGUfm2UDYtNDEXPuiZfhdtHCQfhw6nxNIwGhFpuBpPCFH3TIG9
-# UiVFCHTER5/J6/gYAs/ojvx+vCADPw0p3shqWnSRrgHPcTh8f279b5fz0OsjPQ32
-# nqXLa9s/SmU6VguWLicmoYlWSb0/gxU+iz8fNgB1eRSsIMv3yxDUMylF5Iktc2FD
-# S0nQQlCmDeToXCBf7RroUefKSY+/JWgOi2JiGumrfI9/QeuJ69TeRO/aYXII4PYp
-# ALfgM9ofG99t03teGuwymGP4EAdksumVMxEja8GSsZ0Xa0RF+NVgmmhSRAu87yfd
-# sRxf3SyEzh74eoEavAJpBaa+1noUxZLcbVcWG1KlJwU1sSPC+8+vHtqVNbNgWBb6
-# n5HhFJviw5/6WebIO2YFBWpFs5tqKpJdZT+3OCD1eE2ENlF9U3VnOzejv/1aBhB1
-# DFOmvtEKdOMlKuj/XKi7uRYb73jurXeSDG0X8Z3y3Q==
+# CSqGSIb3DQEJBTEPFw0yNjA5MzAxNjE2NDNaMC8GCSqGSIb3DQEJBDEiBCCveMpO
+# 1I7e4bNl9+PPnWX38TwHSU4MjN90AbiGllILPzANBgkqhkiG9w0BAQEFAASCAgAE
+# NVVxZJaYsqTbfCi/8xCWCbwkKVAgja5mJDCW7lkQvceImkDVtsu0pnWsKGwSAS6R
+# KpND6BQZzZe0Yt85Gu3z6do9Qylu/bJ+A+/FmfndTYwtfxh/rzRKSN+CuHFz/xAd
+# H6NXgJg73UhykqAE4TVlxn113iP5O6nls8O9Kl2uFMZKE5MhAyhRkhpdMFGGLP8Z
+# NAd9u6mFtH3N9zAkZGzXiQ5iC6vqcZxmwvHd2P6zPXo66tWvBBLk/woTWMlFSQt5
+# nvGTO+K6cHoTf1tTUzAePKq3nxn7k5Wq2pkl31tmFv8jVvOBQbpkhWga+y5onimo
+# ipfoB0xAHIyqnamsis6GXieSCCymkoknU7weqjUEZNqVsqXYcBjjvD+X/aOXbSjX
+# y55bmvxTMEb4Y2d6Wdyfxh6XLHaTvKFinqgiECRq9DMlobMcsqaY/xefgLv+6amh
+# uQcVyHcroZ1JTvEYuKT7Na8JNsQCV6xNUBjKHATpU5pwXq0j7VmF2aWE1unHXREU
+# OZJHB3NDpidMI4yNEIQmCCC7xLvjzeWHFRfSlrWm/oHRda/iHF8qxx/Sw8CHB1by
+# vTc7a1mel4sjxLA/KWuN91h0eypnxoYpT+TiCjT85WhIJLqHEvA55YvPTqhxbzrH
+# MiKjXzdYdDxmk2AmvdNbccuK31VDRG+aoqjG4HQ2EA==
 # SIG # End signature block

@@ -1,29 +1,215 @@
-﻿#requires -Version 5.1
+﻿<#
+.SYNOPSIS
+    Discovers BGP, EIGRP, CDP, and LLDP neighbors over SNMP and plans WUG monitors.
 
-function New-CdpMonitorPlan {
+.DESCRIPTION
+    Wraps the protocol helpers in helpers\bgp, helpers\eigrp, helpers\cdp, and
+    helpers\lldp. Each target is walked once per enabled protocol; the results are
+    returned as discovery items plus inventory rows for the neighbor dashboard.
+
+    Monitor plan:
+      - One shared SNMP Table active monitor per protocol (adjacency/neighbor rows).
+      - BGP: per-peer SNMP active monitor (state = established) plus state and
+        established-time performance monitors.
+      - EIGRP: per-neighbor hold time, SRTT, RTO, retransmission, and retry
+        performance monitors.
+
+    Context options (ctx.Options):
+      Community, SnmpVersion (V1|V2), SnmpPort, SnmpTimeoutMs,
+      Protocols (subset of BGP, EIGRP, CDP, LLDP),
+      SshCredential (PSCredential, optional), SshPort, SshTimeoutSeconds
+#>
+
+$script:NeighborProviderRoot = Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent
+
+foreach ($neighborHelper in @(
+        'bgp\Get-BgpPeerInventory.ps1', 'bgp\New-BgpMonitorPlan.ps1',
+        'eigrp\Get-EigrpNeighborInventory.ps1', 'eigrp\New-EigrpMonitorPlan.ps1',
+        'cdp\Get-CdpNeighborInventory.ps1', 'cdp\New-CdpMonitorPlan.ps1',
+        'lldp\Get-LldpNeighborInventory.ps1', 'lldp\New-LldpMonitorPlan.ps1')) {
+    $neighborHelperPath = Join-Path $script:NeighborProviderRoot $neighborHelper
+    if (-not (Test-Path -LiteralPath $neighborHelperPath)) { throw "Network neighbor helper not found: $neighborHelperPath" }
+    . $neighborHelperPath
+}
+
+if (-not (Get-Command -Name 'Register-DiscoveryProvider' -ErrorAction SilentlyContinue)) {
+    $helpersPath = Join-Path $PSScriptRoot 'DiscoveryHelpers.ps1'
+    if (-not (Test-Path $helpersPath)) { throw 'DiscoveryHelpers.ps1 is required.' }
+    . $helpersPath
+}
+
+function ConvertTo-NeighborDiscoveredItem {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][int]$DeviceId,
-        [Parameter(Mandatory = $true)][string]$DeviceName,
-        [hashtable]$OidMap = $(Get-CdpOidMap)
+        [Parameter(Mandatory = $true)][object]$PlanEntry,
+        [Parameter(Mandatory = $true)][string]$Protocol,
+        [Parameter(Mandatory = $true)][string]$TargetAddress,
+        [Parameter(Mandatory = $true)][int]$DeviceId
     )
-    # cdpCacheAddressType is a positive integer on every cache row; the row vanishes when the neighbor is lost.
-    $tableParams = @{
-        SnmpTableDiscOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscOperator = 'gt'; SnmpTableDiscValue = '0'
-        SnmpTableDiscCommentOID = "$($OidMap.CacheTable).$($OidMap.DeviceId)"
-        SnmpTableDiscIndexOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscCreates = 'true'; SnmpTableMonitoredOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableMonitorOperator = 'gt'; SnmpTableMonitoredValue = '0'; SnmpTableMonitorUpIfMatch = 'upifmatch'
+
+    $tags = @($PlanEntry.Tags)
+    if ($PlanEntry.Type -eq 'SNMPTable') {
+        # Shared name: the SNMP table monitor discovers rows per device, so one library entry serves all devices.
+        $name = "Neighbors - $Protocol Neighbor Table"
+        return (New-DiscoveredItem -Name $name -ItemType 'ActiveMonitor' -MonitorType 'SNMPTable' `
+            -MonitorParams $PlanEntry.Parameters -UniqueKey "Neighbors:${Protocol}:table" `
+            -DeviceId $DeviceId -Tags $tags)
     }
-    @([pscustomobject][ordered]@{ Name = "CDP Neighbor Discovery [$DeviceName]"; Type = 'SNMPTable'; Parameters = $tableParams; DeviceId = $DeviceId; Tags = @('cdp','snmp','neighbor') })
+
+    $metric = (($PlanEntry.Name -replace '\s*\[[^\]]*\]', '') -replace "^$Protocol\s+", '').Trim()
+    $peerLabel = if ($PlanEntry.Name -match '\[([^\]]+)\]') { $Matches[1] } else { $PlanEntry.Instance }
+    return (New-DiscoveredItem -Name "Neighbors - $Protocol $metric - $peerLabel - $TargetAddress" `
+        -ItemType 'PerformanceMonitor' -MonitorType 'Snmp' `
+        -MonitorParams @{ SnmpOID = [string]$PlanEntry.Oid; SnmpInstance = [string]$PlanEntry.Instance } `
+        -UniqueKey "Neighbors:${TargetAddress}:${Protocol}:$($PlanEntry.Instance):$metric" `
+        -DeviceId $DeviceId -Tags $tags)
 }
+
+Register-DiscoveryProvider -Name 'NetworkNeighbors' `
+    -MatchAttribute 'DiscoveryHelper.NetworkNeighbors' `
+    -AuthType 'BasicAuth' `
+    -DefaultPort 161 `
+    -DefaultProtocol 'snmp' `
+    -IgnoreCertErrors $true `
+    -DiscoverScript {
+        param($ctx)
+
+        $options = if ($ctx.Options) { $ctx.Options } else { @{} }
+        $community = if ($options.Community) { [string]$options.Community } else { 'public' }
+        $snmpVersion = if ($options.SnmpVersion -eq 'V1') { 'V1' } else { 'V2' }
+        $snmpPort = if ($options.SnmpPort) { [int]$options.SnmpPort } else { 161 }
+        $timeoutMs = if ($options.SnmpTimeoutMs) { [int]$options.SnmpTimeoutMs } else { 5000 }
+        $protocols = if ($options.Protocols) { @($options.Protocols) } else { @('BGP', 'EIGRP', 'CDP', 'LLDP') }
+        $target = [string]$ctx.DeviceIP
+        $deviceId = [int]$ctx.DeviceId
+        $snmpSplat = @{ Target = $target; Community = $community; SnmpVersion = $snmpVersion; Port = $snmpPort; Timeout = $timeoutMs }
+
+        $items = New-Object 'System.Collections.Generic.List[object]'
+        $rows = New-Object 'System.Collections.Generic.List[object]'
+        $counts = [ordered]@{}
+
+        foreach ($protocol in $protocols) {
+            Write-Host "Neighbors: walking $protocol on $target ..." -ForegroundColor Cyan
+            $inventory = @()
+            $plan = @()
+            try {
+                switch ($protocol) {
+                    'BGP' {
+                        $inventory = @(Get-BgpPeerInventory @snmpSplat)
+                        $plan = @(New-BgpMonitorPlan -DeviceId $deviceId -DeviceName $target -Peers $inventory)
+                    }
+                    'EIGRP' {
+                        $inventory = @(Get-EigrpNeighborInventory @snmpSplat)
+                        $plan = @(New-EigrpMonitorPlan -DeviceId $deviceId -DeviceName $target -Neighbors $inventory)
+                    }
+                    'CDP' {
+                        $inventory = @(Get-CdpNeighborInventory @snmpSplat)
+                        $plan = @(New-CdpMonitorPlan -DeviceId $deviceId -DeviceName $target)
+                    }
+                    'LLDP' {
+                        $inventory = @(Get-LldpNeighborInventory @snmpSplat)
+                        $plan = @(New-LldpMonitorPlan -DeviceId $deviceId -DeviceName $target)
+                    }
+                    default { Write-Warning "Unknown neighbor protocol '$protocol'; skipping."; continue }
+                }
+            }
+            catch {
+                Write-Warning "Neighbors: $protocol walk failed on ${target}: $($_.Exception.Message)"
+                $counts[$protocol] = 'error'
+                continue
+            }
+
+            $counts[$protocol] = $inventory.Count
+            Write-Host "  $protocol rows: $($inventory.Count)" -ForegroundColor Gray
+            foreach ($row in $inventory) {
+                $row | Add-Member -NotePropertyName Protocol -NotePropertyValue $protocol -Force
+                $row | Add-Member -NotePropertyName Target -NotePropertyValue $target -Force
+                [void]$rows.Add($row)
+            }
+
+            # Skip monitors for protocols the device does not run; an empty table monitor would always be down.
+            if ($inventory.Count -eq 0) { continue }
+
+            foreach ($entry in $plan) {
+                [void]$items.Add((ConvertTo-NeighborDiscoveredItem -PlanEntry $entry -Protocol $protocol -TargetAddress $target -DeviceId $deviceId))
+            }
+
+            if ($protocol -eq 'BGP') {
+                $oidMap = Get-BgpOidMap
+                foreach ($peer in $inventory) {
+                    [void]$items.Add((New-DiscoveredItem -Name "Neighbors - BGP Peer Established - $($peer.PeerAddress) - $target" `
+                        -ItemType 'ActiveMonitor' -MonitorType 'SNMP' `
+                        -MonitorParams @{ SnmpOID = "$($oidMap.PeerTable).$($oidMap.State)"; SnmpInstance = [string]$peer.Index; SnmpCheckType = 'constant'; SnmpValue = 6 } `
+                        -UniqueKey "Neighbors:${target}:BGP:$($peer.Index):established" `
+                        -DeviceId $deviceId -Tags @('bgp', 'snmp', 'peer', 'availability')))
+                }
+            }
+        }
+
+        $sshCredential = $options.SshCredential
+        if ($sshCredential) {
+            $sshSplat = @{ Target = $target; Username = $sshCredential.UserName; SecurePassword = $sshCredential.Password }
+            if ($options.SshPort) { $sshSplat['Port'] = [int]$options.SshPort }
+            if ($options.SshTimeoutSeconds) { $sshSplat['TimeoutSeconds'] = [int]$options.SshTimeoutSeconds }
+            foreach ($protocol in $protocols) {
+                $sshScript = switch ($protocol) {
+                    'BGP' { 'bgp\Get-BgpSshInventory.ps1' }
+                    'EIGRP' { 'eigrp\Get-EigrpSshInventory.ps1' }
+                    'CDP' { 'cdp\Get-CdpSshInventory.ps1' }
+                    'LLDP' { 'lldp\Get-LldpSshInventory.ps1' }
+                }
+                if (-not $sshScript) { continue }
+                try {
+                    . (Join-Path $script:NeighborProviderRoot $sshScript)
+                    $sshRows = switch ($protocol) {
+                        'BGP' { @(Get-BgpSshInventory @sshSplat) }
+                        'EIGRP' { @(Get-EigrpSshInventory @sshSplat) }
+                        'CDP' { @(Get-CdpSshInventory @sshSplat) }
+                        'LLDP' { @(Get-LldpSshInventory @sshSplat) }
+                    }
+                    foreach ($row in $sshRows) {
+                        $row | Add-Member -NotePropertyName Protocol -NotePropertyValue $protocol -Force
+                        [void]$rows.Add($row)
+                    }
+                    Write-Host "  $protocol SSH rows: $(@($sshRows).Count)" -ForegroundColor Gray
+                }
+                catch {
+                    Write-Warning "Neighbors: $protocol SSH collection failed on ${target}: $($_.Exception.Message)"
+                }
+            }
+        }
+
+        $summary = ($counts.Keys | ForEach-Object { "$_=$($counts[$_])" }) -join '; '
+        $attributes = @{
+            'Neighbors.LastScan'  = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            'Neighbors.Protocols' = $summary
+        }
+        foreach ($protocol in $counts.Keys) {
+            if ($counts[$protocol] -is [int]) { $attributes["Neighbors.$($protocol)Count"] = [string]$counts[$protocol] }
+        }
+        $bgpDown = @($rows | Where-Object { $_.Protocol -eq 'BGP' -and $_.Source -eq 'SNMP' -and $_.State -ne 'Established' }).Count
+        if ($counts.Contains('BGP') -and $counts['BGP'] -is [int]) { $attributes['Neighbors.BGPNotEstablished'] = [string]$bgpDown }
+
+        # Carry inventory on the first item so the setup script can build dashboards and attributes.
+        if ($items.Count -eq 0) {
+            $carrier = [PSCustomObject]@{ Name = "Neighbors - inventory - $target"; ItemType = 'Inventory'; MonitorType = ''; MonitorParams = @{}; UniqueKey = "Neighbors:${target}:inventory"; DeviceId = $deviceId; Attributes = $attributes; Tags = @('inventory') }
+            [void]$items.Add($carrier)
+        }
+        else {
+            $items[0].Attributes = $attributes
+        }
+        $items[0] | Add-Member -NotePropertyName 'NeighborRows' -NotePropertyValue $rows.ToArray() -Force
+        $items[0] | Add-Member -NotePropertyName 'NeighborCounts' -NotePropertyValue $counts -Force
+
+        Write-Host "Neighbors: $target -> $summary; $(@($items | Where-Object ItemType -ne 'Inventory').Count) monitor item(s)." -ForegroundColor Green
+        return $items.ToArray()
+    }
 
 # SIG # Begin signature block
 # MIIr1gYJKoZIhvcNAQcCoIIrxzCCK8MCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUKpZ2y1ETwKA39D8qJPqGbXZG
-# esmggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUylSu9vOozMfGDjxVf7V6J+u6
+# 1x+ggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
 # AQwFADB7MQswCQYDVQQGEwJHQjEbMBkGA1UECAwSR3JlYXRlciBNYW5jaGVzdGVy
 # MRAwDgYDVQQHDAdTYWxmb3JkMRowGAYDVQQKDBFDb21vZG8gQ0EgTGltaXRlZDEh
 # MB8GA1UEAwwYQUFBIENlcnRpZmljYXRlIFNlcnZpY2VzMB4XDTIxMDUyNTAwMDAw
@@ -225,33 +411,33 @@ function New-CdpMonitorPlan {
 # BAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+F
 # zTlzz3YtN+swCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAw
 # GQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisG
-# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFIFxHaRDoFInfSQpeaDMhnMTqXdkMA0G
-# CSqGSIb3DQEBAQUABIICAFupnzYDSxFEb6v7/9mNCd6+L/hLAoxd5MX6LAlhHjWH
-# 3fUPZUuUVIetoPRPEOCjd4ALp2yTPESBFOU6LQdhIpKpeWYEI9ey3c+ShY7bKO5a
-# vTVlxDeFUCxlY16GUtLQcaTCm4dmgCdys0lZqnQQ5DKcM8g9XYPCScdqWhlSVTpz
-# XJrWBmFwoEnx/o6NWYLEBQHcWk4X2xT54pKF2wRqcs0HQKUdy8t7660/Uqyb24s5
-# OVMOt1aXLXD/wUCTjuPK5ytHrNMq3fpr7ymU9DsJ95I3m1CIJgTmsrZuZCdJCCr2
-# AIt2c5hAY7LhumeTlAYaDNef72RCZsw07cWg3Kxgjrm00uBPyQ5npHnEbSg77AMv
-# sTi6Ijjh69T3oTQLeQE9W+zzxSH+Q192pAhcPxss6Hjp2fDcLt/V82j/Qe2+EZ2l
-# nXA3uyeBtp+DZIdPP51MjBzdojxRIJanaTniOLQ/GEsiOvmPI4SXb33SopG8vDk4
-# j6aooXU94Uw63Pv20wpF8D2q7FhIzpBKxwLXdwqLXTOy095PJYjxRhfRZDjUsFKA
-# Y0yvxCq89hwEJi/MtXZVKYJ2O/zrhyoYCLvRK9g9iGmnKc7zLJkPTqDJCjRZgovk
-# wBwoCFZKFeh8A8ulyRQ8DbVl7+9HbbbAXOZiWpJ8nCccjbvLBISMvl6j63btJEQ8
+# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFOBkQqka768k2OoPDhLaHynCJ8iEMA0G
+# CSqGSIb3DQEBAQUABIICAGkPVp0EaNm2Xj3473MUFCxcXvaE7QUWioF7jj8ZUnOm
+# IaP2M0OsMl19LyYDKPdg1dJ84g81EQNn3xsT6/FYHOMA6IJO7/XfSkFv+kaURAlp
+# 6nvJfW8DTNk/LE+b64dl8Zg6HvK/p2G20NlyVUZ2CNR8XHxOpXAOpfa879ueIwcL
+# Cg/mn/43tUVaXWOfydeZ9KvlwzqyBhRdIJKzuPFatbFVP6IEXOLHQX4FwEdSFuQS
+# PWntQnJ8oxx0GtE6lL437oMjxVYcT0PUCmpnLMJj/HkwgieRxaWNNG8WExJ+Lq8X
+# wZnHq7hHHanZ6xg+ImJ1gisICt51kbQl5l1dc3zPxIS+kLpy8BKzmXMUh8Ituj13
+# rSlnvdT8Ng9EuhPNVvVtF02ZjqcRKjW7eRqVnqtdVsPd480ELmsMAj89sDlGlRqC
+# e40bxUp1UdlhCwnBbuzwZngLvjkBusC5UY86ZtHoRcGfQsIw/rpAjxQylTNYE5M4
+# I4BS8OpiBAvrP+EKrREF3LO1npDIiynuNcDvO71fa1+F3rOD0pZqRMNAdHKfR0v5
+# FETon+rSN9EYJVNnssEJzPy1hY1SaVSDh8BRsgIU41g9UJXQV856tQRC6Gf8k0Dy
+# oCFX8lM08dbDl2MMygFiFos+r5xmwfq3v40gcxyI3/NxUJbsFw920UCqIaYrX57A
 # oYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UEBhMCVVMx
 # FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVz
 # dGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMQIQCE/c
 # M09+RU7bww+P+ZIYNTANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJAzELBgkq
-# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDIwMlowLwYJKoZIhvcN
-# AQkEMSIEIGI/2xEx1S1uEpgie0IhnUx87MyJyfou71SgM2ABe9J9MA0GCSqGSIb3
-# DQEBAQUABIICAB7xcEgas1zn70hpQCDCCsvwaijpPlntlbNAIN+KPqG5lTYcwXOT
-# KBcri6yNaOQbmSWFPVrRwtARAf11QXIopMyEyh1vLhVmR7UtT56zUth7D/57XSDV
-# yhx8CFbdbkDsqW0QjU2KRuwe5S2NABaWLzTmQYyMqcEcNpZWPFNjIFhT+88Oi7eS
-# 2ZvpuWUlpiuklcrbDVPuBO4ccDVE+wUfUoNUyuO/LOS/OEeC+ex4rOflbMVsHQ01
-# bSC0h7BRhgt8J7arOcBjx1hb73KxsS1IzeyfQmOovt7HoKqxL5DXZjLdVEcyC+7V
-# U9HVsgaUI03SR1HBO8crrZrSnm/Psnoiv0j/hRdRFgL2B0mDh6EcYRJPrdwZ6DEe
-# xdfJKqroCmv2Xq+GEXbEDntnkUKs2bq9k36sXoR5r4Xx6zJIr175LLEZrycJ0K3W
-# BIYzeAyUJ5t/w9UB8ufCHHxgsVfPnjjoBcuI8q5Bo1VFrCkfqeR9V+LPoj2FymhF
-# GZeWMhoVapuoA4jJflaRWNKPgIFasupxvcZwnyd9irJ3kOnj0wMnocGpP2rK4fDI
-# sF+nFFBDyat3JSMRl3Gp/7LiQRh1o5PBVp1tDIBKe7bkE6yibnFFZUWd/xEu4Ho8
-# vJiYhdRP62vTsGZWI+V1TpGnvcbCBgHRB+ZOeG0H9bbEmwQkjM1K2KR5
+# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDI0MVowLwYJKoZIhvcN
+# AQkEMSIEIPxpbdZErzJb6meU+k8mdlJzDkleIue0Dd6Q/Ud9L6h/MA0GCSqGSIb3
+# DQEBAQUABIICADXsvoTJ2PCWI24ffpThBISrVeHmHof3i4toUO2P7c64ZzgFurTJ
+# NYh6nNT6XWHNKMIcnqsORz4qS9RezKxsB1WkXETY72eDrKehDvWRC7ZIeg6l6p8n
+# e41UgEagPM2K05gdUwlvOHjtywSIaxaoDJ0C9A8tGe0wD0Il4b+5EO4Hd7lywx4l
+# IdraH9M24Xi47ALfOl+4yfkBp6z9/MSaVh0yhapRoXGL4tDqXfqGfE6oT49+HLK1
+# Mk6avMaQ1LGqD4MZxE/913rdh6hRrIrc50vyYEMQvTjwx/SZygtv1j78ROScxB8A
+# JATtaUEztHhm0s4kXAtdCU9RxM/i1MSnxio86A4COhpIdDSPGRjoNT9Eeg3f4kWE
+# 2PL1S0fUuvwFGk0fe+wIaycjlXxawNRem0t41lqWKSiC5z1SWqlMLgh975L5m4QZ
+# ESlDry2p9prrXZ2+Ff/M8XJhjSWIIa9QfMDWWCvoo9HJoV4lrhxlRRPrc63xZbjZ
+# Sag0rsOYrIkYpcjb+7sa3n1wuZ153MOMjqM/1u6cnCOEJMZM3OKpDePDNR1Z7uQQ
+# euhzsO0RmfG9X1qIfdbMTAlkkKW85knyQ1YXvNB1SXoBRy9x8htTCFvnL5IzehcV
+# Y3zU36F2kk9iLGlF8TTG39Na2oA/KtkBucSV8gzXCibmI3VZfGMh2de5
 # SIG # End signature block

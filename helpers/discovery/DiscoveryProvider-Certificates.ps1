@@ -1,29 +1,97 @@
-﻿#requires -Version 5.1
+﻿<#
+.SYNOPSIS
+    Discovers TLS certificates on host:port endpoints and plans WUG certificate monitors.
 
-function New-CdpMonitorPlan {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][int]$DeviceId,
-        [Parameter(Mandatory = $true)][string]$DeviceName,
-        [hashtable]$OidMap = $(Get-CdpOidMap)
-    )
-    # cdpCacheAddressType is a positive integer on every cache row; the row vanishes when the neighbor is lost.
-    $tableParams = @{
-        SnmpTableDiscOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscOperator = 'gt'; SnmpTableDiscValue = '0'
-        SnmpTableDiscCommentOID = "$($OidMap.CacheTable).$($OidMap.DeviceId)"
-        SnmpTableDiscIndexOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableDiscCreates = 'true'; SnmpTableMonitoredOID = "$($OidMap.CacheTable).$($OidMap.AddressType)"
-        SnmpTableMonitorOperator = 'gt'; SnmpTableMonitoredValue = '0'; SnmpTableMonitorUpIfMatch = 'upifmatch'
-    }
-    @([pscustomobject][ordered]@{ Name = "CDP Neighbor Discovery [$DeviceName]"; Type = 'SNMPTable'; Parameters = $tableParams; DeviceId = $DeviceId; Tags = @('cdp','snmp','neighbor') })
+.DESCRIPTION
+    Wraps helpers\certificates\CertificateHelpers.ps1. Each target is probed on the
+    requested TCP ports; every endpoint that presents a certificate becomes one
+    WhatsUp Gold Certificate active monitor (URL mode) that alerts before expiry.
+
+    Context options (ctx.Options):
+      Ports (int[]), ConnectTimeoutMs, WarningDays, CriticalDays, AlertDays
+#>
+
+$script:CertificateHelpersPath = Join-Path (Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent) 'certificates\CertificateHelpers.ps1'
+if (-not (Test-Path -LiteralPath $script:CertificateHelpersPath)) { throw "Certificate helpers not found: $script:CertificateHelpersPath" }
+. $script:CertificateHelpersPath
+
+if (-not (Get-Command -Name 'Register-DiscoveryProvider' -ErrorAction SilentlyContinue)) {
+    $helpersPath = Join-Path $PSScriptRoot 'DiscoveryHelpers.ps1'
+    if (-not (Test-Path $helpersPath)) { throw 'DiscoveryHelpers.ps1 is required.' }
+    . $helpersPath
 }
+
+Register-DiscoveryProvider -Name 'Certificates' `
+    -MatchAttribute 'DiscoveryHelper.Certificates' `
+    -AuthType 'BasicAuth' `
+    -DefaultPort 443 `
+    -DefaultProtocol 'https' `
+    -IgnoreCertErrors $true `
+    -DiscoverScript {
+        param($ctx)
+
+        $options = if ($ctx.Options) { $ctx.Options } else { @{} }
+        $ports = if ($options.Ports) { @($options.Ports | ForEach-Object { [int]$_ }) } else { @(443, 8443) }
+        $timeoutMs = if ($options.ConnectTimeoutMs) { [int]$options.ConnectTimeoutMs } else { 5000 }
+        $warningDays = if ($options.WarningDays) { [int]$options.WarningDays } else { 90 }
+        $criticalDays = if ($options.CriticalDays) { [int]$options.CriticalDays } else { 30 }
+        $alertDays = if ($options.AlertDays) { [int]$options.AlertDays } else { $criticalDays }
+        $target = [string]$ctx.DeviceIP
+        $deviceId = [int]$ctx.DeviceId
+
+        Write-Host "Certificates: probing $target on port(s) $($ports -join ', ') ..." -ForegroundColor Cyan
+        $raw = @(Get-CertificateInfo -IPAddresses @($target) -TcpPorts $ports -ConnectTimeoutMs $timeoutMs)
+        $rows = @()
+        if ($raw.Count -gt 0) {
+            $rows = @(Get-CertificateDashboard -CertificateData $raw -WarningDays $warningDays -CriticalDays $criticalDays)
+        }
+
+        $items = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($row in $rows) {
+            $endpoint = "${target}:$($row.Port)"
+            $url = if ([int]$row.Port -eq 443) { "https://$target" } else { "https://$endpoint" }
+            [void]$items.Add((New-DiscoveredItem -Name "Certificates - $endpoint" `
+                -ItemType 'ActiveMonitor' -MonitorType 'Certificate' `
+                -MonitorParams @{ CertOption = 'url'; CertPath = $url; CertExpiresDays = $alertDays; CertCheckExpires = 'true'; CertCheckUsage = 'false' } `
+                -UniqueKey "Certificates:$endpoint" -DeviceId $deviceId `
+                -Tags @('certificate', 'tls', [string]$row.Status)))
+        }
+
+        $attributes = @{
+            'Certificates.LastScan' = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            'Certificates.Count'    = [string]$rows.Count
+        }
+        $dated = @($rows | Where-Object { $_.DaysUntilExpiry -is [int] } | Sort-Object DaysUntilExpiry)
+        if ($dated.Count) {
+            $next = $dated[0]
+            $attributes['Certificates.NextExpiry'] = "$($next.ExpirationDate) (port $($next.Port), $($next.DaysUntilExpiry) days)"
+            $attributes['Certificates.NextExpiryDays'] = [string]$next.DaysUntilExpiry
+            $attributes['Certificates.NextExpirySubject'] = [string]$next.Subject
+        }
+        $attention = @($rows | Where-Object { $_.Status -in @('Expired', 'Critical', 'Warning') })
+        $attributes['Certificates.NeedsAttention'] = [string]$attention.Count
+        $selfSigned = @($rows | Where-Object { $_.SelfSigned -eq 'Yes' })
+        $attributes['Certificates.SelfSigned'] = [string]$selfSigned.Count
+
+        if ($items.Count -eq 0) {
+            [void]$items.Add([PSCustomObject]@{ Name = "Certificates - inventory - $target"; ItemType = 'Inventory'; MonitorType = ''; MonitorParams = @{}; UniqueKey = "Certificates:${target}:inventory"; DeviceId = $deviceId; Attributes = $attributes; Tags = @('inventory') })
+        }
+        else {
+            $items[0].Attributes = $attributes
+        }
+        $items[0] | Add-Member -NotePropertyName 'CertificateRows' -NotePropertyValue $rows -Force
+
+        $statusSummary = ($rows | Group-Object Status | ForEach-Object { "$($_.Name)=$($_.Count)" }) -join ', '
+        if (-not $statusSummary) { $statusSummary = 'no TLS endpoints' }
+        Write-Host "Certificates: $target -> $($rows.Count) certificate(s) ($statusSummary)." -ForegroundColor Green
+        return $items.ToArray()
+    }
 
 # SIG # Begin signature block
 # MIIr1gYJKoZIhvcNAQcCoIIrxzCCK8MCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUKpZ2y1ETwKA39D8qJPqGbXZG
-# esmggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUD+EMB4TiPwVPbBKnJeQ5KtHe
+# fduggiUNMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
 # AQwFADB7MQswCQYDVQQGEwJHQjEbMBkGA1UECAwSR3JlYXRlciBNYW5jaGVzdGVy
 # MRAwDgYDVQQHDAdTYWxmb3JkMRowGAYDVQQKDBFDb21vZG8gQ0EgTGltaXRlZDEh
 # MB8GA1UEAwwYQUFBIENlcnRpZmljYXRlIFNlcnZpY2VzMB4XDTIxMDUyNTAwMDAw
@@ -225,33 +293,33 @@ function New-CdpMonitorPlan {
 # BAMTIlNlY3RpZ28gUHVibGljIENvZGUgU2lnbmluZyBDQSBSMzYCEAec4OTRFH+F
 # zTlzz3YtN+swCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAw
 # GQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisG
-# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFIFxHaRDoFInfSQpeaDMhnMTqXdkMA0G
-# CSqGSIb3DQEBAQUABIICAFupnzYDSxFEb6v7/9mNCd6+L/hLAoxd5MX6LAlhHjWH
-# 3fUPZUuUVIetoPRPEOCjd4ALp2yTPESBFOU6LQdhIpKpeWYEI9ey3c+ShY7bKO5a
-# vTVlxDeFUCxlY16GUtLQcaTCm4dmgCdys0lZqnQQ5DKcM8g9XYPCScdqWhlSVTpz
-# XJrWBmFwoEnx/o6NWYLEBQHcWk4X2xT54pKF2wRqcs0HQKUdy8t7660/Uqyb24s5
-# OVMOt1aXLXD/wUCTjuPK5ytHrNMq3fpr7ymU9DsJ95I3m1CIJgTmsrZuZCdJCCr2
-# AIt2c5hAY7LhumeTlAYaDNef72RCZsw07cWg3Kxgjrm00uBPyQ5npHnEbSg77AMv
-# sTi6Ijjh69T3oTQLeQE9W+zzxSH+Q192pAhcPxss6Hjp2fDcLt/V82j/Qe2+EZ2l
-# nXA3uyeBtp+DZIdPP51MjBzdojxRIJanaTniOLQ/GEsiOvmPI4SXb33SopG8vDk4
-# j6aooXU94Uw63Pv20wpF8D2q7FhIzpBKxwLXdwqLXTOy095PJYjxRhfRZDjUsFKA
-# Y0yvxCq89hwEJi/MtXZVKYJ2O/zrhyoYCLvRK9g9iGmnKc7zLJkPTqDJCjRZgovk
-# wBwoCFZKFeh8A8ulyRQ8DbVl7+9HbbbAXOZiWpJ8nCccjbvLBISMvl6j63btJEQ8
+# AQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFAszk+PtmA1OA4yg28+/3/bz26u/MA0G
+# CSqGSIb3DQEBAQUABIICABY5xsJ3ZYAyOQed39qBAmAUPB3DLIE0VFXGbIuUXGTD
+# tsuM6P8rq1bo/5/DDhIB5zYJs/x8Y+h2W3x7E3VuVBlSx6YgbTpT8f5Qz3TvQcqo
+# 1GNEcB+IyMPzl5ssL1F6wInczywOTXjgC+p37nAyX8flEs6hOU+y6pC4smjAlTH4
+# drlEPRiqJOCOz3WOYq7xO+LlNLMRM1CfrTYgsiWNQGbHGAwjZTvz/4w4bFnw+MPD
+# YVIJqcbKt1iBPCYGYz3wHgjvd8rYu5VjwQlSDOW6G9KWSTO+iXE0BpmxLrs/QMqs
+# 8O4D76/KicV6xjM0Vq1mqFDvBxoqfjNGOO+Se93BYMxQHMvaIw2P9EJSFGlENhSm
+# j1jT/9APF5MRMV4YIz6b96DxNgd60EDtgZpoPG12QRNrADcRis+MBBHkMLIOimCf
+# 7j5EVgc4/EEOJqQ39FUiwpoAEPR5hee6QbnMXGXEmAb4l9xIh3HYDORscPfeEav9
+# Z2FnVMH6M1hW5Syk5I5+r8a5z++E8Wm1krFk2RAt47lVCp4w7xbEWnOsaZtSJESZ
+# UtPEuVxxJYgHJyxgI9AUd7BtMfYV5IaNlTHPxOpKdxA+AY/xhK9uFkvaMD7EXGWX
+# c52ZDHt+4kRybL1SucFYvCsBshTJ18DxDOm8ev2n2hJYdxUa+sPuCaORogJU341P
 # oYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UEBhMCVVMx
 # FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVz
 # dGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMQIQCE/c
 # M09+RU7bww+P+ZIYNTANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJAzELBgkq
-# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDIwMlowLwYJKoZIhvcN
-# AQkEMSIEIGI/2xEx1S1uEpgie0IhnUx87MyJyfou71SgM2ABe9J9MA0GCSqGSIb3
-# DQEBAQUABIICAB7xcEgas1zn70hpQCDCCsvwaijpPlntlbNAIN+KPqG5lTYcwXOT
-# KBcri6yNaOQbmSWFPVrRwtARAf11QXIopMyEyh1vLhVmR7UtT56zUth7D/57XSDV
-# yhx8CFbdbkDsqW0QjU2KRuwe5S2NABaWLzTmQYyMqcEcNpZWPFNjIFhT+88Oi7eS
-# 2ZvpuWUlpiuklcrbDVPuBO4ccDVE+wUfUoNUyuO/LOS/OEeC+ex4rOflbMVsHQ01
-# bSC0h7BRhgt8J7arOcBjx1hb73KxsS1IzeyfQmOovt7HoKqxL5DXZjLdVEcyC+7V
-# U9HVsgaUI03SR1HBO8crrZrSnm/Psnoiv0j/hRdRFgL2B0mDh6EcYRJPrdwZ6DEe
-# xdfJKqroCmv2Xq+GEXbEDntnkUKs2bq9k36sXoR5r4Xx6zJIr175LLEZrycJ0K3W
-# BIYzeAyUJ5t/w9UB8ufCHHxgsVfPnjjoBcuI8q5Bo1VFrCkfqeR9V+LPoj2FymhF
-# GZeWMhoVapuoA4jJflaRWNKPgIFasupxvcZwnyd9irJ3kOnj0wMnocGpP2rK4fDI
-# sF+nFFBDyat3JSMRl3Gp/7LiQRh1o5PBVp1tDIBKe7bkE6yibnFFZUWd/xEu4Ho8
-# vJiYhdRP62vTsGZWI+V1TpGnvcbCBgHRB+ZOeG0H9bbEmwQkjM1K2KR5
+# hkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDkzMDIzMDIzMlowLwYJKoZIhvcN
+# AQkEMSIEICrfzBzzT/tXzVnQqnkRIXcenABUA2sTR8lX7Xbu+a3/MA0GCSqGSIb3
+# DQEBAQUABIICAJa/QntdjtTnQs8ou8DeniX7+p1c+68/9d0ESYnfPIpP8kE/tKwl
+# jupj0qYMhAjT850qunXj7m36TcfVL4rVaZRfGgwgD2c3scU542NorFs/I4PyGix4
+# eg/VoCOoDLm9vmnlF6IHSa5gMp3oVskAK87F4erF7UijEMUlso9iVSyTnLZB2Xyd
+# PM9hXCA2wokfDqrK43Fj3dY/NefYkMfStGDBBl5ovDR5vT7HBdXr2P4wmId5/KK5
+# ERZGoDYtwD3hUYpOcn6EQQSA0MsrAsiaThqoNzMyURp4MHJneqcPeInHUsknO0TK
+# EmH5cIQXf63QGKwU4Mu8Wdy8n6Cv3WmMtRzzGJp3Wai4rn6DDfCC6XQ8h5RZ0/FZ
+# wCiRD5RkxRN8sCtApUT4bHV/uy06t1fSS4iUGhZpzLKTdp1L0WPApkNZvt+PvHyO
+# pKM/rkQTC0whDrd21zKGS6hznWy+X0QJ40IHMrHxfG6ibwP+t6bwe5cJnOZNXT9x
+# j5ZVmqmp203g/Hul2qPHXNR3t9ZpmzQDXlbwxTg/EXK1/k7xIdYWD2777CInsk4p
+# teu+8DATb8Af58EOJsOhnKLxW3IC/9puJcv31kuL+xNLvOgc01dR9O2FJp44ln4s
+# sjCEF19iWFEh5XXp05+gOcgMa97pmrLyzrTW+6VVg2XzAv7dMRdI7dMX
 # SIG # End signature block

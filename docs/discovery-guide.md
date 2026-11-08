@@ -18,6 +18,8 @@ Each discovery provider knows how to talk to a specific platform (Azure, AWS, VM
 
 ## What Platforms Are Supported?
 
+For existing Zabbix templates, see the [SNMP template converter](zabbix-template-conversion.md). It generates profiles/reports and can explicitly create supported active, performance, table and trap monitors in the WUG library. Device discovery and monitor assignment remain separate.
+
 | Provider | What It Scans |
 |----------|--------------|
 | **Azure** | Virtual machines, databases, app services, and other cloud resources in Microsoft Azure |

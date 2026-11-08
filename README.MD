@@ -353,6 +353,8 @@ The `helpers/` directory contains automation examples and discovery tools.
 
 | Directory | Description |
 |---|---|
+| [helpers/converters](helpers/converters) | [Zabbix SNMP template conversion](docs/zabbix-template-conversion.md) with opt-in WUG library creation; offline by default |
+| [helpers/interfaces](helpers/interfaces) | [Interface grouping operator guide](helpers/interfaces/README.md): guided profiles, optional SNMP, offline status/traffic dashboards, readiness/status checks and recoverable WUG publishing |
 | helpers/discovery | Unified discovery framework with DPAPI credential vault |
 | helpers/vmware | VMware vSphere discovery |
 | helpers/proxmox | Proxmox VE discovery |

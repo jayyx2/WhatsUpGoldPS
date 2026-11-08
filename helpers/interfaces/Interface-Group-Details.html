@@ -1,0 +1,220 @@
+﻿<section id="interface-details" style="margin:24px;padding:24px;border:1px solid #cbd5e1;border-radius:16px">
+    <h2>Interface performance details</h2>
+    <p>Snapshot history, not live polling. Traffic uses decimal units (1 Kbps = 1,000 bps). Missing samples are not zero.
+        Performance assignment IDs refer to WUG's device-wide Interface Utilization collector.</p>
+    <h3>Top 5 consumers</h3>
+    <p>Ranked by the latest complete RX + TX snapshot rates in this group, not overlapping-group aggregation or historical totals.
+        Incomplete, missing, invalid and future snapshots are excluded; stale snapshots are labelled.</p>
+    <ol id="interface-top-consumers"></ol>
+    <label for="interface-choice">Interface:</label>
+    <select id="interface-choice" style="max-width:100%"></select>
+    <label for="interface-chart-mode">Chart:</label>
+    <select id="interface-chart-mode"><option value="traffic">Traffic</option><option value="utilization">Utilization</option></select>
+    <p id="interface-meta" aria-live="polite"></p>
+    <svg id="interface-chart" viewBox="0 0 900 280" style="width:100%;max-height:360px" role="group" aria-label="RX and TX traffic history" aria-describedby="interface-chart-help interface-hover"></svg>
+    <p id="interface-chart-help">RX: cyan solid line / TX: purple dashed line. Time axis is UTC.
+        Hover over or keyboard-focus a sample for its timestamp and values. Exact values are also in the poll samples table.</p>
+    <p id="interface-hover" role="status" style="min-height:1.5em"></p>
+    <details><summary>Poll samples (UTC)</summary><div style="max-height:300px;overflow:auto"><table style="width:100%"><thead><tr><th scope="col">UTC</th><th scope="col">RX traffic</th><th scope="col">TX traffic</th><th scope="col">RX %</th><th scope="col">TX %</th></tr></thead><tbody id="interface-samples"></tbody></table></div></details>
+</section>
+<script>
+(function () {
+    'use strict';
+    var interfaces = INTERFACE_GROUP_DATA;
+    var select = document.getElementById('interface-choice');
+    var svg = document.getElementById('interface-chart');
+    var mode = document.getElementById('interface-chart-mode');
+    var hover = document.getElementById('interface-hover');
+    var rowsByKey = Object.create(null);
+    var ns = 'http://www.w3.org/2000/svg';
+    function number(value) {
+        if (value === null || value === undefined || typeof value === 'boolean' || String(value).trim() === '') return null;
+        var n = Number(value);
+        return Number.isFinite(n) && n >= 0 ? n : null;
+    }
+    function rate(value) {
+        var n = number(value);
+        if (n === null) return 'N/A';
+        var units = ['bps', 'Kbps', 'Mbps', 'Gbps'], unit = 0;
+        while (n >= 1000 && unit < units.length - 1) { n /= 1000; unit++; }
+        return n.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' ' + units[unit];
+    }
+    function percent(value) {
+        var n = number(value);
+        return n === null ? 'N/A' : n.toLocaleString('en-US', { maximumFractionDigits: 2 }) + '%';
+    }
+    function utc(value) {
+        var time = typeof value === 'string' && value.trim() ? Date.parse(value) : NaN;
+        return Number.isFinite(time) ? new Date(time).toISOString() : 'N/A';
+    }
+    function label(row) {
+        return (row.DeviceName || 'Unknown device') + ' / ' + (row.IfAlias || row.InterfaceComment || row.IfName || row.InterfaceName || row.IfDescr || 'Unnamed interface') +
+            ' / ifIndex ' + (row.IfIndex === null || row.IfIndex === undefined ? 'unknown' : row.IfIndex);
+    }
+    function ids(value) {
+        return Array.isArray(value) ? value.join(', ') || 'none' : 'none';
+    }
+    function choose(key) {
+        if (!Object.prototype.hasOwnProperty.call(rowsByKey, String(key))) return;
+        select.value = String(key);
+        render();
+    }
+    function draw(tag, attrs, text) {
+        var node = document.createElementNS(ns, tag);
+        Object.keys(attrs).forEach(function (key) { node.setAttribute(key, attrs[key]); });
+        if (text !== undefined) node.textContent = text;
+        svg.appendChild(node);
+        return node;
+    }
+    interfaces.forEach(function (row) {
+        if (row.InterfaceKey === null || row.InterfaceKey === undefined) return;
+        var key = String(row.InterfaceKey);
+        if (Object.prototype.hasOwnProperty.call(rowsByKey, key)) return;
+        rowsByKey[key] = row;
+        var option = document.createElement('option');
+        option.value = key;
+        option.textContent = label(row);
+        select.appendChild(option);
+    });
+    var top = interfaces.filter(function (row) {
+        return number(row.RxBps) !== null && number(row.TxBps) !== null &&
+            Number.isFinite(number(row.RxBps) + number(row.TxBps)) &&
+            utc(row.PollTimeUtc) !== 'N/A' &&
+            ['Missing', 'Invalid', 'Future'].indexOf(row.Freshness) === -1;
+    }).sort(function (a, b) {
+        return (number(b.RxBps) + number(b.TxBps)) - (number(a.RxBps) + number(a.TxBps));
+    }).slice(0, 5);
+    var consumers = document.getElementById('interface-top-consumers');
+    top.forEach(function (row) {
+        var li = document.createElement('li'), button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label(row) + ' - ' + rate(number(row.RxBps) + number(row.TxBps)) +
+            ' (RX ' + rate(row.RxBps) + ', TX ' + rate(row.TxBps) + ') | ' +
+            (row.Freshness || 'Freshness unknown') + ' | Snapshot time: ' + utc(row.PollTimeUtc);
+        button.addEventListener('click', function () { choose(row.InterfaceKey); });
+        li.appendChild(button);
+        consumers.appendChild(li);
+    });
+    if (!top.length) {
+        var empty = document.createElement('li');
+        empty.textContent = 'No complete timestamped snapshot rates available.';
+        consumers.appendChild(empty);
+    }
+    function render() {
+        var row = rowsByKey[select.value];
+        var table = document.getElementById('interface-samples');
+        table.textContent = '';
+        svg.textContent = '';
+        hover.textContent = '';
+        var utilization = mode.value === 'utilization';
+        var keys = utilization ? ['RxPercent', 'TxPercent'] : ['RxBps', 'TxBps'];
+        var format = utilization ? percent : rate;
+        svg.setAttribute('aria-label', 'RX and TX ' + (utilization ? 'utilization' : 'traffic') + ' history, UTC');
+        if (!row) {
+            document.getElementById('interface-meta').textContent = 'No matching interfaces.';
+            return;
+        }
+        document.getElementById('interface-meta').textContent = 'Status: ' + (row.Status || 'unknown') +
+            ' | Source: ' + (row.InventorySource || 'WUG') + ' | SNMP metadata: ' + (row.SnmpStatus || 'not requested') +
+            ' | ifAlias: ' + (row.IfAlias || 'N/A') + ' | ifName: ' + (row.IfName || 'N/A') +
+            ' | ifDescr: ' + (row.IfDescr || 'N/A') +
+            ' | Freshness: ' + (row.Freshness || 'unknown') +
+            ' | Last sample (UTC): ' + utc(row.LastSampleUtc) +
+            ' | Age: ' + (number(row.AgeMinutes) === null ? 'N/A' : number(row.AgeMinutes).toFixed(1) + ' minutes') +
+            ' | Snapshot RX: ' + rate(row.RxBps) + ' / TX: ' + rate(row.TxBps) +
+            ' | Active assignments: ' + ids(row.ActiveAssignmentIds) +
+            ' | Traffic interface IDs: ' + ids(row.TrafficInterfaceIds) +
+            ' | Performance collector: ' + ids(row.PerformanceAssignmentIds) +
+            ' | Last report poll (UTC): ' + utc(row.PollTimeUtc);
+        var samples = (row.Samples || []).slice().sort(function (a, b) {
+            return String(a.PollTimeUtc).localeCompare(String(b.PollTimeUtc));
+        });
+        samples.forEach(function (sample) {
+            var tr = document.createElement('tr');
+            ['PollTimeUtc', 'RxBps', 'TxBps', 'RxPercent', 'TxPercent'].forEach(function (key) {
+                var td = document.createElement('td');
+                td.textContent = key === 'PollTimeUtc' ? utc(sample[key]) :
+                    (key === 'RxBps' || key === 'TxBps' ? rate(sample[key]) : percent(sample[key]));
+                tr.appendChild(td);
+            });
+            table.appendChild(tr);
+        });
+        var minTime = Infinity, maxTime = -Infinity, maxValue = 0, hasValues = false;
+        samples.forEach(function (p) {
+            if (utc(p.PollTimeUtc) === 'N/A') return;
+            var time = Date.parse(p.PollTimeUtc);
+            minTime = Math.min(minTime, time);
+            maxTime = Math.max(maxTime, time);
+            keys.forEach(function (key) {
+                var value = number(p[key]);
+                if (value !== null) { hasValues = true; maxValue = Math.max(maxValue, value); }
+            });
+        });
+        if (!hasValues) {
+            draw('text', { x: 20, y: 100 }, 'No timestamped ' + (utilization ? 'utilization' : 'traffic') + ' samples available.');
+            return;
+        }
+        maxValue = utilization ? Math.max(100, maxValue) : maxValue || 1;
+        draw('text', { x: 110, y: 18, fill: '#475569' }, utilization ? 'Utilization (%)' : 'Traffic (decimal bits per second)');
+        for (var tick = 0; tick <= 4; tick++) {
+            var yTick = 200 - tick / 4 * 170;
+            draw('line', { x1: 110, y1: yTick, x2: 870, y2: yTick, stroke: '#cbd5e1' });
+            draw('text', { x: 100, y: yTick + 4, 'text-anchor': 'end', fill: '#475569' }, format(maxValue * tick / 4));
+        }
+        draw('text', { x: minTime === maxTime ? 490 : 110, y: 230, 'text-anchor': minTime === maxTime ? 'middle' : 'start', fill: '#475569' }, new Date(minTime).toISOString());
+        if (minTime !== maxTime) draw('text', { x: 870, y: 230, 'text-anchor': 'end', fill: '#475569' }, new Date(maxTime).toISOString());
+        draw('text', { x: 490, y: 260, 'text-anchor': 'middle', fill: '#475569' }, 'Sample time (UTC)');
+        keys.forEach(function (key, i) {
+            var segment = [];
+            function flush() {
+                if (segment.length) draw('polyline', { points: segment.join(' '), fill: 'none', stroke: i ? '#a855f7' : '#0891b2', 'stroke-width': 2, 'stroke-dasharray': i ? '6 4' : 'none', 'pointer-events': 'none' });
+                segment = [];
+            }
+            samples.forEach(function (p) {
+                var value = number(p[key]);
+                if (value === null || utc(p.PollTimeUtc) === 'N/A') { flush(); return; }
+                var x = minTime === maxTime ? 490 : 110 + (Date.parse(p.PollTimeUtc) - minTime) / (maxTime - minTime) * 760;
+                var y = 200 - value / maxValue * 170;
+                segment.push(x + ',' + y);
+                var description = utc(p.PollTimeUtc) + ' | RX: ' + format(p[keys[0]]) + ' | TX: ' + format(p[keys[1]]);
+                var dot = draw('circle', { cx: x, cy: y, r: 4, fill: i ? '#a855f7' : '#0891b2', tabindex: 0, role: 'img', 'aria-label': (i ? 'TX ' : 'RX ') + description });
+                var title = document.createElementNS(ns, 'title');
+                title.textContent = description;
+                dot.appendChild(title);
+                dot.addEventListener('mouseenter', function () { hover.textContent = description; });
+                dot.addEventListener('focus', function () { hover.textContent = description; });
+                dot.addEventListener('mouseleave', function () { hover.textContent = ''; });
+                dot.addEventListener('blur', function () { hover.textContent = ''; });
+            });
+            flush();
+        });
+    }
+    select.addEventListener('change', render);
+    mode.addEventListener('change', render);
+    // Bootstrap Table supplies the row object even after sorting, searching or pagination.
+    if (typeof jQuery !== 'undefined') {
+        jQuery('#table').on('click-row.bs.table.interfaceDetails', function (event, row) {
+            if (row) choose(row.InterfaceKey);
+        });
+    }
+    // Native table fallback for offline pages: resolve the key column, never a row ordinal.
+    var mainTable = document.getElementById('table');
+    if (mainTable) mainTable.addEventListener('click', function (event) {
+        var tr = event.target.closest('tbody tr');
+        if (!tr || tr.closest('table') !== mainTable) return;
+        var key = tr.getAttribute('data-interface-key');
+        if (!key) {
+            var headers = mainTable.querySelectorAll('thead tr:last-child th');
+            for (var i = 0; i < headers.length; i++) {
+                if (headers[i].getAttribute('data-field') === 'InterfaceKey' ||
+                    headers[i].textContent.replace(/\s/g, '') === 'InterfaceKey') {
+                    if (tr.cells[i]) key = tr.cells[i].textContent.trim();
+                    break;
+                }
+            }
+        }
+        if (key) choose(key);
+    });
+    render();
+})();
+</script>

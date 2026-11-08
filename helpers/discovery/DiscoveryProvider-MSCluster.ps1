@@ -31,13 +31,10 @@
         actually return data
 
     Monitor plan and the shared-vs-local split:
-      - NODE devices receive the node-local resources: the Cluster Service active
-        monitor and every validated cluster performance counter. Those counters
-        measure a node's own participation in the cluster, so they belong on the
-        node and stay meaningful regardless of which node owns a role.
-      - ROLE devices (the virtual IP / VNN of each clustered role) receive the
-        shared resource: role availability. A role floats between nodes, so the
-        only honest place to answer "is this role up" is its virtual IP.
+            - NODE devices receive the Cluster Service check, Hyper-V VMMS when the
+                cluster contains virtual-machine resources, and validated cluster counters.
+            - ROLE devices receive role availability and Windows service checks for
+                clustered resources, including SQL Server and generic clustered services.
 
     A clustered role only becomes a WUG device if it owns an IPv4 virtual IP.
     Roles without one are still reported in the inventory.
@@ -555,6 +552,7 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                     VirtualIPs   = [System.Collections.Generic.List[string]]::new()
                     OnlineIPs    = [System.Collections.Generic.List[string]]::new()
                     SqlInstances = [System.Collections.Generic.List[string]]::new()
+                    Services     = [System.Collections.Generic.List[object]]::new()
                     AGNames      = [System.Collections.Generic.List[string]]::new()
                     Resources    = [System.Collections.Generic.List[object]]::new()
                     OwnerNode    = [string]$res.OwnerNode
@@ -604,6 +602,18 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                 if (-not $g.SqlInstances.Contains($inst)) { $g.SqlInstances.Add($inst) }
                 if ($vs -and -not $g.NetworkNames.Contains($vs)) { $g.NetworkNames.Add($vs) }
                 $g.Kind = 'SqlFci'
+            }
+            elseif ($resType -like '*Generic Service*') {
+                $serviceName = Get-MSClusterPrivateProp -Resource $res -PropertyName 'ServiceName'
+                $serviceExists = @($g.Services | Where-Object { $_.Name -eq $serviceName }).Count -gt 0
+                if ($serviceName -and -not $serviceExists) {
+                    $serviceDisplayName = Get-MSClusterPrivateProp -Resource $res -PropertyName 'ServiceDisplayName'
+                    if (-not $serviceDisplayName) { $serviceDisplayName = $resName }
+                    $g.Services.Add([PSCustomObject]@{
+                        Name        = $serviceName
+                        DisplayName = $serviceDisplayName
+                    })
+                }
             }
             elseif ($resType -like '*Availability Group*') {
                 if ($resName -and -not $g.AGNames.Contains($resName)) { $g.AGNames.Add($resName) }
@@ -655,6 +665,7 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                 OnlineIPs    = @($g.OnlineIPs)
                 PrimaryIP    = $primary
                 SqlInstances = @($g.SqlInstances)
+                Services     = @($g.Services)
                 AGNames      = @($g.AGNames)
                 Resources    = @($g.Resources)
                 State        = if ($stateInfo) { $stateInfo.State } else { 'Unknown' }
@@ -736,6 +747,8 @@ Register-DiscoveryProvider -Name 'MSCluster' `
         # Counters are enumerated per node because roles installed on one node
         # (S2D, CSV, SQL) add classes the other nodes may not have.
         $nodeCounters = @{}   # nodeName -> @( @{ Class; Property; Instances } )
+        $nodeVmmsServices = @{}   # nodeName -> Windows VMMS service, when Hyper-V roles exist
+        $hasHyperVResources = @($resources | Where-Object { [string]$_.Type -like '*Virtual Machine*' }).Count -gt 0
 
         $skipNodePerfMonitors = $false
         $counterClassFilter = @()
@@ -746,14 +759,29 @@ Register-DiscoveryProvider -Name 'MSCluster' `
 
         $nodeIndex = 0
         foreach ($nodeName in $nodeNames) {
-            if ($skipNodePerfMonitors) { continue }
             $nodeIndex++
-            $nodeSw = [System.Diagnostics.Stopwatch]::StartNew()
             $probeTarget = if ($nodeIPs.ContainsKey($nodeName)) { $nodeIPs[$nodeName] } else { $nodeName }
             $cimvSplat = $null
             try { $cimvSplat = New-MSClusterWmiSplat -Target $probeTarget -Cred $cred -Namespace 'root\cimv2' }
             catch { continue }
 
+            if ($hasHyperVResources) {
+                try {
+                    $vmms = Get-WmiObject -Class Win32_Service -Filter "Name='vmms'" @cimvSplat | Select-Object -First 1
+                    if ($vmms) {
+                        $nodeVmmsServices[$nodeName] = [PSCustomObject]@{
+                            Name        = [string]$vmms.Name
+                            DisplayName = [string]$vmms.DisplayName
+                        }
+                    }
+                }
+                catch {
+                    Write-Verbose "Could not check Hyper-V VMMS on ${nodeName}: $($_.Exception.Message)"
+                }
+            }
+
+            if ($skipNodePerfMonitors) { continue }
+            $nodeSw = [System.Diagnostics.Stopwatch]::StartNew()
             Write-Host "    [$nodeIndex/$($nodeNames.Count)] ${nodeName} ($probeTarget): listing cluster performance classes ..." -ForegroundColor DarkGray
             Write-Progress -Activity 'MS Cluster discovery' -Status "Listing performance classes on $nodeName" -PercentComplete 0
 
@@ -948,6 +976,24 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                 -Attributes $nodeAttrs `
                 -Tags $nodeTags
 
+            if ($nodeVmmsServices.ContainsKey($nodeName)) {
+                $vmms = $nodeVmmsServices[$nodeName]
+                $vmmsDisplayName = if ($vmms.DisplayName) { $vmms.DisplayName } else { 'Hyper-V Virtual Machine Management' }
+                $items += New-DiscoveredItem `
+                    -Name 'MSCluster - Hyper-V Virtual Machine Management Service' `
+                    -ItemType 'ActiveMonitor' `
+                    -MonitorType 'Service' `
+                    -MonitorParams @{
+                        ServiceDisplayName  = $vmmsDisplayName
+                        ServiceInternalName = 'vmms'
+                        ServiceUseSNMP      = 'false'
+                        Description         = "$vmmsDisplayName (vmms) on node $nodeName"
+                    } `
+                    -UniqueKey "mscluster:${clusterName}:node:${nodeName}:svc:vmms" `
+                    -Attributes $nodeAttrs `
+                    -Tags $nodeTags
+            }
+
             # Validated cluster performance counters for this node
             $counters = @()
             if ($nodeCounters.ContainsKey($nodeName)) { $counters = @($nodeCounters[$nodeName]) }
@@ -1034,10 +1080,29 @@ Register-DiscoveryProvider -Name 'MSCluster' `
 
             $roleTags = @('mscluster', 'role', $role.Kind, $roleName, $clusterName)
 
+            foreach ($service in @($role.Services)) {
+                $serviceName = [string]$service.Name
+                if (-not $serviceName) { continue }
+                $serviceDisplayName = if ($service.DisplayName) { [string]$service.DisplayName } else { $serviceName }
+                $items += New-DiscoveredItem `
+                    -Name "MSCluster - Clustered Service - $serviceDisplayName ($serviceName)" `
+                    -ItemType 'ActiveMonitor' `
+                    -MonitorType 'Service' `
+                    -MonitorParams @{
+                        ServiceDisplayName  = $serviceDisplayName
+                        ServiceInternalName = $serviceName
+                        ServiceUseSNMP      = 'false'
+                        Description         = "$serviceDisplayName ($serviceName) for clustered role $roleName"
+                    } `
+                    -UniqueKey "mscluster:${clusterName}:role:$($role.GroupName):svc:$serviceName" `
+                    -Attributes $roleAttrs `
+                    -Tags $roleTags
+            }
+
             # SQL services are shared resources of the role. Poll them through the
             # role name so the service checks follow the active cluster owner.
             foreach ($instanceName in @($role.SqlInstances | Select-Object -Unique)) {
-                $serviceSuffix = if ($instanceName -eq 'MSSQLSERVER') { '' } else { "`$$instanceName" }
+                $sqlServiceName = if ($instanceName -eq 'MSSQLSERVER') { 'MSSQLSERVER' } else { "MSSQL`$$instanceName" }
                 $displaySuffix = if ($instanceName -eq 'MSSQLSERVER') { '' } else { " ($instanceName)" }
 
                 $items += New-DiscoveredItem `
@@ -1046,7 +1111,7 @@ Register-DiscoveryProvider -Name 'MSCluster' `
                     -MonitorType 'Service' `
                     -MonitorParams @{
                         ServiceDisplayName  = "SQL Server$displaySuffix"
-                        ServiceInternalName = "MSSQLSERVER$serviceSuffix"
+                        ServiceInternalName = $sqlServiceName
                         ServiceUseSNMP      = 'false'
                         Description         = "SQL Server service for clustered role $roleName"
                     } `
@@ -1133,8 +1198,8 @@ function Export-MSClusterDashboardHtml {
 # SIG # Begin signature block
 # MIIr+wYJKoZIhvcNAQcCoIIr7DCCK+gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAa+ira4LY3hBad
-# PWqHiwjGTq2oa6eapg0rdF0+sfieHKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdE66FZO9Y35cA
+# u9f0Hvx5wMNEQnh05bYNqQIQltJxJKCCJQ0wggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -1337,33 +1402,33 @@ function Export-MSClusterDashboardHtml {
 # aW5nIENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDhAFg5Otz4bgrAXPOJ6PsPKV6UL95lHLmfx4GbebaE1DANBgkqhkiG9w0BAQEF
-# AASCAgDGG9cVbCKz8vBf7ZYHA36aLbgR8PLiesSJaeQT7b3NT/7RR0r6xj8Ra3hj
-# X/mYkEynYiKF03yJZuReIm+UmE1lsQgwgKFmt/xMgxAAIzyfK3vEIYwYJJARY8q1
-# a0o5Y1ZPZtmFqtJ6su47wubA+w9O6gM8ShFkysMLOS2jwvvkwXCawKGisXcowGnw
-# Inzdgx6fzz/tPnfHW+5iAA9IjvU52hyNWRoUHkivgV3gSDSztzdQjS5eXb6xBcPX
-# LnoBewxf7mlJHKCoFEs+aX2C3w+1mQN8wjpqKslYx39suLTDv1cGC21aCfahWm80
-# QQeTzvN/pUnqm55LStXvOGcGOQkBIXxyS8f2nA+KiQ5X6fgdLdfa+1sP2aRQZbuh
-# h+yGboxefW/w2KtiXytOuvauCuFQMNgGWCoyng+l+/zzRZnUbcqHRHkc4qyZCKuZ
-# YOx/DmBDJ45RdSO9iOhK4yE35M9Ebf97y8gbju52BVVXkvUF77gmC1oeHuA/q/wS
-# CzEPmYR7VAKmpQw95vodwjaxY9ebFqnK9YKSD22OEJEsKzVU+Y5FsI0RaZUywzFa
-# YIJy5coKKAxLJq5MtSfOl5I3zfJxFXtaP+L/GTFdxsnyZD3t/myEJrqB0MPOr9oQ
-# swyp7wHJuoW3Mxh1InRBAvEJtzi2IjgQw1BnSmNKmHcsi3kipKGCAyYwggMiBgkq
+# BCCSAQgR9HIHePUEQI+3PlwRwj8Gt710D4mm6/tLtwNtHjANBgkqhkiG9w0BAQEF
+# AASCAgBzzY/904VQweUrAT2zZ2lECc493fYVvv1BjWSZQLBmth+iN8WvrEGE1xP6
+# TH8Bn1jbBiyMW7futB4i5FErEu5Qoel9fh1icpGZVse4rSZ8RPgN6DVTqZVDsw/o
+# cQGYGIK0PH4pQA7+Uo8aeZFAk1+eBFaRT3FTIUdtZlA/MTCUDmYcRwDiANXlFjfy
+# G9tETR7JvHzz+zAi4CP4Brc7eitS49z57F0bFEbRyHx9H+0RZPHhtZMNCUf6cbU/
+# QMUizQWKnHQZ6Y1TdlCUmukqGtqIdW6b9yplSTYemcTXH4GFzKX1E/cUeTZHtvVr
+# szS1miNvFCSO1FB1kHmkdART2gMy1IY9C7z9O5NGSBvfnK6T5UnTPrnUM4+KFph/
+# Dwj53nAwLHt0tGt/10egSnf2woCdt/c+3AzlAYy7Ave+RXa+TXaFtbQdKxz+TLtm
+# wpY2dSP8WoKfDMCp1Rq3dYalZ0JUUJoKuvUo81lN4/vNhq5Eou7oKfuBFywFLdDd
+# UmICqWvPasKzlppNkvyLM5wKQYd8D3jnBoG0QVyaBunkDus657b3XLP8WQBaLRjK
+# jlSpATRJCdBpLccfoQvfEL52XsPRaRRkwCA3Y30MpqUqMnLuQONFdRFe+WSi2Cfb
+# xideqd7bFg5dP3XFKagdEv38u9sBEX9trP/lVSEox7GKOw+8q6GCAyYwggMiBgkq
 # hkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
 # aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1l
 # U3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mS
 # GDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA5MjAxNDQzMDFaMC8GCSqGSIb3DQEJBDEiBCC38Zt2
-# eQsfMv8UIjt2cGxUo50+nwIuUpZR0IP90dvGkTANBgkqhkiG9w0BAQEFAASCAgB2
-# NUN8g5jpkqQSZ+2MZWSDLBtkG0rePU0yxuH8IBhZlg7FhFwP3NpVY715LQelSgwY
-# jvqBCImHobG7910mkcM1OecAoMO8wzynBheoRdbfK2TSyzObzyMfVTrN0qzS/oCN
-# BfbU7sL9qk8ObcsCA0HNjwsdmkyLx0a/O88aIh215Nrc3UXgo3DPju+cVzJa2bp4
-# uEPSLNDOaa1kOsidol4eVIo9KwFF2B+0FZz/jRYF7dCZWk4qIMmoteKzpolPteFR
-# 2XpKTeXg1A3+DinfxTeXIwa+6e183JOmtESBu1p5i0dgPqKkAE3J6NEPXz2j4tP2
-# xFvaRB99PN6TxYSeCEgCPxZCtGR+T7Gxfdk+38B0faI6A1kJIKRv650Pjh9aDclA
-# 4a4pjpGWOp8rt+8ZSQTR+RBpVy3ESMpZkhEf29CRtcJJ3/n7q8pjTyhYmU9r7cZJ
-# UrBRLoOZ5+ivycebSLCd0JN4b6FsvykcXHJtqCjgvo7jzH+0IS++pvIhMfx6gfwX
-# SiCsI0gjSCJa2DfCbslxo+Ng54w8WzHWFRfnuw8C+1ksq3JHllytOTwvnTd8E7al
-# 1ux5B1bx01EVyKBGD6vEGbJ9jlhNtyf/D7W+6UAmvROzRxpGiB8UiXbLqx/MqTfr
-# OPgQVNT/Izaanb4LG8/b2THC8FvdZkFXWTKkMoV9Fg==
+# CSqGSIb3DQEJBTEPFw0yNjEwMDQxMzE4NDlaMC8GCSqGSIb3DQEJBDEiBCBC3TCQ
+# ULsx4BkhwLRL+EuNxR5EAdY5+QL2qksMZ+edKDANBgkqhkiG9w0BAQEFAASCAgCh
+# ABxaQND+sKiBCQyxJIhKJ3BSoDwFTzFSv6WF+r4vBE3xfoa/TTZ3DARLGuwngNEZ
+# Rwcwe0n/nNvBW/yJwcoGSVaPfx1Hq2ehgVitXyynwWNrZaAvw9dBCAvbsbNCFoLT
+# 65YWbhyPdcntfCVDMVNyZLuP3JaG9bQ4a2G0vEu4f+y0vzjSTPopz0KR2lZjjWHo
+# msOIoZ6/JwnIyxLzcd/bqSE44vAecyF2kro9AnT97TE+Y6gTJpxuWNB2bxlEqrIC
+# gWLOtm0ZrwBidJVBXXkI5C6AN/uRjn4nUa6DqC44pNvMvtgIt2J3pzYLyV1n31QL
+# UIJZ/Y7qo2veGgf6ZQNTrpXjQ6e3bf7GpmV7gIAvE8H7NT3+Ae+6DOfioa7LNxJf
+# xpN7ixgU8EDrPyL6Ya1vHsq2Fg0KZod8e3LUm7uFGwPEgkLS+v+fx/IAMnsuY1sa
+# /tyLTCmPtK0Pntww8g3D6FddASXrldwMK5k/GINkMoN24sZh0mxfeYvFFS8lcPCj
+# ktQzLhZ259vyLC95ULbKkaPoDEFzji4ieR/p9rw/vx8g+RDHSLaEjR2n5h5EQBIj
+# gUx0wZ5W9MlK6PZxQ82iSFpejmAOIsqZUozvAYqSS/DFZ5B+A/a+c7Ti2V7keL+q
+# 778LSGoZb65Cx4zxGfcvTDZL+Edd4rH9Fal0gpnwIg==
 # SIG # End signature block

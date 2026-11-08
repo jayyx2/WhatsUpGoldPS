@@ -1,0 +1,242 @@
+﻿<!-- WhatsUpGoldPS: owned local interface browser review -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Local interface grouping review</title>
+<style>
+body{font:16px system-ui,sans-serif;margin:1.5rem;color:#17202a;background:#fff}
+h1{font-size:1.7rem}p{max-width:100ch}button,input{font:inherit}button{padding:.45rem .7rem;cursor:pointer}
+input[type=text],input[type=search]{padding:.4rem;max-width:100%;box-sizing:border-box}
+input[type=checkbox]{width:1.2rem;height:1.2rem} :focus-visible{outline:3px solid #1259ac;outline-offset:2px}
+.toolbar{display:flex;flex-wrap:wrap;gap:.7rem;align-items:center;margin:1rem 0}
+.table-wrap{overflow:auto;max-height:65vh;border:1px solid #ccd}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;padding:.6rem;border-bottom:1px solid #dde}
+th{background:#eaf1f8;position:sticky;top:0;z-index:1}td{min-width:8rem;white-space:pre-wrap;overflow-wrap:anywhere}
+td:first-child,td:last-child{min-width:3rem}td input[type=text]{min-width:14rem}
+.raw{display:block;margin-bottom:.4rem}.error{color:#a31616;font-weight:bold}
+tr.invalid{background:#fff0f0}#preview{white-space:pre-wrap;border:1px solid #ccd;padding:1rem;max-height:22rem;overflow:auto}
+.muted{color:#445}#validation:empty{display:none}
+</style>
+</head>
+<body>
+<h1>Local interface grouping review</h1>
+<p>This page works locally without an HTTP service, login, or network requests. Inventory metadata stays in this file and your browser. Keep this HTML and its CSV private.</p>
+<p><strong>Review workflow</strong></p>
+<ol>
+<li>Check the automatic group summary below, then search or review the table. Search only filters the table; selected rows stay selected while hidden. The count shows how many selected rows are hidden.</li>
+<li>Change group labels separated by semicolons (<strong>;</strong>) and check <strong>Apply</strong> to pin a decision. Unchecked rows keep their automatic proposal. <strong>Exclude</strong> removes an applied row from all groups. Use the selection controls for explicit bulk changes; reset selected rows to their automatic proposals when needed.</li>
+<li>Download a decisions CSV only when you need overrides (it includes every row, including untouched proposals). Pass the actual downloaded file location as <code>-ReviewPath</code> to the grouping workflow. Identity and raw descriptions cannot be changed here.</li>
+</ol>
+<p>Your browser controls the download folder or Save As prompt. This page cannot modify WUG, save a browser profile, or change existing files; closing or reloading it loses unsaved edits.</p>
+<div class="toolbar">
+<label for="search">Search inventory</label><input id="search" type="search" placeholder="Device, description, SNMP, key, group..." autocomplete="off">
+<button id="select-visible" type="button">Select visible</button><button id="clear-selection" type="button">Clear selection</button>
+</div>
+<div class="toolbar">
+<label for="bulk-groups">Selected rows' groups</label><input id="bulk-groups" type="text" placeholder="Group A;Group B">
+<button id="assign-selected" type="button">Assign selected</button>
+<button id="exclude-selected" type="button">Exclude selected</button>
+<button id="reset-selected" type="button">Reset selected to automatic proposals</button>
+<button id="accept-automatic" type="button">Accept automatic groups</button>
+<button id="preview-edits" type="button">Preview decisions</button>
+<button id="download" type="button">Download decisions CSV</button>
+</div>
+<p id="counts" role="status" aria-live="polite"></p>
+<p id="validation" class="error" role="alert"></p>
+<div class="table-wrap" tabindex="0" aria-label="Scrollable interface review table">
+<table>
+<caption>Editable interface decisions (all rows are included in the CSV, even when filtered)</caption>
+<thead><tr><th scope="col">Select</th><th scope="col">Device / key</th><th scope="col">Descriptions</th><th scope="col">Raw SNMP</th><th scope="col">Proposal / match explanation</th><th scope="col">Groups</th><th scope="col">Apply</th><th scope="col">Exclude</th></tr></thead>
+<tbody id="review-body"></tbody>
+</table>
+</div>
+<h2>This is what we got: automatic group summary</h2>
+<pre id="group-summary" aria-live="polite"></pre>
+<h2>Decision preview</h2>
+<p class="muted">Counts and preview use effective memberships: unchecked Apply keeps ProposedGroups, while applied Exclude removes membership. Overlap means more than one effective group; unmatched means none.</p>
+<pre id="preview" aria-live="polite">Choose Preview decisions to inspect row-by-row decisions.</pre>
+<script id="review-data" type="application/json">__INTERFACE_REVIEW_DATA__</script>
+<script>
+'use strict';
+const InterfaceGroupReview = (() => {
+    const columns = ['InterfaceKey','DeviceName','InterfaceComment','InterfaceName','IfAlias','IfName','IfDescr','ProposedGroups','Groups','MatchExplanation','Exclude','Apply'];
+    const text = value => value == null ? '' : String(value);
+    function normalizeGroups(value) {
+        const seen = new Set();
+        return text(value).split(';').map(label => label.trim()).filter(label => {
+            if (!label || seen.has(label.toLowerCase())) return false;
+            seen.add(label.toLowerCase()); return true;
+        });
+    }
+    const isTrue = value => text(value).toLowerCase() === 'true';
+    function effectiveGroups(row) {
+        return normalizeGroups(!isTrue(row.Apply) ? row.ProposedGroups : isTrue(row.Exclude) ? '' : row.Groups);
+    }
+    function validateRows(rows) {
+        return rows.filter(row => isTrue(row.Apply) && !isTrue(row.Exclude) && normalizeGroups(row.Groups).length === 0);
+    }
+    function decisionsCsv(rows) {
+        if (validateRows(rows).length) throw new Error('Applied rows need a group name or Exclude checked.');
+        const quote = value => '"' + text(value).replace(/"/g, '""') + '"';
+        return '\uFEFF' + columns.map(quote).join(',') + '\r\n' +
+            rows.map(row => columns.map(column => quote(row[column])).join(',')).join('\r\n') +
+            (rows.length ? '\r\n' : '');
+    }
+    return {columns, text, normalizeGroups, effectiveGroups, validateRows, decisionsCsv};
+})();
+if (typeof document !== 'undefined' && document.getElementById('review-body')) {
+    const api = InterfaceGroupReview;
+    const rows = JSON.parse(document.getElementById('review-data').textContent);
+    const body = document.getElementById('review-body');
+    const search = document.getElementById('search');
+    const validation = document.getElementById('validation');
+    const groupSummary = document.getElementById('group-summary');
+    const selected = new Set();
+    const views = [];
+    let previewRequested = false;
+    let actionError = '';
+    function cell(tr, value) {
+        const td = document.createElement('td');
+        td.textContent = api.text(value); tr.appendChild(td); return td;
+    }
+    function checkbox(tr, row, field) {
+        const input = document.createElement('input'); input.type = 'checkbox';
+        input.checked = row[field] === 'True';
+        input.setAttribute('aria-label', field + ' interface ' + row.InterfaceKey);
+        input.addEventListener('change', () => { row[field] = input.checked ? 'True' : 'False'; refresh(); });
+        cell(tr, '').appendChild(input); return input;
+    }
+    rows.forEach((row, index) => {
+        const tr = document.createElement('tr');
+        const select = document.createElement('input'); select.type = 'checkbox';
+        select.setAttribute('aria-label', 'Select interface ' + row.InterfaceKey);
+        select.addEventListener('change', () => { if (select.checked) selected.add(index); else selected.delete(index); actionError = ''; refresh(); });
+        cell(tr, '').appendChild(select);
+        cell(tr, row.DeviceName + '\n' + row.InterfaceKey);
+        cell(tr, 'Comment: ' + row.InterfaceComment + '\nName: ' + row.InterfaceName);
+        const raw = cell(tr, '');
+        ['IfAlias','IfName','IfDescr'].forEach(field => {
+            const span = document.createElement('span'); span.className = 'raw';
+            span.textContent = field + ': ' + row[field]; raw.appendChild(span);
+        });
+        cell(tr, 'Proposed: ' + row.ProposedGroups + '\n' + row.MatchExplanation);
+        const groups = document.createElement('input'); groups.type = 'text'; groups.value = row.Groups;
+        groups.setAttribute('aria-label', 'Groups for interface ' + row.InterfaceKey);
+        groups.addEventListener('input', () => { row.Groups = groups.value; actionError = ''; refresh(); });
+        cell(tr, '').appendChild(groups);
+        const apply = checkbox(tr, row, 'Apply');
+        const exclude = checkbox(tr, row, 'Exclude');
+        body.appendChild(tr); views.push({tr, select, groups, apply, exclude});
+    });
+    function refresh() {
+        const query = search.value.toLowerCase().trim();
+        let visible = 0, overlap = 0, unmatched = 0, excluded = 0, edited = 0;
+        const invalidRows = api.validateRows(rows);
+        const invalid = new Set(invalidRows);
+        let hiddenSelected = 0;
+        rows.forEach((row, index) => {
+            const view = views[index];
+            view.tr.hidden = query !== '' && !api.columns.map(column => api.text(row[column])).join(' ').toLowerCase().includes(query);
+            if (!view.tr.hidden) visible++;
+            else if (selected.has(index)) hiddenSelected++;
+            view.select.checked = selected.has(index);
+            view.tr.classList.toggle('invalid', invalid.has(row));
+            view.groups.setAttribute('aria-invalid', invalid.has(row) ? 'true' : 'false');
+            const labels = api.effectiveGroups(row);
+            if (labels.length > 1) overlap++;
+            if (labels.length === 0) unmatched++;
+            if (row.Apply === 'True' && row.Exclude === 'True') excluded++;
+            if (row.Groups !== row.ProposedGroups || row.Exclude === 'True') edited++;
+        });
+        document.getElementById('counts').textContent = `${rows.length} interfaces; ${visible} visible; ${selected.size} selected (${hiddenSelected} hidden by search; selection is preserved); ${overlap} overlapping; ${unmatched} unmatched; ${excluded} excluded; ${edited} edited.`;
+        validation.textContent = actionError || (invalid.size ? `${invalid.size} applied row(s) need a group or Exclude checked. CSV download is blocked. Uncheck Apply to keep the proposal instead.` : '');
+        const groupCounts = new Map();
+        rows.forEach(row => api.effectiveGroups(row).forEach(label => {
+            const key = label.toLowerCase();
+            if (!groupCounts.has(key)) groupCounts.set(key, {label, count: 0});
+            groupCounts.get(key).count++;
+        }));
+        const groupLines = Array.from(groupCounts.values())
+            .sort((left, right) => left.label.localeCompare(right.label))
+            .map(group => `${group.label}: ${group.count} interface(s)`);
+        groupSummary.textContent = [
+            `${rows.length} interface(s) total`,
+            ...groupLines,
+            `${unmatched} unmatched; ${overlap} overlapping; ${excluded} excluded`
+        ].join('\n');
+        if (previewRequested) {
+            const summary = rows.map(row => `${row.DeviceName} / ${row.InterfaceKey}: ${api.effectiveGroups(row).join('; ') || '(no groups)'} [Apply=${row.Apply}, Exclude=${row.Exclude}]`);
+            document.getElementById('preview').textContent = summary.join('\n') || 'No interfaces in this inventory.';
+        }
+    }
+    search.addEventListener('input', () => { actionError = ''; refresh(); });
+    document.getElementById('select-visible').addEventListener('click', () => { views.forEach((view, index) => { if (!view.tr.hidden) selected.add(index); }); refresh(); });
+    document.getElementById('clear-selection').addEventListener('click', () => { selected.clear(); refresh(); });
+    function bulk(exclude) {
+        const groupsInput = document.getElementById('bulk-groups').value;
+        const normalizedGroups = api.normalizeGroups(groupsInput);
+        if (selected.size === 0) {
+            actionError = 'Select at least one row before making a bulk assignment. No rows were changed.';
+            refresh(); return;
+        }
+        if (!exclude && normalizedGroups.length === 0) {
+            actionError = 'Enter at least one group name before assigning selected rows. No rows were changed.';
+            refresh(); return;
+        }
+        actionError = '';
+        selected.forEach(index => {
+            const row = rows[index], view = views[index];
+            if (!exclude) { row.Groups = normalizedGroups.join(';'); view.groups.value = row.Groups; }
+            row.Apply = 'True'; row.Exclude = exclude ? 'True' : 'False';
+            view.apply.checked = true; view.exclude.checked = exclude;
+        });
+        refresh();
+    }
+    document.getElementById('assign-selected').addEventListener('click', () => bulk(false));
+    document.getElementById('exclude-selected').addEventListener('click', () => bulk(true));
+    document.getElementById('reset-selected').addEventListener('click', () => {
+        if (selected.size === 0) {
+            actionError = 'Select at least one row to reset to automatic proposals. No rows were changed.';
+            refresh(); return;
+        }
+        actionError = '';
+        selected.forEach(index => {
+            const row = rows[index], view = views[index];
+            row.Groups = row.ProposedGroups; row.Apply = 'False'; row.Exclude = 'False';
+            view.groups.value = row.Groups; view.apply.checked = false; view.exclude.checked = false;
+        });
+        refresh();
+    });
+    document.getElementById('accept-automatic').addEventListener('click', () => {
+        const hasEdits = rows.some(row =>
+            row.Groups !== row.ProposedGroups || api.text(row.Exclude).toLowerCase() === 'true');
+        if (hasEdits && !window.confirm('Replace all decisions with their automatic proposals? Existing edits will be discarded.')) return;
+        actionError = '';
+        rows.forEach((row, index) => {
+            const view = views[index];
+            row.Groups = row.ProposedGroups; row.Apply = 'False'; row.Exclude = 'False';
+            view.groups.value = row.Groups; view.apply.checked = false; view.exclude.checked = false;
+        });
+        refresh();
+    });
+    document.getElementById('preview-edits').addEventListener('click', () => { previewRequested = true; refresh(); });
+    document.getElementById('download').addEventListener('click', () => {
+        refresh();
+        const invalid = api.validateRows(rows);
+        if (invalid.length) {
+            search.value = ''; refresh();
+            views[rows.indexOf(invalid[0])].groups.focus(); return;
+        }
+        const url = URL.createObjectURL(new Blob([api.decisionsCsv(rows)], {type:'text/csv;charset=utf-8'}));
+        const link = document.createElement('a'); link.href = url; link.download = 'interface-group-decisions.csv';
+        document.body.appendChild(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+    refresh();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+﻿{
+  "SchemaVersion": 1,
+  "Settings": {
+    "DeviceId": [818],
+    "Mode": "AllInterfaces",
+    "Range": "lastNHours",
+    "RangeN": 4,
+    "StaleAfterMinutes": 60
+  }
+}

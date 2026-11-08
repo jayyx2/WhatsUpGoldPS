@@ -153,7 +153,7 @@ Each successful device needs three column walks; failed candidates add attempts.
 V1 uses Walk, V2/V3 BulkWalk; V3 also performs engine discovery. Large all-device
 runs can be slow and generate authentication logs. Start small and use the minimum
 approved credential set. Live V1/V2/V3 device verification is still required in
-your environment; offline tests verify routing, context and failure behavior.
+your environment.
 
 ## Quick demo and set-and-forget refresh
 
@@ -391,45 +391,6 @@ The existing importer revalidates identities and available metadata on the next
 run; a downloaded CSV is not proof that live metadata is unchanged. Keep this
 operational-data page and CSV local with restricted folder permissions.
 
-## Offline regression commands
-
-Run from the repository root using Windows PowerShell 5.1:
-
-```powershell
-powershell.exe -NoProfile -NonInteractive -File .\helpers\test\Invoke-WUGConnectionScopeTest.ps1
-pwsh.exe -NoProfile -NonInteractive -File .\helpers\test\Invoke-WUGConnectionScopeTest.ps1
-powershell.exe -NoProfile -NonInteractive -File .\helpers\test\Invoke-WUGInterfaceBaselineTest.ps1
-powershell.exe -NoProfile -NonInteractive -File .\helpers\test\Invoke-WUGInterfacePolicyTest.ps1
-powershell.exe -NoProfile -NonInteractive -File .\helpers\test\Invoke-WUGInterfaceLocalExportTest.ps1
-powershell.exe -NoProfile -NonInteractive -File .\helpers\test\Invoke-WUGInterfaceBrowserReviewTest.ps1
-powershell.exe -NoProfile -NonInteractive -File .\helpers\test\Invoke-WUGInterfaceBrowserTest.ps1
-```
-
-The connection-scope test uses an isolated real vault entry, a loopback TCP
-listener and mocked HTTP responses; it verifies auto-connect/API/disconnect with
-null and populated caller defaults in Windows PowerShell 5.1 and PowerShell Core.
-Core SSL request defaults stay inside the function invocation rather than changing
-the caller's table. It does not connect to your saved WUG server.
-
-The browser-review helper tests use Node.js. The headless browser harness requires
-a Node.js version supported by Playwright (current releases require Node 20+),
-Playwright and a Chromium runtime. It fails explicitly if unavailable rather than
-silently skipping browser checks. Existing Edge/Chrome can be used instead of
-downloading Chromium:
-
-```powershell
-powershell.exe -NoProfile -NonInteractive -File .\helpers\test\Invoke-WUGInterfaceBrowserTest.ps1 `
-    -PlaywrightModulePath 'C:\tools\node_modules\playwright' `
-    -BrowserExecutablePath 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
-```
-
-Use your installed Playwright module path and ensure compatible `node.exe` is on
-PATH. The harness covers searchable tables, identity-safe sorted selection,
-charts/top consumers, keyboard controls, CSV/XLSX exports, graphical review and
-zero external requests/page errors. Offline tests do not verify IIS
-authentication, live SNMP, or scheduled-task identity access. Alerts,
-shared-asset pack optimization and packaging/lifecycle cleanup remain deferred.
-
 ## Readiness checks before collection
 
 ```powershell
@@ -506,7 +467,7 @@ before the next publish. Restore failures are explicit, not hidden.
 **This is recoverable publication, not a whole-directory atomic IIS switch.**
 Files are promoted individually, so readers can briefly see mixed generations.
 After abrupt process termination, recovery waits for the next publishing attempt.
-Power-loss durability and live IIS behavior are not established by offline tests.
+Power-loss durability and live IIS behavior require separate environment verification.
 Do not manually delete a pending recovery journal to make an error disappear.
 Staging/backups contain only HTML/configuration, not raw group/change JSON.
 
@@ -552,12 +513,9 @@ writes, or replace a publication rollback. SNMP never probes additional credenti
 after the first successful ifDescr read; selected-entry fallback is separate from
 WUG transient retries.
 
-The scale regression generates **2,000 interfaces / 16 groups**, verifies exact
-membership/page counts and measures export runtime and pack size against
-**90 seconds / 50 MiB** fixture thresholds. Inline vendor assets increase per-page
-size. This is a reproducible local fixture, not a promise of API throughput,
-server capacity or arbitrary history sizes. Prefer smaller scopes and shorter
-history windows when packs grow.
+Inline vendor assets increase per-page size. Export runtime and pack size depend
+on interface counts, group counts and history windows. Prefer smaller scopes and
+shorter history windows when packs grow.
 
 ## 1. Open PowerShell in the repository
 
@@ -609,7 +567,7 @@ A missing/unusable saved connection causes an explicit error rather than an
 interactive prompt inside the report script. Run the first-time setup to fix it.
 Auto-connect inherits the existing connection helper's vault and SSL behavior;
 review its certificate-validation warnings. A connection made in another terminal,
-process, or assistant test session does not connect your terminal.
+process does not connect your terminal.
 
 ## 3. Quick start: inspect one device, without changing WUG
 
@@ -1018,9 +976,8 @@ SourcePath, ConsoleUri, PackName, and optional WebSession.
 
 `Publication.AuthenticationVerified` remains False after copying, by design.
 Use the separate access verification result/browser evidence to establish E2E
-success. This workstation has no WUG IIS installation; filesystem/configuration
-tests and API generation are verified here, but actual IIS authentication must be
-verified on the WUG server.
+success. Copying files and generating configuration do not establish successful
+IIS authentication; verify access on the WUG server.
 
 ## Review, rename, merge, exclude and pin interfaces
 
@@ -1463,13 +1420,4 @@ Built-in help:
 ```powershell
 Get-Help .\helpers\interfaces\Example-InterfaceGrouping.ps1 -Full
 Get-Help .\helpers\interfaces\Invoke-InterfaceGrouping.ps1 -Examples
-```
-
-Offline regression tests (no WUG connection required):
-
-```powershell
-powershell.exe -NoProfile -File .\helpers\test\Invoke-WUGInterfaceGroupingTest.ps1
-powershell.exe -NoProfile -File .\helpers\test\Invoke-WUGInterfaceOperationsTest.ps1
-powershell.exe -NoProfile -File .\helpers\test\Invoke-WUGDashboardPublishingReliabilityTest.ps1
-powershell.exe -NoProfile -File .\helpers\test\Invoke-WUGInterfaceDashboardAssetsTest.ps1
 ```

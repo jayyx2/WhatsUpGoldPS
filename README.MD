@@ -353,7 +353,7 @@ The `helpers/` directory contains automation examples and discovery tools.
 
 | Directory | Description |
 |---|---|
-| [helpers/converters](helpers/converters) | [Zabbix SNMP template conversion](docs/zabbix-template-conversion.md) with opt-in WUG library creation; offline by default |
+| [helpers/converters](helpers/converters) | [Guided Zabbix-to-WUG migration](helpers/converters/README.md): host/group selection, credential review, supported SNMP snapshots, reviewed monitor replacements and save/resume; [separate offline SNMP converter](docs/zabbix-template-conversion.md) |
 | [helpers/interfaces](helpers/interfaces) | [Interface grouping operator guide](helpers/interfaces/README.md): guided profiles, optional SNMP, offline status/traffic dashboards, readiness/status checks and recoverable WUG publishing |
 | helpers/discovery | Unified discovery framework with DPAPI credential vault |
 | helpers/vmware | VMware vSphere discovery |
@@ -373,6 +373,40 @@ The `helpers/` directory contains automation examples and discovery tools.
 | helpers/geolocation | Interactive Leaflet geolocation maps |
 | helpers/reports | HTML report templates and `Export-DynamicDashboardHtml` universal dashboard generator |
 | helpers/test | End-to-end integration test harness |
+
+## Zabbix-to-WUG migration wizard
+
+From the repository root, run:
+
+```powershell
+.\examples\Import-ZabbixHostsToWUG.ps1
+```
+
+The wizard reads a Zabbix 6.0-7.4 HTTPS API, lets you choose groups/hosts, and
+reviews credentials and monitors before one final **APPLY** approval. Missing
+secrets are masked prompts; new credentials use the existing encrypted discovery
+vault. `-WhatIf` previews source discovery without connecting to WUG;
+`-PlanPath 'C:\Migration\selection.json'` resumes saved redacted selections.
+The original template-based SNMP workflow remains available with `-Legacy`.
+
+**Experimental, not a complete Zabbix migration:** raw numeric SNMP collectors
+and portable trap filters are supported within the documented limits. Ping,
+TCP, restricted HTTP GET and simple SNMP trigger candidates require explicit
+review and do not reproduce Zabbix alert behavior. SSH/SQL, agent
+CPU/memory/disk/service checks and advanced HTTP require existing reviewed WUG
+replacements. Preprocessing, dependent items, rate/delta, complex alerts,
+dynamic LLD lifecycle, history, dashboards and alert actions are not migrated.
+Device targets must currently be literal IPv4.
+
+Credential creation is not monitor conversion. VMware/JMX, SSH key and non-Basic
+REST authentication candidates require deliberately configured existing
+credentials; automatic SNMPv3 creation supports only authPriv with MD5/SHA1 and
+DES/AES128. Read-back confirms assignments, **not live polling**.
+
+See the [operator guide and coverage tables](helpers/converters/README.md#5-monitor-coverage)
+for handoff commands, wizard examples, unsupported requirements and recovery.
+The [offline converter reference](docs/zabbix-template-conversion.md) documents
+the distinct local-export workflow, which does not create devices or assignments.
 
 ---
 

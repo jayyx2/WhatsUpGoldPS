@@ -4,7 +4,7 @@ The standalone [converter](../helpers/converters/Convert-ZabbixTemplateToWUG.ps1
 
 Conversion is offline by default. It never polls SNMP targets, creates devices, assigns monitors, installs packages, or executes template scripts/commands. No credentials are needed for conversion. **Only `-ImportToWUG` enables WUG library writes**, using an existing connection.
 
-## Current scope
+## Current scope of the offline export converter
 
 | Feature | Current behavior |
 |---|---|
@@ -22,7 +22,141 @@ Conversion is offline by default. It never polls SNMP targets, creates devices, 
 
 This is not a universal Zabbix runtime. Complex history/recovery/dependency expressions, preprocessing transforms, advanced LLD filters and unsupported PCRE features remain explicit deferred definitions. YAML parsing is tested separately against the complete pinned official suite described below. Live WUG/device validation is a separate step.
 
+### Which workflow should I use?
+
+| Workflow | Input / output | Approval and limits |
+|---|---|---|
+| Guided planner (default example) | Live Zabbix 6.0-7.4 API; effective host inventory, credential candidates, WUG devices/monitors/assignments and redacted selection plans. | Explicit review, then APPLY. Limited SNMP conversion plus reviewed alternatives; not a complete migration. |
+| Legacy example (`-Legacy`) | Live API plus recursive template exports; SNMP devices/monitors/assignments, optional library-only SSH/Windows credentials. | IMPORT/CREATE confirmations; does not use effective-host planning or saved selections. |
+| Offline converter | Local YAML/XML/JSON exports; profiles, reports and optional SNMP library creation. | `-ImportToWUG` requires an existing connection. No devices, credential creation or monitor assignments. |
+
+All use the repository's PowerShell 5.1-compatible helpers. **Reading or creating
+a credential does not translate its associated check.** "Unsupported" means no
+automatic mapping in the chosen workflow, not necessarily that WUG lacks an
+appropriate monitor.
+
 ## Usage
+
+### Interactive Zabbix server to WUG example
+
+For a copy-and-paste launch command, administrator handoff checklist, example
+wizard sessions, and troubleshooting, start with the
+[Zabbix-to-WUG operator guide](../helpers/converters/README.md).
+
+The [interactive migration entry point](../examples/Import-ZabbixHostsToWUG.ps1)
+now opens a guided effective-host planner for **Zabbix 6.0-7.4**, using trusted
+HTTPS and a masked API token. Select groups/hosts by number, including agent-only
+hosts with compatible IPv4 targets. It reads effective host items, triggers,
+discovery rules, web scenarios, interfaces and inherited/global macro settings
+without temporary raw exports. The token needs `hostgroup.get`, `host.get`,
+`template.get`, `usermacro.get`, `item.get`, `trigger.get`, `discoveryrule.get`
+and `httptest.get` permissions. Failed inventory reads stop explicitly.
+
+```powershell
+# Read Zabbix and preview conversions without connecting or writing to WUG:
+.\examples\Import-ZabbixHostsToWUG.ps1 -WhatIf
+
+# Review credentials/alternatives, then approve one final APPLY:
+.\examples\Import-ZabbixHostsToWUG.ps1
+
+# Resume redacted selections (re-authenticates and rediscovers source):
+.\examples\Import-ZabbixHostsToWUG.ps1 -PlanPath 'C:\Migration\selection.json'
+
+# Preserve the original exact-host/template-export SNMP workflow:
+.\examples\Import-ZabbixHostsToWUG.ps1 -Legacy
+```
+
+The review menu provides **M** (monitor alternatives), **X** (exclude collectors),
+**C** (credential review), **S** (save redacted selections), **B** (return to
+review), **A** (preflight/apply) and **Q** (cancel). Credential pickers retain
+number/ID selection, C/U/R/Q. New credentials are staged as SecureStrings until
+final **APPLY**, then saved through `Save-DiscoveryCredential` and created through
+`Add-WUGCredential`. Readable values are confirmed without printing them; missing
+secrets are masked prompts. Explicit cross-host reuse and device-assignment
+approval are required; names alone never imply shared credentials.
+At C, operators can also add a credential type not detected in source settings,
+for example Windows credentials for an existing WUG-native service replacement.
+B at the review menu does not undo selections or return to host selection.
+X excludes ready generated candidates; it does not remove existing replacement
+selections. Missing approved monitors or required SNMP bindings return to review;
+other preflight conflicts stop before wizard writes.
+
+Candidates include SNMP, SSH, Windows, HTTP Basic/REST, ADO, AWS, Azure and
+Redfish. SSH key, non-Basic REST, VMware and JMX settings require intentionally
+configured existing credentials, not guessed mappings. SNMPv3 automatic
+creation remains authPriv with MD5/SHA1 and DES/AES128 only. Secret/vault/masked,
+context, cyclic or ambiguous macro values are never recovered or downgraded.
+Credential POSTs disable automatic retries. The existing discovery vault retains
+its DPAPI/AES configuration and scheduling-scope mirror; see the operator guide.
+Manual **U** UI creation is outside the wizard's final write gate.
+
+Effective numeric SNMP items and resolved discovered instances generate concrete
+snapshot collectors, preserving OIDs and supported whole-minute intervals.
+LLD rescan/lost-resource behavior remains deferred. Supported current-value
+SNMP triggers require explicit cadence review. Restricted Ping, TCP and anonymous
+HTTP/HTTPS GET checks with peer/host verification settings enabled are
+**WUG-native alternatives**, not claims of
+Zabbix alert equivalence. Preprocessing/history/recovery/dependencies, other HTTP
+semantics and multi-step web scenarios remain blocked. For SSH/SQL and native
+CPU/memory/disk/service requirements, operators may choose an existing reviewed
+WUG monitor, including an explicitly reviewed assignment interval. Source
+commands are never executed during discovery; approved WUG replacements may
+execute later on the WUG poller.
+
+#### Automatic conversion versus unsupported requirements
+
+| Source requirement | Guided planner behavior now |
+|---|---|
+| Untransformed numeric SNMP items | Ready collectors with complete numeric OIDs and fixed whole-minute intervals (1-1440 minutes). Resolved LLD instances are snapshots only. |
+| Portable SNMP trap filters | Ready passive event filters; no history/recovery or automatic trap-routing setup. |
+| Supported local current-value SNMP triggers | Explicit review required; 60-second WUG cadence, not Zabbix historical alert equivalence. |
+| `icmpping` / `icmpping[]` | Reviewed Ping alternative (5-second timeout, 1 retry, 32-byte payload); explicit packet/target options, latency and loss keys are not mapped. |
+| `net.tcp.service[tcp,,PORT]` | Reviewed TCP alternative to the selected device, literal port 1-65535 and 5-second timeout; other protocols, explicit targets and service-performance checks are not mapped. |
+| Restricted HTTP GET | Reviewed anonymous connectivity alternative with 10-second timeout. Requires no redirects/body/headers/proxy/query/fragment/URL credentials or unresolved URL macros; does not translate source status/content/response processing. |
+| SSH / ODBC / SQL | No command/query/DSN/row-condition conversion. Select an existing reviewed WUG monitor; SSH/ADO credential creation alone is insufficient. |
+| Agent CPU/memory/disk/services and other unmapped items | No automatic agent-to-WUG monitor/units/threshold mapping; select reviewed existing replacements. |
+| Advanced HTTP and multistep web scenarios | No automatic authentication, header/body, cookie/redirect, step or response-condition translation; configure a WUG replacement separately. |
+| Preprocessing/dependent/calculated items, rate/delta, custom schedules | Deferred with Reasons; no raw-value substitution or interval rounding. |
+| Complex triggers, cross-host checks, history/recovery/dependencies | Deferred; no claim that a current-value or connectivity replacement preserves alerts. |
+| LLD rules/lifecycle, dashboards, historical data and alert actions | Not migrated as ongoing discovery or configuration. The planner does not reproduce the offline converter's table-rule mapping. |
+| DNS/IPv6 targets, absent/incompatible primary interfaces | Blocked by the current wizard/device-template target requirements. |
+
+The active item alternatives require fixed intervals from 10 to 86400 seconds.
+Readable inherited/global macros are resolved for **credential suggestions**,
+not arbitrary monitor keys/OIDs/schedules/URLs. Those unresolved monitor fields
+remain requirements. Disabled definitions are excluded, not offered as
+replacement candidates.
+
+For the exact credential type/authentication restrictions and operator steps,
+see the [credential coverage](../helpers/converters/README.md#4-credential-discovery-and-safety)
+and [monitor coverage](../helpers/converters/README.md#5-monitor-coverage).
+
+Saved JSON contains URLs, IDs, generated candidate/target fingerprints and
+existing-monitor selections, never tokens, credential bundles, source commands
+or monitor payloads. Resume rediscovers source, rejects changed generated
+snapshots/replacement configurations and recollects credential approvals.
+It also verifies the saved WUG server URL. This is a re-reviewed selection
+checkpoint, not a persisted executable payload, unattended import or rollback.
+Preflight checks all planned library name/configuration conflicts, device
+ambiguity and advertised WUG monitor classes before wizard writes. Existing
+identical monitors/devices are reused; only missing objects are created.
+Existing assignment settings and device SNMP ports are not overwritten.
+Read-back receipts distinguish created/assigned objects from **LiveValidation =
+NotRun**. Live authentication, results, units and alert conditions still require
+verification. Writes are not transactional; inspect partial results after errors.
+`BlockedDefinitions` counts all non-Ready definitions, including disabled,
+skipped and unapproved candidates and requirements with user-selected
+replacements. `ReviewedReplacements` counts those replacements separately;
+`AssignedMonitors` is deduplicated by monitor type/ID, and `AssignedCredentials`
+counts the approved device credential bindings.
+
+`-Legacy` retains the prior template-export workflow, IMPORT/CREATE confirmations,
+optional library-only SSH/Windows credentials and temporary export cleanup. It
+additionally needs `configuration.export`. The offline converter described below
+retains its default SNMP-only import allowlist; planner alternatives are explicitly
+opted in by the planner.
+
+### Local export conversion
 
 Run from the repository root. Example paths below use sibling folders rather than a specific user's machine layout. Input folders are not bundled with this repository; adjust the paths to your local exports, checkouts and desired output locations.
 
@@ -187,12 +321,22 @@ XML external entities/DTDs are prohibited. Export versions currently accepted ar
 
 ## Tests and Cisco validation path
 
-Run the offline harness in Windows PowerShell 5.1:
+Run the signed targeted harnesses in Windows PowerShell 5.1 from the repository
+root (no live Zabbix/WUG server required):
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-    -File .\helpers\test\Invoke-WUGZabbixConversionTest.ps1
+powershell.exe -NoProfile -File .\helpers\test\Invoke-WUGZabbixMigrationPlannerTest.ps1
+powershell.exe -NoProfile -File .\helpers\test\Invoke-WUGZabbixHostImportTest.ps1
+powershell.exe -NoProfile -File .\helpers\test\Invoke-WUGZabbixConversionTest.ps1
 ```
+
+The last verified default runs passed **114 planner checks**, **48 legacy
+workflow/vault groups**, and **58 offline converter groups** on Windows
+PowerShell 5.1. Planner coverage includes no-write preview/cancel, credential
+staging and typed payloads, manual credential assignment, unsupported/name
+conflict preflight, assignment reconciliation and save/resume drift checks.
+These are mocked/offline validations, not live polling or a claim that every
+deferred source type is converted.
 
 Optionally also test actual Cisco exports from a local checkout/download. Set `-CommunityTemplateRoot` to the folder containing `Network_Devices` (ZIP downloads may add an extra enclosing folder):
 
@@ -203,7 +347,11 @@ Optionally also test actual Cisco exports from a local checkout/download. Set `-
 
 Synthetic fixtures are generated in a private temporary directory and removed afterwards. Community files are read-only and are not redistributed. The optional tests cover Cisco 1900 and 2960 XML/YAML exports; these names are fixtures, not a claim that either model matches the intended live device.
 
-The current regression run passes **62 groups on both Windows PowerShell 5.1 and PowerShell 7**, including the four community Cisco fixtures. This is offline parsing/conversion coverage, not live E2E validation. Unsupported monitor definitions remain visible in reports.
+A previously verified extended converter run passed **62 groups on both Windows
+PowerShell 5.1 and PowerShell 7**, including the four optional community Cisco
+fixtures. Those fixtures are not part of the 58-group default run. This is
+offline parsing/conversion coverage, not live E2E validation. Unsupported
+monitor definitions remain visible in reports.
 
 The harness also exercises multiline flow syntax, tags/directives, complex keys and structural equality, all three scalar schemas, exact large-number canonicalization, recursive alias identity, opaque tags, stream scope, Unicode rejection and source-line diagnostics. An expanded-syntax Zabbix export must produce exactly the same WUG payload as the baseline export; multi-document exports must be rejected.
 

@@ -18,7 +18,34 @@ Each discovery provider knows how to talk to a specific platform (Azure, AWS, VM
 
 ## What Platforms Are Supported?
 
-For existing Zabbix templates, see the [SNMP template converter](zabbix-template-conversion.md). It generates profiles/reports and can explicitly create supported active, performance, table and trap monitors in the WUG library. Device discovery and monitor assignment remain separate.
+For a Zabbix server, use the separate
+[guided Zabbix-to-WUG wizard](../helpers/converters/README.md), not a discovery
+provider setup script. From the repository root:
+
+```powershell
+.\examples\Import-ZabbixHostsToWUG.ps1
+```
+
+It selects Zabbix groups/hosts, reads effective configuration, prompts for missing
+credential secrets, and can create/reuse WUG devices, library monitors and
+approved assignments after final **APPLY** confirmation. `-WhatIf` performs
+source-only discovery; saved redacted selections can be resumed with `-PlanPath`.
+It uses the discovery framework's vault but is **not** a provider in the table below.
+
+This is an experimental, selective migration: supported raw SNMP snapshots/trap
+filters and reviewed Ping/TCP/restricted HTTP/current-value alternatives are not
+a complete copy of Zabbix. SSH/SQL, agent checks and advanced HTTP need reviewed
+existing WUG replacements; transforms, complex alert logic, dynamic LLD lifecycle,
+history, dashboards and actions are not migrated. Credential discovery/creation
+does not imply that the corresponding monitor is converted. See the
+[coverage and credential limits](../helpers/converters/README.md#4-credential-discovery-and-safety).
+Assignment read-back is not live authentication or polling validation.
+
+For **local Zabbix export files**, the
+[offline SNMP template converter](zabbix-template-conversion.md) remains separate.
+It generates profiles/reports and optionally creates supported SNMP active,
+performance, table and trap monitors in the WUG library; that converter does
+not create devices or assign monitors.
 
 | Provider | What It Scans |
 |----------|--------------|

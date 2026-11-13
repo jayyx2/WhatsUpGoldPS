@@ -3869,7 +3869,20 @@ function Resolve-WUGDiscoveryTargetDevice {
         Write-Host "  [CREATE] $Target" -ForegroundColor Yellow
         $created = Add-WUGDeviceTemplate -displayName $Target -DeviceAddress $Target -Brand $Brand `
             -PrimaryRole $PrimaryRole -Note $Note -ErrorAction Stop
-        if ($created.idMap) { $deviceId = [int]($created.idMap | Select-Object -First 1).resultId }
+        if ($created -and $created.PSObject.Properties['idMap'] -and $created.idMap) {
+            $deviceId = [int]($created.idMap | Select-Object -First 1).resultId
+        }
+        if (-not $deviceId) {
+            # Add-WUGDeviceTemplate returns only the errors/warnings list when WUG reports any,
+            # even though the device was usually created; surface them and look the device up.
+            foreach ($msg in @($created)) {
+                if ($null -eq $msg) { continue }
+                $text = if ($msg.PSObject.Properties['messages']) { @($msg.messages) -join '; ' } else { "$msg" }
+                if ($text) { Write-Warning "  WUG reported for ${Target}: $text" }
+            }
+            $recheck = Find-WUGDiscoveryDeviceMatch -Name $Target -Address $Target
+            if ($recheck.Found) { $deviceId = [int]$recheck.Device.id }
+        }
         if (-not $deviceId) {
             Write-Warning "  WUG did not return a device ID for $Target."
             return $null
@@ -4033,8 +4046,8 @@ function Write-DiscoveryStats {
 # SIG # Begin signature block
 # MIImiAYJKoZIhvcNAQcCoIImeTCCJnUCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQ6bQRaBiOnj/x
-# QQ9n+pq8lGKIomSfVbDqW99+/WtTTKCCH5owggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+2cSBVchgjZxs
+# zvvpXGlnYLAKW9bBizagDfrl6FxfUaCCH5owggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -4207,34 +4220,34 @@ function Write-DiscoveryStats {
 # Z28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWduaW5n
 # IENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAYBgor
 # BgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEE
-# MBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAH
-# VTfu3/LQ0T1BSCjWy6RP/HlqEhY1IbQxgYKxpWNgdDANBgkqhkiG9w0BAQEFAASC
-# AgB/IZYFPL9ju638/rr9PqLJb5hxFfV9GsRfDjGsx1WzmjixoV1ptTaX33HeeeYP
-# cnF9VoSygvxbgOViraCM4wndGPO615L+/wGmQBZjvKC+HNYwnRHn0T6pPvfr7+ir
-# JrCssJGKV8+FkN0b4KsK9V4sSbDU4VPk94g6pBdAnEz2IugusMH9OytnLru0s3kU
-# DxDlFhCssSMfHjf0hpfWcpywa67YgAqTulj7ntDYF29qaoa7xFeW2s9OsrSYuVcu
-# 7GZXZn7e7Zz/3+9+TvtKB+HfIWLt5/e4tE3n+PAwffMjS7Q6PAYQ0wzp8y/yquLV
-# ncT1/hs8Xa3w+7LqilTlIGj7RGUIln+iw3Q+nW2XOaibgmDt+O/8ThffPPMOYCrk
-# EyVlLdhJJH1CBTrtrUpTZJkS0cjJ9JRXPNL/TjXeeIUM4l1N3ORN4sjgyLX92WjD
-# E69KiAIx/OuaZBr3cCrphKvz/RwyJtoDpd53osp0F2uHuCOJu5Bvr4VlFE21RMpg
-# IMWcWWsUkyxowrucnWnVejZN4JTevohOEY1CgyQCfilnQHblQXitjmVu3MwZ5eTU
-# S/fnhX5fnSeRP25zgeJ0J+tso48sbbZIIFC4ROURD8iW0h8ZI4tUYCXWRCIUUiXs
-# 3YkzfZ3wW74Y15ujHTfPgoEalazwFYMggfLlZspu5jTwJaGCAyYwggMiBgkqhkiG
+# MBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBb
+# EayEkAEsHsbdBeswuP8WoW1XtDx2SwcoBwmzTVrgnTANBgkqhkiG9w0BAQEFAASC
+# AgADkdC/nrqw/tErIu8QZJllPpLY0Drq0jy+cpsXX8/LsMxcuWvNqadW1n+sYn5b
+# T+FInM9XvZkXM5BwcNUpyNkq9fqBtmUFnCFDDbplkQNizhjKtXFk2A1NkbNOYZhz
+# aY1WBtZ1yeksTjh/h//UDakfAlZrJWLxIEJX+O7Z7l8OJ8TJ49YBDFdiSHlrP+SF
+# E6b3tuVdoV+691nsOntBVB4MoRosbH491X/yAymhwwFlmff0sMGK/2ANUSTHNamB
+# vHCY2ixgw0xsNyvJmodW/46y5pUz/NLuWDeo7NgHDAQIGInUcRt3WFMbX+ZmAMO1
+# JjjOj+OuF4zFQYeMtRohovb0TZ6jlDMMz+HdqgYLZRu5fnJmGIsAQdL4DtL0ptFR
+# KqDcchnW/amrF/24hjIKVWzM3iL2LkLx7nkBhXHvM5dArsPzOCRB0pRuj6AlaQ8g
+# msk/i5gV9KFWNbQ67GW+H0WMbiaZYBQu6/Sfs3ZDk8mo1Z0YaVOOzjsw/S5tpzij
+# ExrmYNPIxWEEyzvu2mcF93AIAjeh7/rs7wx+AFH2f2s4CQei2DAEjNiAsp8GhvM4
+# dTUe0A7QOodKVBO5mVl1bmThFRPMPVfppqs9/LgOZBFKF6bmi3izhUxN6YuUkQ4a
+# L1pBT4gmKP4Crq6SeNAVEFZS4p/6RhDaLy3IBzT41TmzGqGCAyYwggMiBgkqhkiG
 # 9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
 # bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUw
 # DQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqG
-# SIb3DQEJBTEPFw0yNjExMDgxNjEzNDVaMC8GCSqGSIb3DQEJBDEiBCBXd1AzUoV7
-# sz9HgvVX3t4YoRAY57ISiTuS6DI7RXuhuzANBgkqhkiG9w0BAQEFAASCAgAPVjDp
-# 8aAP09NMntqkqO2UkeCvYkP7Klz8hhzABdSd0FbGcVuC02W1AWNWMwb/IVUifmmy
-# vmnauJ3Fn7Q5pcJ4hIAWLSRDjPs7OepXSvDDWp0kxnlBUXaI+UjqvKPqOYZwnjyW
-# L9nADBeanCD3vYGEd378fe7gROBrVY2PI5rM9IvOg9palmIEsh1RCN/JAxlDMjMp
-# nigZtFzwP5GWLHC+f73POu+4i6XvxYaqAHJoeOIeHoUEwPTqLD9hYQdK2Bfm/qwc
-# rXzkkEP3C1CXnUgzSMzqsvZKXmK2ORfUGbHPyD8P46I7lk7Ql3vvTuTZ3/Js+ngo
-# xi/MhbiNHPFTVjU+Qr6ecUzCi1l/qdDJikjTwKeTWaEPrBIeiQtZkP8Zkzf161jl
-# QkRzttgzsXxwAVJfA430mMVqaCsUcUknEX0KcmRkO6rfHJEJgaNvWtBX5Pi6tHur
-# MZps0zmhaJFiMd5NXxYAp98AvvaHrVebyMmvDlFMOe2PmyYGaj8IUoo8p+eksNv+
-# gyP8MAhBV9FGkUKiMzKaBMfEzek/4Rn+uIceeAFaZ5h5K3Yw9DHgIMiAUQ/9WRe1
-# ww2a72MXCWAvKnzFO+Cy7XXpVGi9MB2t5Nj006dHyQ/daGlIHfFhPYV1tv35zdQZ
-# LE9mEJ9bGznzhxa1YGw/QtuSWNiHv4TEtsG8cg==
+# SIb3DQEJBTEPFw0yNjExMTMwMjA4MDdaMC8GCSqGSIb3DQEJBDEiBCDZikfYoUyE
+# Lr1TcyggV25vTur8px8ArN022AAjU1R/IDANBgkqhkiG9w0BAQEFAASCAgB8KAQN
+# ZbIItNU+88xKLv0bj35yf8tI9WOhrOGJKS9jDSuwNJ+ybY5eknqPPsotGQrmuLTf
+# HszHE40oL6yImLrlHZ1jAnOiNUo8S3ZenNA9EACZAb0tVlSdE+RR4zzldPQfS3HT
+# 1jEbSvVfn3mfs9H55oqE1WlMKcyW4/mhYpPl+9wYvYQE5iZVSx4mdOHfuoFQ6asE
+# MyxLQPa1Z3VR2gavJU30+rzzVFuOz2rZNg+XZQZwocknyiknpg8kVmeUOv3kzEf3
+# el5ie74bx6uNX3gTmNkHgoBLKaoRQwHNmDAkYA3iMAv6eb+UkUjcqSTzxo8EVAdA
+# 0sQLBCD9oqUBVmDJ+Q9OfDWnUcosx+gm/11Uh1oml8/TkJlh2t3r9/RZenMqsBoJ
+# pyJ67+v/Mv0m3zcUcGFLzHGzKcofpC8wkv9niLjUmmP4JXnznuatOo2UkRs7y/kI
+# c5v1EFNpF7xNKo14eJ6lGDi8jOyur+nrGxSeWM8POKjN8BAIosvMtIEcPwMcIgTL
+# QDucIllGZflnXtdZXFrf5bDm/fC1gmMJKL9MaipE9zLVYPe7Te2gi6OfWRaxA9Dm
+# r3nPFKMc3JNnXNirYzfRXnDzVtMoycxRwZs/gtLFiBl9qrPhH3I1F+MTHoQtSpUc
+# dtsTnKP8CYRjAe+NFnyHxIB79PEgSK2bo6YF5A==
 # SIG # End signature block

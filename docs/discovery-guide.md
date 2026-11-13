@@ -64,6 +64,8 @@ not create devices or assign monitors.
 | **Bigleaf** | SD-WAN circuits and tunnel health on Bigleaf Networks devices |
 | **Windows Attributes** | OS, hardware, BIOS, and memory info as device attributes on Windows servers |
 | **Windows Disk I/O** | Disk instance discovery and disk I/O performance monitors on Windows servers |
+| **NVIDIA GPU** | GPUs on Linux hosts via `nvidia-smi` over SSH: GPU Health, per-GPU metrics, and inventory attributes |
+| **Redfish** | Server hardware health, power, and thermals through BMCs (iLO, iDRAC, XCC, Supermicro) |
 
 ---
 
@@ -87,6 +89,7 @@ Every platform needs a login. You'll be asked for things like:
 - **AWS**: An Access Key + Secret Key
 - **VMware / Proxmox**: A username + password or API token
 - **Docker**: An API token
+- **NVIDIA GPU**: An SSH username + password (no root or sudo needed)
 
 Your credentials are saved in an **encrypted vault** on your computer — they're never stored in plain text. Only your Windows user account can decrypt them. If you run the setup again later, it will find your saved credentials so you don't have to type them again.
 

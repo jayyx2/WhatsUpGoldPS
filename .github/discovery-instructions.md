@@ -82,6 +82,7 @@ Resolve-DiscoveryCredential -Name '{VaultKey}' -CredType '{Type}'
 | Proxmox | `PSCredential` | `Proxmox.{Host}.Credential` | Username, Password |
 | AWS | `AWSKeys` | `AWS.{Identifier}` | AccessKeyId, SecretAccessKey |
 | Docker | `BearerToken` | `Docker.{Host}.Token` | API token string |
+| NvidiaSmi | (script-managed) | `NvidiaSmi.Ssh` | Username, Password and/or KeyFile, Port |
 | Generic | `PSCredential` | `{Provider}.{Host}.Credential` | Username, Password |
 | WUG | `WUGServer` | `WUG.{Server}` | Server, Port, Protocol, Credential, IgnoreSSL |
 

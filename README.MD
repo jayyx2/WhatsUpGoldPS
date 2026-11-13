@@ -209,6 +209,11 @@ The module includes helper scripts to automatically discover infrastructure acro
 - Google Cloud Platform (GCP)
 - Oracle Cloud Infrastructure (OCI)
 
+### Hardware & Accelerators
+
+- NVIDIA GPUs on Linux hosts (`nvidia-smi` over SSH): GPU Health active monitor, per-GPU performance monitors, and GPU inventory device attributes
+- Server BMCs via DMTF Redfish (HPE iLO, Dell iDRAC, Lenovo XCC, Supermicro)
+
 ---
 
 # Quick Start
@@ -355,7 +360,7 @@ The `helpers/` directory contains automation examples and discovery tools.
 |---|---|
 | [helpers/converters](helpers/converters) | [Guided Zabbix-to-WUG migration](helpers/converters/README.md): host/group selection, credential review, supported SNMP snapshots, reviewed monitor replacements and save/resume; [separate offline SNMP converter](docs/zabbix-template-conversion.md) |
 | [helpers/interfaces](helpers/interfaces) | [Interface grouping operator guide](helpers/interfaces/README.md): guided profiles, optional SNMP, offline status/traffic dashboards, readiness/status checks and recoverable WUG publishing |
-| helpers/discovery | Unified discovery framework with DPAPI credential vault |
+| helpers/discovery | Unified discovery framework with DPAPI credential vault, including [NVIDIA GPU](#nvidia-gpu-monitoring) and Redfish BMC discovery |
 | helpers/vmware | VMware vSphere discovery |
 | helpers/proxmox | Proxmox VE discovery |
 | helpers/hyperv | Hyper-V discovery |
@@ -407,6 +412,39 @@ See the [operator guide and coverage tables](helpers/converters/README.md#5-moni
 for handoff commands, wizard examples, unsupported requirements and recovery.
 The [offline converter reference](docs/zabbix-template-conversion.md) documents
 the distinct local-export workflow, which does not create devices or assignments.
+
+## NVIDIA GPU monitoring
+
+[`Setup-NvidiaSmi-Discovery.ps1`](helpers/discovery/Setup-NvidiaSmi-Discovery.ps1)
+connects to Linux GPU hosts over SSH, runs `nvidia-smi`, and onboards them into WhatsUp Gold:
+
+```powershell
+# Check every monitor command on the hosts first; changes nothing in WUG
+.\helpers\discovery\Setup-NvidiaSmi-Discovery.ps1 -Target '10.0.0.80','10.0.0.82' -Action Validate
+
+# Create/reuse the SSH credential, devices, monitors, and attributes
+.\helpers\discovery\Setup-NvidiaSmi-Discovery.ps1 -Target '10.0.0.80','10.0.0.82' -Action PushToWUG
+```
+
+- **GPU Health** (SSH active monitor): up only when nvidia-smi initializes, no GPU reports lost, `ERR!`
+  or *requires reset*, and nvidia-smi sees every NVIDIA GPU on the PCI bus. When down, its output gives
+  the reason (for example an NVML driver/library mismatch after a driver update).
+- **Performance monitors**: per-GPU utilization, memory utilization, VRAM used %, temperature and power
+  (`GPU0 ...` to `GPU3 ...`, set by `-MaxGpuCount`), plus host-wide memory, clocks, fan, encoder and decoder metrics.
+- **Device attributes** (`NVIDIA.*`): GPU count, models, total VRAM, driver and CUDA versions, host OS and
+  kernel, and per-GPU model, serial, UUID, PCI bus ID, VBIOS, power limit, compute capability and PCIe link.
+  The device OS role is set to `Linux` when WUG has none.
+
+Every monitor command is run over SSH before anything is created, and only commands that return a number
+are added. Monitors are shared library entries with no host-specific values, so one set serves every GPU
+host, and re-runs only add what is missing. The awk is POSIX-only, so gawk, mawk, nawk and busybox awk all
+behave the same. When a value is `N/A`, the output says it came from nvidia-smi itself, so it isn't mistaken
+for a failed lookup.
+
+The SSH account needs no root or sudo; `nvidia-smi` runs as any user. WUG SSH credentials are
+username/password, so a dedicated low-privilege account with password login allowed only for that user
+(an `sshd_config` `Match User` block) is recommended. Credentials are kept in the encrypted
+discovery vault under `NvidiaSmi.Ssh`.
 
 ---
 
@@ -500,8 +538,11 @@ The module includes discovery helpers for:
 - Amazon Web Services
 - Google Cloud Platform
 - Oracle Cloud Infrastructure
+- NVIDIA GPU hosts (`nvidia-smi` over SSH)
+- Server BMCs via Redfish
 
 ### Does WhatsUpGoldPS include testing?
+
 
 Yes.
 

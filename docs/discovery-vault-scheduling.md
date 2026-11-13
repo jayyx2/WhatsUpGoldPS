@@ -70,6 +70,7 @@ Jump to any provider:
 - [Bigleaf](#bigleaf)
 - [GCP](#gcp)
 - [OCI](#oci)
+- [NVIDIA GPU](#nvidia-gpu)
 
 ---
 
@@ -586,6 +587,37 @@ Discovers compute instances and resources in Oracle Cloud Infrastructure.
 
 ---
 
+## NVIDIA GPU
+
+Discovers NVIDIA GPUs on Linux hosts by running `nvidia-smi` over SSH. `PushToWUG` creates a shared **GPU Health** SSH active monitor, per-GPU and host-wide SSH performance monitors, and `NVIDIA.*` inventory device attributes, and sets the device OS role to `Linux` when WUG has none.
+
+**What you need:** An SSH account on each GPU host. It needs no root or sudo. WUG SSH credentials are username/password, so allow password login for that account (for example with an `sshd_config` `Match User` block).
+
+### Step 1 — Save credentials to vault
+```powershell
+.\Setup-NvidiaSmi-Discovery.ps1 -Target '192.168.75.82' -Action None
+# Follow prompts; saved as NvidiaSmi.Ssh (Username, Password, Port)
+```
+
+### Step 2 — Test run
+```powershell
+# Runs every monitor command over SSH and reports the results; changes nothing in WUG
+.\Setup-NvidiaSmi-Discovery.ps1 -Target '192.168.75.80','192.168.75.82' -Action Validate -NonInteractive
+
+# Create/update the WUG devices, monitors, and attributes
+.\Setup-NvidiaSmi-Discovery.ps1 -Target '192.168.75.80','192.168.75.82' -Action PushToWUG -NonInteractive
+```
+
+### Step 3 — Schedule
+```powershell
+.\Register-DiscoveryScheduledTask.ps1 -Mode Provider -Provider NvidiaSmi -Target '192.168.75.80','192.168.75.82' -Action PushToWUG -UseSystemVault -SkipVaultPopulate -TriggerType Daily -TimeOfDay '02:00' -RunNow
+```
+A scheduled `PushToWUG` keeps the attributes current (only changed values are written), assigns the per-GPU monitors to GPUs that are added later, and records failures such as an NVML driver/library mismatch in `NVIDIA.Status`.
+
+**Dashboard:** `Output\nvidiasmi-dashboard-gpu.html` (`-Action Dashboard`)
+
+---
+
 ## Common Operations
 
 ### View all registered tasks
@@ -679,6 +711,7 @@ foreach ($p in $providers) {
 | Bigleaf | `Output\Bigleaf-Dashboard.html` |
 | GCP | `Output\GCP-Dashboard.html` |
 | OCI | `Output\OCI-Dashboard.html` |
+| NvidiaSmi | `Output\nvidiasmi-dashboard-gpu.html` |
 
 All dashboards embed an `Updated:` timestamp in the header, refreshed on every run.
 
@@ -697,6 +730,7 @@ All dashboards embed an `Updated:` timestamp in the header, refreshed on every r
 | CUCM | `CUCM.Snmp` |
 | GCP | `GCP.ServiceAccount` |
 | OCI | `OCI.Config` |
+| NvidiaSmi | `NvidiaSmi.Ssh` |
 | Others | Set via `Setup-<Provider>-Discovery.ps1 -Action None` |
 
 ---

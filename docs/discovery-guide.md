@@ -64,6 +64,7 @@ not create devices or assign monitors.
 | **Bigleaf** | SD-WAN circuits and tunnel health on Bigleaf Networks devices |
 | **Windows Attributes** | OS, hardware, BIOS, and memory info as device attributes on Windows servers |
 | **Windows Disk I/O** | Disk instance discovery and disk I/O performance monitors on Windows servers |
+| **Linux** | SSH compliance checks, shared health/performance monitors, OS classification and inventory attributes |
 | **NVIDIA GPU** | GPUs on Linux hosts via `nvidia-smi` over SSH: GPU Health, per-GPU metrics, and inventory attributes |
 | **Redfish** | Server hardware health, power, and thermals through BMCs (iLO, iDRAC, XCC, Supermicro) |
 
@@ -90,6 +91,7 @@ Every platform needs a login. You'll be asked for things like:
 - **VMware / Proxmox**: A username + password or API token
 - **Docker**: An API token
 - **NVIDIA GPU**: An SSH username + password (no root or sudo needed)
+- **Linux**: An SSH username + password for WUG monitoring; key-only runs can collect inventory and validate commands
 
 Your credentials are saved in an **encrypted vault** on your computer — they're never stored in plain text. Only your Windows user account can decrypt them. If you run the setup again later, it will find your saved credentials so you don't have to type them again.
 
@@ -101,7 +103,101 @@ The provider connects to the platform's API and looks for everything:
 - What metrics are available for each one? (CPU, memory, disk, health status, etc.)
 - Are those metrics actually returning real data? (It tests them to make sure)
 
-Anything that comes back empty or broken gets filtered out so you don't end up with dead monitors.
+The Linux and NVIDIA helpers can run `-Action Validate` without touching WUG. Pushes run the
+same checks before provisioning: command failures, empty results and malformed numbers are
+excluded. A health command that successfully reports an unhealthy host is still eligible,
+so WUG can alert on the fault.
+
+### Safe repeat runs
+
+Shared WUG synchronization reuses both active and performance library entries, reads every
+assignment page, and adds only missing assignments. A failed assignment lookup prevents writes
+for that device/type rather than being mistaken for an empty list.
+
+Inventory synchronization compares values before writing, preserves last-known values when a
+new value is null/blank, and keeps zero/false as valid values. It reports written, unchanged and
+failed counts. Proxmox and Docker refresh attributes on existing devices as well as new ones.
+If a Proxmox cluster endpoint shares a WUG device with a physical node, their inventory is merged
+once; node classification takes precedence while cluster-only facts are retained.
+VMware and Hyper-V do not copy a no-IP guest's inventory onto its host's WUG device.
+No stale attributes or legacy monitor assignments are automatically deleted.
+
+Docker hosts with no running containers still receive host health monitoring and inventory,
+including their actual address and a zero container count. Container performance monitors
+track memory usage in bytes and eth0 network Rx/Tx bytes, not CPU percentage. Older monitors
+named `CPU Usage` actually read memory usage; review those legacy assignments manually.
+These anonymous REST monitors need no WUG REST credential. Restrict access to the Docker
+API to trusted pollers rather than exposing its host-control endpoints broadly.
+
+### Hyper-V prerequisites and validation
+
+Hyper-V discovery uses WSMan, then DCOM/WMI fallback. Local Hyper-V RSAT is optional.
+Allow the chosen management transport and supply an account with the required host/WMI
+permissions. `Setup-HyperV-Discovery.ps1 -HyperVCredential $credential` accepts an existing
+vault's PSCredential without copying it into the discovery vault. WUG pushes create/reuse
+one account-named Windows credential and assign it to the resolved devices before monitors.
+Existing devices are matched by address, then exact hostname/name; their addresses are not
+silently changed.
+
+Host monitors check VMMS and, on cluster nodes, ClusSvc without restarting either service.
+Host performance counters report CPU %, available memory in MB, and disk free %.
+VM status queries `root\virtualization\v2` by GUID. VM CPU averages all matching virtual
+processors; missing samples fail rather than report zero. VM memory uses PhysicalMemory
+in MB. PowerShell scripts retrieve the assigned Windows credential from WUG's runtime
+context and pass it explicitly to remote WMI; impersonation alone is insufficient.
+Unavailable VM inventory remains unknown instead of becoming a fabricated zero.
+
+Clustered VM status, CPU, and memory scripts resolve `MSCluster_Resource.PrivateProperties.VmId`
+to the current owner on every poll. Parallel probes use the known node addresses with a
+20-second ownership deadline; failed probes are reported, and unresolved ownership fails
+explicitly rather than using a stale owner. Allow remote WMI/DCOM access to `root\MSCluster`,
+`root\virtualization\v2`, and the performance classes on every node from the WUG poller.
+
+VMs with an IP keep their own WUG device. No-IP clustered VMs keep their checks on the
+alphabetically first cluster node's WUG device, independent of the current VM owner.
+Rediscovery therefore reuses assignments instead of adding them to each successive owner.
+VM inventory still never overwrites host inventory. The assignment itself does not move:
+review WUG dependencies/polling policies if an anchor-device outage could suppress checks.
+
+**Existing deployments:** push the new `HyperV - Cluster VM ... [GUID]` monitors, verify
+their results, then review and unassign the old `HyperV - VM ...` static-owner monitors.
+Neither legacy configurations nor assignments are silently rewritten/deleted. Standalone
+VM checks still use their discovered host. Rediscovery does not update an existing
+library monitor's configuration.
+
+Live validation covered two-node host-service polling, WUG-executed numeric host/VM
+metrics, and a temporary diskless VM's Running -> Off -> Running status. A separate
+temporary clustered VM live-migrated in both directions (VMMS event 20415; reported
+blackout 4.5 and 2.2 seconds). A resource-scoped `Test-ClusterResourceFailure`, with only
+the temporary VM resource's restart threshold temporarily changed, automatically recovered
+the VM Running/Online on the other node in about 14 seconds. WUG status and exact CPU/memory
+scripts followed ownership without library/assignment edits; a controlled role Offline/Online
+cycle verified fresh Down -> Up results. Repeated setup reused devices/libraries and
+preserved assignment IDs/settings. Temporary VMs, roles, and test-only monitors were removed.
+
+This was a simulated VM-resource failure, not a physical-node outage. Both nested nodes
+share a physical failure domain; the diskless fixture does not establish guest application
+continuity. Physical-host failure remains unvalidated.
+
+Historical host-counter ingestion was separately verified through WUG's Custom Performance
+Monitors report and its rendered charts, not just active-monitor metric verifiers or the
+last-polled table. All six assignments (CPU %, available memory MB, and disk free % on both
+hosts) had multiple distinct timestamped numeric samples spanning more than an hour.
+Requesting one additional real device poll added a newer historical sample to every series;
+the charts were checked against the persisted report data. Constant disk-free values still
+produced distinct timestamped samples, rather than being mistaken for missing collection.
+No monitor configuration, polling interval, or VM was changed for this check.
+
+To inspect these graphs, open the device's Custom Performance Monitors report, choose
+Today or an appropriate historical range, and select an individual monitor. Avoid mixing
+MB, percentages, and byte counters on one axis when checking a particular series.
+Match both the device and custom monitor name: the standard CPU/memory reports can show
+different collectors on the same device. The public REST report functions do not expose
+these custom-monitor charts; this validation used the authenticated WUG console.
+
+Per-VM historical charts were not part of this host-counter check because the temporary
+VMs and their monitors had already been removed. Long-term retention/rollups also remain
+outside the validated scope.
 
 ### Step 3 — The Discovery Plan
 

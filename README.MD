@@ -413,6 +413,56 @@ for handoff commands, wizard examples, unsupported requirements and recovery.
 The [offline converter reference](docs/zabbix-template-conversion.md) documents
 the distinct local-export workflow, which does not create devices or assignments.
 
+## Linux fleet monitoring
+
+[`Setup-Linux-Discovery.ps1`](helpers/discovery/Setup-Linux-Discovery.ps1) collects Linux
+compliance facts and validates the exact SSH monitor commands before provisioning:
+
+```powershell
+.\helpers\discovery\Setup-Linux-Discovery.ps1 -Target '10.0.0.80','10.0.0.82' -Action Validate
+.\helpers\discovery\Setup-Linux-Discovery.ps1 -Target '10.0.0.80','10.0.0.82' -Action PushToWUG
+```
+
+WUG uses the device's SSH password credential (`Linux.Ssh` in the discovery vault by default).
+NTP, reboot and systemd health checks are shared active monitors; package age, failed-unit count
+and disk usage are shared performance monitors, with disk monitors reused by mount point.
+An unhealthy but working health check is still provisioned so it can alert. Failed commands,
+empty results and invalid numbers are not provisioned, and missing systemd/package data is
+unknown rather than a healthy zero. Existing Linux health commands are refreshed after validation;
+legacy host-named performance monitors are **not** automatically removed.
+
+The helper refreshes `Linux.*` inventory attributes and fills the Linux OS role only when WUG
+has none. Shared discovery synchronization writes only changed, nonempty inventory values and
+pre-checks all assignment pages before adding monitors. Proxmox and Docker also refresh existing
+device inventory; VMware and Hyper-V keep guest inventory off the host when a guest has no
+separate WUG device. Missing values preserve the last-known inventory, and failures are reported.
+
+## Docker discovery
+
+[`Setup-Docker-Discovery.ps1`](helpers/discovery/Setup-Docker-Discovery.ps1) monitors hosts
+even when no containers are running. Inventory includes the host address and container count;
+running containers add health, memory usage in bytes, and eth0 network Rx/Tx monitors.
+Anonymous REST monitors need no WUG credential. Restrict Docker API access to trusted pollers.
+Legacy `CPU Usage` monitors actually read memory usage and are left for manual review.
+
+## Hyper-V discovery
+
+[`Setup-HyperV-Discovery.ps1`](helpers/discovery/Setup-HyperV-Discovery.ps1) discovers
+cluster siblings using their reported addresses, without requiring local Hyper-V RSAT.
+It provisions VMMS/cluster-service checks and CPU, available-memory (MB), and disk-free (%)
+performance monitors. Per-VM checks use the VM GUID; VM CPU averages its virtual processors,
+and VM memory is reported in MB.
+
+Use `-HyperVCredential $credential` to supply a credential from another vault; otherwise the
+discovery vault is used. Pushes reuse and assign a Windows WUG credential before monitoring.
+VM scripts explicitly authenticate WMI queries using that device credential, not just
+PowerShell impersonation. No-IP VM inventory stays off its parent host.
+Clustered VM checks resolve the GUID's current owner on every poll and query that node for
+status, CPU, and memory, without rediscovery. No-IP cluster checks keep a stable WUG host
+assignment rather than accumulating assignments after migration. Legacy static-owner
+monitors are not rewritten or deleted automatically. See the [discovery guide](docs/discovery-guide.md)
+for permissions, upgrade guidance, and live-migration/resource-failover validation limits.
+
 ## NVIDIA GPU monitoring
 
 [`Setup-NvidiaSmi-Discovery.ps1`](helpers/discovery/Setup-NvidiaSmi-Discovery.ps1)

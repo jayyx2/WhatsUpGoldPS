@@ -262,6 +262,10 @@ Description
 -----------
     Creates an SSH active monitor that runs 'df -h /' and expects '/dev/sda1' in the output.
 
+.PARAMETER PowerShellScriptImpersonateFlag
+    Set to 1 to run a PowerShell monitor using the device's Windows credential.
+    Defaults to 0, preserving polling-service identity behavior.
+
 .EXAMPLE
     Add-WUGActiveMonitor -Type PowerShell -Name "PS Script Monitor" -PowerShellScriptText 'if (Test-Connection 8.8.8.8 -Count 1 -Quiet) { $context.SetResult(0, "OK") } else { $context.SetResult(1, "Fail") }'
 
@@ -675,6 +679,10 @@ function Add-WUGActiveMonitor {
         [string]$PowerShellScriptText,
         [Parameter(ParameterSetName = 'PowerShell')]
         [int]$PowerShellScriptTimeout = 60,
+
+        [Parameter(ParameterSetName = "PowerShell")]
+        [ValidateSet('0', '1')]
+        [string]$PowerShellScriptImpersonateFlag = '0',
 
         # RestApi Monitor Parameters
         [Parameter(Mandatory = $true, ParameterSetName = 'RestApi')]
@@ -1169,7 +1177,7 @@ function Add-WUGActiveMonitor {
                 $PropertyBags = @(
                     @{ "name" = "PowerShell:ScriptType"; "value" = "2" },
                     @{ "name" = "PowerShell:ScriptTimeout"; "value" = "$PowerShellScriptTimeout" },
-                    @{ "name" = "PowerShell:ScriptImpersonateFlag"; "value" = "0" },
+                    @{ "name" = "PowerShell:ScriptImpersonateFlag"; "value" = "$PowerShellScriptImpersonateFlag" },
                     @{ "name" = "PowerShell:ScriptText"; "value" = "$PowerShellScriptText" },
                     @{ "name" = "Cred:Type"; "value" = "1,2,4,8,16,32,64,128,32768" }
                 )
@@ -1304,8 +1312,8 @@ function Add-WUGActiveMonitor {
 # SIG # Begin signature block
 # MIImiAYJKoZIhvcNAQcCoIImeTCCJnUCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvv371gFSRixgE
-# cH0g7URV2NC6gsdB617yVJdKA3mstaCCH5owggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDAHxZx2/hql5HY
+# VTpzYebdt6WWdNDh1cHw35WVskbo2qCCH5owggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -1478,34 +1486,34 @@ function Add-WUGActiveMonitor {
 # Z28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWduaW5n
 # IENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAYBgor
 # BgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEE
-# MBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBL
-# zsobsK6rB3JyCAItQkr0cSAJfdyR3Q9d6rxufipP9jANBgkqhkiG9w0BAQEFAASC
-# AgA3YxJBQ16NBE/mMn2uETXG6qpZ6w+te8uCjxdVdH4T3VT/qHDwYPG+bXQFvxCc
-# GvwkTrBBkPEluGVHvL4Fs4oUkUz9aatnBRGQFgFqIhGQ+BMCVlOGkdwuQJZoI7Cf
-# 9yMEWZ0LCbd0lwe311aLca2GMFA0bNCwBv1qw4MJaOM7bBqKAoHQyAEOtxViUpyj
-# 4HTLvRN5k4+OShmjLdk+u25uNW/DqqtId6kpWkb5nJ8ta1EpP7HnJDpuggIEhQB2
-# 2F5Jk2tnsyOOZBPqfNtFIroVZnmhSE9UfoEgStla5QPP1EmQYwUJDpEuQe38Rktn
-# +ZUw/TjgFBL+HlLFdRX0QTlDXDBz++JIeBYCdj/iHK0HYS+mJQ6oz36ZB0MkLsmk
-# LVXw/qu7D9RS9yknl/Y+4AdDVkCBH9xGD0AtJO+axsaN6UPd4KpcS6bcMi9ifDFD
-# gzems5ptaH0G1ZqF1qGC3Q+WgMBjF9Kcb22dQbdJgZ1A+h3v8Jn88FuVTPoxU0Wg
-# 6OQMoiDDfUc5c7CFuGIlJ09D9nlhJAIYBeez7hghsNtElKNZQqYEi2bDzfuabhJM
-# Rhx4PMImQu8eIog5kome355s0Uj2q0XF12dSfOkMjG/yss6Lp0mcsQGQUjqS0ZSf
-# SwC92adqMbBhciDtUZqL6BAEXgYz6UzyZj55z3IqSJwVvKGCAyYwggMiBgkqhkiG
+# MBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB0
+# pQe5ZLYgqJmJ3SB+bRBsZEmr7HnA/9nRMxejxw5bXjANBgkqhkiG9w0BAQEFAASC
+# AgDMT+S0ygM2DMFJq14zshMBSZF57h/K220sqOSW4RTzh4620kxzL/zli7EzDDRr
+# U7Gw51yd/cB+dzlhO1FCjjegeHdmzFv63POXQCSWRXkbQInLcoxZ1khhOncDfp4w
+# 0fN8THTRdyXqA3NVXuMcEOp0sxBohJDYcuk5vIMOOX05fOPXMICAK3nOaYR6Kr5T
+# An4HN3s8KKPTRLC/vKh9Vp4AUGI0aJX6DD0sgQDRZdbc9Xg7hFeaOxlvJGbfWBGC
+# rYw/dxLC8Xer8oEQZ6fFeRECECxwYF//h5CC9XtIEiLQLsQaDwDMtq5IbEEr2Wec
+# XabySX5qdd2VQoURTZm2z8VXz5YaKnbsId82YlJdY6sGiK2Kfvbzwz9+zaOHVfEh
+# +pbNBYsYK3VE3b7atF2e9BvYSFw2chHgshzA/Lcnn4cgbHZ7OCGLJ9nuUMfOn343
+# VZu+PbhwxwItPlOkV902MnzXnHAPm2AZxJ1RrEtUgiXtqtTz/yIKu9ZbEvvuAfjw
+# KzQ/Qm6WoAti+Etuomcb7Y3XxwF57uR6BVMATfGpXQiIHyBtZql73OkQ1m5YHJZ9
+# C7iX2tTRNI3GPNIiobT4UASB8gv4b7Pn3D7SVd2QcpvnwXIM6okn2EPVlFkaHLXO
+# UaV0LVLhg9p7XLDbmzq8mgSCkH/GzUNsLTdmF9WE+s8Q96GCAyYwggMiBgkqhkiG
 # 9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
 # bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUw
 # DQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqG
-# SIb3DQEJBTEPFw0yNjExMTMxMzA0MTBaMC8GCSqGSIb3DQEJBDEiBCCG/dPyMtbT
-# PQ1prjJEiVRgjoCekSEN1mJ/tZKS/hR7cDANBgkqhkiG9w0BAQEFAASCAgA5f/K+
-# +x8uweyiNIAqfCdwt56QPUY8oiq/mg/CwvKlMDIDk9NgBDM/0Oll6AhS6xzXm7Lm
-# IjfqKTv2Dy6BkcL0UgL77Hrtawb8P/dX2cmAWKxf+RaNnynkXm6/EXz1r97YEMp0
-# R+ER6ycyeijuiqZYK4HGGgtZc0bakjHF8kr+MkR4T/3udrU/Kd51ZZItWd4OQYrk
-# j62pd90YSzkRx4K6uVAw32psKH9Mp1gvDDiMIFKcuB9bTLOeNL0qX80AqV3muSss
-# KG9WHDe7sIazhVBR4kvtZgfy2dwHmQrCvS7+drolrYM2M3ZKPtw0YyGD0KaXSIwI
-# 069ZwpJHriCC1SOioBFLV2cvNVLgA+6Rn1wWT6U/9LLr1Rj9ys79VUYcpHs6GhZ8
-# hesOBa8rKZxAF9ualeeqitbfmWh7TlEpcJaaATrkrcQTy8ooCXf85qOocRm+TW+h
-# CvdcxBpkQAxxHAauJQHqmQt6tyD5GDK0YSbvuWWfdp2P+H7o9x+oWuoexcJKnlvu
-# ILgRKYI+dABgotGmsQXwZYtQUyxFf+A1LESmyhmIBwCh4cU7tb8n2ucV+QobgTTX
-# 22g5BRm1dUwPM3iuimWUSboYMyTUNdYFqv6BRss8s7CQNuQH7ZWwpiuUEGwp+Ca9
-# hqtHhxncGxSColM/T8N5riypxGnxGYzcSpFPRQ==
+# SIb3DQEJBTEPFw0yNjExMTQwMTQ2NDBaMC8GCSqGSIb3DQEJBDEiBCCjoNnsZ89e
+# +9nMGJnb4MFtgdmLDCOvIvC9/rC230CBbTANBgkqhkiG9w0BAQEFAASCAgBkkTe+
+# P4OVbmsGhct8D2yx5dqNW6zqYYWNGzWtOrqzkuzB5bK1mfJZ/PhFY5nq3n1ajRnb
+# S8YC9d8hGXsuD8R7oZ/rP9C6CUT2xaeWfXXcHmoOGzsT56dghAxzKBzXNiet9hti
+# IcofDYXyIrabLhyrjo6fVNXzShmLggOQC49n5McUY6OFZR7NBVzF0rK48AWxHUfz
+# 64/9qzA4nHKxaimwFgGZcTUIEyqpDSINPh2qPgP+j47/EJDTYfvN6UQaOHvCjoBg
+# j1eWIf6CYvR8d+b7e14j1LG07F529+qIQf/3f4G1/pBzR/BiwoF9n6ukaTefwDA3
+# sb+J0GTyGLVwdHczRwRvYQ8t7V5lQpeu3cNwfXpCQRJ0vXeY43K2xfAm4BUt1iRD
+# 7ws6kvATcnN56Qf3YjtTmG64lfys7QYOkicmsPBWNNiLU23L5L89HfEyQajQl2JH
+# ObEYT2qougGKUVZ4gJLzgSvwnqfLvpR250bIw+22ft1VUVdFZj7dY+omojeIlQBc
+# lf92x5lniPIgNz/J2NOGxmXJmVmDpMe+gCruIci16d6GAh29N3jejiKg/Q1JH80D
+# JLroHWUPG+2SlDBv/FITmSVNkTnhmyoo8JFcDkMcKh90avUbHyROGh7xL1Ckigzi
+# eB4/tj3S2YaJjGpKpVXy1Gmsb72tjrx5xRTm+Q==
 # SIG # End signature block

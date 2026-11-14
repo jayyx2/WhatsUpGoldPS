@@ -2814,6 +2814,168 @@ function Invoke-WUGDiscovery {
 # region  WUG Discovery Sync (requires WhatsUpGoldPS)
 # ============================================================================
 
+function Set-WUGDiscoveryOSRoleIfUnset {
+    <#
+    .SYNOPSIS
+        Sets a discovered OS role only when WUG has no OS classification.
+    #>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)][int]$DeviceId,
+        [Parameter(Mandatory = $true)][string]$OSName
+    )
+    foreach ($dependency in 'Get-WUGAPIResponse', 'Set-WUGDeviceRole') {
+        if (-not (Get-Command $dependency -ErrorAction SilentlyContinue)) {
+            . (Join-Path $PSScriptRoot "..\..\functions\$dependency.ps1")
+        }
+    }
+    $r = Get-WUGAPIResponse -Uri "$($global:WhatsUpServerBaseURI)/api/v1/devices/$DeviceId/roles/-?kind=os" -Method GET -ErrorAction Stop
+    if (-not $r -or -not $r.PSObject.Properties['data']) { throw "OS role lookup returned no data for device $DeviceId." }
+    $role = @($r.data | Where-Object kind -eq 'os') | Select-Object -First 1
+    if ($role -and $role.name -and $role.name -ne 'Not set') { return }
+    if ($PSCmdlet.ShouldProcess("Device $DeviceId", "Set OS role '$OSName'")) {
+        $result = Set-WUGDeviceRole -SetDeviceRoleKind -DeviceId ([string]$DeviceId) -RoleKind os -RoleValue $OSName -Confirm:$false -ErrorAction Stop
+        if (-not $result -or -not $result.success) { throw "WUG did not confirm OS role '$OSName' for device $DeviceId." }
+    }
+}
+
+function Sync-WUGDiscoveryDeviceAttributes {
+    <#
+    .SYNOPSIS
+        Writes changed inventory attributes only, preserving last-known values when data is missing.
+    .DESCRIPTION
+        Reads existing attributes once per device. Null and blank values are omitted;
+        zero and false are valid inventory values. No attributes are deleted.
+        A failed read prevents writes rather than being treated as an empty inventory.
+    #>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)][int]$DeviceId,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Attributes
+    )
+
+    foreach ($dependency in 'Get-WUGDeviceAttribute', 'Set-WUGDeviceAttribute', 'Get-WUGAPIResponse') {
+        if (-not (Get-Command -Name $dependency -ErrorAction SilentlyContinue)) {
+            . (Join-Path $PSScriptRoot "..\..\functions\$dependency.ps1")
+        }
+    }
+
+    $result = [ordered]@{ Updated = 0; Unchanged = 0; Failed = 0 }
+    $values = [ordered]@{}
+    foreach ($entry in $Attributes.GetEnumerator()) {
+        if ($null -ne $entry.Value -and -not [string]::IsNullOrWhiteSpace([string]$entry.Value)) {
+            $values[$entry.Key] = [string]$entry.Value
+        }
+    }
+    if (@($values.GetEnumerator()).Count -eq 0) { return [PSCustomObject]$result }
+
+    $existing = @{}
+    try {
+        foreach ($attribute in @(Get-WUGDeviceAttribute -DeviceId $DeviceId -Limit 250 -ErrorAction Stop)) {
+            if ($attribute) { $existing[[string]$attribute.name] = [string]$attribute.value }
+        }
+    }
+    catch {
+        Write-Warning "Could not read attributes on device ${DeviceId}; no inventory values were written: $_"
+        $result.Failed = @($values.GetEnumerator()).Count
+        return [PSCustomObject]$result
+    }
+
+    foreach ($entry in $values.GetEnumerator()) {
+        $name = $entry.Key
+        if ($existing.ContainsKey($name) -and $existing[$name] -ceq $values[$name]) {
+            $result.Unchanged++
+            continue
+        }
+        if (-not $PSCmdlet.ShouldProcess("Device ${DeviceId}: $name=$($values[$name])", 'Set device attribute')) { continue }
+        try {
+            $written = Set-WUGDeviceAttribute -DeviceId $DeviceId -Name $name -Value $values[$name] -Confirm:$false -ErrorAction Stop -WarningAction Stop
+            if (-not $written) { throw 'The attribute setter returned no confirmation.' }
+            $result.Updated++
+        }
+        catch {
+            Write-Warning "Failed to set attribute '$name' on device ${DeviceId}: $_"
+            $result.Failed++
+        }
+    }
+    return [PSCustomObject]$result
+}
+
+function Sync-WUGDiscoveryMonitorAssignments {
+    <#
+    .SYNOPSIS
+        Assigns only missing library monitors after reading all assignment pages.
+    .DESCRIPTION
+        A failed or incomplete lookup prevents assignment. Existing assignments,
+        including their polling settings, are left untouched.
+    #>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)][int]$DeviceId,
+        [Parameter(Mandatory = $true)][ValidateSet('active', 'performance')][string]$Type,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][int[]]$MonitorId,
+        [ValidateRange(60, 86400)][int]$PollingIntervalSeconds,
+        [ValidateRange(1, 1440)][int]$PerfPollingIntervalMinutes
+    )
+
+    foreach ($dependency in 'Get-WUGAPIResponse', 'Add-WUGActiveMonitorToDevice', 'Add-WUGPerformanceMonitorToDevice') {
+        if (-not (Get-Command -Name $dependency -ErrorAction SilentlyContinue)) {
+            . (Join-Path $PSScriptRoot "..\..\functions\$dependency.ps1")
+        }
+    }
+    $result = [ordered]@{ Assigned = 0; Skipped = 0; Failed = 0 }
+    $ids = @($MonitorId | Select-Object -Unique)
+    if ($ids.Count -eq 0) { return [PSCustomObject]$result }
+
+    $assigned = @{}
+    $seenPages = @{}
+    $pageId = $null
+    try {
+        do {
+            $uri = "$($global:WhatsUpServerBaseURI)/api/v1/devices/$DeviceId/monitors/-?type=$Type&view=basic&limit=250"
+            if ($pageId) { $uri += "&pageId=$([uri]::EscapeDataString($pageId))" }
+            $response = Get-WUGAPIResponse -Uri $uri -Method GET -ErrorAction Stop
+            if (-not $response -or -not $response.PSObject.Properties['data']) { throw 'Assignment lookup returned no data property.' }
+            foreach ($monitor in @($response.data)) {
+                if ($monitor -and $monitor.monitorTypeId) { $assigned[[string]$monitor.monitorTypeId] = $true }
+            }
+            $pageId = if ($response.paging) { $response.paging.nextPageId } else { $null }
+            if ($pageId) {
+                if ($seenPages.ContainsKey($pageId)) { throw "Repeated assignment page '$pageId'." }
+                $seenPages[$pageId] = $true
+            }
+        } while ($pageId)
+    }
+    catch {
+        Write-Warning "Could not read $Type assignments on device ${DeviceId}; no monitors were assigned: $_"
+        $result.Failed = $ids.Count
+        return [PSCustomObject]$result
+    }
+
+    foreach ($id in $ids) {
+        if ($assigned.ContainsKey([string]$id)) { $result.Skipped++; continue }
+        if (-not $PSCmdlet.ShouldProcess("Device $DeviceId", "Assign $Type monitor $id")) { continue }
+        try {
+            $splat = @{ DeviceId = $DeviceId; MonitorId = $id; Confirm = $false; ErrorAction = 'Stop'; WarningAction = 'Stop' }
+            if ($Type -eq 'active') {
+                if ($PSBoundParameters.ContainsKey('PollingIntervalSeconds')) { $splat.PollingIntervalSeconds = $PollingIntervalSeconds }
+                $confirmation = Add-WUGActiveMonitorToDevice @splat
+            }
+            else {
+                if ($PSBoundParameters.ContainsKey('PerfPollingIntervalMinutes')) { $splat.PollingIntervalMinutes = $PerfPollingIntervalMinutes }
+                $confirmation = Add-WUGPerformanceMonitorToDevice @splat
+            }
+            if (-not $confirmation) { throw 'The assignment setter returned no confirmation.' }
+            $result.Assigned++
+        }
+        catch {
+            Write-Warning "Failed to assign $Type monitor $id to device ${DeviceId}: $_"
+            $result.Failed++
+        }
+    }
+    return [PSCustomObject]$result
+}
+
 function Invoke-WUGDiscoverySync {
     <#
     .SYNOPSIS
@@ -2824,7 +2986,7 @@ function Invoke-WUGDiscoverySync {
         1. Checks if a monitor with the same name already exists
         2. Creates it if missing (Active or Performance monitor)
         3. Assigns it to the target device
-        4. Updates device attributes if the item includes any
+        4. Writes only changed, nonempty device attributes if the item includes any
 
         This is idempotent   running it multiple times only creates what's
         missing. Monitors whose discovered items have disappeared are NOT
@@ -2889,6 +3051,7 @@ function Invoke-WUGDiscoverySync {
 
         Write-Verbose "Fetching existing WUG active monitors for duplicate check..."
         $existingActiveNames = Get-WUGMonitorLibraryMap -Type active
+        $existingPerfNames = Get-WUGMonitorLibraryMap -Type performance
 
         $stats = @{
             ActiveCreated  = 0
@@ -2896,9 +3059,12 @@ function Invoke-WUGDiscoverySync {
             Skipped        = 0
             Assigned       = 0
             AttrsUpdated   = 0
+            AttrsUnchanged = 0
+            AttrsFailed    = 0
             Failed         = 0
         }
-        $deviceActiveMonitors = @{}
+        $assignments = @{ active = @{}; performance = @{} }
+        $attributesByDevice = @{}
         $items = [System.Collections.ArrayList]@()
     }
 
@@ -2947,9 +3113,7 @@ function Invoke-WUGDiscoverySync {
                                 }
                             }
 
-                            $result = Add-WUGActiveMonitor @addParams
-                            $stats.ActiveCreated++
-                            Write-Verbose "Created active monitor '$monName' ($($item.MonitorType))"
+                            $result = Add-WUGActiveMonitor @addParams -Confirm:$false -ErrorAction Stop -WarningAction Stop
 
                             if ($result) {
                                 # Add-WUGActiveMonitor returns the bare new monitor ID.
@@ -2962,6 +3126,9 @@ function Invoke-WUGDiscoverySync {
                                 $monId = (Get-WUGMonitorLibraryMap -Type active)[$monName]
                                 if ($monId) { $existingActiveNames[$monName] = $monId }
                             }
+                            if (-not $monId) { throw 'Monitor creation returned no library ID.' }
+                            $stats.ActiveCreated++
+                            Write-Verbose "Created active monitor '$monName' ($($item.MonitorType))"
                         }
                         catch {
                             Write-Warning "Failed to create active monitor '$monName': $_"
@@ -2970,119 +3137,86 @@ function Invoke-WUGDiscoverySync {
                     }
                 }
 
-                # WUG rejects duplicate assignments instead of merging, so check first.
                 if ($monId -and $item.DeviceId) {
                     $devKey = [string]$item.DeviceId
-                    if (-not $deviceActiveMonitors.ContainsKey($devKey)) {
-                        $assignedIds = @{}
-                        try {
-                            $devMonUri = "$($global:WhatsUpServerBaseURI)/api/v1/devices/$devKey/monitors/-?type=active&view=basic"
-                            foreach ($mon in @((Get-WUGAPIResponse -Uri $devMonUri -Method GET).data)) {
-                                if ($mon -and $mon.monitorTypeId) { $assignedIds[[string]$mon.monitorTypeId] = $true }
-                            }
-                        }
-                        catch {
-                            Write-Verbose "Could not read active assignments for device ${devKey}: $_"
-                        }
-                        $deviceActiveMonitors[$devKey] = $assignedIds
-                    }
-
-                    if ($deviceActiveMonitors[$devKey].ContainsKey([string]$monId)) {
-                        Write-Verbose "Monitor '$monName' already assigned to device $devKey"
-                        $stats.Skipped++
-                    }
-                    else {
-                        try {
-                            $assignSplat = @{
-                                DeviceId  = $item.DeviceId
-                                MonitorId = $monId
-                            }
-                            if ($PSBoundParameters.ContainsKey('PollingIntervalSeconds')) {
-                                $assignSplat['PollingIntervalSeconds'] = $PollingIntervalSeconds
-                            }
-                            Add-WUGActiveMonitorToDevice @assignSplat | Out-Null
-                            $deviceActiveMonitors[$devKey][[string]$monId] = $true
-                            $stats.Assigned++
-                            Write-Verbose "Assigned '$monName' to device $devKey"
-                        }
-                        catch {
-                            if ($_.Exception.Message -match 'already|assigned|exists|duplicate') {
-                                Write-Verbose "Monitor '$monName' already assigned to device $devKey"
-                                $stats.Skipped++
-                            }
-                            else {
-                                Write-Warning "Failed to assign '$monName' to device ${devKey}: $_"
-                                $stats.Failed++
-                            }
-                        }
-                    }
+                    if (-not $assignments.active.ContainsKey($devKey)) { $assignments.active[$devKey] = @() }
+                    $assignments.active[$devKey] += [int]$monId
                 }
             }
 
             # --- Create Performance Monitor ---
             if ($item.ItemType -eq 'PerformanceMonitor') {
-                # Performance monitors are per-device   skip if no valid DeviceId
                 if (-not $item.DeviceId -or $item.DeviceId -eq 0) {
                     Write-Verbose "Skipping perf monitor '$monName'   no valid DeviceId"
                     $stats.Skipped++
                     continue
                 }
-                if ($PSCmdlet.ShouldProcess($monName, "Create $($item.MonitorType) Performance Monitor on device $($item.DeviceId)")) {
+                $perfName = if ($item.MonitorParams.ContainsKey('Name')) { $item.MonitorParams['Name'] } else { $monName }
+                $monId = $null
+                if ($existingPerfNames.ContainsKey($perfName)) {
+                    $monId = $existingPerfNames[$perfName]
+                    $stats.Skipped++
+                }
+                elseif ($PSCmdlet.ShouldProcess($perfName, "Create $($item.MonitorType) Performance Monitor in library")) {
                     try {
                         $perfParams = @{
-                            DeviceId = $item.DeviceId
                             Type     = $item.MonitorType
+                            Name     = $perfName
                         }
-                        if ($PSBoundParameters.ContainsKey('PerfPollingIntervalMinutes')) {
-                            $perfParams['PollingIntervalMinutes'] = $PerfPollingIntervalMinutes
-                        }
-                        if ($item.MonitorParams.ContainsKey('Name')) {
-                            $perfParams['Name'] = $item.MonitorParams['Name']
-                        }
-                        else {
-                            $perfParams['Name'] = $monName
-                        }
-                        # Copy monitor params, filtering out non-cmdlet keys
                         foreach ($key in $item.MonitorParams.Keys) {
-                            if ($key -ne 'Name' -and $key -ne 'Description') {
+                            if ($key -notin @('Name', 'Description', 'DeviceId', 'PollingIntervalMinutes')) {
                                 $perfParams[$key] = $item.MonitorParams[$key]
                             }
                         }
-
-                        $result = Add-WUGPerformanceMonitor @perfParams
+                        $result = Add-WUGPerformanceMonitor @perfParams -Confirm:$false -ErrorAction Stop -WarningAction Stop
+                        if (-not $result -or -not $result.Success -or -not $result.MonitorId) {
+                            throw 'Performance monitor creation returned no successful library ID.'
+                        }
+                        $monId = $result.MonitorId
+                        $existingPerfNames[$perfName] = $monId
                         $stats.PerfCreated++
-                        $stats.Assigned++
-                        Write-Verbose "Created performance monitor '$monName' on device $($item.DeviceId)"
+                        Write-Verbose "Created performance monitor '$perfName' in library (ID: $monId)"
                     }
                     catch {
-                        # Check if it's a duplicate error
-                        if ($_.Exception.Message -match 'already exists|duplicate') {
-                            Write-Verbose "Skipping perf monitor '$monName'   already exists"
-                            $stats.Skipped++
-                        }
-                        else {
-                            Write-Warning "Failed to create performance monitor '$monName': $_"
-                            $stats.Failed++
-                        }
+                        Write-Warning "Failed to create performance monitor '$perfName': $_"
+                        $stats.Failed++
                     }
+                }
+                if ($monId) {
+                    $devKey = [string]$item.DeviceId
+                    if (-not $assignments.performance.ContainsKey($devKey)) { $assignments.performance[$devKey] = @() }
+                    $assignments.performance[$devKey] += [int]$monId
                 }
             }
 
             # --- Update Device Attributes ---
-            if ($UpdateAttributes -and $item.DeviceId -and $item.DeviceId -ne 0 -and $item.Attributes -and $item.Attributes.Count -gt 0) {
-                foreach ($attrName in $item.Attributes.Keys) {
-                    $attrValue = $item.Attributes[$attrName]
-                    if ($PSCmdlet.ShouldProcess("Device $($item.DeviceId): $attrName=$attrValue", 'Set device attribute')) {
-                        try {
-                            Set-WUGDeviceAttribute -DeviceId $item.DeviceId -Name $attrName -Value $attrValue | Out-Null
-                            $stats.AttrsUpdated++
-                        }
-                        catch {
-                            Write-Warning "Failed to set attribute '$attrName' on device $($item.DeviceId): $_"
-                        }
-                    }
+            if ($UpdateAttributes -and $item.DeviceId -and $item.DeviceId -ne 0 -and $item.Attributes -and @($item.Attributes.GetEnumerator()).Count -gt 0) {
+                $devKey = [string]$item.DeviceId
+                if (-not $attributesByDevice.ContainsKey($devKey)) { $attributesByDevice[$devKey] = [ordered]@{} }
+                foreach ($attribute in $item.Attributes.GetEnumerator()) {
+                    $attributesByDevice[$devKey][$attribute.Key] = $attribute.Value
                 }
             }
+        }
+
+        foreach ($type in 'active', 'performance') {
+            foreach ($devKey in $assignments[$type].Keys) {
+                $splat = @{ DeviceId = [int]$devKey; Type = $type; MonitorId = $assignments[$type][$devKey] }
+                foreach ($interval in 'PollingIntervalSeconds', 'PerfPollingIntervalMinutes') {
+                    if ($PSBoundParameters.ContainsKey($interval)) { $splat[$interval] = $PSBoundParameters[$interval] }
+                }
+                $sync = Sync-WUGDiscoveryMonitorAssignments @splat
+                $stats.Assigned += $sync.Assigned
+                $stats.Skipped += $sync.Skipped
+                $stats.Failed += $sync.Failed
+            }
+        }
+        foreach ($devKey in $attributesByDevice.Keys) {
+            $sync = Sync-WUGDiscoveryDeviceAttributes -DeviceId ([int]$devKey) -Attributes $attributesByDevice[$devKey]
+            $stats.AttrsUpdated += $sync.Updated
+            $stats.AttrsUnchanged += $sync.Unchanged
+            $stats.AttrsFailed += $sync.Failed
+            $stats.Failed += $sync.Failed
         }
 
         Write-Progress -Activity 'WUG Discovery Sync' -Completed
@@ -3093,6 +3227,8 @@ function Invoke-WUGDiscoverySync {
             Skipped       = $stats.Skipped
             Assigned      = $stats.Assigned
             AttrsUpdated  = $stats.AttrsUpdated
+            AttrsUnchanged = $stats.AttrsUnchanged
+            AttrsFailed   = $stats.AttrsFailed
             Failed        = $stats.Failed
             Total         = $total
         }
@@ -4046,8 +4182,8 @@ function Write-DiscoveryStats {
 # SIG # Begin signature block
 # MIImiAYJKoZIhvcNAQcCoIImeTCCJnUCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+2cSBVchgjZxs
-# zvvpXGlnYLAKW9bBizagDfrl6FxfUaCCH5owggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAoCcNgkbNc4EhY
+# MpBNhqQrF+8Un9/wDLV/7WRTnweTdKCCH5owggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -4220,34 +4356,34 @@ function Write-DiscoveryStats {
 # Z28gTGltaXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWduaW5n
 # IENBIFIzNgIQB5zg5NEUf4XNOXPPdi036zANBglghkgBZQMEAgEFAKCBhDAYBgor
 # BgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEE
-# MBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBb
-# EayEkAEsHsbdBeswuP8WoW1XtDx2SwcoBwmzTVrgnTANBgkqhkiG9w0BAQEFAASC
-# AgADkdC/nrqw/tErIu8QZJllPpLY0Drq0jy+cpsXX8/LsMxcuWvNqadW1n+sYn5b
-# T+FInM9XvZkXM5BwcNUpyNkq9fqBtmUFnCFDDbplkQNizhjKtXFk2A1NkbNOYZhz
-# aY1WBtZ1yeksTjh/h//UDakfAlZrJWLxIEJX+O7Z7l8OJ8TJ49YBDFdiSHlrP+SF
-# E6b3tuVdoV+691nsOntBVB4MoRosbH491X/yAymhwwFlmff0sMGK/2ANUSTHNamB
-# vHCY2ixgw0xsNyvJmodW/46y5pUz/NLuWDeo7NgHDAQIGInUcRt3WFMbX+ZmAMO1
-# JjjOj+OuF4zFQYeMtRohovb0TZ6jlDMMz+HdqgYLZRu5fnJmGIsAQdL4DtL0ptFR
-# KqDcchnW/amrF/24hjIKVWzM3iL2LkLx7nkBhXHvM5dArsPzOCRB0pRuj6AlaQ8g
-# msk/i5gV9KFWNbQ67GW+H0WMbiaZYBQu6/Sfs3ZDk8mo1Z0YaVOOzjsw/S5tpzij
-# ExrmYNPIxWEEyzvu2mcF93AIAjeh7/rs7wx+AFH2f2s4CQei2DAEjNiAsp8GhvM4
-# dTUe0A7QOodKVBO5mVl1bmThFRPMPVfppqs9/LgOZBFKF6bmi3izhUxN6YuUkQ4a
-# L1pBT4gmKP4Crq6SeNAVEFZS4p/6RhDaLy3IBzT41TmzGqGCAyYwggMiBgkqhkiG
+# MBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBq
+# OE/+jwd0UruxyzRK7oFY1FpDCK0zo5iCToLnZhkZZzANBgkqhkiG9w0BAQEFAASC
+# AgDDjVWk9pxOORCETYfLyanhcUdWaMeZHxmpKScDOBakO44Qdyf28Wjv8qW7743f
+# S9zYlh6kUPio7WN1TUuvNvZOUmTR9xhbWgHPRV4XEtnGvJ4itvDAhDKcHstICmKO
+# H/ktJIXJAQCjmEKaxZ8JmgLEkhnzTRHZfKa++8tlft52yNPc16vwwkDKHAxoFoSf
+# ToMViChdZ1HfkEd7DhPXLoIbHgajO8Mo7KAI6lTgvPCQMn/kW/c7zkK/184s+6Zv
+# ZT4eHvd+3+ect99cNSzBL/f86gNBe4p1bwUtyZ1tTFow1IE9p7cHpgqNqiyC3bNN
+# MdcCUofE9fvzEiSTIPTkF/sYfVsgvXnKVFM1Sl03go5Q4yGigiva3lyxBhjWyP+2
+# jxHRsV9vibHfFYgjN44v0PGH64LH8sr7vKFmD8HGiSqaeUHaCM6rLVhewA11qwnP
+# YBKbo8ia9R6o3m+zxB513WqvwmYs5BQ91VZcQ9rYl6ydEEywyUt+wCe6kkF3BMI+
+# WJA0x1uDv537vZ3rouXoDXjVIXPlm3GxoZ8m2xsKl2bnOPKgbGDMCj3jHIkx/nyM
+# 13Os6o+G4qZjAiAtN1/PI1RqnhVegu84fpkLAMx7fkcZN8RlQw+bjIaAbzAyNuYK
+# FAMevxvZkl6KmW3hZqQeAwpJ+mWeomhZ8MbizHVReLbsFqGCAyYwggMiBgkqhkiG
 # 9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
 # bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUw
 # DQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqG
-# SIb3DQEJBTEPFw0yNjExMTMwMjA4MDdaMC8GCSqGSIb3DQEJBDEiBCDZikfYoUyE
-# Lr1TcyggV25vTur8px8ArN022AAjU1R/IDANBgkqhkiG9w0BAQEFAASCAgB8KAQN
-# ZbIItNU+88xKLv0bj35yf8tI9WOhrOGJKS9jDSuwNJ+ybY5eknqPPsotGQrmuLTf
-# HszHE40oL6yImLrlHZ1jAnOiNUo8S3ZenNA9EACZAb0tVlSdE+RR4zzldPQfS3HT
-# 1jEbSvVfn3mfs9H55oqE1WlMKcyW4/mhYpPl+9wYvYQE5iZVSx4mdOHfuoFQ6asE
-# MyxLQPa1Z3VR2gavJU30+rzzVFuOz2rZNg+XZQZwocknyiknpg8kVmeUOv3kzEf3
-# el5ie74bx6uNX3gTmNkHgoBLKaoRQwHNmDAkYA3iMAv6eb+UkUjcqSTzxo8EVAdA
-# 0sQLBCD9oqUBVmDJ+Q9OfDWnUcosx+gm/11Uh1oml8/TkJlh2t3r9/RZenMqsBoJ
-# pyJ67+v/Mv0m3zcUcGFLzHGzKcofpC8wkv9niLjUmmP4JXnznuatOo2UkRs7y/kI
-# c5v1EFNpF7xNKo14eJ6lGDi8jOyur+nrGxSeWM8POKjN8BAIosvMtIEcPwMcIgTL
-# QDucIllGZflnXtdZXFrf5bDm/fC1gmMJKL9MaipE9zLVYPe7Te2gi6OfWRaxA9Dm
-# r3nPFKMc3JNnXNirYzfRXnDzVtMoycxRwZs/gtLFiBl9qrPhH3I1F+MTHoQtSpUc
-# dtsTnKP8CYRjAe+NFnyHxIB79PEgSK2bo6YF5A==
+# SIb3DQEJBTEPFw0yNjExMTMxODMzMDlaMC8GCSqGSIb3DQEJBDEiBCCJV5RRLZS5
+# 3gk7tnMOLWntZzzoeJegpJPDEBJ6278grjANBgkqhkiG9w0BAQEFAASCAgBZ3Fpd
+# ZyxoUFe2lvdQNg+BsXKhNdzKpI8ZW2Cye4ACuJ60qjt5JeN4GtOCdHtnT+dbYJef
+# BzA0TNyf49C7YNkE5u/qC5sFBpbc4EwvDAfqI1vhqb5DbF/PcmnNTIS8gIfaT1mb
+# R/X9AZNZwmNnPzoN/jm+DwEK8+kzsyP8NXLj4mGJovvWPWLk/sRXpGWLBG4BfjGK
+# aRiifBABZYO0pLkk5rEHWjPKXSg4GWw70wI08FpV7bztFrcYSyInUwX062/6MiLD
+# //SUJuCAXNlNNMp79FyljHuXFxuww0cMLzJiThKTYAufsDrJ6PPHFp1puh5IBuU7
+# +oOykNczTuLFn3AmddhR/kbh273nwCRkd+tOTJ9ql1SNEf3Nw0hIoMYuey3ETNOS
+# RuAaZBd1ccNAGDkPJw8vF+HjM4I5tE9ttnmr/dNZrhg/Q2GnRl6LIUkds5fSpVf2
+# 1VJlJ5SEsx8EpuSVsMlVSx3SDf/bEdjGGMulj5gmCj8h0u1rVmGl61R+SLqTKfn/
+# w5yJdVnGVcRqh/ibFcM0i/f51Yo0t3p+lZrpBNtXMn64H5F0cwKNkNvVd+R+jBys
+# BLrLJupGi0FDor9P4bFZuy5UBk3aYnFr8U//dYsvmUZ87talQRrG/Br4j4AtnYlj
+# IvVdGneJq9Xr5boY1tTHEXRQ3ZZRpRYJKxWsjw==
 # SIG # End signature block

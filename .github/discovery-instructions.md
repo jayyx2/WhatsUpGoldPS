@@ -83,6 +83,7 @@ Resolve-DiscoveryCredential -Name '{VaultKey}' -CredType '{Type}'
 | AWS | `AWSKeys` | `AWS.{Identifier}` | AccessKeyId, SecretAccessKey |
 | Docker | `BearerToken` | `Docker.{Host}.Token` | API token string |
 | NvidiaSmi | (script-managed) | `NvidiaSmi.Ssh` | Username, Password and/or KeyFile, Port |
+| Linux | `PSCredential` | `Linux.Ssh` | Username/password credential; WUG polling requires password authentication |
 | Generic | `PSCredential` | `{Provider}.{Host}.Credential` | Username, Password |
 | WUG | `WUGServer` | `WUG.{Server}` | Server, Port, Protocol, Credential, IgnoreSSL |
 
@@ -412,7 +413,10 @@ Add a provider definition to the `$providerDefs` hashtable with:
 | `Save-DiscoveryCredential` | DiscoveryHelpers.ps1 | Store credential in DPAPI vault |
 | `Get-DiscoveryCredential` | DiscoveryHelpers.ps1 | Retrieve credential from vault |
 | `Remove-DiscoveryCredential` | DiscoveryHelpers.ps1 | Delete credential from vault |
-| `Invoke-WUGDiscoverySync` | DiscoveryHelpers.ps1 | Sync plan to WUG (create/update monitors) |
+| `Invoke-WUGDiscoverySync` | DiscoveryHelpers.ps1 | Reuse active/performance libraries, assign missing monitors, sync changed inventory |
+| `Sync-WUGDiscoveryDeviceAttributes` | DiscoveryHelpers.ps1 | Compare once per device; skip null/blank, retain zero/false, report Updated/Unchanged/Failed |
+| `Sync-WUGDiscoveryMonitorAssignments` | DiscoveryHelpers.ps1 | Read all assignment pages, assign missing IDs only, stop writes on failed reads |
+| `Set-WUGDiscoveryOSRoleIfUnset` | DiscoveryHelpers.ps1 | Fill a discovered OS role without replacing an existing classification |
 | `New-WUGDiscoveryCredential` | DiscoveryHelpers.ps1 | Create WUG credential for a provider |
 | `Start-WUGDiscovery` | DiscoveryHelpers.ps1 | End-to-end: discover + sync to WUG |
 | `Export-DynamicDashboardHtml` | helpers/reports/ | Generate HTML dashboard from plan data |

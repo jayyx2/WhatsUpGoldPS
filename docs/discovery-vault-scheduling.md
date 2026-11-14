@@ -71,6 +71,7 @@ Jump to any provider:
 - [GCP](#gcp)
 - [OCI](#oci)
 - [NVIDIA GPU](#nvidia-gpu)
+- [Linux](#linux)
 
 ---
 
@@ -587,6 +588,39 @@ Discovers compute instances and resources in Oracle Cloud Infrastructure.
 
 ---
 
+## Linux
+
+Collects Linux compliance inventory and provisions shared SSH health/performance monitors.
+Every exact monitor command is validated before a push. `Down` means a working health check
+found a fault; command errors or malformed/empty output are excluded instead of creating fake
+zero values. WUG polling uses password authentication, even if discovery also has a key.
+
+```powershell
+# Interactive first run saves the SSH password credential in Linux.Ssh
+.\Setup-Linux-Discovery.ps1 -Target '10.0.0.80' -Action None
+
+# Read-only command validation, then provision/update
+.\Setup-Linux-Discovery.ps1 -Target '10.0.0.80','10.0.0.82' -Action Validate -NonInteractive
+.\Setup-Linux-Discovery.ps1 -Target '10.0.0.80','10.0.0.82' -Action PushToWUG -NonInteractive
+
+# Populate the machine vault on the first registration for a SYSTEM task
+.\Register-DiscoveryScheduledTask.ps1 -Mode Provider -Provider Linux -Target '10.0.0.80','10.0.0.82' -Action PushToWUG -UseSystemVault -TriggerType Daily -TimeOfDay '02:00'
+```
+
+Use `-SshCredentialName` to select another compatible vault bundle. The default is `Linux.Ssh`.
+The machine vault must contain both the SSH and WUG credentials for unattended pushes.
+On later registrations, use `-SkipVaultPopulate` only when those entries are already populated.
+
+The helper writes changed `Linux.*` attributes, preserves last-known values when collection is
+unavailable, and sets the Linux OS role only when WUG has no OS classification. The scan timestamp
+changes on each successful collection. Shared performance monitors replace host-specific naming;
+old host-named monitors/assignments remain untouched and must be reviewed before manual removal.
+Existing shared Linux active monitor commands are refreshed from the validated definitions.
+
+**Dashboard:** `Output\Linux-Compliance-Dashboard.html` (`-Action Dashboard`).
+
+---
+
 ## NVIDIA GPU
 
 Discovers NVIDIA GPUs on Linux hosts by running `nvidia-smi` over SSH. `PushToWUG` creates a shared **GPU Health** SSH active monitor, per-GPU and host-wide SSH performance monitors, and `NVIDIA.*` inventory device attributes, and sets the device OS role to `Linux` when WUG has none.
@@ -712,6 +746,7 @@ foreach ($p in $providers) {
 | GCP | `Output\GCP-Dashboard.html` |
 | OCI | `Output\OCI-Dashboard.html` |
 | NvidiaSmi | `Output\nvidiasmi-dashboard-gpu.html` |
+| Linux | `Output\Linux-Compliance-Dashboard.html` |
 
 All dashboards embed an `Updated:` timestamp in the header, refreshed on every run.
 
@@ -731,6 +766,7 @@ All dashboards embed an `Updated:` timestamp in the header, refreshed on every r
 | GCP | `GCP.ServiceAccount` |
 | OCI | `OCI.Config` |
 | NvidiaSmi | `NvidiaSmi.Ssh` |
+| Linux | `Linux.Ssh` (or `-SshCredentialName`) |
 | Others | Set via `Setup-<Provider>-Discovery.ps1 -Action None` |
 
 ---

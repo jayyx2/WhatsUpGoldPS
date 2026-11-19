@@ -57,6 +57,7 @@ not create devices or assign monitors.
 | **Hyper-V** | Virtual machines running on Microsoft Hyper-V hosts |
 | **Proxmox** | Virtual machines and containers on Proxmox VE servers |
 | **Nutanix** | VMs and clusters on Nutanix AHV |
+| **UniFi** | Devices and clients managed by a UniFi Network Controller |
 | **Docker** | Containers running on Docker hosts |
 | **F5** | Virtual servers and pools on F5 BIG-IP load balancers |
 | **LoadMaster** | Virtual services on Kemp LoadMaster load balancers |
@@ -65,6 +66,9 @@ not create devices or assign monitors.
 | **Windows Attributes** | OS, hardware, BIOS, and memory info as device attributes on Windows servers |
 | **Windows Disk I/O** | Disk instance discovery and disk I/O performance monitors on Windows servers |
 | **Linux** | SSH compliance checks, shared health/performance monitors, OS classification and inventory attributes |
+| **Configuration Drift** | SSH-collected device configurations compared with approved baselines and policies |
+| **Network Neighbors** | BGP, EIGRP, CDP and LLDP peer inventory and SNMP monitoring |
+| **TLS Certificates** | Certificate expiry and trust checks for TLS-enabled endpoints |
 | **NVIDIA GPU** | GPUs on Linux hosts via `nvidia-smi` over SSH: GPU Health, per-GPU metrics, and inventory attributes |
 | **Redfish** | Server hardware health, power, and thermals through BMCs (iLO, iDRAC, XCC, Supermicro) |
 

@@ -88,7 +88,7 @@ This allows administrators to:
 ## Features
 
 - **Native PowerShell cmdlets** for the WhatsUp Gold REST API
-- **92 exported functions** covering devices, monitors, groups, reports, performance monitors, passive monitors (SnmpTrap, Syslog, WinEvent), and 20 active monitor types
+- **94 exported functions** covering devices, monitors, groups, reports, performance monitors, passive monitors (SnmpTrap, Syslog, WinEvent), and 20 active monitor types
 - **Infrastructure discovery helpers** for virtualization and cloud platforms
 - **Automation-friendly workflows** for monitoring onboarding and configuration
 - **End-to-end CRUD integration test harness**
@@ -187,7 +187,7 @@ This enables automation scenarios such as:
 
 Current module export:
 
-**92 PowerShell functions**
+**94 PowerShell functions**
 
 ---
 
@@ -213,6 +213,14 @@ The module includes helper scripts to automatically discover infrastructure acro
 
 - NVIDIA GPUs on Linux hosts (`nvidia-smi` over SSH): GPU Health active monitor, per-GPU performance monitors, and GPU inventory device attributes
 - Server BMCs via DMTF Redfish (HPE iLO, Dell iDRAC, Lenovo XCC, Supermicro)
+
+### Network & Operations
+
+- UniFi Network Controller device and client discovery
+- Network-neighbor inventory and monitoring for BGP, EIGRP, CDP, and LLDP
+- TLS certificate expiry and trust monitoring
+- SSH-based configuration drift checks against approved baselines
+- Linux compliance and host monitoring over SSH
 
 ---
 
